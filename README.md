@@ -74,3 +74,9 @@ bash tools/render-fixture.sh
 ```
 
 The render script writes local WAVs under `artifacts/`, which is intentionally ignored.
+
+Emit a machine-readable project summary for scripts:
+
+```sh
+cargo run -p meldritch-cli -- summary-json fixtures/basic_drums.toml
+```

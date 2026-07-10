@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use meldritch_core::{FrameRange, Pattern, StepIndex};
 use meldritch_render::{ArtifactCache, CacheStatus, RenderSettings};
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -19,6 +20,10 @@ enum Command {
         project: PathBuf,
     },
     Inspect {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+    },
+    SummaryJson {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
     },
@@ -77,6 +82,7 @@ fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::Validate { project } => validate_project(project),
         Command::Inspect { project } => inspect_project(project),
+        Command::SummaryJson { project } => summarize_project_json(project),
         Command::RenderClicks {
             project,
             pattern_id,
@@ -159,6 +165,25 @@ fn inspect_project(path: PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+fn summarize_project_json(path: PathBuf) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+
+    let summary = ProjectSummary::from_project(&project);
+    let output = serde_json::to_string_pretty(&summary)
+        .map_err(|err| format!("failed to encode project summary: {err}"))?;
+    println!("{output}");
+
+    Ok(())
+}
+
 fn validate_project(path: PathBuf) -> Result<(), String> {
     let input = std::fs::read_to_string(&path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
@@ -179,6 +204,83 @@ fn validate_project(path: PathBuf) -> Result<(), String> {
     );
 
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct ProjectSummary {
+    schema_version: u32,
+    name: String,
+    tempo: TempoSummary,
+    samples: Vec<SampleSummary>,
+    patterns: Vec<PatternSummary>,
+}
+
+impl ProjectSummary {
+    fn from_project(project: &meldritch_dsl::ValidatedProject) -> Self {
+        Self {
+            schema_version: 1,
+            name: project.name().to_owned(),
+            tempo: TempoSummary {
+                bpm: project.tempo().bpm(),
+                sample_rate: project.tempo().sample_rate(),
+                probability_seed: project.probability_seed().raw(),
+            },
+            samples: project
+                .samples()
+                .iter()
+                .map(|sample| SampleSummary {
+                    note: sample.note(),
+                    path: sample.path().to_owned(),
+                })
+                .collect(),
+            patterns: project
+                .patterns()
+                .iter()
+                .map(|pattern| PatternSummary {
+                    id: pattern.id().raw(),
+                    length_steps: pattern.length_steps(),
+                    steps_per_beat: pattern.steps_per_beat(),
+                    active_steps: pattern.active_step_count(),
+                    tracks: pattern
+                        .active_step_counts_by_track()
+                        .into_iter()
+                        .map(|(track, active_steps)| TrackSummary {
+                            id: track.raw(),
+                            active_steps,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct TempoSummary {
+    bpm: f64,
+    sample_rate: u32,
+    probability_seed: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct SampleSummary {
+    note: u8,
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PatternSummary {
+    id: u64,
+    length_steps: u32,
+    steps_per_beat: u32,
+    active_steps: usize,
+    tracks: Vec<TrackSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrackSummary {
+    id: u64,
+    active_steps: usize,
 }
 
 fn render_clicks(

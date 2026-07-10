@@ -11,3 +11,5 @@ meldritch-audio = { path = "../meldritch-audio" }
 meldritch-core = { path = "../meldritch-core" }
 meldritch-dsl = { path = "../meldritch-dsl" }
 meldritch-render = { path = "../meldritch-render" }
+serde.workspace = true
+serde_json.workspace = true
