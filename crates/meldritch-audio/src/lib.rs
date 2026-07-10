@@ -79,6 +79,29 @@ impl AudioBlock {
     pub fn samples_mut(&mut self) -> &mut [Sample] {
         &mut self.samples
     }
+
+    #[must_use]
+    pub fn peak_abs(&self) -> Sample {
+        self.samples
+            .iter()
+            .fold(0.0, |peak, sample| peak.max(sample.abs()))
+    }
+
+    #[must_use]
+    pub fn normalized_to_peak(&self, target_peak: Sample) -> Self {
+        let peak = self.peak_abs();
+        if peak == 0.0 || target_peak <= 0.0 {
+            return self.clone();
+        }
+
+        let gain = target_peak / peak;
+        let mut normalized = self.clone();
+        for sample in normalized.samples_mut() {
+            *sample *= gain;
+        }
+
+        normalized
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -243,5 +266,18 @@ mod tests {
         assert_eq!(loaded.samples(), &[0.25, -0.25]);
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn audio_block_reports_and_normalizes_peak() {
+        let mut block = AudioBlock::silent(1, 3);
+        block.samples_mut()[0] = -2.0;
+        block.samples_mut()[1] = 0.5;
+        block.samples_mut()[2] = 1.0;
+
+        let normalized = block.normalized_to_peak(1.0);
+
+        assert_eq!(block.peak_abs(), 2.0);
+        assert_eq!(normalized.samples(), &[-1.0, 0.25, 0.5]);
     }
 }

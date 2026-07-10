@@ -27,6 +27,8 @@ enum Command {
         channels: u16,
         #[arg(long, value_name = "WAV")]
         output: Option<PathBuf>,
+        #[arg(long)]
+        normalize: bool,
     },
     RenderSamples {
         #[arg(value_name = "PROJECT")]
@@ -37,6 +39,8 @@ enum Command {
         channels: u16,
         #[arg(long, value_name = "WAV")]
         output: Option<PathBuf>,
+        #[arg(long)]
+        normalize: bool,
     },
 }
 
@@ -55,13 +59,15 @@ fn run(cli: Cli) -> Result<(), String> {
             frames,
             channels,
             output,
-        } => render_clicks(project, frames, channels, output),
+            normalize,
+        } => render_clicks(project, frames, channels, output, normalize),
         Command::RenderSamples {
             project,
             frames,
             channels,
             output,
-        } => render_samples(project, frames, channels, output),
+            normalize,
+        } => render_samples(project, frames, channels, output, normalize),
     }
 }
 
@@ -92,6 +98,7 @@ fn render_clicks(
     frames: u64,
     channels: u16,
     output: Option<PathBuf>,
+    normalize: bool,
 ) -> Result<(), String> {
     if let Some(output) = &output
         && output.exists()
@@ -117,18 +124,18 @@ fn render_clicks(
         .ok_or_else(|| "project has no patterns to render".to_owned())?;
     let settings =
         RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
-    let block = meldritch_render::render_pattern_clicks(
+    let mut block = meldritch_render::render_pattern_clicks(
         pattern,
         project.tempo(),
         FrameRange::new(0, frames).map_err(|err| err.to_string())?,
         project.probability_seed(),
         settings,
     );
+    if normalize {
+        block = block.normalized_to_peak(1.0);
+    }
 
-    let peak = block
-        .samples()
-        .iter()
-        .fold(0.0_f64, |peak, sample| peak.max(sample.abs()));
+    let peak = block.peak_abs();
     let nonzero_samples = block
         .samples()
         .iter()
@@ -159,6 +166,7 @@ fn render_samples(
     frames: u64,
     channels: u16,
     output: Option<PathBuf>,
+    normalize: bool,
 ) -> Result<(), String> {
     if let Some(output) = &output
         && output.exists()
@@ -185,7 +193,7 @@ fn render_samples(
     let settings =
         RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
     let samples_by_note = load_project_samples(&project)?;
-    let block = meldritch_render::render_pattern_samples(
+    let mut block = meldritch_render::render_pattern_samples(
         pattern,
         project.tempo(),
         FrameRange::new(0, frames).map_err(|err| err.to_string())?,
@@ -193,11 +201,11 @@ fn render_samples(
         settings,
         &samples_by_note,
     );
+    if normalize {
+        block = block.normalized_to_peak(1.0);
+    }
 
-    let peak = block
-        .samples()
-        .iter()
-        .fold(0.0_f64, |peak, sample| peak.max(sample.abs()));
+    let peak = block.peak_abs();
     let nonzero_samples = block
         .samples()
         .iter()
