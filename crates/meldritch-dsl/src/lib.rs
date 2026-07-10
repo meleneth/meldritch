@@ -8,6 +8,7 @@ use meldritch_core::{
     Step, StepIndex, Tempo, TrackId,
 };
 use serde::Deserialize;
+use std::collections::BTreeSet;
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -15,6 +16,7 @@ pub struct ValidatedProject {
     name: String,
     tempo: Tempo,
     probability_seed: ProbabilitySeed,
+    samples: Vec<SampleRef>,
     patterns: Vec<Pattern>,
 }
 
@@ -37,6 +39,37 @@ impl ValidatedProject {
     #[must_use]
     pub fn patterns(&self) -> &[Pattern] {
         &self.patterns
+    }
+
+    #[must_use]
+    pub fn samples(&self) -> &[SampleRef] {
+        &self.samples
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SampleRef {
+    note: u8,
+    path: String,
+}
+
+impl SampleRef {
+    #[must_use]
+    pub fn new(note: u8, path: impl Into<String>) -> Self {
+        Self {
+            note,
+            path: path.into(),
+        }
+    }
+
+    #[must_use]
+    pub const fn note(&self) -> u8 {
+        self.note
+    }
+
+    #[must_use]
+    pub fn path(&self) -> &str {
+        &self.path
     }
 }
 
@@ -108,6 +141,8 @@ fn validate_project(raw: RawProject) -> Result<ValidatedProject, ProjectValidati
         }
     };
 
+    let samples = validate_samples(raw.samples, &mut diagnostics);
+
     let mut patterns = Vec::new();
     for raw_pattern in raw.patterns {
         match validate_pattern(raw_pattern) {
@@ -121,11 +156,42 @@ fn validate_project(raw: RawProject) -> Result<ValidatedProject, ProjectValidati
             name: raw.project.name,
             tempo,
             probability_seed: ProbabilitySeed::new(raw.project.seed.unwrap_or(0)),
+            samples,
             patterns,
         })
     } else {
         Err(ProjectValidationError::new(diagnostics))
     }
+}
+
+fn validate_samples(
+    raw_samples: Vec<RawSample>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<SampleRef> {
+    let mut seen_notes = BTreeSet::new();
+    let mut samples = Vec::new();
+
+    for raw_sample in raw_samples {
+        if raw_sample.path.trim().is_empty() {
+            diagnostics.push(Diagnostic::new(format!(
+                "sample for note {} has an empty path",
+                raw_sample.note
+            )));
+            continue;
+        }
+
+        if !seen_notes.insert(raw_sample.note) {
+            diagnostics.push(Diagnostic::new(format!(
+                "sample note {} is mapped more than once",
+                raw_sample.note
+            )));
+            continue;
+        }
+
+        samples.push(SampleRef::new(raw_sample.note, raw_sample.path));
+    }
+
+    samples
 }
 
 fn validate_pattern(raw: RawPattern) -> Result<Pattern, Vec<Diagnostic>> {
@@ -220,6 +286,8 @@ fn parse_tag(tag: &str) -> Option<EventTag> {
 struct RawProject {
     project: RawProjectMeta,
     #[serde(default)]
+    samples: Vec<RawSample>,
+    #[serde(default)]
     patterns: Vec<RawPattern>,
 }
 
@@ -229,6 +297,12 @@ struct RawProjectMeta {
     bpm: f64,
     sample_rate: SampleRate,
     seed: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSample {
+    note: u8,
+    path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -270,6 +344,14 @@ bpm = 120.0
 sample_rate = 48000
 seed = 7
 
+[[samples]]
+note = 36
+path = "fixtures/audio/kick.wav"
+
+[[samples]]
+note = 38
+path = "fixtures/audio/snare.wav"
+
 [[patterns]]
 id = 1
 length_steps = 16
@@ -299,6 +381,13 @@ tags = ["ghost", "probabilistic"]
         assert_eq!(project.name(), "Minimal Kick");
         assert_eq!(project.tempo(), Tempo::new(120.0, 48_000).unwrap());
         assert_eq!(project.probability_seed(), ProbabilitySeed::new(7));
+        assert_eq!(
+            project.samples(),
+            &[
+                SampleRef::new(36, "fixtures/audio/kick.wav"),
+                SampleRef::new(38, "fixtures/audio/snare.wav"),
+            ]
+        );
         assert_eq!(project.patterns().len(), 1);
 
         let pattern = &project.patterns()[0];
@@ -361,5 +450,21 @@ tags = ["ghost", "probabilistic"]
             messages,
             vec!["pattern 1 track 1 step 64 is invalid: step 64 is outside pattern length 16"]
         );
+    }
+
+    #[test]
+    fn duplicate_sample_notes_return_useful_diagnostics() {
+        let input = MINIMAL_PROJECT.replace(
+            "note = 38\npath = \"fixtures/audio/snare.wav\"",
+            "note = 36\npath = \"fixtures/audio/snare.wav\"",
+        );
+        let err = parse_project(&input).unwrap_err();
+        let messages = err
+            .diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(messages, vec!["sample note 36 is mapped more than once"]);
     }
 }

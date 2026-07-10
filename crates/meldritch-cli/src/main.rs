@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use meldritch_core::FrameRange;
 use meldritch_render::RenderSettings;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "meldritch")]
@@ -31,8 +31,6 @@ enum Command {
     RenderSamples {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
-        #[arg(long, default_value = "fixtures/audio")]
-        sample_dir: PathBuf,
         #[arg(long, default_value_t = 96_000)]
         frames: u64,
         #[arg(long, default_value_t = 2)]
@@ -60,11 +58,10 @@ fn run(cli: Cli) -> Result<(), String> {
         } => render_clicks(project, frames, channels, output),
         Command::RenderSamples {
             project,
-            sample_dir,
             frames,
             channels,
             output,
-        } => render_samples(project, sample_dir, frames, channels, output),
+        } => render_samples(project, frames, channels, output),
     }
 }
 
@@ -159,7 +156,6 @@ fn render_clicks(
 
 fn render_samples(
     path: PathBuf,
-    sample_dir: PathBuf,
     frames: u64,
     channels: u16,
     output: Option<PathBuf>,
@@ -188,7 +184,7 @@ fn render_samples(
         .ok_or_else(|| "project has no patterns to render".to_owned())?;
     let settings =
         RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
-    let samples_by_note = load_fixture_samples(&sample_dir)?;
+    let samples_by_note = load_project_samples(&project)?;
     let block = meldritch_render::render_pattern_samples(
         pattern,
         project.tempo(),
@@ -227,15 +223,15 @@ fn render_samples(
     Ok(())
 }
 
-fn load_fixture_samples(
-    sample_dir: &Path,
+fn load_project_samples(
+    project: &meldritch_dsl::ValidatedProject,
 ) -> Result<BTreeMap<u8, meldritch_audio::SampleBuffer>, String> {
     let mut samples = BTreeMap::new();
-    for (note, name) in [(36, "kick"), (38, "snare"), (42, "hat"), (43, "sub")] {
-        let path = sample_dir.join(format!("{name}.wav"));
+    for sample_ref in project.samples() {
+        let path = PathBuf::from(sample_ref.path());
         let sample = meldritch_audio::read_wav(&path)
             .map_err(|err| format!("failed to read sample {}: {err}", path.display()))?;
-        samples.insert(note, sample);
+        samples.insert(sample_ref.note(), sample);
     }
 
     Ok(samples)

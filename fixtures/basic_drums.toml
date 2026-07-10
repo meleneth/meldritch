@@ -4,6 +4,22 @@ bpm = 120.0
 sample_rate = 48000
 seed = 11
 
+[[samples]]
+note = 36
+path = "fixtures/audio/kick.wav"
+
+[[samples]]
+note = 38
+path = "fixtures/audio/snare.wav"
+
+[[samples]]
+note = 42
+path = "fixtures/audio/hat.wav"
+
+[[samples]]
+note = 43
+path = "fixtures/audio/sub.wav"
+
 [[patterns]]
 id = 1
 length_steps = 16

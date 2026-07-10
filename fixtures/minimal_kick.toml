@@ -4,6 +4,10 @@ bpm = 120.0
 sample_rate = 48000
 seed = 7
 
+[[samples]]
+note = 36
+path = "fixtures/audio/kick.wav"
+
 [[patterns]]
 id = 1
 length_steps = 16
