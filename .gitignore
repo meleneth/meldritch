@@ -1,6 +1,9 @@
 # Rust build output
 /target/
 
+# Local rendered audio artifacts
+/artifacts/
+
 # Cargo leaves this behind after interrupted package/publish commands
 Cargo.lock.orig
 

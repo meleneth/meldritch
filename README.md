@@ -58,3 +58,19 @@ Then add:
 - relational DSP
 
 Do not start by making a pretty grid. The grid is the cockpit. The engine is the dragon.
+
+## Fixture Workflow
+
+Generate the Csound sample fixtures:
+
+```sh
+bash tools/csound/generate-fixtures.sh
+```
+
+Render the sample-backed drum fixture through the Rust CLI:
+
+```sh
+bash tools/render-fixture.sh
+```
+
+The render script writes local WAVs under `artifacts/`, which is intentionally ignored.
