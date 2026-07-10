@@ -1125,10 +1125,10 @@ impl RelationGraph {
         }
 
         let previous = self.edges.insert(edge.id(), edge.clone());
-        if let Some(previous) = &previous {
-            if let Some(ids) = self.outgoing.get_mut(&previous.from()) {
-                ids.remove(&previous.id());
-            }
+        if let Some(previous) = &previous
+            && let Some(ids) = self.outgoing.get_mut(&previous.from())
+        {
+            ids.remove(&previous.id());
         }
         self.outgoing
             .entry(edge.from())
@@ -1573,9 +1573,11 @@ mod tests {
         let dirty = graph.invalidate_from(changed, range(0, 16));
 
         assert_eq!(dirty.len(), 2);
-        assert!(dirty
-            .iter()
-            .all(|dirty| dirty.entity() != EntityId::Node(unrelated)));
+        assert!(
+            dirty
+                .iter()
+                .all(|dirty| dirty.entity() != EntityId::Node(unrelated))
+        );
     }
 
     #[test]

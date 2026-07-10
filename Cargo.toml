@@ -8,11 +8,11 @@ members = [
 resolver = "2"
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
-rust-version = "1.81"
+rust-version = "1.97"
 
 [workspace.dependencies]
-indexmap = "=2.2.6"
+clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+toml = "1"

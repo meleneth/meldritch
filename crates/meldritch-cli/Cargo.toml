@@ -6,4 +6,6 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+clap.workspace = true
 meldritch-core = { path = "../meldritch-core" }
+meldritch-dsl = { path = "../meldritch-dsl" }
