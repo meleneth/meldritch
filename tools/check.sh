@@ -37,5 +37,7 @@ run bash tools/relations.sh
 run bash tools/dirty-pattern.sh
 rm -f artifacts/check_render.wav artifacts/check_render.manifest.json
 run cargo run -p meldritch-cli -- render-samples fixtures/basic_drums.toml --pattern-id 1 --frames 96000 --channels 2 --output artifacts/check_render.wav --manifest artifacts/check_render.manifest.json --normalize --cache-probe
+rm -f artifacts/check_control_render.wav artifacts/check_control_render.manifest.json
+run cargo run -p meldritch-cli -- render-samples fixtures/control_relations.toml --pattern-id 8 --frames 48000 --channels 2 --output artifacts/check_control_render.wav --manifest artifacts/check_control_render.manifest.json --normalize --cache-probe
 
 MELDRITCH_OVERWRITE=1 run bash tools/render-fixture.sh

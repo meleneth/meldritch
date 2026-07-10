@@ -4,7 +4,7 @@ use meldritch_core::{
 };
 use meldritch_render::{ArtifactCache, CacheStatus, RenderSettings};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Parser)]
@@ -891,6 +891,7 @@ impl RenderGraphSummary {
             })
             .ok_or_else(|| format!("compiled graph has no pattern {}", pattern.raw()))?;
 
+        let mut audio_notes = BTreeSet::new();
         let relations = compiled
             .relation_bindings()
             .iter()
@@ -898,12 +899,16 @@ impl RenderGraphSummary {
                 meldritch_dsl::RelationBindingKind::SampleToPattern {
                     note,
                     pattern: relation_pattern,
-                } if *relation_pattern == pattern => Some(RenderGraphRelationSummary {
-                    relation_id: binding.relation().raw(),
-                    from_node_id: binding.from().raw(),
-                    to_node_id: binding.to().raw(),
-                    note: *note,
-                }),
+                } if *relation_pattern == pattern => {
+                    audio_notes.insert(*note);
+                    Some(RenderGraphRelationSummary::from_binding(binding))
+                }
+                meldritch_dsl::RelationBindingKind::PatternControlsPattern {
+                    from_pattern,
+                    to_pattern,
+                } if *from_pattern == pattern || *to_pattern == pattern => {
+                    Some(RenderGraphRelationSummary::from_binding(binding))
+                }
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -916,7 +921,7 @@ impl RenderGraphSummary {
                 .iter()
                 .filter_map(|binding| match binding.kind() {
                     meldritch_dsl::SourceBindingKind::Sample { note, .. }
-                        if relations.iter().any(|relation| relation.note == *note) =>
+                        if audio_notes.contains(note) =>
                     {
                         Some(RenderGraphSampleSourceSummary {
                             note: *note,
@@ -945,7 +950,51 @@ struct RenderGraphRelationSummary {
     relation_id: u64,
     from_node_id: u64,
     to_node_id: u64,
-    note: u8,
+    kind: RenderGraphRelationKindSummary,
+}
+
+impl RenderGraphRelationSummary {
+    fn from_binding(binding: &meldritch_dsl::RelationBinding) -> Self {
+        Self {
+            relation_id: binding.relation().raw(),
+            from_node_id: binding.from().raw(),
+            to_node_id: binding.to().raw(),
+            kind: RenderGraphRelationKindSummary::from_kind(binding.kind()),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+enum RenderGraphRelationKindSummary {
+    SampleToPattern {
+        note: u8,
+        pattern_id: u64,
+    },
+    PatternControlsPattern {
+        from_pattern_id: u64,
+        to_pattern_id: u64,
+    },
+}
+
+impl RenderGraphRelationKindSummary {
+    fn from_kind(kind: &meldritch_dsl::RelationBindingKind) -> Self {
+        match kind {
+            meldritch_dsl::RelationBindingKind::SampleToPattern { note, pattern } => {
+                Self::SampleToPattern {
+                    note: *note,
+                    pattern_id: pattern.raw(),
+                }
+            }
+            meldritch_dsl::RelationBindingKind::PatternControlsPattern {
+                from_pattern,
+                to_pattern,
+            } => Self::PatternControlsPattern {
+                from_pattern_id: from_pattern.raw(),
+                to_pattern_id: to_pattern.raw(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
