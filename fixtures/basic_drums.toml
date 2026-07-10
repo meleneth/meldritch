@@ -1,0 +1,75 @@
+[project]
+name = "Basic Csound Drums"
+bpm = 120.0
+sample_rate = 48000
+seed = 11
+
+[[patterns]]
+id = 1
+length_steps = 16
+steps_per_beat = 4
+
+[[patterns.tracks]]
+id = 1
+
+[[patterns.tracks.steps]]
+step = 0
+note = 36
+velocity = 0.95
+tags = ["accent"]
+
+[[patterns.tracks.steps]]
+step = 4
+note = 38
+velocity = 0.82
+tags = ["accent"]
+
+[[patterns.tracks.steps]]
+step = 8
+note = 36
+velocity = 0.78
+
+[[patterns.tracks.steps]]
+step = 12
+note = 38
+velocity = 0.72
+
+[[patterns.tracks]]
+id = 2
+
+[[patterns.tracks.steps]]
+step = 2
+note = 42
+velocity = 0.45
+tags = ["ghost"]
+
+[[patterns.tracks.steps]]
+step = 6
+note = 42
+velocity = 0.48
+tags = ["ghost"]
+
+[[patterns.tracks.steps]]
+step = 10
+note = 42
+velocity = 0.42
+tags = ["ghost"]
+
+[[patterns.tracks.steps]]
+step = 14
+note = 42
+velocity = 0.52
+tags = ["accent"]
+
+[[patterns.tracks]]
+id = 3
+
+[[patterns.tracks.steps]]
+step = 0
+note = 43
+velocity = 0.7
+
+[[patterns.tracks.steps]]
+step = 8
+note = 43
+velocity = 0.64

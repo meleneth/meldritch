@@ -11,6 +11,44 @@ pub struct AudioBlock {
     samples: Vec<Sample>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SampleBuffer {
+    channels: u16,
+    sample_rate: SampleRate,
+    samples: Vec<Sample>,
+}
+
+impl SampleBuffer {
+    #[must_use]
+    pub fn new(channels: u16, sample_rate: SampleRate, samples: Vec<Sample>) -> Self {
+        Self {
+            channels,
+            sample_rate,
+            samples,
+        }
+    }
+
+    #[must_use]
+    pub const fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    #[must_use]
+    pub const fn sample_rate(&self) -> SampleRate {
+        self.sample_rate
+    }
+
+    #[must_use]
+    pub fn samples(&self) -> &[Sample] {
+        &self.samples
+    }
+
+    #[must_use]
+    pub fn frames(&self) -> Frames {
+        (self.samples.len() / usize::from(self.channels)) as Frames
+    }
+}
+
 impl AudioBlock {
     #[must_use]
     pub fn silent(channels: u16, frames: Frames) -> Self {
@@ -87,6 +125,39 @@ pub fn write_wav_f32(
     Ok(())
 }
 
+pub fn read_wav(path: impl AsRef<Path>) -> Result<SampleBuffer, Box<dyn std::error::Error>> {
+    let mut reader = hound::WavReader::open(path)?;
+    let spec = reader.spec();
+    let samples = match spec.sample_format {
+        hound::SampleFormat::Float => reader
+            .samples::<f32>()
+            .map(|sample| sample.map(f64::from))
+            .collect::<Result<Vec<_>, _>>()?,
+        hound::SampleFormat::Int => read_int_samples(&mut reader, spec.bits_per_sample)?,
+    };
+
+    Ok(SampleBuffer::new(spec.channels, spec.sample_rate, samples))
+}
+
+fn read_int_samples<R: std::io::Read>(
+    reader: &mut hound::WavReader<R>,
+    bits_per_sample: u16,
+) -> Result<Vec<Sample>, hound::Error> {
+    if bits_per_sample <= 16 {
+        let scale = f64::from(i16::MAX);
+        reader
+            .samples::<i16>()
+            .map(|sample| sample.map(|sample| f64::from(sample) / scale))
+            .collect()
+    } else {
+        let max_amplitude = ((1_i64 << (bits_per_sample - 1)) - 1) as f64;
+        reader
+            .samples::<i32>()
+            .map(|sample| sample.map(|sample| f64::from(sample) / max_amplitude))
+            .collect()
+    }
+}
+
 fn validate_export_block(block: &AudioBlock) -> Result<(), WavExportError> {
     let channels = usize::from(block.channels());
     if channels == 0 || !block.samples().len().is_multiple_of(channels) {
@@ -153,5 +224,24 @@ mod tests {
         let err = validate_export_block(&block).unwrap_err();
 
         assert_eq!(err, WavExportError::NonFiniteSample { index: 0 });
+    }
+
+    #[test]
+    fn reads_wav_into_f64_sample_buffer() {
+        let path =
+            std::env::temp_dir().join(format!("meldritch-read-test-{}.wav", std::process::id()));
+        let mut block = AudioBlock::silent(1, 2);
+        block.samples_mut()[0] = 0.25;
+        block.samples_mut()[1] = -0.25;
+        write_wav_f32(&path, &block, 48_000).unwrap();
+
+        let loaded = read_wav(&path).unwrap();
+
+        assert_eq!(loaded.channels(), 1);
+        assert_eq!(loaded.sample_rate(), 48_000);
+        assert_eq!(loaded.frames(), 2);
+        assert_eq!(loaded.samples(), &[0.25, -0.25]);
+
+        let _ = std::fs::remove_file(path);
     }
 }

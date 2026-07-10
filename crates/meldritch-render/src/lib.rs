@@ -4,8 +4,9 @@
 //! is not a sampler yet; it proves that scheduled core events can become finite
 //! internal `f64` audio blocks without touching device I/O.
 
-use meldritch_audio::AudioBlock;
+use meldritch_audio::{AudioBlock, SampleBuffer};
 use meldritch_core::{FrameRange, Pattern, PatternId, ProbabilitySeed, Sample, SampleRate, Tempo};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RenderSettings {
@@ -135,12 +136,61 @@ pub fn render_pattern_clicks(
     block
 }
 
+pub fn render_pattern_samples(
+    pattern: &Pattern,
+    tempo: Tempo,
+    range: FrameRange,
+    probability_seed: ProbabilitySeed,
+    settings: RenderSettings,
+    samples_by_note: &BTreeMap<u8, SampleBuffer>,
+) -> AudioBlock {
+    let frames = range
+        .end()
+        .saturating_sub(range.start())
+        .min(u64::from(u32::MAX)) as u32;
+    let mut block = AudioBlock::silent(settings.channels(), frames);
+    let mut events = Vec::new();
+    pattern.events_between(tempo, range, probability_seed, &mut events);
+
+    for event in events {
+        let Some(sample) = samples_by_note.get(&event.note()) else {
+            continue;
+        };
+        let Some(relative_frame) = event.range().start().checked_sub(range.start()) else {
+            continue;
+        };
+        if relative_frame >= u64::from(frames) {
+            continue;
+        }
+
+        mix_sample(&mut block, relative_frame as u32, sample, event.velocity());
+    }
+
+    block
+}
+
 fn write_frame(block: &mut AudioBlock, frame: u32, sample: Sample) {
     let channels = usize::from(block.channels());
     let start = frame as usize * channels;
 
     for channel_offset in 0..channels {
         block.samples_mut()[start + channel_offset] += sample;
+    }
+}
+
+fn mix_sample(block: &mut AudioBlock, start_frame: u32, sample: &SampleBuffer, gain: Sample) {
+    let out_channels = usize::from(block.channels());
+    let sample_channels = usize::from(sample.channels());
+    let available_frames = block.frames().saturating_sub(start_frame);
+    let frames_to_mix = available_frames.min(sample.frames());
+
+    for frame in 0..frames_to_mix {
+        for out_channel in 0..out_channels {
+            let source_channel = out_channel.min(sample_channels.saturating_sub(1));
+            let source_index = frame as usize * sample_channels + source_channel;
+            let target_index = (start_frame + frame) as usize * out_channels + out_channel;
+            block.samples_mut()[target_index] += sample.samples()[source_index] * gain;
+        }
     }
 }
 
@@ -214,6 +264,31 @@ mod tests {
         assert_eq!(block.samples()[48_000], 0.5);
         assert_eq!(block.samples()[48_001], 0.5);
         assert!(block.samples().iter().all(|sample| sample.is_finite()));
+    }
+
+    #[test]
+    fn renders_pattern_events_with_sample_lookup() {
+        let mut pattern = Pattern::new(PatternId::new(1), 16, 4).unwrap();
+        pattern
+            .set_step(
+                TrackId::new(1),
+                StepIndex::new(0),
+                Step::new(36).with_velocity(0.5),
+            )
+            .unwrap();
+        let mut samples_by_note = BTreeMap::new();
+        samples_by_note.insert(36, SampleBuffer::new(1, 48_000, vec![1.0, 0.5]));
+
+        let block = render_pattern_samples(
+            &pattern,
+            tempo(),
+            FrameRange::new(0, 4).unwrap(),
+            ProbabilitySeed::new(0),
+            RenderSettings::new(2).unwrap(),
+            &samples_by_note,
+        );
+
+        assert_eq!(block.samples(), &[0.5, 0.5, 0.25, 0.25, 0.0, 0.0, 0.0, 0.0]);
     }
 
     #[test]
