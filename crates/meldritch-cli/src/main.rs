@@ -82,6 +82,8 @@ enum Command {
         channels: u16,
         #[arg(long, value_name = "WAV")]
         output: Option<PathBuf>,
+        #[arg(long, value_name = "JSON")]
+        manifest: Option<PathBuf>,
         #[arg(long)]
         normalize: bool,
         #[arg(long)]
@@ -147,16 +149,20 @@ fn run(cli: Cli) -> Result<(), String> {
             frames,
             channels,
             output,
+            manifest,
             normalize,
             cache_probe,
         } => render_samples(
             project,
-            pattern_id,
-            frames,
-            channels,
-            output,
-            normalize,
-            cache_probe,
+            RenderSamplesOptions {
+                pattern_id,
+                frames,
+                channels,
+                output,
+                manifest,
+                normalize,
+                cache_probe,
+            },
         ),
         Command::DirtyStep {
             project,
@@ -598,6 +604,124 @@ impl SampleDiagnostic {
 }
 
 #[derive(Debug, Serialize)]
+struct RenderManifest {
+    schema_version: u32,
+    project_path: String,
+    output_path: Option<String>,
+    pattern_id: u64,
+    range: FrameRangeSummary,
+    channels: u16,
+    normalize: bool,
+    cache_probe: bool,
+    cache_probe_result: Option<CacheProbeSummary>,
+    artifact: ArtifactSummary,
+    samples: Vec<RenderSampleSummary>,
+    result: RenderResultSummary,
+}
+
+struct RenderManifestInput<'a> {
+    project_path: &'a Path,
+    output_path: Option<&'a Path>,
+    pattern: &'a Pattern,
+    range: FrameRange,
+    channels: u16,
+    normalize: bool,
+    cache_probe: bool,
+    cache_probe_summary: Option<CacheProbeSummary>,
+    artifact_key: meldritch_render::ArtifactKey,
+    samples_by_note: &'a BTreeMap<u8, meldritch_audio::SampleBuffer>,
+    peak: f64,
+    nonzero_samples: usize,
+    finite: bool,
+}
+
+impl RenderManifest {
+    fn from_render(input: RenderManifestInput<'_>) -> Self {
+        Self {
+            schema_version: 1,
+            project_path: input.project_path.display().to_string(),
+            output_path: input.output_path.map(|path| path.display().to_string()),
+            pattern_id: input.pattern.id().raw(),
+            range: FrameRangeSummary::from_range(input.range),
+            channels: input.channels,
+            normalize: input.normalize,
+            cache_probe: input.cache_probe,
+            cache_probe_result: input.cache_probe_summary,
+            artifact: ArtifactSummary::from_key(input.artifact_key),
+            samples: input
+                .samples_by_note
+                .iter()
+                .map(|(note, sample)| RenderSampleSummary::from_sample(*note, sample))
+                .collect(),
+            result: RenderResultSummary {
+                peak: input.peak,
+                nonzero_samples: input.nonzero_samples,
+                finite: input.finite,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct CacheProbeSummary {
+    first: String,
+    second: String,
+    artifacts: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactSummary {
+    pattern_id: u64,
+    range: FrameRangeSummary,
+    sample_rate: u32,
+    fingerprint: u64,
+}
+
+impl ArtifactSummary {
+    fn from_key(key: meldritch_render::ArtifactKey) -> Self {
+        Self {
+            pattern_id: key.pattern().raw(),
+            range: FrameRangeSummary::from_range(key.range()),
+            sample_rate: key.sample_rate(),
+            fingerprint: key.fingerprint().raw(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct RenderSampleSummary {
+    note: u8,
+    sample_rate: u32,
+    channels: u16,
+    frames: meldritch_audio::Frames,
+    peak: f64,
+    finite: bool,
+}
+
+impl RenderSampleSummary {
+    fn from_sample(note: u8, sample: &meldritch_audio::SampleBuffer) -> Self {
+        Self {
+            note,
+            sample_rate: sample.sample_rate(),
+            channels: sample.channels(),
+            frames: sample.frames(),
+            peak: sample
+                .samples()
+                .iter()
+                .fold(0.0, |peak, sample| peak.max(sample.abs())),
+            finite: sample.samples().iter().all(|sample| sample.is_finite()),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct RenderResultSummary {
+    peak: f64,
+    nonzero_samples: usize,
+    finite: bool,
+}
+
+#[derive(Debug, Serialize)]
 struct DirtyGraphSummary {
     schema_version: u32,
     source_id: u64,
@@ -814,8 +938,8 @@ fn render_clicks(
         peak
     );
 
-    if let Some(output) = output {
-        meldritch_audio::write_wav_f32(&output, &block, project.tempo().sample_rate())
+    if let Some(output) = &output {
+        meldritch_audio::write_wav_f32(output, &block, project.tempo().sample_rate())
             .map_err(|err| format!("failed to write {}: {err}", output.display()))?;
         println!("wrote: {}", output.display());
     }
@@ -823,21 +947,31 @@ fn render_clicks(
     Ok(())
 }
 
-fn render_samples(
-    path: PathBuf,
+struct RenderSamplesOptions {
     pattern_id: Option<u64>,
     frames: u64,
     channels: u16,
     output: Option<PathBuf>,
+    manifest: Option<PathBuf>,
     normalize: bool,
     cache_probe: bool,
-) -> Result<(), String> {
-    if let Some(output) = &output
+}
+
+fn render_samples(path: PathBuf, options: RenderSamplesOptions) -> Result<(), String> {
+    if let Some(output) = &options.output
         && output.exists()
     {
         return Err(format!(
             "output {} already exists; choose a new path",
             output.display()
+        ));
+    }
+    if let Some(manifest) = &options.manifest
+        && manifest.exists()
+    {
+        return Err(format!(
+            "manifest {} already exists; choose a new path",
+            manifest.display()
         ));
     }
 
@@ -850,12 +984,21 @@ fn render_samples(
             .collect::<Vec<_>>()
             .join("\n")
     })?;
-    let pattern = select_pattern(&project, pattern_id, "render")?;
-    let settings =
-        RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
+    let pattern = select_pattern(&project, options.pattern_id, "render")?;
+    let settings = RenderSettings::new(options.channels)
+        .map_err(|err| format!("invalid render settings: {err:?}"))?;
     let samples_by_note = load_project_samples(&project, &path)?;
-    let range = FrameRange::new(0, frames).map_err(|err| err.to_string())?;
-    let mut block = if cache_probe {
+    let range = FrameRange::new(0, options.frames).map_err(|err| err.to_string())?;
+    let artifact_key = meldritch_render::pattern_sample_artifact_key(
+        pattern,
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        settings,
+        &samples_by_note,
+    );
+    let mut cache_probe_summary = None;
+    let mut block = if options.cache_probe {
         let mut cache = ArtifactCache::new();
         let first = meldritch_render::render_pattern_samples_cached(
             &mut cache,
@@ -881,6 +1024,11 @@ fn render_samples(
             format_cache_status(second.status()),
             cache.len()
         );
+        cache_probe_summary = Some(CacheProbeSummary {
+            first: format_cache_status(first.status()).to_owned(),
+            second: format_cache_status(second.status()).to_owned(),
+            artifacts: cache.len(),
+        });
         second.into_block()
     } else {
         meldritch_render::render_pattern_samples(
@@ -892,7 +1040,7 @@ fn render_samples(
             &samples_by_note,
         )
     };
-    if normalize {
+    if options.normalize {
         block = block.normalized_to_peak(1.0);
     }
 
@@ -913,10 +1061,33 @@ fn render_samples(
         peak
     );
 
-    if let Some(output) = output {
-        meldritch_audio::write_wav_f32(&output, &block, project.tempo().sample_rate())
+    if let Some(output) = &options.output {
+        meldritch_audio::write_wav_f32(output, &block, project.tempo().sample_rate())
             .map_err(|err| format!("failed to write {}: {err}", output.display()))?;
         println!("wrote: {}", output.display());
+    }
+
+    if let Some(manifest) = options.manifest {
+        let summary = RenderManifest::from_render(RenderManifestInput {
+            project_path: &path,
+            output_path: options.output.as_deref(),
+            pattern,
+            range,
+            channels: options.channels,
+            normalize: options.normalize,
+            cache_probe: options.cache_probe,
+            cache_probe_summary,
+            artifact_key,
+            samples_by_note: &samples_by_note,
+            peak,
+            nonzero_samples,
+            finite,
+        });
+        let json = serde_json::to_string_pretty(&summary)
+            .map_err(|err| format!("failed to encode render manifest: {err}"))?;
+        std::fs::write(&manifest, json)
+            .map_err(|err| format!("failed to write {}: {err}", manifest.display()))?;
+        println!("wrote manifest: {}", manifest.display());
     }
 
     Ok(())

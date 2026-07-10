@@ -73,7 +73,7 @@ Render the sample-backed drum fixture through the Rust CLI:
 bash tools/render-fixture.sh
 ```
 
-The render script writes local WAVs under `artifacts/`, which is intentionally ignored.
+The render script writes local WAVs and render manifests under `artifacts/`, which is intentionally ignored.
 
 Emit a machine-readable project summary for scripts:
 
