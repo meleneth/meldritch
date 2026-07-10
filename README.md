@@ -73,6 +73,12 @@ Render the sample-backed drum fixture through the Rust CLI:
 bash tools/render-fixture.sh
 ```
 
+Render the control-relation fixture and manifest:
+
+```sh
+bash tools/render-control-fixture.sh
+```
+
 The render script writes local WAVs and render manifests under `artifacts/`, which is intentionally ignored.
 
 Emit a machine-readable project summary for scripts:
