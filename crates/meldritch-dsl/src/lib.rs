@@ -19,6 +19,7 @@ pub struct ValidatedProject {
     probability_seed: ProbabilitySeed,
     samples: Vec<SampleRef>,
     patterns: Vec<Pattern>,
+    relations: Vec<RelationRef>,
 }
 
 impl ValidatedProject {
@@ -46,12 +47,57 @@ impl ValidatedProject {
     pub fn samples(&self) -> &[SampleRef] {
         &self.samples
     }
+
+    #[must_use]
+    pub fn relations(&self) -> &[RelationRef] {
+        &self.relations
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SampleRef {
     note: u8,
     path: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RelationRef {
+    from: RelationEndpoint,
+    to: RelationEndpoint,
+    kind: RelationKind,
+}
+
+impl RelationRef {
+    #[must_use]
+    pub const fn new(from: RelationEndpoint, to: RelationEndpoint, kind: RelationKind) -> Self {
+        Self { from, to, kind }
+    }
+
+    #[must_use]
+    pub const fn from(&self) -> RelationEndpoint {
+        self.from
+    }
+
+    #[must_use]
+    pub const fn to(&self) -> RelationEndpoint {
+        self.to
+    }
+
+    #[must_use]
+    pub const fn kind(&self) -> RelationKind {
+        self.kind
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RelationEndpoint {
+    SampleNote(u8),
+    Pattern(PatternId),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RelationKind {
+    Audio,
 }
 
 #[derive(Clone, Debug)]
@@ -253,19 +299,17 @@ pub fn parse_project(input: &str) -> Result<ValidatedProject, ParseProjectError>
 
 pub fn compile_project(project: &ValidatedProject) -> Result<CompiledProject, CompileProjectError> {
     let mut diagnostics = Vec::new();
-    let mut sources = SourceGraph::new();
-    let mut relations = RelationGraph::new();
-    let mut source_bindings = Vec::new();
-    let mut relation_bindings = Vec::new();
-    let mut sample_nodes_by_note = BTreeMap::new();
+    let mut graph = CompiledGraphBuilder::new();
 
     for sample in project.samples() {
         let source = sample_source_id(sample.note());
         let node = NodeId::new(source.raw());
-        sources.insert(Source::new(source, node));
-        relations.insert_node(node, NodeProperties::new(Linearity::Linear));
-        sample_nodes_by_note.insert(sample.note(), node);
-        source_bindings.push(SourceBinding {
+        graph.sources.insert(Source::new(source, node));
+        graph
+            .relations
+            .insert_node(node, NodeProperties::new(Linearity::Linear));
+        graph.sample_nodes_by_note.insert(sample.note(), node);
+        graph.source_bindings.push(SourceBinding {
             source,
             node,
             kind: SourceBindingKind::Sample {
@@ -279,9 +323,12 @@ pub fn compile_project(project: &ValidatedProject) -> Result<CompiledProject, Co
         match pattern_source_id(pattern.id()) {
             Some(source) => {
                 let node = NodeId::new(source.raw());
-                sources.insert(Source::new(source, node));
-                relations.insert_node(node, NodeProperties::new(Linearity::Linear));
-                source_bindings.push(SourceBinding {
+                graph.sources.insert(Source::new(source, node));
+                graph
+                    .relations
+                    .insert_node(node, NodeProperties::new(Linearity::Linear));
+                graph.pattern_nodes_by_id.insert(pattern.id().raw(), node);
+                graph.source_bindings.push(SourceBinding {
                     source,
                     node,
                     kind: SourceBindingKind::Pattern {
@@ -290,40 +337,7 @@ pub fn compile_project(project: &ValidatedProject) -> Result<CompiledProject, Co
                 });
 
                 for note in pattern.used_notes() {
-                    let Some(sample_node) = sample_nodes_by_note.get(&note).copied() else {
-                        diagnostics.push(Diagnostic::new(format!(
-                            "pattern {} uses note {} without a sample source",
-                            pattern.id().raw(),
-                            note
-                        )));
-                        continue;
-                    };
-                    let Some(relation) = sample_to_pattern_relation_id(note, pattern.id()) else {
-                        diagnostics.push(Diagnostic::new(format!(
-                            "pattern {} note {} cannot be compiled to a relation id",
-                            pattern.id().raw(),
-                            note
-                        )));
-                        continue;
-                    };
-                    let edge = RelationEdge::new(relation, sample_node, node, EdgeKind::Audio);
-                    if let Err(err) = relations.insert_edge(edge) {
-                        diagnostics.push(Diagnostic::new(format!(
-                            "pattern {} note {} relation is invalid: {err}",
-                            pattern.id().raw(),
-                            note
-                        )));
-                    } else {
-                        relation_bindings.push(RelationBinding {
-                            relation,
-                            from: sample_node,
-                            to: node,
-                            kind: RelationBindingKind::SampleToPattern {
-                                note,
-                                pattern: pattern.id(),
-                            },
-                        });
-                    }
+                    graph.insert_sample_pattern_relation(note, pattern.id(), &mut diagnostics);
                 }
             }
             None => diagnostics.push(Diagnostic::new(format!(
@@ -333,12 +347,25 @@ pub fn compile_project(project: &ValidatedProject) -> Result<CompiledProject, Co
         }
     }
 
+    for relation in project.relations() {
+        match (relation.from(), relation.to(), relation.kind()) {
+            (
+                RelationEndpoint::SampleNote(note),
+                RelationEndpoint::Pattern(pattern),
+                RelationKind::Audio,
+            ) => graph.insert_sample_pattern_relation(note, pattern, &mut diagnostics),
+            _ => diagnostics.push(Diagnostic::new(
+                "explicit relation shape is not supported by the compiler",
+            )),
+        }
+    }
+
     if diagnostics.is_empty() {
         Ok(CompiledProject {
-            sources,
-            relations,
-            source_bindings,
-            relation_bindings,
+            sources: graph.sources,
+            relations: graph.relations,
+            source_bindings: graph.source_bindings,
+            relation_bindings: graph.relation_bindings,
         })
     } else {
         Err(CompileProjectError::new(diagnostics))
@@ -362,6 +389,81 @@ fn sample_to_pattern_relation_id(note: u8, pattern: PatternId) -> Option<Relatio
         .map(RelationId::new)
 }
 
+struct CompiledGraphBuilder {
+    sources: SourceGraph,
+    relations: RelationGraph,
+    source_bindings: Vec<SourceBinding>,
+    relation_bindings: Vec<RelationBinding>,
+    sample_nodes_by_note: BTreeMap<u8, NodeId>,
+    pattern_nodes_by_id: BTreeMap<u64, NodeId>,
+    relation_pairs: BTreeSet<(u8, u64)>,
+}
+
+impl CompiledGraphBuilder {
+    fn new() -> Self {
+        Self {
+            sources: SourceGraph::new(),
+            relations: RelationGraph::new(),
+            source_bindings: Vec::new(),
+            relation_bindings: Vec::new(),
+            sample_nodes_by_note: BTreeMap::new(),
+            pattern_nodes_by_id: BTreeMap::new(),
+            relation_pairs: BTreeSet::new(),
+        }
+    }
+
+    fn insert_sample_pattern_relation(
+        &mut self,
+        note: u8,
+        pattern: PatternId,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        if !self.relation_pairs.insert((note, pattern.raw())) {
+            return;
+        }
+
+        let Some(sample_node) = self.sample_nodes_by_note.get(&note).copied() else {
+            diagnostics.push(Diagnostic::new(format!(
+                "pattern {} uses note {} without a sample source",
+                pattern.raw(),
+                note
+            )));
+            return;
+        };
+        let Some(pattern_node) = self.pattern_nodes_by_id.get(&pattern.raw()).copied() else {
+            diagnostics.push(Diagnostic::new(format!(
+                "relation to pattern {} has no compiled pattern node",
+                pattern.raw()
+            )));
+            return;
+        };
+        let Some(relation) = sample_to_pattern_relation_id(note, pattern) else {
+            diagnostics.push(Diagnostic::new(format!(
+                "pattern {} note {} cannot be compiled to a relation id",
+                pattern.raw(),
+                note
+            )));
+            return;
+        };
+
+        let edge = RelationEdge::new(relation, sample_node, pattern_node, EdgeKind::Audio);
+        if let Err(err) = self.relations.insert_edge(edge) {
+            diagnostics.push(Diagnostic::new(format!(
+                "pattern {} note {} relation is invalid: {err}",
+                pattern.raw(),
+                note
+            )));
+        } else {
+            self.relation_bindings.push(RelationBinding {
+                relation,
+                from: sample_node,
+                to: pattern_node,
+                kind: RelationBindingKind::SampleToPattern { note, pattern },
+            });
+        }
+    }
+}
+
 fn validate_project(raw: RawProject) -> Result<ValidatedProject, ProjectValidationError> {
     let mut diagnostics = Vec::new();
 
@@ -374,6 +476,7 @@ fn validate_project(raw: RawProject) -> Result<ValidatedProject, ProjectValidati
     };
 
     let samples = validate_samples(raw.samples, &mut diagnostics);
+    let sample_notes = samples.iter().map(SampleRef::note).collect::<BTreeSet<_>>();
 
     let mut seen_patterns = BTreeSet::new();
     let mut patterns = Vec::new();
@@ -391,6 +494,13 @@ fn validate_project(raw: RawProject) -> Result<ValidatedProject, ProjectValidati
             Err(mut pattern_diagnostics) => diagnostics.append(&mut pattern_diagnostics),
         }
     }
+    let pattern_ids = patterns
+        .iter()
+        .map(Pattern::id)
+        .map(PatternId::raw)
+        .collect::<BTreeSet<_>>();
+    let relations =
+        validate_relations(raw.relations, &sample_notes, &pattern_ids, &mut diagnostics);
 
     if diagnostics.is_empty() {
         Ok(ValidatedProject {
@@ -399,9 +509,120 @@ fn validate_project(raw: RawProject) -> Result<ValidatedProject, ProjectValidati
             probability_seed: ProbabilitySeed::new(raw.project.seed.unwrap_or(0)),
             samples,
             patterns,
+            relations,
         })
     } else {
         Err(ProjectValidationError::new(diagnostics))
+    }
+}
+
+fn validate_relations(
+    raw_relations: Vec<RawRelation>,
+    sample_notes: &BTreeSet<u8>,
+    pattern_ids: &BTreeSet<u64>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<RelationRef> {
+    let mut relations = Vec::new();
+
+    for (index, raw_relation) in raw_relations.into_iter().enumerate() {
+        let relation_number = index + 1;
+        let Some(from) = validate_relation_endpoint(
+            raw_relation.from,
+            sample_notes,
+            pattern_ids,
+            relation_number,
+            "from",
+            diagnostics,
+        ) else {
+            continue;
+        };
+        let Some(to) = validate_relation_endpoint(
+            raw_relation.to,
+            sample_notes,
+            pattern_ids,
+            relation_number,
+            "to",
+            diagnostics,
+        ) else {
+            continue;
+        };
+        let Some(kind) = validate_relation_kind(&raw_relation.kind, relation_number, diagnostics)
+        else {
+            continue;
+        };
+
+        match (from, to, kind) {
+            (
+                RelationEndpoint::SampleNote(_),
+                RelationEndpoint::Pattern(_),
+                RelationKind::Audio,
+            ) => relations.push(RelationRef::new(from, to, kind)),
+            _ => diagnostics.push(Diagnostic::new(format!(
+                "relation {relation_number} must connect a sample_note to a pattern"
+            ))),
+        }
+    }
+
+    relations
+}
+
+fn validate_relation_endpoint(
+    raw: RawRelationEndpoint,
+    sample_notes: &BTreeSet<u8>,
+    pattern_ids: &BTreeSet<u64>,
+    relation_number: usize,
+    side: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<RelationEndpoint> {
+    match (raw.sample_note, raw.pattern) {
+        (Some(note), None) => {
+            if sample_notes.contains(&note) {
+                Some(RelationEndpoint::SampleNote(note))
+            } else {
+                diagnostics.push(Diagnostic::new(format!(
+                    "relation {relation_number} {side} references unknown sample note {note}"
+                )));
+                None
+            }
+        }
+        (None, Some(pattern)) => {
+            if pattern_ids.contains(&pattern) {
+                Some(RelationEndpoint::Pattern(PatternId::new(pattern)))
+            } else {
+                diagnostics.push(Diagnostic::new(format!(
+                    "relation {relation_number} {side} references unknown pattern {pattern}"
+                )));
+                None
+            }
+        }
+        (None, None) => {
+            diagnostics.push(Diagnostic::new(format!(
+                "relation {relation_number} {side} endpoint is empty"
+            )));
+            None
+        }
+        (Some(_), Some(_)) => {
+            diagnostics.push(Diagnostic::new(format!(
+                "relation {relation_number} {side} endpoint must specify exactly one target"
+            )));
+            None
+        }
+    }
+}
+
+fn validate_relation_kind(
+    kind: &str,
+    relation_number: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<RelationKind> {
+    match kind {
+        "audio" => Some(RelationKind::Audio),
+        _ => {
+            diagnostics.push(Diagnostic::new(format!(
+                "relation {relation_number} has unknown kind '{kind}'"
+            )));
+            None
+        }
     }
 }
 
@@ -530,6 +751,8 @@ struct RawProject {
     samples: Vec<RawSample>,
     #[serde(default)]
     patterns: Vec<RawPattern>,
+    #[serde(default)]
+    relations: Vec<RawRelation>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -571,6 +794,19 @@ struct RawStep {
     probability: Option<f64>,
     #[serde(default)]
     tags: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawRelation {
+    from: RawRelationEndpoint,
+    to: RawRelationEndpoint,
+    kind: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawRelationEndpoint {
+    sample_note: Option<u8>,
+    pattern: Option<u64>,
 }
 
 #[cfg(test)]
@@ -630,6 +866,7 @@ tags = ["ghost", "probabilistic"]
             ]
         );
         assert_eq!(project.patterns().len(), 1);
+        assert!(project.relations().is_empty());
 
         let pattern = &project.patterns()[0];
         let kick = pattern
@@ -701,6 +938,74 @@ tags = ["ghost", "probabilistic"]
             compiled.relation_bindings()[0].to(),
             NodeId::new(1_000_000_001)
         );
+    }
+
+    #[test]
+    fn parses_explicit_sample_to_pattern_relations() {
+        let input = MINIMAL_PROJECT.to_owned()
+            + r#"
+
+[[relations]]
+from = { sample_note = 36 }
+to = { pattern = 1 }
+kind = "audio"
+"#;
+        let project = parse_project(&input).unwrap();
+
+        assert_eq!(
+            project.relations(),
+            &[RelationRef::new(
+                RelationEndpoint::SampleNote(36),
+                RelationEndpoint::Pattern(PatternId::new(1)),
+                RelationKind::Audio
+            )]
+        );
+
+        let compiled = compile_project(&project).unwrap();
+        assert_eq!(compiled.relation_bindings().len(), 2);
+    }
+
+    #[test]
+    fn relation_validation_reports_unknown_targets() {
+        let input = MINIMAL_PROJECT.to_owned()
+            + r#"
+
+[[relations]]
+from = { sample_note = 99 }
+to = { pattern = 2 }
+kind = "audio"
+"#;
+        let err = parse_project(&input).unwrap_err();
+        let messages = err
+            .diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            messages,
+            vec!["relation 1 from references unknown sample note 99"]
+        );
+    }
+
+    #[test]
+    fn relation_validation_reports_unknown_kinds() {
+        let input = MINIMAL_PROJECT.to_owned()
+            + r#"
+
+[[relations]]
+from = { sample_note = 36 }
+to = { pattern = 1 }
+kind = "control"
+"#;
+        let err = parse_project(&input).unwrap_err();
+        let messages = err
+            .diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(messages, vec!["relation 1 has unknown kind 'control'"]);
     }
 
     #[test]

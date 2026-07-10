@@ -428,6 +428,7 @@ struct ProjectSummary {
     tempo: TempoSummary,
     samples: Vec<SampleSummary>,
     patterns: Vec<PatternSummary>,
+    relations: Vec<ProjectRelationSummary>,
 }
 
 impl ProjectSummary {
@@ -466,6 +467,11 @@ impl ProjectSummary {
                         .collect(),
                 })
                 .collect(),
+            relations: project
+                .relations()
+                .iter()
+                .map(ProjectRelationSummary::from_relation)
+                .collect(),
         }
     }
 }
@@ -496,6 +502,43 @@ struct PatternSummary {
 struct TrackSummary {
     id: u64,
     active_steps: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ProjectRelationSummary {
+    from: ProjectRelationEndpointSummary,
+    to: ProjectRelationEndpointSummary,
+    kind: &'static str,
+}
+
+impl ProjectRelationSummary {
+    fn from_relation(relation: &meldritch_dsl::RelationRef) -> Self {
+        Self {
+            from: ProjectRelationEndpointSummary::from_endpoint(relation.from()),
+            to: ProjectRelationEndpointSummary::from_endpoint(relation.to()),
+            kind: match relation.kind() {
+                meldritch_dsl::RelationKind::Audio => "audio",
+            },
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+enum ProjectRelationEndpointSummary {
+    SampleNote { note: u8 },
+    Pattern { pattern_id: u64 },
+}
+
+impl ProjectRelationEndpointSummary {
+    const fn from_endpoint(endpoint: meldritch_dsl::RelationEndpoint) -> Self {
+        match endpoint {
+            meldritch_dsl::RelationEndpoint::SampleNote(note) => Self::SampleNote { note },
+            meldritch_dsl::RelationEndpoint::Pattern(pattern) => Self::Pattern {
+                pattern_id: pattern.raw(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
