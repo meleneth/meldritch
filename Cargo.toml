@@ -3,6 +3,7 @@ members = [
     "crates/meldritch-audio",
     "crates/meldritch-cli",
     "crates/meldritch-core",
+    "crates/meldritch-dsl",
 ]
 resolver = "2"
 
@@ -10,3 +11,8 @@ resolver = "2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.81"
+
+[workspace.dependencies]
+indexmap = "=2.2.6"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
