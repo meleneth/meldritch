@@ -76,6 +76,15 @@ fn render_clicks(
     channels: u16,
     output: Option<PathBuf>,
 ) -> Result<(), String> {
+    if let Some(output) = &output
+        && output.exists()
+    {
+        return Err(format!(
+            "output {} already exists; choose a new path",
+            output.display()
+        ));
+    }
+
     let input = std::fs::read_to_string(&path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let project = meldritch_dsl::parse_project(&input).map_err(|err| {
