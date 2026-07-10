@@ -69,6 +69,16 @@ enum Command {
         #[arg(long)]
         end: u64,
     },
+    DirtyPatternJson {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long)]
+        pattern_id: u64,
+        #[arg(long)]
+        start: u64,
+        #[arg(long)]
+        end: u64,
+    },
     RenderClicks {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -147,6 +157,12 @@ fn run(cli: Cli) -> Result<(), String> {
             start,
             end,
         } => dirty_note_json(project, note, start, end),
+        Command::DirtyPatternJson {
+            project,
+            pattern_id,
+            start,
+            end,
+        } => dirty_pattern_json(project, pattern_id, start, end),
         Command::RenderClicks {
             project,
             pattern_id,
@@ -337,6 +353,23 @@ fn dirty_note_json(path: PathBuf, note: u8, start: u64, end: u64) -> Result<(), 
             _ => None,
         })
         .ok_or_else(|| format!("compiled graph has no sample source for note {note}"))?;
+
+    emit_dirty_json(&compiled, source_id, start, end)
+}
+
+fn dirty_pattern_json(path: PathBuf, pattern_id: u64, start: u64, end: u64) -> Result<(), String> {
+    let compiled = compile_project_file(&path)?;
+    let pattern = meldritch_core::PatternId::new(pattern_id);
+    let source_id = compiled
+        .source_bindings()
+        .iter()
+        .find_map(|binding| match binding.kind() {
+            meldritch_dsl::SourceBindingKind::Pattern {
+                pattern: binding_pattern,
+            } if *binding_pattern == pattern => Some(binding.source().raw()),
+            _ => None,
+        })
+        .ok_or_else(|| format!("compiled graph has no pattern source for pattern {pattern_id}"))?;
 
     emit_dirty_json(&compiled, source_id, start, end)
 }
