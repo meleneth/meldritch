@@ -18,6 +18,10 @@ enum Command {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
     },
+    Inspect {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+    },
     RenderClicks {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -66,6 +70,7 @@ fn main() {
 fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::Validate { project } => validate_project(project),
+        Command::Inspect { project } => inspect_project(project),
         Command::RenderClicks {
             project,
             frames,
@@ -88,6 +93,42 @@ fn run(cli: Cli) -> Result<(), String> {
             cycle,
         } => dirty_step(project, step, cycle),
     }
+}
+
+fn inspect_project(path: PathBuf) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+
+    println!("project: {}", project.name());
+    println!(
+        "tempo: bpm={}, sample_rate={}, seed={}",
+        project.tempo().bpm(),
+        project.tempo().sample_rate(),
+        project.probability_seed().raw()
+    );
+    println!("samples: {}", project.samples().len());
+    for sample in project.samples() {
+        println!("  note {} -> {}", sample.note(), sample.path());
+    }
+    println!("patterns: {}", project.patterns().len());
+    for pattern in project.patterns() {
+        println!(
+            "  pattern {}: length_steps={}, steps_per_beat={}, active_steps={}",
+            pattern.id().raw(),
+            pattern.length_steps(),
+            pattern.steps_per_beat(),
+            pattern.active_step_count()
+        );
+    }
+
+    Ok(())
 }
 
 fn validate_project(path: PathBuf) -> Result<(), String> {

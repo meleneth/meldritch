@@ -536,6 +536,11 @@ impl Pattern {
         self.steps.get(&(track, step))
     }
 
+    #[must_use]
+    pub fn active_step_count(&self) -> usize {
+        self.steps.len()
+    }
+
     pub fn events_between(
         &self,
         tempo: Tempo,
@@ -1429,6 +1434,18 @@ mod tests {
         assert_eq!(events[1].step(), StepIndex::new(4));
         assert_eq!(events[1].range(), range(24_000, 30_000));
         assert!(events[1].tags().contains(&EventTag::Accent));
+    }
+
+    #[test]
+    fn pattern_counts_active_steps() {
+        let mut pattern = Pattern::new(PatternId::new(1), 16, 4).unwrap();
+        assert_eq!(pattern.active_step_count(), 0);
+
+        pattern
+            .set_step(TrackId::new(1), StepIndex::new(0), Step::new(36))
+            .unwrap();
+
+        assert_eq!(pattern.active_step_count(), 1);
     }
 
     #[test]
