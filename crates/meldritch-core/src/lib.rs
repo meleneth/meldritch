@@ -34,16 +34,20 @@ macro_rules! id_type {
 
 id_type!(CommandId);
 id_type!(NodeId);
+id_type!(PatternId);
 id_type!(PortId);
 id_type!(RelationId);
 id_type!(SourceId);
+id_type!(TrackId);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum EntityId {
     Node(NodeId),
+    Pattern(PatternId),
     Port(PortId),
     Relation(RelationId),
     Source(SourceId),
+    Track(TrackId),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -134,6 +138,487 @@ impl fmt::Display for FrameRangeError {
 }
 
 impl std::error::Error for FrameRangeError {}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tempo {
+    bpm: f64,
+    sample_rate: SampleRate,
+}
+
+impl Tempo {
+    pub fn new(bpm: f64, sample_rate: SampleRate) -> Result<Self, TempoError> {
+        if !bpm.is_finite() || bpm <= 0.0 {
+            return Err(TempoError::InvalidBpm(bpm));
+        }
+        if sample_rate == 0 {
+            return Err(TempoError::InvalidSampleRate(sample_rate));
+        }
+
+        Ok(Self { bpm, sample_rate })
+    }
+
+    #[must_use]
+    pub const fn bpm(self) -> f64 {
+        self.bpm
+    }
+
+    #[must_use]
+    pub const fn sample_rate(self) -> SampleRate {
+        self.sample_rate
+    }
+
+    #[must_use]
+    pub fn frames_per_beat(self) -> f64 {
+        (f64::from(self.sample_rate) * 60.0) / self.bpm
+    }
+
+    #[must_use]
+    pub fn step_start_frame(self, step: u64, steps_per_beat: u32) -> Frame {
+        assert!(
+            steps_per_beat > 0,
+            "steps_per_beat must be greater than zero"
+        );
+        ((step as f64 * self.frames_per_beat()) / f64::from(steps_per_beat)).round() as Frame
+    }
+
+    pub fn step_frame_range(
+        self,
+        step: u64,
+        steps_per_beat: u32,
+    ) -> Result<FrameRange, FrameRangeError> {
+        FrameRange::new(
+            self.step_start_frame(step, steps_per_beat),
+            self.step_start_frame(step.saturating_add(1), steps_per_beat),
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TempoError {
+    InvalidBpm(f64),
+    InvalidSampleRate(SampleRate),
+}
+
+impl fmt::Display for TempoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidBpm(bpm) => write!(f, "invalid bpm {bpm}"),
+            Self::InvalidSampleRate(sample_rate) => {
+                write!(f, "invalid sample rate {sample_rate}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TempoError {}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct StepIndex(u32);
+
+impl StepIndex {
+    #[must_use]
+    pub const fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    #[must_use]
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum EventTag {
+    Accent,
+    Ghost,
+    Fill,
+    Ratchet,
+    Probabilistic,
+    Humanized,
+    SceneTransition,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Probability(f64);
+
+impl Probability {
+    pub const ALWAYS: Self = Self(1.0);
+    pub const NEVER: Self = Self(0.0);
+
+    pub fn new(chance: f64) -> Result<Self, ProbabilityError> {
+        if !chance.is_finite() || !(0.0..=1.0).contains(&chance) {
+            return Err(ProbabilityError::OutOfRange(chance));
+        }
+
+        Ok(Self(chance))
+    }
+
+    #[must_use]
+    pub const fn chance(self) -> f64 {
+        self.0
+    }
+
+    #[must_use]
+    pub fn allows(self, seed: ProbabilitySeed, occurrence: EventOccurrence) -> bool {
+        if self.0 <= 0.0 {
+            return false;
+        }
+        if self.0 >= 1.0 {
+            return true;
+        }
+
+        deterministic_unit(seed, occurrence) < self.0
+    }
+}
+
+impl Default for Probability {
+    fn default() -> Self {
+        Self::ALWAYS
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ProbabilityError {
+    OutOfRange(f64),
+}
+
+impl fmt::Display for ProbabilityError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OutOfRange(chance) => write!(f, "probability {chance} is outside 0.0..=1.0"),
+        }
+    }
+}
+
+impl std::error::Error for ProbabilityError {}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ProbabilitySeed(u64);
+
+impl ProbabilitySeed {
+    #[must_use]
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    #[must_use]
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct EventOccurrence {
+    pattern: PatternId,
+    track: TrackId,
+    step: StepIndex,
+    cycle: u64,
+}
+
+impl EventOccurrence {
+    #[must_use]
+    pub const fn new(pattern: PatternId, track: TrackId, step: StepIndex, cycle: u64) -> Self {
+        Self {
+            pattern,
+            track,
+            step,
+            cycle,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Step {
+    note: u8,
+    velocity: Param,
+    gate: f64,
+    probability: Probability,
+    tags: BTreeSet<EventTag>,
+}
+
+impl Step {
+    pub fn new(note: u8) -> Self {
+        Self {
+            note,
+            velocity: 1.0,
+            gate: 1.0,
+            probability: Probability::ALWAYS,
+            tags: BTreeSet::new(),
+        }
+    }
+
+    #[must_use]
+    pub const fn note(&self) -> u8 {
+        self.note
+    }
+
+    #[must_use]
+    pub const fn velocity(&self) -> Param {
+        self.velocity
+    }
+
+    #[must_use]
+    pub const fn gate(&self) -> f64 {
+        self.gate
+    }
+
+    #[must_use]
+    pub const fn probability(&self) -> Probability {
+        self.probability
+    }
+
+    #[must_use]
+    pub fn tags(&self) -> &BTreeSet<EventTag> {
+        &self.tags
+    }
+
+    #[must_use]
+    pub fn with_velocity(mut self, velocity: Param) -> Self {
+        self.velocity = velocity;
+        self
+    }
+
+    #[must_use]
+    pub fn with_gate(mut self, gate: f64) -> Self {
+        self.gate = gate.max(0.0);
+        self
+    }
+
+    #[must_use]
+    pub fn with_probability(mut self, probability: Probability) -> Self {
+        self.probability = probability;
+        self
+    }
+
+    #[must_use]
+    pub fn with_tag(mut self, tag: EventTag) -> Self {
+        self.tags.insert(tag);
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Event {
+    pattern: PatternId,
+    track: TrackId,
+    step: StepIndex,
+    range: FrameRange,
+    note: u8,
+    velocity: Param,
+    tags: BTreeSet<EventTag>,
+}
+
+impl Event {
+    #[must_use]
+    pub const fn pattern(&self) -> PatternId {
+        self.pattern
+    }
+
+    #[must_use]
+    pub const fn track(&self) -> TrackId {
+        self.track
+    }
+
+    #[must_use]
+    pub const fn step(&self) -> StepIndex {
+        self.step
+    }
+
+    #[must_use]
+    pub const fn range(&self) -> FrameRange {
+        self.range
+    }
+
+    #[must_use]
+    pub const fn note(&self) -> u8 {
+        self.note
+    }
+
+    #[must_use]
+    pub const fn velocity(&self) -> Param {
+        self.velocity
+    }
+
+    #[must_use]
+    pub fn tags(&self) -> &BTreeSet<EventTag> {
+        &self.tags
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PatternError {
+    EmptyPattern,
+    InvalidStepsPerBeat(u32),
+    StepOutOfRange { step: StepIndex, length_steps: u32 },
+}
+
+impl fmt::Display for PatternError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyPattern => write!(f, "pattern length must be greater than zero"),
+            Self::InvalidStepsPerBeat(steps_per_beat) => {
+                write!(
+                    f,
+                    "steps per beat must be greater than zero, got {steps_per_beat}"
+                )
+            }
+            Self::StepOutOfRange { step, length_steps } => {
+                write!(
+                    f,
+                    "step {} is outside pattern length {}",
+                    step.raw(),
+                    length_steps
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for PatternError {}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pattern {
+    id: PatternId,
+    length_steps: u32,
+    steps_per_beat: u32,
+    steps: BTreeMap<(TrackId, StepIndex), Step>,
+}
+
+impl Pattern {
+    pub fn new(
+        id: PatternId,
+        length_steps: u32,
+        steps_per_beat: u32,
+    ) -> Result<Self, PatternError> {
+        if length_steps == 0 {
+            return Err(PatternError::EmptyPattern);
+        }
+        if steps_per_beat == 0 {
+            return Err(PatternError::InvalidStepsPerBeat(steps_per_beat));
+        }
+
+        Ok(Self {
+            id,
+            length_steps,
+            steps_per_beat,
+            steps: BTreeMap::new(),
+        })
+    }
+
+    #[must_use]
+    pub const fn id(&self) -> PatternId {
+        self.id
+    }
+
+    #[must_use]
+    pub const fn length_steps(&self) -> u32 {
+        self.length_steps
+    }
+
+    #[must_use]
+    pub const fn steps_per_beat(&self) -> u32 {
+        self.steps_per_beat
+    }
+
+    pub fn set_step(
+        &mut self,
+        track: TrackId,
+        step: StepIndex,
+        event: Step,
+    ) -> Result<Option<Step>, PatternError> {
+        self.ensure_step_in_range(step)?;
+
+        Ok(self.steps.insert((track, step), event))
+    }
+
+    #[must_use]
+    pub fn get_step(&self, track: TrackId, step: StepIndex) -> Option<&Step> {
+        self.steps.get(&(track, step))
+    }
+
+    pub fn events_between(
+        &self,
+        tempo: Tempo,
+        range: FrameRange,
+        probability_seed: ProbabilitySeed,
+        out: &mut Vec<Event>,
+    ) {
+        let pattern_frames =
+            tempo.step_start_frame(u64::from(self.length_steps), self.steps_per_beat);
+        if pattern_frames == 0 || range.is_empty() {
+            return;
+        }
+
+        let first_cycle = range.start() / pattern_frames;
+        let last_cycle = range.end().saturating_sub(1) / pattern_frames;
+
+        for cycle in first_cycle..=last_cycle {
+            let cycle_start = cycle.saturating_mul(pattern_frames);
+            for ((track, step_index), step) in &self.steps {
+                let occurrence = EventOccurrence::new(self.id, *track, *step_index, cycle);
+                if !step.probability().allows(probability_seed, occurrence) {
+                    continue;
+                }
+
+                let step_start = cycle_start.saturating_add(
+                    tempo.step_start_frame(u64::from(step_index.raw()), self.steps_per_beat),
+                );
+                let next_step_start = cycle_start.saturating_add(
+                    tempo.step_start_frame(u64::from(step_index.raw()) + 1, self.steps_per_beat),
+                );
+                let step_frames = next_step_start.saturating_sub(step_start);
+                let gate_frames = ((step_frames as f64) * step.gate()).round() as Frame;
+                let event_range = FrameRange::new(
+                    step_start,
+                    step_start.saturating_add(gate_frames).min(next_step_start),
+                )
+                .expect("event frame range is constructed in order");
+
+                if event_range.overlaps(range) {
+                    out.push(Event {
+                        pattern: self.id,
+                        track: *track,
+                        step: *step_index,
+                        range: event_range,
+                        note: step.note(),
+                        velocity: step.velocity(),
+                        tags: step.tags().clone(),
+                    });
+                }
+            }
+        }
+
+        out.sort_by_key(|event| (event.range().start(), event.track(), event.step()));
+    }
+
+    fn ensure_step_in_range(&self, step: StepIndex) -> Result<(), PatternError> {
+        if step.raw() >= self.length_steps {
+            return Err(PatternError::StepOutOfRange {
+                step,
+                length_steps: self.length_steps,
+            });
+        }
+
+        Ok(())
+    }
+}
+
+fn deterministic_unit(seed: ProbabilitySeed, occurrence: EventOccurrence) -> f64 {
+    let mut value = seed.raw();
+    value = mix_u64(value ^ occurrence.pattern.raw());
+    value = mix_u64(value ^ occurrence.track.raw());
+    value = mix_u64(value ^ u64::from(occurrence.step.raw()));
+    value = mix_u64(value ^ occurrence.cycle);
+
+    ((value >> 11) as f64) * (1.0 / ((1_u64 << 53) as f64))
+}
+
+fn mix_u64(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum EdgeKind {
@@ -802,6 +1287,10 @@ mod tests {
         NodeProperties::new(Linearity::Linear)
     }
 
+    fn tempo() -> Tempo {
+        Tempo::new(120.0, 48_000).unwrap()
+    }
+
     #[test]
     fn typed_ids_are_distinct_and_ordered() {
         let source = SourceId::new(7);
@@ -837,6 +1326,153 @@ mod tests {
             range(3, 10).expand_saturating(8, 4),
             FrameRange::new(0, 14).unwrap()
         );
+    }
+
+    #[test]
+    fn tempo_converts_steps_to_frames() {
+        let tempo = tempo();
+
+        assert_eq!(tempo.frames_per_beat(), 24_000.0);
+        assert_eq!(tempo.step_start_frame(0, 4), 0);
+        assert_eq!(tempo.step_start_frame(1, 4), 6_000);
+        assert_eq!(tempo.step_start_frame(16, 4), 96_000);
+        assert_eq!(tempo.step_frame_range(2, 4).unwrap(), range(12_000, 18_000));
+    }
+
+    #[test]
+    fn tempo_rejects_invalid_values() {
+        assert_eq!(Tempo::new(0.0, 48_000), Err(TempoError::InvalidBpm(0.0)));
+        assert_eq!(Tempo::new(120.0, 0), Err(TempoError::InvalidSampleRate(0)));
+    }
+
+    #[test]
+    fn probability_rejects_values_outside_unit_range() {
+        assert_eq!(
+            Probability::new(1.25),
+            Err(ProbabilityError::OutOfRange(1.25))
+        );
+    }
+
+    #[test]
+    fn pattern_rejects_empty_length_and_out_of_range_steps() {
+        assert_eq!(
+            Pattern::new(PatternId::new(1), 0, 4),
+            Err(PatternError::EmptyPattern)
+        );
+
+        let mut pattern = Pattern::new(PatternId::new(1), 4, 4).unwrap();
+        let err = pattern
+            .set_step(TrackId::new(1), StepIndex::new(4), Step::new(60))
+            .unwrap_err();
+
+        assert_eq!(
+            err,
+            PatternError::StepOutOfRange {
+                step: StepIndex::new(4),
+                length_steps: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn pattern_events_can_be_queried_for_frame_range() {
+        let mut pattern = Pattern::new(PatternId::new(1), 16, 4).unwrap();
+        pattern
+            .set_step(
+                TrackId::new(1),
+                StepIndex::new(0),
+                Step::new(36).with_velocity(0.8).with_gate(0.5),
+            )
+            .unwrap();
+        pattern
+            .set_step(
+                TrackId::new(1),
+                StepIndex::new(4),
+                Step::new(38).with_tag(EventTag::Accent),
+            )
+            .unwrap();
+
+        let mut events = Vec::new();
+        pattern.events_between(
+            tempo(),
+            range(0, 30_001),
+            ProbabilitySeed::new(123),
+            &mut events,
+        );
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].track(), TrackId::new(1));
+        assert_eq!(events[0].step(), StepIndex::new(0));
+        assert_eq!(events[0].range(), range(0, 3_000));
+        assert_eq!(events[0].note(), 36);
+        assert_eq!(events[0].velocity(), 0.8);
+        assert_eq!(events[1].step(), StepIndex::new(4));
+        assert_eq!(events[1].range(), range(24_000, 30_000));
+        assert!(events[1].tags().contains(&EventTag::Accent));
+    }
+
+    #[test]
+    fn pattern_events_loop_across_cycles() {
+        let mut pattern = Pattern::new(PatternId::new(1), 4, 4).unwrap();
+        pattern
+            .set_step(TrackId::new(1), StepIndex::new(0), Step::new(36))
+            .unwrap();
+        pattern
+            .set_step(TrackId::new(1), StepIndex::new(3), Step::new(42))
+            .unwrap();
+
+        let mut events = Vec::new();
+        pattern.events_between(
+            tempo(),
+            range(23_999, 24_001),
+            ProbabilitySeed::new(123),
+            &mut events,
+        );
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].range(), range(18_000, 24_000));
+        assert_eq!(events[1].range(), range(24_000, 30_000));
+    }
+
+    #[test]
+    fn probability_is_deterministic_when_seeded() {
+        let mut pattern = Pattern::new(PatternId::new(1), 4, 4).unwrap();
+        pattern
+            .set_step(
+                TrackId::new(1),
+                StepIndex::new(0),
+                Step::new(36)
+                    .with_probability(Probability::new(0.5).unwrap())
+                    .with_tag(EventTag::Probabilistic),
+            )
+            .unwrap();
+
+        let mut first = Vec::new();
+        let mut second = Vec::new();
+        pattern.events_between(
+            tempo(),
+            range(0, 240_000),
+            ProbabilitySeed::new(7),
+            &mut first,
+        );
+        pattern.events_between(
+            tempo(),
+            range(0, 240_000),
+            ProbabilitySeed::new(7),
+            &mut second,
+        );
+
+        assert_eq!(first, second);
+
+        let mut different_seed = Vec::new();
+        pattern.events_between(
+            tempo(),
+            range(0, 240_000),
+            ProbabilitySeed::new(8),
+            &mut different_seed,
+        );
+
+        assert_ne!(first, different_seed);
     }
 
     #[test]
