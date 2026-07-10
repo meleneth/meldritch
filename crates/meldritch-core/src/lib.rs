@@ -50,7 +50,7 @@ pub enum EntityId {
     Track(TrackId),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct FrameRange {
     start: Frame,
     end: Frame,

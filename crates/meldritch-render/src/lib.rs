@@ -48,12 +48,78 @@ impl Fingerprint {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ArtifactKey {
     pattern: PatternId,
     range: FrameRange,
     sample_rate: SampleRate,
     fingerprint: Fingerprint,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CacheStatus {
+    Hit,
+    Miss,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CachedArtifact {
+    key: ArtifactKey,
+    block: AudioBlock,
+    status: CacheStatus,
+}
+
+impl CachedArtifact {
+    #[must_use]
+    pub const fn key(&self) -> ArtifactKey {
+        self.key
+    }
+
+    #[must_use]
+    pub fn block(&self) -> &AudioBlock {
+        &self.block
+    }
+
+    #[must_use]
+    pub const fn status(&self) -> CacheStatus {
+        self.status
+    }
+
+    #[must_use]
+    pub fn into_block(self) -> AudioBlock {
+        self.block
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ArtifactCache {
+    artifacts: BTreeMap<ArtifactKey, AudioBlock>,
+}
+
+impl ArtifactCache {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.artifacts.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.artifacts.is_empty()
+    }
+
+    #[must_use]
+    pub fn get(&self, key: ArtifactKey) -> Option<&AudioBlock> {
+        self.artifacts.get(&key)
+    }
+
+    pub fn insert(&mut self, key: ArtifactKey, block: AudioBlock) -> Option<AudioBlock> {
+        self.artifacts.insert(key, block)
+    }
 }
 
 impl ArtifactKey {
@@ -103,6 +169,69 @@ pub fn pattern_click_artifact_key(
         range,
         sample_rate: tempo.sample_rate(),
         fingerprint: state.finish(),
+    }
+}
+
+#[must_use]
+pub fn pattern_sample_artifact_key(
+    pattern: &Pattern,
+    tempo: Tempo,
+    range: FrameRange,
+    probability_seed: ProbabilitySeed,
+    settings: RenderSettings,
+    samples_by_note: &BTreeMap<u8, SampleBuffer>,
+) -> ArtifactKey {
+    let mut state = FingerprintBuilder::new();
+    state.write_u64(pattern.id().raw());
+    state.write_u64(u64::from(pattern.length_steps()));
+    state.write_u64(u64::from(pattern.steps_per_beat()));
+    state.write_u64(range.start());
+    state.write_u64(range.end());
+    state.write_u64(u64::from(tempo.sample_rate()));
+    state.write_u64(tempo.bpm().to_bits());
+    state.write_u64(probability_seed.raw());
+    state.write_u64(u64::from(settings.channels()));
+    state.write_u64(0x7361_6d70_6c65_7265);
+
+    for (note, sample) in samples_by_note {
+        state.write_u64(u64::from(*note));
+        state.write_u64(u64::from(sample.channels()));
+        state.write_u64(u64::from(sample.sample_rate()));
+        state.write_u64(u64::from(sample.frames()));
+        state.write_u64(sample_signature(sample));
+    }
+
+    ArtifactKey {
+        pattern: pattern.id(),
+        range,
+        sample_rate: tempo.sample_rate(),
+        fingerprint: state.finish(),
+    }
+}
+
+pub fn render_pattern_clicks_cached(
+    cache: &mut ArtifactCache,
+    pattern: &Pattern,
+    tempo: Tempo,
+    range: FrameRange,
+    probability_seed: ProbabilitySeed,
+    settings: RenderSettings,
+) -> CachedArtifact {
+    let key = pattern_click_artifact_key(pattern, tempo, range, probability_seed, settings);
+    if let Some(block) = cache.get(key) {
+        return CachedArtifact {
+            key,
+            block: block.clone(),
+            status: CacheStatus::Hit,
+        };
+    }
+
+    let block = render_pattern_clicks(pattern, tempo, range, probability_seed, settings);
+    cache.insert(key, block.clone());
+    CachedArtifact {
+        key,
+        block,
+        status: CacheStatus::Miss,
     }
 }
 
@@ -169,6 +298,47 @@ pub fn render_pattern_samples(
     block
 }
 
+pub fn render_pattern_samples_cached(
+    cache: &mut ArtifactCache,
+    pattern: &Pattern,
+    tempo: Tempo,
+    range: FrameRange,
+    probability_seed: ProbabilitySeed,
+    settings: RenderSettings,
+    samples_by_note: &BTreeMap<u8, SampleBuffer>,
+) -> CachedArtifact {
+    let key = pattern_sample_artifact_key(
+        pattern,
+        tempo,
+        range,
+        probability_seed,
+        settings,
+        samples_by_note,
+    );
+    if let Some(block) = cache.get(key) {
+        return CachedArtifact {
+            key,
+            block: block.clone(),
+            status: CacheStatus::Hit,
+        };
+    }
+
+    let block = render_pattern_samples(
+        pattern,
+        tempo,
+        range,
+        probability_seed,
+        settings,
+        samples_by_note,
+    );
+    cache.insert(key, block.clone());
+    CachedArtifact {
+        key,
+        block,
+        status: CacheStatus::Miss,
+    }
+}
+
 fn write_frame(block: &mut AudioBlock, frame: u32, sample: Sample) {
     let channels = usize::from(block.channels());
     let start = frame as usize * channels;
@@ -192,6 +362,15 @@ fn mix_sample(block: &mut AudioBlock, start_frame: u32, sample: &SampleBuffer, g
             block.samples_mut()[target_index] += sample.samples()[source_index] * gain;
         }
     }
+}
+
+fn sample_signature(sample: &SampleBuffer) -> u64 {
+    let mut state = FingerprintBuilder::new();
+    for sample in sample.samples() {
+        state.write_u64(sample.to_bits());
+    }
+
+    state.finish().raw()
 }
 
 struct FingerprintBuilder {
@@ -372,5 +551,61 @@ mod tests {
 
         assert_ne!(base.fingerprint(), changed_seed.fingerprint());
         assert_ne!(base.fingerprint(), changed_range.fingerprint());
+    }
+
+    #[test]
+    fn cached_click_render_reports_miss_then_hit() {
+        let pattern = Pattern::new(PatternId::new(1), 16, 4).unwrap();
+        let mut cache = ArtifactCache::new();
+
+        let first = render_pattern_clicks_cached(
+            &mut cache,
+            &pattern,
+            tempo(),
+            FrameRange::new(0, 96_000).unwrap(),
+            ProbabilitySeed::new(11),
+            RenderSettings::new(2).unwrap(),
+        );
+        let second = render_pattern_clicks_cached(
+            &mut cache,
+            &pattern,
+            tempo(),
+            FrameRange::new(0, 96_000).unwrap(),
+            ProbabilitySeed::new(11),
+            RenderSettings::new(2).unwrap(),
+        );
+
+        assert_eq!(first.status(), CacheStatus::Miss);
+        assert_eq!(second.status(), CacheStatus::Hit);
+        assert_eq!(cache.len(), 1);
+        assert_eq!(first.block(), second.block());
+    }
+
+    #[test]
+    fn sample_artifact_key_changes_when_sample_content_changes() {
+        let pattern = Pattern::new(PatternId::new(1), 16, 4).unwrap();
+        let mut first_samples = BTreeMap::new();
+        first_samples.insert(36, SampleBuffer::new(1, 48_000, vec![1.0, 0.5]));
+        let mut changed_samples = BTreeMap::new();
+        changed_samples.insert(36, SampleBuffer::new(1, 48_000, vec![1.0, 0.25]));
+
+        let first = pattern_sample_artifact_key(
+            &pattern,
+            tempo(),
+            FrameRange::new(0, 96_000).unwrap(),
+            ProbabilitySeed::new(11),
+            RenderSettings::new(2).unwrap(),
+            &first_samples,
+        );
+        let changed = pattern_sample_artifact_key(
+            &pattern,
+            tempo(),
+            FrameRange::new(0, 96_000).unwrap(),
+            ProbabilitySeed::new(11),
+            RenderSettings::new(2).unwrap(),
+            &changed_samples,
+        );
+
+        assert_ne!(first.fingerprint(), changed.fingerprint());
     }
 }
