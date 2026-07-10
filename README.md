@@ -80,3 +80,9 @@ Emit a machine-readable project summary for scripts:
 ```sh
 cargo run -p meldritch-cli -- summary-json fixtures/basic_drums.toml
 ```
+
+Emit scheduled events as JSON for a render range:
+
+```sh
+cargo run -p meldritch-cli -- events-json fixtures/basic_drums.toml --pattern-id 1 --frames 48000
+```

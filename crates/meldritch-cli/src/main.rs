@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use meldritch_core::{FrameRange, Pattern, StepIndex};
+use meldritch_core::{Event, EventTag, FrameRange, Pattern, StepIndex};
 use meldritch_render::{ArtifactCache, CacheStatus, RenderSettings};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -26,6 +26,14 @@ enum Command {
     SummaryJson {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
+    },
+    EventsJson {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long)]
+        pattern_id: Option<u64>,
+        #[arg(long, default_value_t = 96_000)]
+        frames: u64,
     },
     RenderClicks {
         #[arg(value_name = "PROJECT")]
@@ -83,6 +91,11 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Validate { project } => validate_project(project),
         Command::Inspect { project } => inspect_project(project),
         Command::SummaryJson { project } => summarize_project_json(project),
+        Command::EventsJson {
+            project,
+            pattern_id,
+            frames,
+        } => events_json(project, pattern_id, frames),
         Command::RenderClicks {
             project,
             pattern_id,
@@ -161,6 +174,35 @@ fn inspect_project(path: PathBuf) -> Result<(), String> {
             println!("    track {}: active_steps={count}", track.raw());
         }
     }
+
+    Ok(())
+}
+
+fn events_json(path: PathBuf, pattern_id: Option<u64>, frames: u64) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let pattern = select_pattern(&project, pattern_id, "schedule")?;
+    let range = FrameRange::new(0, frames).map_err(|err| err.to_string())?;
+
+    let mut events = Vec::new();
+    pattern.events_between(
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        &mut events,
+    );
+
+    let output = EventSchedule::from_events(pattern.id().raw(), range, &events);
+    let json = serde_json::to_string_pretty(&output)
+        .map_err(|err| format!("failed to encode event schedule: {err}"))?;
+    println!("{json}");
 
     Ok(())
 }
@@ -281,6 +323,77 @@ struct PatternSummary {
 struct TrackSummary {
     id: u64,
     active_steps: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct EventSchedule {
+    schema_version: u32,
+    pattern_id: u64,
+    range: FrameRangeSummary,
+    events: Vec<EventSummary>,
+}
+
+impl EventSchedule {
+    fn from_events(pattern_id: u64, range: FrameRange, events: &[Event]) -> Self {
+        Self {
+            schema_version: 1,
+            pattern_id,
+            range: FrameRangeSummary::from_range(range),
+            events: events.iter().map(EventSummary::from_event).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct EventSummary {
+    pattern_id: u64,
+    track_id: u64,
+    step: u32,
+    range: FrameRangeSummary,
+    note: u8,
+    velocity: f64,
+    tags: Vec<&'static str>,
+}
+
+impl EventSummary {
+    fn from_event(event: &Event) -> Self {
+        Self {
+            pattern_id: event.pattern().raw(),
+            track_id: event.track().raw(),
+            step: event.step().raw(),
+            range: FrameRangeSummary::from_range(event.range()),
+            note: event.note(),
+            velocity: event.velocity(),
+            tags: event.tags().iter().map(event_tag_name).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct FrameRangeSummary {
+    start: u64,
+    end: u64,
+}
+
+impl FrameRangeSummary {
+    const fn from_range(range: FrameRange) -> Self {
+        Self {
+            start: range.start(),
+            end: range.end(),
+        }
+    }
+}
+
+fn event_tag_name(tag: &EventTag) -> &'static str {
+    match tag {
+        EventTag::Accent => "accent",
+        EventTag::Ghost => "ghost",
+        EventTag::Fill => "fill",
+        EventTag::Ratchet => "ratchet",
+        EventTag::Probabilistic => "probabilistic",
+        EventTag::Humanized => "humanized",
+        EventTag::SceneTransition => "scene_transition",
+    }
 }
 
 fn render_clicks(
