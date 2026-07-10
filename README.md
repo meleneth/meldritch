@@ -105,6 +105,12 @@ Emit graph invalidation from a compiled source:
 cargo run -p meldritch-cli -- dirty-json fixtures/basic_drums.toml --source-id 1036 --start 0 --end 48000
 ```
 
+Emit graph invalidation from a sample note:
+
+```sh
+cargo run -p meldritch-cli -- dirty-note-json fixtures/basic_drums.toml --note 36 --start 0 --end 48000
+```
+
 Run the standard local check suite:
 
 ```sh

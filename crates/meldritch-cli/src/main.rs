@@ -55,6 +55,16 @@ enum Command {
         #[arg(long)]
         end: u64,
     },
+    DirtyNoteJson {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long)]
+        note: u8,
+        #[arg(long)]
+        start: u64,
+        #[arg(long)]
+        end: u64,
+    },
     RenderClicks {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -126,6 +136,12 @@ fn run(cli: Cli) -> Result<(), String> {
             start,
             end,
         } => dirty_json(project, source_id, start, end),
+        Command::DirtyNoteJson {
+            project,
+            note,
+            start,
+            end,
+        } => dirty_note_json(project, note, start, end),
         Command::RenderClicks {
             project,
             pattern_id,
@@ -274,7 +290,28 @@ fn samples_json(path: PathBuf) -> Result<(), String> {
 }
 
 fn dirty_json(path: PathBuf, source_id: u64, start: u64, end: u64) -> Result<(), String> {
-    let input = std::fs::read_to_string(&path)
+    let compiled = compile_project_file(&path)?;
+    emit_dirty_json(&compiled, source_id, start, end)
+}
+
+fn dirty_note_json(path: PathBuf, note: u8, start: u64, end: u64) -> Result<(), String> {
+    let compiled = compile_project_file(&path)?;
+    let source_id = compiled
+        .source_bindings()
+        .iter()
+        .find_map(|binding| match binding.kind() {
+            meldritch_dsl::SourceBindingKind::Sample {
+                note: sample_note, ..
+            } if *sample_note == note => Some(binding.source().raw()),
+            _ => None,
+        })
+        .ok_or_else(|| format!("compiled graph has no sample source for note {note}"))?;
+
+    emit_dirty_json(&compiled, source_id, start, end)
+}
+
+fn compile_project_file(path: &Path) -> Result<meldritch_dsl::CompiledProject, String> {
+    let input = std::fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let project = meldritch_dsl::parse_project(&input).map_err(|err| {
         err.diagnostics()
@@ -283,13 +320,21 @@ fn dirty_json(path: PathBuf, source_id: u64, start: u64, end: u64) -> Result<(),
             .collect::<Vec<_>>()
             .join("\n")
     })?;
-    let compiled = meldritch_dsl::compile_project(&project).map_err(|err| {
+    meldritch_dsl::compile_project(&project).map_err(|err| {
         err.diagnostics()
             .iter()
             .map(|diagnostic| diagnostic.message().to_owned())
             .collect::<Vec<_>>()
             .join("\n")
-    })?;
+    })
+}
+
+fn emit_dirty_json(
+    compiled: &meldritch_dsl::CompiledProject,
+    source_id: u64,
+    start: u64,
+    end: u64,
+) -> Result<(), String> {
     let range = FrameRange::new(start, end).map_err(|err| err.to_string())?;
     let source = SourceId::new(source_id);
     let node = compiled
