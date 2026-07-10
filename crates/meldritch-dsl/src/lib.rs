@@ -143,8 +143,17 @@ fn validate_project(raw: RawProject) -> Result<ValidatedProject, ProjectValidati
 
     let samples = validate_samples(raw.samples, &mut diagnostics);
 
+    let mut seen_patterns = BTreeSet::new();
     let mut patterns = Vec::new();
     for raw_pattern in raw.patterns {
+        if !seen_patterns.insert(raw_pattern.id) {
+            diagnostics.push(Diagnostic::new(format!(
+                "pattern {} is mapped more than once",
+                raw_pattern.id
+            )));
+            continue;
+        }
+
         match validate_pattern(raw_pattern) {
             Ok(pattern) => patterns.push(pattern),
             Err(mut pattern_diagnostics) => diagnostics.append(&mut pattern_diagnostics),
@@ -466,5 +475,25 @@ tags = ["ghost", "probabilistic"]
             .collect::<Vec<_>>();
 
         assert_eq!(messages, vec!["sample note 36 is mapped more than once"]);
+    }
+
+    #[test]
+    fn duplicate_pattern_ids_return_useful_diagnostics() {
+        let input = MINIMAL_PROJECT.to_owned()
+            + r#"
+
+[[patterns]]
+id = 1
+length_steps = 8
+steps_per_beat = 4
+"#;
+        let err = parse_project(&input).unwrap_err();
+        let messages = err
+            .diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(messages, vec!["pattern 1 is mapped more than once"]);
     }
 }

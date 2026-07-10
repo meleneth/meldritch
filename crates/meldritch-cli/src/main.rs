@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use meldritch_core::{FrameRange, StepIndex};
+use meldritch_core::{FrameRange, Pattern, StepIndex};
 use meldritch_render::{ArtifactCache, CacheStatus, RenderSettings};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -25,6 +25,8 @@ enum Command {
     RenderClicks {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
+        #[arg(long)]
+        pattern_id: Option<u64>,
         #[arg(long, default_value_t = 96_000)]
         frames: u64,
         #[arg(long, default_value_t = 2)]
@@ -39,6 +41,8 @@ enum Command {
     RenderSamples {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
+        #[arg(long)]
+        pattern_id: Option<u64>,
         #[arg(long, default_value_t = 96_000)]
         frames: u64,
         #[arg(long, default_value_t = 2)]
@@ -53,6 +57,8 @@ enum Command {
     DirtyStep {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
+        #[arg(long)]
+        pattern_id: Option<u64>,
         #[arg(long)]
         step: u32,
         #[arg(long, default_value_t = 0)]
@@ -73,25 +79,44 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Inspect { project } => inspect_project(project),
         Command::RenderClicks {
             project,
+            pattern_id,
             frames,
             channels,
             output,
             normalize,
             cache_probe,
-        } => render_clicks(project, frames, channels, output, normalize, cache_probe),
+        } => render_clicks(
+            project,
+            pattern_id,
+            frames,
+            channels,
+            output,
+            normalize,
+            cache_probe,
+        ),
         Command::RenderSamples {
             project,
+            pattern_id,
             frames,
             channels,
             output,
             normalize,
             cache_probe,
-        } => render_samples(project, frames, channels, output, normalize, cache_probe),
+        } => render_samples(
+            project,
+            pattern_id,
+            frames,
+            channels,
+            output,
+            normalize,
+            cache_probe,
+        ),
         Command::DirtyStep {
             project,
+            pattern_id,
             step,
             cycle,
-        } => dirty_step(project, step, cycle),
+        } => dirty_step(project, pattern_id, step, cycle),
     }
 }
 
@@ -155,6 +180,7 @@ fn validate_project(path: PathBuf) -> Result<(), String> {
 
 fn render_clicks(
     path: PathBuf,
+    pattern_id: Option<u64>,
     frames: u64,
     channels: u16,
     output: Option<PathBuf>,
@@ -179,10 +205,7 @@ fn render_clicks(
             .collect::<Vec<_>>()
             .join("\n")
     })?;
-    let pattern = project
-        .patterns()
-        .first()
-        .ok_or_else(|| "project has no patterns to render".to_owned())?;
+    let pattern = select_pattern(&project, pattern_id, "render")?;
     let settings =
         RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
     let range = FrameRange::new(0, frames).map_err(|err| err.to_string())?;
@@ -252,6 +275,7 @@ fn render_clicks(
 
 fn render_samples(
     path: PathBuf,
+    pattern_id: Option<u64>,
     frames: u64,
     channels: u16,
     output: Option<PathBuf>,
@@ -276,10 +300,7 @@ fn render_samples(
             .collect::<Vec<_>>()
             .join("\n")
     })?;
-    let pattern = project
-        .patterns()
-        .first()
-        .ok_or_else(|| "project has no patterns to render".to_owned())?;
+    let pattern = select_pattern(&project, pattern_id, "render")?;
     let settings =
         RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
     let samples_by_note = load_project_samples(&project, &path)?;
@@ -358,7 +379,7 @@ fn format_cache_status(status: CacheStatus) -> &'static str {
     }
 }
 
-fn dirty_step(path: PathBuf, step: u32, cycle: u64) -> Result<(), String> {
+fn dirty_step(path: PathBuf, pattern_id: Option<u64>, step: u32, cycle: u64) -> Result<(), String> {
     let input = std::fs::read_to_string(&path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let project = meldritch_dsl::parse_project(&input).map_err(|err| {
@@ -368,10 +389,7 @@ fn dirty_step(path: PathBuf, step: u32, cycle: u64) -> Result<(), String> {
             .collect::<Vec<_>>()
             .join("\n")
     })?;
-    let pattern = project
-        .patterns()
-        .first()
-        .ok_or_else(|| "project has no patterns to inspect".to_owned())?;
+    let pattern = select_pattern(&project, pattern_id, "inspect")?;
     let dirty = pattern
         .step_dirty_range(project.tempo(), StepIndex::new(step), cycle)
         .map_err(|err| err.to_string())?;
@@ -384,6 +402,24 @@ fn dirty_step(path: PathBuf, step: u32, cycle: u64) -> Result<(), String> {
     );
 
     Ok(())
+}
+
+fn select_pattern<'a>(
+    project: &'a meldritch_dsl::ValidatedProject,
+    pattern_id: Option<u64>,
+    action: &str,
+) -> Result<&'a Pattern, String> {
+    match pattern_id {
+        Some(pattern_id) => project
+            .patterns()
+            .iter()
+            .find(|pattern| pattern.id().raw() == pattern_id)
+            .ok_or_else(|| format!("project has no pattern {pattern_id} to {action}")),
+        None => project
+            .patterns()
+            .first()
+            .ok_or_else(|| format!("project has no patterns to {action}")),
+    }
 }
 
 fn load_project_samples(
