@@ -15,5 +15,6 @@ rust-version = "1.97"
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive"] }
+hound = "3"
 serde = { version = "1", features = ["derive"] }
 toml = "1"

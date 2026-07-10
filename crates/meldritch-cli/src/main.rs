@@ -24,6 +24,8 @@ enum Command {
         frames: u64,
         #[arg(long, default_value_t = 2)]
         channels: u16,
+        #[arg(long, value_name = "WAV")]
+        output: Option<PathBuf>,
     },
 }
 
@@ -41,7 +43,8 @@ fn run(cli: Cli) -> Result<(), String> {
             project,
             frames,
             channels,
-        } => render_clicks(project, frames, channels),
+            output,
+        } => render_clicks(project, frames, channels, output),
     }
 }
 
@@ -67,7 +70,12 @@ fn validate_project(path: PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-fn render_clicks(path: PathBuf, frames: u64, channels: u16) -> Result<(), String> {
+fn render_clicks(
+    path: PathBuf,
+    frames: u64,
+    channels: u16,
+    output: Option<PathBuf>,
+) -> Result<(), String> {
     let input = std::fs::read_to_string(&path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let project = meldritch_dsl::parse_project(&input).map_err(|err| {
@@ -110,6 +118,12 @@ fn render_clicks(path: PathBuf, frames: u64, channels: u16) -> Result<(), String
         nonzero_samples,
         peak
     );
+
+    if let Some(output) = output {
+        meldritch_audio::write_wav_f32(&output, &block, project.tempo().sample_rate())
+            .map_err(|err| format!("failed to write {}: {err}", output.display()))?;
+        println!("wrote: {}", output.display());
+    }
 
     Ok(())
 }
