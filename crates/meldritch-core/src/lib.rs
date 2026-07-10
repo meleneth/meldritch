@@ -591,6 +591,26 @@ impl Pattern {
         out.sort_by_key(|event| (event.range().start(), event.track(), event.step()));
     }
 
+    pub fn step_dirty_range(
+        &self,
+        tempo: Tempo,
+        step: StepIndex,
+        cycle: u64,
+    ) -> Result<DirtyRange, PatternError> {
+        self.ensure_step_in_range(step)?;
+
+        let pattern_frames =
+            tempo.step_start_frame(u64::from(self.length_steps), self.steps_per_beat);
+        let cycle_start = cycle.saturating_mul(pattern_frames);
+        let start = cycle_start
+            .saturating_add(tempo.step_start_frame(u64::from(step.raw()), self.steps_per_beat));
+        let end = cycle_start
+            .saturating_add(tempo.step_start_frame(u64::from(step.raw()) + 1, self.steps_per_beat));
+        let range = FrameRange::new(start, end).expect("step dirty range is constructed in order");
+
+        Ok(DirtyRange::new(EntityId::Pattern(self.id), range))
+    }
+
     fn ensure_step_in_range(&self, step: StepIndex) -> Result<(), PatternError> {
         if step.raw() >= self.length_steps {
             return Err(PatternError::StepOutOfRange {
@@ -1432,6 +1452,35 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].range(), range(18_000, 24_000));
         assert_eq!(events[1].range(), range(24_000, 30_000));
+    }
+
+    #[test]
+    fn pattern_step_dirty_range_uses_absolute_cycle_frames() {
+        let pattern = Pattern::new(PatternId::new(9), 16, 4).unwrap();
+
+        let dirty = pattern
+            .step_dirty_range(tempo(), StepIndex::new(4), 2)
+            .unwrap();
+
+        assert_eq!(dirty.entity(), EntityId::Pattern(PatternId::new(9)));
+        assert_eq!(dirty.range(), range(216_000, 222_000));
+    }
+
+    #[test]
+    fn pattern_step_dirty_range_rejects_out_of_range_step() {
+        let pattern = Pattern::new(PatternId::new(9), 16, 4).unwrap();
+
+        let err = pattern
+            .step_dirty_range(tempo(), StepIndex::new(16), 0)
+            .unwrap_err();
+
+        assert_eq!(
+            err,
+            PatternError::StepOutOfRange {
+                step: StepIndex::new(16),
+                length_steps: 16,
+            }
+        );
     }
 
     #[test]

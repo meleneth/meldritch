@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use meldritch_core::FrameRange;
+use meldritch_core::{FrameRange, StepIndex};
 use meldritch_render::{ArtifactCache, CacheStatus, RenderSettings};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -46,6 +46,14 @@ enum Command {
         #[arg(long)]
         cache_probe: bool,
     },
+    DirtyStep {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long)]
+        step: u32,
+        #[arg(long, default_value_t = 0)]
+        cycle: u64,
+    },
 }
 
 fn main() {
@@ -74,6 +82,11 @@ fn run(cli: Cli) -> Result<(), String> {
             normalize,
             cache_probe,
         } => render_samples(project, frames, channels, output, normalize, cache_probe),
+        Command::DirtyStep {
+            project,
+            step,
+            cycle,
+        } => dirty_step(project, step, cycle),
     }
 }
 
@@ -302,6 +315,34 @@ fn format_cache_status(status: CacheStatus) -> &'static str {
         CacheStatus::Hit => "hit",
         CacheStatus::Miss => "miss",
     }
+}
+
+fn dirty_step(path: PathBuf, step: u32, cycle: u64) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let pattern = project
+        .patterns()
+        .first()
+        .ok_or_else(|| "project has no patterns to inspect".to_owned())?;
+    let dirty = pattern
+        .step_dirty_range(project.tempo(), StepIndex::new(step), cycle)
+        .map_err(|err| err.to_string())?;
+
+    println!(
+        "dirty: entity={:?}, start={}, end={}",
+        dirty.entity(),
+        dirty.range().start(),
+        dirty.range().end()
+    );
+
+    Ok(())
 }
 
 fn load_project_samples(
