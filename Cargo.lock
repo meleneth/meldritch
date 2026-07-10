@@ -162,6 +162,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "meldritch-render"
+version = "0.1.0"
+dependencies = [
+ "meldritch-audio",
+ "meldritch-core",
+]
+
+[[package]]
 name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

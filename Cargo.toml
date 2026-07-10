@@ -4,6 +4,7 @@ members = [
     "crates/meldritch-cli",
     "crates/meldritch-core",
     "crates/meldritch-dsl",
+    "crates/meldritch-render",
 ]
 resolver = "2"
 
