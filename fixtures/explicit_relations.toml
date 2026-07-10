@@ -1,0 +1,42 @@
+[project]
+name = "Explicit Relation Drums"
+bpm = 120.0
+sample_rate = 48000
+seed = 13
+
+[[samples]]
+note = 36
+path = "audio/kick.wav"
+
+[[samples]]
+note = 38
+path = "audio/snare.wav"
+
+[[patterns]]
+id = 7
+length_steps = 8
+steps_per_beat = 4
+
+[[patterns.tracks]]
+id = 1
+
+[[patterns.tracks.steps]]
+step = 0
+note = 36
+velocity = 0.9
+tags = ["accent"]
+
+[[patterns.tracks.steps]]
+step = 4
+note = 38
+velocity = 0.72
+
+[[relations]]
+from = { sample_note = 36 }
+to = { pattern = 7 }
+kind = "audio"
+
+[[relations]]
+from = { sample_note = 38 }
+to = { pattern = 7 }
+kind = "audio"
