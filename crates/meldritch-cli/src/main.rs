@@ -660,6 +660,7 @@ struct RenderManifest {
     cache_probe: bool,
     cache_probe_result: Option<CacheProbeSummary>,
     artifact: ArtifactSummary,
+    graph: RenderGraphSummary,
     samples: Vec<RenderSampleSummary>,
     result: RenderResultSummary,
 }
@@ -674,6 +675,7 @@ struct RenderManifestInput<'a> {
     cache_probe: bool,
     cache_probe_summary: Option<CacheProbeSummary>,
     artifact_key: meldritch_render::ArtifactKey,
+    compiled: &'a meldritch_dsl::CompiledProject,
     samples_by_note: &'a BTreeMap<u8, meldritch_audio::SampleBuffer>,
     peak: f64,
     nonzero_samples: usize,
@@ -681,8 +683,9 @@ struct RenderManifestInput<'a> {
 }
 
 impl RenderManifest {
-    fn from_render(input: RenderManifestInput<'_>) -> Self {
-        Self {
+    fn from_render(input: RenderManifestInput<'_>) -> Result<Self, String> {
+        let graph = RenderGraphSummary::from_compiled(input.compiled, input.pattern.id())?;
+        Ok(Self {
             schema_version: 1,
             project_path: input.project_path.display().to_string(),
             output_path: input.output_path.map(|path| path.display().to_string()),
@@ -693,6 +696,7 @@ impl RenderManifest {
             cache_probe: input.cache_probe,
             cache_probe_result: input.cache_probe_summary,
             artifact: ArtifactSummary::from_key(input.artifact_key),
+            graph,
             samples: input
                 .samples_by_note
                 .iter()
@@ -703,8 +707,91 @@ impl RenderManifest {
                 nonzero_samples: input.nonzero_samples,
                 finite: input.finite,
             },
-        }
+        })
     }
+}
+
+#[derive(Debug, Serialize)]
+struct RenderGraphSummary {
+    pattern_source_id: u64,
+    pattern_node_id: u64,
+    sample_sources: Vec<RenderGraphSampleSourceSummary>,
+    relations: Vec<RenderGraphRelationSummary>,
+}
+
+impl RenderGraphSummary {
+    fn from_compiled(
+        compiled: &meldritch_dsl::CompiledProject,
+        pattern: meldritch_core::PatternId,
+    ) -> Result<Self, String> {
+        let pattern_binding = compiled
+            .source_bindings()
+            .iter()
+            .find(|binding| {
+                matches!(
+                    binding.kind(),
+                    meldritch_dsl::SourceBindingKind::Pattern {
+                        pattern: binding_pattern
+                    } if *binding_pattern == pattern
+                )
+            })
+            .ok_or_else(|| format!("compiled graph has no pattern {}", pattern.raw()))?;
+
+        let relations = compiled
+            .relation_bindings()
+            .iter()
+            .filter_map(|binding| match binding.kind() {
+                meldritch_dsl::RelationBindingKind::SampleToPattern {
+                    note,
+                    pattern: relation_pattern,
+                } if *relation_pattern == pattern => Some(RenderGraphRelationSummary {
+                    relation_id: binding.relation().raw(),
+                    from_node_id: binding.from().raw(),
+                    to_node_id: binding.to().raw(),
+                    note: *note,
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        Ok(Self {
+            pattern_source_id: pattern_binding.source().raw(),
+            pattern_node_id: pattern_binding.node().raw(),
+            sample_sources: compiled
+                .source_bindings()
+                .iter()
+                .filter_map(|binding| match binding.kind() {
+                    meldritch_dsl::SourceBindingKind::Sample { note, .. }
+                        if relations.iter().any(|relation| relation.note == *note) =>
+                    {
+                        Some(RenderGraphSampleSourceSummary {
+                            note: *note,
+                            source_id: binding.source().raw(),
+                            node_id: binding.node().raw(),
+                        })
+                    }
+                    meldritch_dsl::SourceBindingKind::Pattern { .. } => None,
+                    meldritch_dsl::SourceBindingKind::Sample { .. } => None,
+                })
+                .collect(),
+            relations,
+        })
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct RenderGraphSampleSourceSummary {
+    note: u8,
+    source_id: u64,
+    node_id: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct RenderGraphRelationSummary {
+    relation_id: u64,
+    from_node_id: u64,
+    to_node_id: u64,
+    note: u8,
 }
 
 #[derive(Debug, Serialize)]
@@ -1030,6 +1117,13 @@ fn render_samples(path: PathBuf, options: RenderSamplesOptions) -> Result<(), St
             .join("\n")
     })?;
     let pattern = select_pattern(&project, options.pattern_id, "render")?;
+    let compiled = meldritch_dsl::compile_project(&project).map_err(|err| {
+        err.diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
     let settings = RenderSettings::new(options.channels)
         .map_err(|err| format!("invalid render settings: {err:?}"))?;
     let samples_by_note = load_project_samples(&project, &path)?;
@@ -1123,11 +1217,12 @@ fn render_samples(path: PathBuf, options: RenderSamplesOptions) -> Result<(), St
             cache_probe: options.cache_probe,
             cache_probe_summary,
             artifact_key,
+            compiled: &compiled,
             samples_by_note: &samples_by_note,
             peak,
             nonzero_samples,
             finite,
-        });
+        })?;
         let json = serde_json::to_string_pretty(&summary)
             .map_err(|err| format!("failed to encode render manifest: {err}"))?;
         std::fs::write(&manifest, json)
