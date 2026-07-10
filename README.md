@@ -87,6 +87,12 @@ Emit the compiled source/relation graph skeleton:
 cargo run -p meldritch-cli -- graph-json fixtures/basic_drums.toml
 ```
 
+Emit loaded sample diagnostics:
+
+```sh
+cargo run -p meldritch-cli -- samples-json fixtures/basic_drums.toml
+```
+
 Emit scheduled events as JSON for a render range:
 
 ```sh

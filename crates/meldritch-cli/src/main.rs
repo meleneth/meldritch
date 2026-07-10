@@ -33,6 +33,10 @@ enum Command {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
     },
+    SamplesJson {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+    },
     EventsJson {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -108,6 +112,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Inspect { project } => inspect_project(project),
         Command::SummaryJson { project } => summarize_project_json(project),
         Command::GraphJson { project } => graph_json(project),
+        Command::SamplesJson { project } => samples_json(project),
         Command::EventsJson {
             project,
             pattern_id,
@@ -222,6 +227,41 @@ fn graph_json(path: PathBuf) -> Result<(), String> {
     let output = CompiledGraphSummary::from_compiled(&compiled);
     let json = serde_json::to_string_pretty(&output)
         .map_err(|err| format!("failed to encode compiled graph: {err}"))?;
+    println!("{json}");
+
+    Ok(())
+}
+
+fn samples_json(path: PathBuf) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+
+    let mut samples = Vec::new();
+    for sample_ref in project.samples() {
+        let sample_path = resolve_project_path(&path, sample_ref.path());
+        let sample = meldritch_audio::read_wav(&sample_path)
+            .map_err(|err| format!("failed to read sample {}: {err}", sample_path.display()))?;
+        samples.push(SampleDiagnostic::from_sample(
+            sample_ref.note(),
+            sample_ref.path(),
+            &sample_path,
+            &sample,
+        ));
+    }
+
+    let output = SampleDiagnostics {
+        schema_version: 1,
+        samples,
+    };
+    let json = serde_json::to_string_pretty(&output)
+        .map_err(|err| format!("failed to encode sample diagnostics: {err}"))?;
     println!("{json}");
 
     Ok(())
@@ -510,6 +550,49 @@ impl CompiledRelationKindSummary {
                     pattern_id: pattern.raw(),
                 }
             }
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct SampleDiagnostics {
+    schema_version: u32,
+    samples: Vec<SampleDiagnostic>,
+}
+
+#[derive(Debug, Serialize)]
+struct SampleDiagnostic {
+    note: u8,
+    path: String,
+    resolved_path: String,
+    sample_rate: u32,
+    channels: u16,
+    frames: meldritch_audio::Frames,
+    sample_count: usize,
+    peak: f64,
+    finite: bool,
+}
+
+impl SampleDiagnostic {
+    fn from_sample(
+        note: u8,
+        path: &str,
+        resolved_path: &Path,
+        sample: &meldritch_audio::SampleBuffer,
+    ) -> Self {
+        Self {
+            note,
+            path: path.to_owned(),
+            resolved_path: resolved_path.display().to_string(),
+            sample_rate: sample.sample_rate(),
+            channels: sample.channels(),
+            frames: sample.frames(),
+            sample_count: sample.samples().len(),
+            peak: sample
+                .samples()
+                .iter()
+                .fold(0.0, |peak, sample| peak.max(sample.abs())),
+            finite: sample.samples().iter().all(|sample| sample.is_finite()),
         }
     }
 }
@@ -894,18 +977,24 @@ fn load_project_samples(
     project_path: &Path,
 ) -> Result<BTreeMap<u8, meldritch_audio::SampleBuffer>, String> {
     let mut samples = BTreeMap::new();
-    let base_dir = project_path.parent().unwrap_or_else(|| Path::new("."));
     for sample_ref in project.samples() {
-        let sample_path = PathBuf::from(sample_ref.path());
-        let path = if sample_path.is_absolute() {
-            sample_path
-        } else {
-            base_dir.join(sample_path)
-        };
+        let path = resolve_project_path(project_path, sample_ref.path());
         let sample = meldritch_audio::read_wav(&path)
             .map_err(|err| format!("failed to read sample {}: {err}", path.display()))?;
         samples.insert(sample_ref.note(), sample);
     }
 
     Ok(samples)
+}
+
+fn resolve_project_path(project_path: &Path, relative_or_absolute: &str) -> PathBuf {
+    let path = PathBuf::from(relative_or_absolute);
+    if path.is_absolute() {
+        path
+    } else {
+        project_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(path)
+    }
 }
