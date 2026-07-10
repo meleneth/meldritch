@@ -113,6 +113,10 @@ enum Command {
         #[arg(long)]
         cache_probe: bool,
     },
+    ManifestSummaryJson {
+        #[arg(value_name = "MANIFEST")]
+        manifest: PathBuf,
+    },
     DirtyStep {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -201,6 +205,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 cache_probe,
             },
         ),
+        Command::ManifestSummaryJson { manifest } => manifest_summary_json(manifest),
         Command::DirtyStep {
             project,
             pattern_id,
@@ -372,6 +377,19 @@ fn dirty_pattern_json(path: PathBuf, pattern_id: u64, start: u64, end: u64) -> R
         .ok_or_else(|| format!("compiled graph has no pattern source for pattern {pattern_id}"))?;
 
     emit_dirty_json(&compiled, source_id, start, end)
+}
+
+fn manifest_summary_json(path: PathBuf) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let manifest = serde_json::from_str::<serde_json::Value>(&input)
+        .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
+    let summary = RenderManifestDiagnostics::from_manifest(&manifest)?;
+    let json = serde_json::to_string_pretty(&summary)
+        .map_err(|err| format!("failed to encode manifest summary: {err}"))?;
+    println!("{json}");
+
+    Ok(())
 }
 
 fn compile_project_file(path: &Path) -> Result<meldritch_dsl::CompiledProject, String> {
@@ -866,6 +884,47 @@ impl RenderManifest {
 }
 
 #[derive(Debug, Serialize)]
+struct RenderManifestDiagnostics {
+    schema_version: u32,
+    manifest_schema_version: u64,
+    pattern_id: u64,
+    sample_source_count: usize,
+    relation_count: usize,
+    relation_kinds: BTreeMap<String, usize>,
+    result: RenderResultSummary,
+}
+
+impl RenderManifestDiagnostics {
+    fn from_manifest(manifest: &serde_json::Value) -> Result<Self, String> {
+        let manifest_schema_version = required_u64(manifest, &["schema_version"])?;
+        let pattern_id = required_u64(manifest, &["pattern_id"])?;
+        let sample_source_count = required_array(manifest, &["graph", "sample_sources"])?.len();
+        let relations = required_array(manifest, &["graph", "relations"])?;
+        let mut relation_kinds = BTreeMap::new();
+        for relation in relations {
+            let kind = required_str(relation, &["kind", "type"])?;
+            *relation_kinds.entry(kind.to_owned()).or_insert(0) += 1;
+        }
+
+        Ok(Self {
+            schema_version: 1,
+            manifest_schema_version,
+            pattern_id,
+            sample_source_count,
+            relation_count: relations.len(),
+            relation_kinds,
+            result: RenderResultSummary {
+                peak: required_f64(manifest, &["result", "peak"])?,
+                nonzero_samples: required_u64(manifest, &["result", "nonzero_samples"])?
+                    .try_into()
+                    .map_err(|_| "manifest result nonzero_samples is too large".to_owned())?,
+                finite: required_bool(manifest, &["result", "finite"])?,
+            },
+        })
+    }
+}
+
+#[derive(Debug, Serialize)]
 struct RenderGraphSummary {
     pattern_source_id: u64,
     pattern_node_id: u64,
@@ -995,6 +1054,55 @@ impl RenderGraphRelationKindSummary {
             },
         }
     }
+}
+
+fn required_value<'a>(
+    value: &'a serde_json::Value,
+    path: &[&str],
+) -> Result<&'a serde_json::Value, String> {
+    let mut current = value;
+    for segment in path {
+        current = current
+            .get(*segment)
+            .ok_or_else(|| format!("manifest is missing field {}", path.to_vec().join(".")))?;
+    }
+    Ok(current)
+}
+
+fn required_u64(value: &serde_json::Value, path: &[&str]) -> Result<u64, String> {
+    required_value(value, path)?.as_u64().ok_or_else(|| {
+        format!(
+            "manifest field {} must be an unsigned integer",
+            path.join(".")
+        )
+    })
+}
+
+fn required_f64(value: &serde_json::Value, path: &[&str]) -> Result<f64, String> {
+    required_value(value, path)?
+        .as_f64()
+        .ok_or_else(|| format!("manifest field {} must be a number", path.join(".")))
+}
+
+fn required_bool(value: &serde_json::Value, path: &[&str]) -> Result<bool, String> {
+    required_value(value, path)?
+        .as_bool()
+        .ok_or_else(|| format!("manifest field {} must be a boolean", path.join(".")))
+}
+
+fn required_str<'a>(value: &'a serde_json::Value, path: &[&str]) -> Result<&'a str, String> {
+    required_value(value, path)?
+        .as_str()
+        .ok_or_else(|| format!("manifest field {} must be a string", path.join(".")))
+}
+
+fn required_array<'a>(
+    value: &'a serde_json::Value,
+    path: &[&str],
+) -> Result<&'a Vec<serde_json::Value>, String> {
+    required_value(value, path)?
+        .as_array()
+        .ok_or_else(|| format!("manifest field {} must be an array", path.join(".")))
 }
 
 #[derive(Debug, Serialize)]

@@ -79,6 +79,12 @@ Render the control-relation fixture and manifest:
 bash tools/render-control-fixture.sh
 ```
 
+Summarize a render manifest:
+
+```sh
+bash tools/manifest-summary.sh artifacts/control_relations.manifest.json
+```
+
 The render script writes local WAVs and render manifests under `artifacts/`, which is intentionally ignored.
 
 Emit a machine-readable project summary for scripts:
