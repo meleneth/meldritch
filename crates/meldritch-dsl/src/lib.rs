@@ -4,8 +4,9 @@
 //! model values. It intentionally stays out of audio, rendering, and realtime.
 
 use meldritch_core::{
-    Diagnostic, EventTag, Param, Pattern, PatternId, Probability, ProbabilitySeed, SampleRate,
-    Step, StepIndex, Tempo, TrackId,
+    Diagnostic, EventTag, Linearity, NodeId, NodeProperties, Param, Pattern, PatternId,
+    Probability, ProbabilitySeed, RelationGraph, SampleRate, Source, SourceGraph, SourceId, Step,
+    StepIndex, Tempo, TrackId,
 };
 use serde::Deserialize;
 use std::collections::BTreeSet;
@@ -52,6 +53,85 @@ pub struct SampleRef {
     note: u8,
     path: String,
 }
+
+#[derive(Clone, Debug)]
+pub struct CompiledProject {
+    sources: SourceGraph,
+    relations: RelationGraph,
+    source_bindings: Vec<SourceBinding>,
+}
+
+impl CompiledProject {
+    #[must_use]
+    pub fn sources(&self) -> &SourceGraph {
+        &self.sources
+    }
+
+    #[must_use]
+    pub fn relations(&self) -> &RelationGraph {
+        &self.relations
+    }
+
+    #[must_use]
+    pub fn source_bindings(&self) -> &[SourceBinding] {
+        &self.source_bindings
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceBinding {
+    source: SourceId,
+    node: NodeId,
+    kind: SourceBindingKind,
+}
+
+impl SourceBinding {
+    #[must_use]
+    pub const fn source(&self) -> SourceId {
+        self.source
+    }
+
+    #[must_use]
+    pub const fn node(&self) -> NodeId {
+        self.node
+    }
+
+    #[must_use]
+    pub const fn kind(&self) -> &SourceBindingKind {
+        &self.kind
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SourceBindingKind {
+    Sample { note: u8, path: String },
+    Pattern { pattern: PatternId },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompileProjectError {
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl CompileProjectError {
+    #[must_use]
+    pub fn new(diagnostics: Vec<Diagnostic>) -> Self {
+        Self { diagnostics }
+    }
+
+    #[must_use]
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+}
+
+impl fmt::Display for CompileProjectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "project compilation failed")
+    }
+}
+
+impl std::error::Error for CompileProjectError {}
 
 impl SampleRef {
     #[must_use]
@@ -128,6 +208,69 @@ impl std::error::Error for ParseProjectError {}
 pub fn parse_project(input: &str) -> Result<ValidatedProject, ParseProjectError> {
     let raw = toml::from_str::<RawProject>(input).map_err(ParseProjectError::Toml)?;
     validate_project(raw).map_err(ParseProjectError::Validation)
+}
+
+pub fn compile_project(project: &ValidatedProject) -> Result<CompiledProject, CompileProjectError> {
+    let mut diagnostics = Vec::new();
+    let mut sources = SourceGraph::new();
+    let mut relations = RelationGraph::new();
+    let mut source_bindings = Vec::new();
+
+    for sample in project.samples() {
+        let source = sample_source_id(sample.note());
+        let node = NodeId::new(source.raw());
+        sources.insert(Source::new(source, node));
+        relations.insert_node(node, NodeProperties::new(Linearity::Linear));
+        source_bindings.push(SourceBinding {
+            source,
+            node,
+            kind: SourceBindingKind::Sample {
+                note: sample.note(),
+                path: sample.path().to_owned(),
+            },
+        });
+    }
+
+    for pattern in project.patterns() {
+        match pattern_source_id(pattern.id()) {
+            Some(source) => {
+                let node = NodeId::new(source.raw());
+                sources.insert(Source::new(source, node));
+                relations.insert_node(node, NodeProperties::new(Linearity::Linear));
+                source_bindings.push(SourceBinding {
+                    source,
+                    node,
+                    kind: SourceBindingKind::Pattern {
+                        pattern: pattern.id(),
+                    },
+                });
+            }
+            None => diagnostics.push(Diagnostic::new(format!(
+                "pattern {} cannot be compiled to a source id",
+                pattern.id().raw()
+            ))),
+        }
+    }
+
+    if diagnostics.is_empty() {
+        Ok(CompiledProject {
+            sources,
+            relations,
+            source_bindings,
+        })
+    } else {
+        Err(CompileProjectError::new(diagnostics))
+    }
+}
+
+fn sample_source_id(note: u8) -> SourceId {
+    SourceId::new(1_000 + u64::from(note))
+}
+
+fn pattern_source_id(pattern: PatternId) -> Option<SourceId> {
+    1_000_000_000u64
+        .checked_add(pattern.raw())
+        .map(SourceId::new)
 }
 
 fn validate_project(raw: RawProject) -> Result<ValidatedProject, ProjectValidationError> {
@@ -430,6 +573,49 @@ tags = ["ghost", "probabilistic"]
         assert!(!events.is_empty());
         assert_eq!(events[0].track(), TrackId::new(1));
         assert_eq!(events[0].range(), FrameRange::new(0, 3_000).unwrap());
+    }
+
+    #[test]
+    fn compiles_project_sources_into_graph_nodes() {
+        let project = parse_project(MINIMAL_PROJECT).unwrap();
+        let compiled = compile_project(&project).unwrap();
+
+        assert_eq!(compiled.sources().len(), 3);
+        assert_eq!(compiled.relations().len_nodes(), 3);
+        assert_eq!(compiled.relations().len_edges(), 0);
+        assert_eq!(compiled.source_bindings().len(), 3);
+        assert_eq!(compiled.source_bindings()[0].source(), SourceId::new(1_036));
+        assert_eq!(compiled.source_bindings()[0].node(), NodeId::new(1_036));
+        assert_eq!(
+            compiled.source_bindings()[0].kind(),
+            &SourceBindingKind::Sample {
+                note: 36,
+                path: "audio/kick.wav".to_owned()
+            }
+        );
+        assert_eq!(
+            compiled.source_bindings()[2].kind(),
+            &SourceBindingKind::Pattern {
+                pattern: PatternId::new(1)
+            }
+        );
+    }
+
+    #[test]
+    fn compile_reports_pattern_source_id_overflow() {
+        let input = MINIMAL_PROJECT.replace("id = 1", "id = 18446744072709551616");
+        let project = parse_project(&input).unwrap();
+        let err = compile_project(&project).unwrap_err();
+        let messages = err
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            messages,
+            vec!["pattern 18446744072709551616 cannot be compiled to a source id"]
+        );
     }
 
     #[test]

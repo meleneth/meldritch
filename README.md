@@ -81,6 +81,12 @@ Emit a machine-readable project summary for scripts:
 cargo run -p meldritch-cli -- summary-json fixtures/basic_drums.toml
 ```
 
+Emit the compiled source/relation graph skeleton:
+
+```sh
+cargo run -p meldritch-cli -- graph-json fixtures/basic_drums.toml
+```
+
 Emit scheduled events as JSON for a render range:
 
 ```sh

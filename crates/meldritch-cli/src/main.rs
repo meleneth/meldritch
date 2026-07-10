@@ -27,6 +27,10 @@ enum Command {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
     },
+    GraphJson {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+    },
     EventsJson {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -91,6 +95,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Validate { project } => validate_project(project),
         Command::Inspect { project } => inspect_project(project),
         Command::SummaryJson { project } => summarize_project_json(project),
+        Command::GraphJson { project } => graph_json(project),
         Command::EventsJson {
             project,
             pattern_id,
@@ -174,6 +179,32 @@ fn inspect_project(path: PathBuf) -> Result<(), String> {
             println!("    track {}: active_steps={count}", track.raw());
         }
     }
+
+    Ok(())
+}
+
+fn graph_json(path: PathBuf) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let compiled = meldritch_dsl::compile_project(&project).map_err(|err| {
+        err.diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+
+    let output = CompiledGraphSummary::from_compiled(&compiled);
+    let json = serde_json::to_string_pretty(&output)
+        .map_err(|err| format!("failed to encode compiled graph: {err}"))?;
+    println!("{json}");
 
     Ok(())
 }
@@ -323,6 +354,69 @@ struct PatternSummary {
 struct TrackSummary {
     id: u64,
     active_steps: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct CompiledGraphSummary {
+    schema_version: u32,
+    source_count: usize,
+    node_count: usize,
+    edge_count: usize,
+    sources: Vec<CompiledSourceSummary>,
+}
+
+impl CompiledGraphSummary {
+    fn from_compiled(compiled: &meldritch_dsl::CompiledProject) -> Self {
+        Self {
+            schema_version: 1,
+            source_count: compiled.sources().len(),
+            node_count: compiled.relations().len_nodes(),
+            edge_count: compiled.relations().len_edges(),
+            sources: compiled
+                .source_bindings()
+                .iter()
+                .map(CompiledSourceSummary::from_binding)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct CompiledSourceSummary {
+    source_id: u64,
+    node_id: u64,
+    kind: CompiledSourceKindSummary,
+}
+
+impl CompiledSourceSummary {
+    fn from_binding(binding: &meldritch_dsl::SourceBinding) -> Self {
+        Self {
+            source_id: binding.source().raw(),
+            node_id: binding.node().raw(),
+            kind: CompiledSourceKindSummary::from_kind(binding.kind()),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+enum CompiledSourceKindSummary {
+    Sample { note: u8, path: String },
+    Pattern { pattern_id: u64 },
+}
+
+impl CompiledSourceKindSummary {
+    fn from_kind(kind: &meldritch_dsl::SourceBindingKind) -> Self {
+        match kind {
+            meldritch_dsl::SourceBindingKind::Sample { note, path } => Self::Sample {
+                note: *note,
+                path: path.clone(),
+            },
+            meldritch_dsl::SourceBindingKind::Pattern { pattern } => Self::Pattern {
+                pattern_id: pattern.raw(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
