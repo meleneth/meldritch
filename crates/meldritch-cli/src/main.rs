@@ -363,6 +363,7 @@ struct CompiledGraphSummary {
     node_count: usize,
     edge_count: usize,
     sources: Vec<CompiledSourceSummary>,
+    relations: Vec<CompiledRelationSummary>,
 }
 
 impl CompiledGraphSummary {
@@ -376,6 +377,11 @@ impl CompiledGraphSummary {
                 .source_bindings()
                 .iter()
                 .map(CompiledSourceSummary::from_binding)
+                .collect(),
+            relations: compiled
+                .relation_bindings()
+                .iter()
+                .map(CompiledRelationSummary::from_binding)
                 .collect(),
         }
     }
@@ -415,6 +421,44 @@ impl CompiledSourceKindSummary {
             meldritch_dsl::SourceBindingKind::Pattern { pattern } => Self::Pattern {
                 pattern_id: pattern.raw(),
             },
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct CompiledRelationSummary {
+    relation_id: u64,
+    from_node_id: u64,
+    to_node_id: u64,
+    kind: CompiledRelationKindSummary,
+}
+
+impl CompiledRelationSummary {
+    fn from_binding(binding: &meldritch_dsl::RelationBinding) -> Self {
+        Self {
+            relation_id: binding.relation().raw(),
+            from_node_id: binding.from().raw(),
+            to_node_id: binding.to().raw(),
+            kind: CompiledRelationKindSummary::from_kind(binding.kind()),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+enum CompiledRelationKindSummary {
+    SampleToPattern { note: u8, pattern_id: u64 },
+}
+
+impl CompiledRelationKindSummary {
+    fn from_kind(kind: &meldritch_dsl::RelationBindingKind) -> Self {
+        match kind {
+            meldritch_dsl::RelationBindingKind::SampleToPattern { note, pattern } => {
+                Self::SampleToPattern {
+                    note: *note,
+                    pattern_id: pattern.raw(),
+                }
+            }
         }
     }
 }

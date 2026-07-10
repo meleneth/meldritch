@@ -4,12 +4,12 @@
 //! model values. It intentionally stays out of audio, rendering, and realtime.
 
 use meldritch_core::{
-    Diagnostic, EventTag, Linearity, NodeId, NodeProperties, Param, Pattern, PatternId,
-    Probability, ProbabilitySeed, RelationGraph, SampleRate, Source, SourceGraph, SourceId, Step,
-    StepIndex, Tempo, TrackId,
+    Diagnostic, EdgeKind, EventTag, Linearity, NodeId, NodeProperties, Param, Pattern, PatternId,
+    Probability, ProbabilitySeed, RelationEdge, RelationGraph, RelationId, SampleRate, Source,
+    SourceGraph, SourceId, Step, StepIndex, Tempo, TrackId,
 };
 use serde::Deserialize;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -59,6 +59,7 @@ pub struct CompiledProject {
     sources: SourceGraph,
     relations: RelationGraph,
     source_bindings: Vec<SourceBinding>,
+    relation_bindings: Vec<RelationBinding>,
 }
 
 impl CompiledProject {
@@ -75,6 +76,11 @@ impl CompiledProject {
     #[must_use]
     pub fn source_bindings(&self) -> &[SourceBinding] {
         &self.source_bindings
+    }
+
+    #[must_use]
+    pub fn relation_bindings(&self) -> &[RelationBinding] {
+        &self.relation_bindings
     }
 }
 
@@ -106,6 +112,41 @@ impl SourceBinding {
 pub enum SourceBindingKind {
     Sample { note: u8, path: String },
     Pattern { pattern: PatternId },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RelationBinding {
+    relation: RelationId,
+    from: NodeId,
+    to: NodeId,
+    kind: RelationBindingKind,
+}
+
+impl RelationBinding {
+    #[must_use]
+    pub const fn relation(&self) -> RelationId {
+        self.relation
+    }
+
+    #[must_use]
+    pub const fn from(&self) -> NodeId {
+        self.from
+    }
+
+    #[must_use]
+    pub const fn to(&self) -> NodeId {
+        self.to
+    }
+
+    #[must_use]
+    pub const fn kind(&self) -> &RelationBindingKind {
+        &self.kind
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RelationBindingKind {
+    SampleToPattern { note: u8, pattern: PatternId },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -215,12 +256,15 @@ pub fn compile_project(project: &ValidatedProject) -> Result<CompiledProject, Co
     let mut sources = SourceGraph::new();
     let mut relations = RelationGraph::new();
     let mut source_bindings = Vec::new();
+    let mut relation_bindings = Vec::new();
+    let mut sample_nodes_by_note = BTreeMap::new();
 
     for sample in project.samples() {
         let source = sample_source_id(sample.note());
         let node = NodeId::new(source.raw());
         sources.insert(Source::new(source, node));
         relations.insert_node(node, NodeProperties::new(Linearity::Linear));
+        sample_nodes_by_note.insert(sample.note(), node);
         source_bindings.push(SourceBinding {
             source,
             node,
@@ -244,6 +288,43 @@ pub fn compile_project(project: &ValidatedProject) -> Result<CompiledProject, Co
                         pattern: pattern.id(),
                     },
                 });
+
+                for note in pattern.used_notes() {
+                    let Some(sample_node) = sample_nodes_by_note.get(&note).copied() else {
+                        diagnostics.push(Diagnostic::new(format!(
+                            "pattern {} uses note {} without a sample source",
+                            pattern.id().raw(),
+                            note
+                        )));
+                        continue;
+                    };
+                    let Some(relation) = sample_to_pattern_relation_id(note, pattern.id()) else {
+                        diagnostics.push(Diagnostic::new(format!(
+                            "pattern {} note {} cannot be compiled to a relation id",
+                            pattern.id().raw(),
+                            note
+                        )));
+                        continue;
+                    };
+                    let edge = RelationEdge::new(relation, sample_node, node, EdgeKind::Audio);
+                    if let Err(err) = relations.insert_edge(edge) {
+                        diagnostics.push(Diagnostic::new(format!(
+                            "pattern {} note {} relation is invalid: {err}",
+                            pattern.id().raw(),
+                            note
+                        )));
+                    } else {
+                        relation_bindings.push(RelationBinding {
+                            relation,
+                            from: sample_node,
+                            to: node,
+                            kind: RelationBindingKind::SampleToPattern {
+                                note,
+                                pattern: pattern.id(),
+                            },
+                        });
+                    }
+                }
             }
             None => diagnostics.push(Diagnostic::new(format!(
                 "pattern {} cannot be compiled to a source id",
@@ -257,6 +338,7 @@ pub fn compile_project(project: &ValidatedProject) -> Result<CompiledProject, Co
             sources,
             relations,
             source_bindings,
+            relation_bindings,
         })
     } else {
         Err(CompileProjectError::new(diagnostics))
@@ -271,6 +353,13 @@ fn pattern_source_id(pattern: PatternId) -> Option<SourceId> {
     1_000_000_000u64
         .checked_add(pattern.raw())
         .map(SourceId::new)
+}
+
+fn sample_to_pattern_relation_id(note: u8, pattern: PatternId) -> Option<RelationId> {
+    2_000_000_000u64
+        .checked_add(pattern.raw().checked_mul(1_000)?)
+        .and_then(|id| id.checked_add(u64::from(note)))
+        .map(RelationId::new)
 }
 
 fn validate_project(raw: RawProject) -> Result<ValidatedProject, ProjectValidationError> {
@@ -582,8 +671,9 @@ tags = ["ghost", "probabilistic"]
 
         assert_eq!(compiled.sources().len(), 3);
         assert_eq!(compiled.relations().len_nodes(), 3);
-        assert_eq!(compiled.relations().len_edges(), 0);
+        assert_eq!(compiled.relations().len_edges(), 2);
         assert_eq!(compiled.source_bindings().len(), 3);
+        assert_eq!(compiled.relation_bindings().len(), 2);
         assert_eq!(compiled.source_bindings()[0].source(), SourceId::new(1_036));
         assert_eq!(compiled.source_bindings()[0].node(), NodeId::new(1_036));
         assert_eq!(
@@ -598,6 +688,38 @@ tags = ["ghost", "probabilistic"]
             &SourceBindingKind::Pattern {
                 pattern: PatternId::new(1)
             }
+        );
+        assert_eq!(
+            compiled.relation_bindings()[0].kind(),
+            &RelationBindingKind::SampleToPattern {
+                note: 36,
+                pattern: PatternId::new(1)
+            }
+        );
+        assert_eq!(compiled.relation_bindings()[0].from(), NodeId::new(1_036));
+        assert_eq!(
+            compiled.relation_bindings()[0].to(),
+            NodeId::new(1_000_000_001)
+        );
+    }
+
+    #[test]
+    fn compile_reports_pattern_notes_without_samples() {
+        let input = MINIMAL_PROJECT.replace(
+            "note = 38\npath = \"audio/snare.wav\"",
+            "note = 39\npath = \"audio/clap.wav\"",
+        );
+        let project = parse_project(&input).unwrap();
+        let err = compile_project(&project).unwrap_err();
+        let messages = err
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            messages,
+            vec!["pattern 1 uses note 38 without a sample source"]
         );
     }
 

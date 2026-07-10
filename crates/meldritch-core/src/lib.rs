@@ -550,6 +550,11 @@ impl Pattern {
         counts
     }
 
+    #[must_use]
+    pub fn used_notes(&self) -> BTreeSet<u8> {
+        self.steps.values().map(Step::note).collect()
+    }
+
     pub fn events_between(
         &self,
         tempo: Tempo,
@@ -1466,6 +1471,7 @@ mod tests {
             pattern.active_step_counts_by_track(),
             BTreeMap::from([(TrackId::new(1), 2), (TrackId::new(2), 1)])
         );
+        assert_eq!(pattern.used_notes(), BTreeSet::from([36, 38, 42]));
     }
 
     #[test]
