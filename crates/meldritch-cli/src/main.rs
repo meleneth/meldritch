@@ -549,6 +549,7 @@ impl ProjectRelationSummary {
             to: ProjectRelationEndpointSummary::from_endpoint(relation.to()),
             kind: match relation.kind() {
                 meldritch_dsl::RelationKind::Audio => "audio",
+                meldritch_dsl::RelationKind::Control => "control",
             },
         }
     }
@@ -695,7 +696,14 @@ impl CompiledRelationSummary {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
 enum CompiledRelationKindSummary {
-    SampleToPattern { note: u8, pattern_id: u64 },
+    SampleToPattern {
+        note: u8,
+        pattern_id: u64,
+    },
+    PatternControlsPattern {
+        from_pattern_id: u64,
+        to_pattern_id: u64,
+    },
 }
 
 impl CompiledRelationKindSummary {
@@ -707,6 +715,13 @@ impl CompiledRelationKindSummary {
                     pattern_id: pattern.raw(),
                 }
             }
+            meldritch_dsl::RelationBindingKind::PatternControlsPattern {
+                from_pattern,
+                to_pattern,
+            } => Self::PatternControlsPattern {
+                from_pattern_id: from_pattern.raw(),
+                to_pattern_id: to_pattern.raw(),
+            },
         }
     }
 }

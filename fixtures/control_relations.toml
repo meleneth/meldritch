@@ -1,0 +1,45 @@
+[project]
+name = "Control Relation Drums"
+bpm = 120.0
+sample_rate = 48000
+seed = 21
+
+[[samples]]
+note = 36
+path = "audio/kick.wav"
+
+[[samples]]
+note = 38
+path = "audio/snare.wav"
+
+[[patterns]]
+id = 7
+length_steps = 8
+steps_per_beat = 4
+
+[[patterns.tracks]]
+id = 1
+
+[[patterns.tracks.steps]]
+step = 0
+note = 36
+velocity = 0.9
+
+[[patterns]]
+id = 8
+length_steps = 8
+steps_per_beat = 4
+
+[[patterns.tracks]]
+id = 1
+
+[[patterns.tracks.steps]]
+step = 4
+note = 38
+velocity = 0.72
+tags = ["ghost"]
+
+[[relations]]
+from = { pattern = 7 }
+to = { pattern = 8 }
+kind = "control"

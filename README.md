@@ -102,6 +102,15 @@ to = { pattern = 1 }
 kind = "audio"
 ```
 
+Declare pattern-to-pattern control relations the same way:
+
+```toml
+[[relations]]
+from = { pattern = 7 }
+to = { pattern = 8 }
+kind = "control"
+```
+
 Emit loaded sample diagnostics:
 
 ```sh
