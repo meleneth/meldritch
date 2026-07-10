@@ -541,6 +541,15 @@ impl Pattern {
         self.steps.len()
     }
 
+    #[must_use]
+    pub fn active_step_counts_by_track(&self) -> BTreeMap<TrackId, usize> {
+        let mut counts = BTreeMap::new();
+        for (track, _) in self.steps.keys() {
+            *counts.entry(*track).or_insert(0) += 1;
+        }
+        counts
+    }
+
     pub fn events_between(
         &self,
         tempo: Tempo,
@@ -1440,12 +1449,23 @@ mod tests {
     fn pattern_counts_active_steps() {
         let mut pattern = Pattern::new(PatternId::new(1), 16, 4).unwrap();
         assert_eq!(pattern.active_step_count(), 0);
+        assert!(pattern.active_step_counts_by_track().is_empty());
 
         pattern
             .set_step(TrackId::new(1), StepIndex::new(0), Step::new(36))
             .unwrap();
+        pattern
+            .set_step(TrackId::new(1), StepIndex::new(4), Step::new(38))
+            .unwrap();
+        pattern
+            .set_step(TrackId::new(2), StepIndex::new(8), Step::new(42))
+            .unwrap();
 
-        assert_eq!(pattern.active_step_count(), 1);
+        assert_eq!(pattern.active_step_count(), 3);
+        assert_eq!(
+            pattern.active_step_counts_by_track(),
+            BTreeMap::from([(TrackId::new(1), 2), (TrackId::new(2), 1)])
+        );
     }
 
     #[test]

@@ -151,6 +151,9 @@ fn inspect_project(path: PathBuf) -> Result<(), String> {
             pattern.steps_per_beat(),
             pattern.active_step_count()
         );
+        for (track, count) in pattern.active_step_counts_by_track() {
+            println!("    track {}: active_steps={count}", track.raw());
+        }
     }
 
     Ok(())
