@@ -90,7 +90,7 @@ cargo run -p meldritch-cli -- graph-json fixtures/basic_drums.toml
 Emit declared and compiled relation diagnostics:
 
 ```sh
-cargo run -p meldritch-cli -- relations-json fixtures/explicit_relations.toml
+bash tools/relations.sh fixtures/explicit_relations.toml
 ```
 
 Declare explicit sample-to-pattern audio relations in project TOML:
@@ -126,7 +126,7 @@ cargo run -p meldritch-cli -- events-json fixtures/basic_drums.toml --pattern-id
 Emit graph invalidation from a pattern source:
 
 ```sh
-cargo run -p meldritch-cli -- dirty-pattern-json fixtures/control_relations.toml --pattern-id 7 --start 0 --end 48000
+bash tools/dirty-pattern.sh fixtures/control_relations.toml
 ```
 
 Emit graph invalidation from a compiled source:

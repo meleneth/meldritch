@@ -33,6 +33,8 @@ run cargo run -p meldritch-cli -- dirty-note-json fixtures/basic_drums.toml --no
 run cargo run -p meldritch-cli -- dirty-note-json fixtures/explicit_relations.toml --note 36 --start 0 --end 48000
 run cargo run -p meldritch-cli -- dirty-pattern-json fixtures/control_relations.toml --pattern-id 7 --start 0 --end 48000
 run cargo run -p meldritch-cli -- dirty-step fixtures/basic_drums.toml --pattern-id 1 --step 4 --cycle 2
+run bash tools/relations.sh
+run bash tools/dirty-pattern.sh
 rm -f artifacts/check_render.wav artifacts/check_render.manifest.json
 run cargo run -p meldritch-cli -- render-samples fixtures/basic_drums.toml --pattern-id 1 --frames 96000 --channels 2 --output artifacts/check_render.wav --manifest artifacts/check_render.manifest.json --normalize --cache-probe
 
