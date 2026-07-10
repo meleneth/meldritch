@@ -5,7 +5,7 @@
 //! internal `f64` audio blocks without touching device I/O.
 
 use meldritch_audio::AudioBlock;
-use meldritch_core::{FrameRange, Pattern, ProbabilitySeed, Sample, Tempo};
+use meldritch_core::{FrameRange, Pattern, PatternId, ProbabilitySeed, Sample, SampleRate, Tempo};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RenderSettings {
@@ -30,6 +30,79 @@ impl RenderSettings {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RenderSettingsError {
     InvalidChannelCount(u16),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Fingerprint(u64);
+
+impl Fingerprint {
+    #[must_use]
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    #[must_use]
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ArtifactKey {
+    pattern: PatternId,
+    range: FrameRange,
+    sample_rate: SampleRate,
+    fingerprint: Fingerprint,
+}
+
+impl ArtifactKey {
+    #[must_use]
+    pub const fn pattern(self) -> PatternId {
+        self.pattern
+    }
+
+    #[must_use]
+    pub const fn range(self) -> FrameRange {
+        self.range
+    }
+
+    #[must_use]
+    pub const fn sample_rate(self) -> SampleRate {
+        self.sample_rate
+    }
+
+    #[must_use]
+    pub const fn fingerprint(self) -> Fingerprint {
+        self.fingerprint
+    }
+}
+
+#[must_use]
+pub fn pattern_click_artifact_key(
+    pattern: &Pattern,
+    tempo: Tempo,
+    range: FrameRange,
+    probability_seed: ProbabilitySeed,
+    settings: RenderSettings,
+) -> ArtifactKey {
+    let mut state = FingerprintBuilder::new();
+    state.write_u64(pattern.id().raw());
+    state.write_u64(u64::from(pattern.length_steps()));
+    state.write_u64(u64::from(pattern.steps_per_beat()));
+    state.write_u64(range.start());
+    state.write_u64(range.end());
+    state.write_u64(u64::from(tempo.sample_rate()));
+    state.write_u64(tempo.bpm().to_bits());
+    state.write_u64(probability_seed.raw());
+    state.write_u64(u64::from(settings.channels()));
+    state.write_u64(0x7061_7474_6572_6e63);
+
+    ArtifactKey {
+        pattern: pattern.id(),
+        range,
+        sample_rate: tempo.sample_rate(),
+        fingerprint: state.finish(),
+    }
 }
 
 pub fn render_pattern_clicks(
@@ -69,6 +142,34 @@ fn write_frame(block: &mut AudioBlock, frame: u32, sample: Sample) {
     for channel_offset in 0..channels {
         block.samples_mut()[start + channel_offset] += sample;
     }
+}
+
+struct FingerprintBuilder {
+    state: u64,
+}
+
+impl FingerprintBuilder {
+    fn new() -> Self {
+        Self {
+            state: 0xcbf2_9ce4_8422_2325,
+        }
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.state ^= mix_u64(value);
+        self.state = self.state.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+
+    fn finish(self) -> Fingerprint {
+        Fingerprint::new(mix_u64(self.state))
+    }
+}
+
+fn mix_u64(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
 }
 
 #[cfg(test)]
@@ -146,5 +247,55 @@ mod tests {
             RenderSettings::new(0),
             Err(RenderSettingsError::InvalidChannelCount(0))
         );
+    }
+
+    #[test]
+    fn artifact_key_is_stable_for_same_render_inputs() {
+        let pattern = Pattern::new(PatternId::new(1), 16, 4).unwrap();
+        let key = pattern_click_artifact_key(
+            &pattern,
+            tempo(),
+            FrameRange::new(0, 96_000).unwrap(),
+            ProbabilitySeed::new(11),
+            RenderSettings::new(2).unwrap(),
+        );
+        let same = pattern_click_artifact_key(
+            &pattern,
+            tempo(),
+            FrameRange::new(0, 96_000).unwrap(),
+            ProbabilitySeed::new(11),
+            RenderSettings::new(2).unwrap(),
+        );
+
+        assert_eq!(key, same);
+    }
+
+    #[test]
+    fn artifact_key_changes_for_semantic_render_inputs() {
+        let pattern = Pattern::new(PatternId::new(1), 16, 4).unwrap();
+        let base = pattern_click_artifact_key(
+            &pattern,
+            tempo(),
+            FrameRange::new(0, 96_000).unwrap(),
+            ProbabilitySeed::new(11),
+            RenderSettings::new(2).unwrap(),
+        );
+        let changed_seed = pattern_click_artifact_key(
+            &pattern,
+            tempo(),
+            FrameRange::new(0, 96_000).unwrap(),
+            ProbabilitySeed::new(12),
+            RenderSettings::new(2).unwrap(),
+        );
+        let changed_range = pattern_click_artifact_key(
+            &pattern,
+            tempo(),
+            FrameRange::new(0, 48_000).unwrap(),
+            ProbabilitySeed::new(11),
+            RenderSettings::new(2).unwrap(),
+        );
+
+        assert_ne!(base.fingerprint(), changed_seed.fingerprint());
+        assert_ne!(base.fingerprint(), changed_range.fingerprint());
     }
 }
