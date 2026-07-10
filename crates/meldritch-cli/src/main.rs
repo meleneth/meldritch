@@ -33,6 +33,10 @@ enum Command {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
     },
+    RelationsJson {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+    },
     SamplesJson {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -124,6 +128,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Inspect { project } => inspect_project(project),
         Command::SummaryJson { project } => summarize_project_json(project),
         Command::GraphJson { project } => graph_json(project),
+        Command::RelationsJson { project } => relations_json(project),
         Command::SamplesJson { project } => samples_json(project),
         Command::EventsJson {
             project,
@@ -249,6 +254,32 @@ fn graph_json(path: PathBuf) -> Result<(), String> {
     let output = CompiledGraphSummary::from_compiled(&compiled);
     let json = serde_json::to_string_pretty(&output)
         .map_err(|err| format!("failed to encode compiled graph: {err}"))?;
+    println!("{json}");
+
+    Ok(())
+}
+
+fn relations_json(path: PathBuf) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let compiled = meldritch_dsl::compile_project(&project).map_err(|err| {
+        err.diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+
+    let output = RelationDiagnostics::from_project_and_compiled(&project, &compiled);
+    let json = serde_json::to_string_pretty(&output)
+        .map_err(|err| format!("failed to encode relation diagnostics: {err}"))?;
     println!("{json}");
 
     Ok(())
@@ -537,6 +568,38 @@ impl ProjectRelationEndpointSummary {
             meldritch_dsl::RelationEndpoint::Pattern(pattern) => Self::Pattern {
                 pattern_id: pattern.raw(),
             },
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct RelationDiagnostics {
+    schema_version: u32,
+    declared_count: usize,
+    compiled_count: usize,
+    declared: Vec<ProjectRelationSummary>,
+    compiled: Vec<CompiledRelationSummary>,
+}
+
+impl RelationDiagnostics {
+    fn from_project_and_compiled(
+        project: &meldritch_dsl::ValidatedProject,
+        compiled: &meldritch_dsl::CompiledProject,
+    ) -> Self {
+        Self {
+            schema_version: 1,
+            declared_count: project.relations().len(),
+            compiled_count: compiled.relation_bindings().len(),
+            declared: project
+                .relations()
+                .iter()
+                .map(ProjectRelationSummary::from_relation)
+                .collect(),
+            compiled: compiled
+                .relation_bindings()
+                .iter()
+                .map(CompiledRelationSummary::from_binding)
+                .collect(),
         }
     }
 }

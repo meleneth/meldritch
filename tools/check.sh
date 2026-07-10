@@ -19,6 +19,8 @@ run cargo run -p meldritch-cli -- summary-json fixtures/basic_drums.toml
 run cargo run -p meldritch-cli -- summary-json fixtures/explicit_relations.toml
 run cargo run -p meldritch-cli -- graph-json fixtures/basic_drums.toml
 run cargo run -p meldritch-cli -- graph-json fixtures/explicit_relations.toml
+run cargo run -p meldritch-cli -- relations-json fixtures/basic_drums.toml
+run cargo run -p meldritch-cli -- relations-json fixtures/explicit_relations.toml
 run cargo run -p meldritch-cli -- samples-json fixtures/basic_drums.toml
 run cargo run -p meldritch-cli -- events-json fixtures/basic_drums.toml --pattern-id 1 --frames 48000
 run cargo run -p meldritch-cli -- events-json fixtures/explicit_relations.toml --pattern-id 7 --frames 48000

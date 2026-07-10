@@ -87,6 +87,12 @@ Emit the compiled source/relation graph skeleton:
 cargo run -p meldritch-cli -- graph-json fixtures/basic_drums.toml
 ```
 
+Emit declared and compiled relation diagnostics:
+
+```sh
+cargo run -p meldritch-cli -- relations-json fixtures/explicit_relations.toml
+```
+
 Declare explicit sample-to-pattern audio relations in project TOML:
 
 ```toml
