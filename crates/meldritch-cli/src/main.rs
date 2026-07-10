@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
-use meldritch_core::{Event, EventTag, FrameRange, Pattern, StepIndex};
+use meldritch_core::{
+    DirtyRange, EntityId, Event, EventTag, FrameRange, Pattern, SourceId, StepIndex,
+};
 use meldritch_render::{ArtifactCache, CacheStatus, RenderSettings};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -38,6 +40,16 @@ enum Command {
         pattern_id: Option<u64>,
         #[arg(long, default_value_t = 96_000)]
         frames: u64,
+    },
+    DirtyJson {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long)]
+        source_id: u64,
+        #[arg(long)]
+        start: u64,
+        #[arg(long)]
+        end: u64,
     },
     RenderClicks {
         #[arg(value_name = "PROJECT")]
@@ -101,6 +113,12 @@ fn run(cli: Cli) -> Result<(), String> {
             pattern_id,
             frames,
         } => events_json(project, pattern_id, frames),
+        Command::DirtyJson {
+            project,
+            source_id,
+            start,
+            end,
+        } => dirty_json(project, source_id, start, end),
         Command::RenderClicks {
             project,
             pattern_id,
@@ -204,6 +222,39 @@ fn graph_json(path: PathBuf) -> Result<(), String> {
     let output = CompiledGraphSummary::from_compiled(&compiled);
     let json = serde_json::to_string_pretty(&output)
         .map_err(|err| format!("failed to encode compiled graph: {err}"))?;
+    println!("{json}");
+
+    Ok(())
+}
+
+fn dirty_json(path: PathBuf, source_id: u64, start: u64, end: u64) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let compiled = meldritch_dsl::compile_project(&project).map_err(|err| {
+        err.diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let range = FrameRange::new(start, end).map_err(|err| err.to_string())?;
+    let source = SourceId::new(source_id);
+    let node = compiled
+        .sources()
+        .get(source)
+        .ok_or_else(|| format!("compiled graph has no source {source_id}"))?
+        .node();
+    let dirty = compiled.relations().invalidate_from(node, range);
+    let output = DirtyGraphSummary::from_dirty(source_id, node.raw(), range, &dirty);
+    let json = serde_json::to_string_pretty(&output)
+        .map_err(|err| format!("failed to encode dirty graph summary: {err}"))?;
     println!("{json}");
 
     Ok(())
@@ -459,6 +510,66 @@ impl CompiledRelationKindSummary {
                     pattern_id: pattern.raw(),
                 }
             }
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct DirtyGraphSummary {
+    schema_version: u32,
+    source_id: u64,
+    node_id: u64,
+    range: FrameRangeSummary,
+    dirty: Vec<DirtySummary>,
+}
+
+impl DirtyGraphSummary {
+    fn from_dirty(source_id: u64, node_id: u64, range: FrameRange, dirty: &[DirtyRange]) -> Self {
+        Self {
+            schema_version: 1,
+            source_id,
+            node_id,
+            range: FrameRangeSummary::from_range(range),
+            dirty: dirty.iter().map(DirtySummary::from_dirty).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct DirtySummary {
+    entity: EntitySummary,
+    range: FrameRangeSummary,
+}
+
+impl DirtySummary {
+    fn from_dirty(dirty: &DirtyRange) -> Self {
+        Self {
+            entity: EntitySummary::from_entity(dirty.entity()),
+            range: FrameRangeSummary::from_range(dirty.range()),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+enum EntitySummary {
+    Node { id: u64 },
+    Pattern { id: u64 },
+    Port { id: u64 },
+    Relation { id: u64 },
+    Source { id: u64 },
+    Track { id: u64 },
+}
+
+impl EntitySummary {
+    const fn from_entity(entity: EntityId) -> Self {
+        match entity {
+            EntityId::Node(id) => Self::Node { id: id.raw() },
+            EntityId::Pattern(id) => Self::Pattern { id: id.raw() },
+            EntityId::Port(id) => Self::Port { id: id.raw() },
+            EntityId::Relation(id) => Self::Relation { id: id.raw() },
+            EntityId::Source(id) => Self::Source { id: id.raw() },
+            EntityId::Track(id) => Self::Track { id: id.raw() },
         }
     }
 }

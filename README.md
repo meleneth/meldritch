@@ -93,6 +93,12 @@ Emit scheduled events as JSON for a render range:
 cargo run -p meldritch-cli -- events-json fixtures/basic_drums.toml --pattern-id 1 --frames 48000
 ```
 
+Emit graph invalidation from a compiled source:
+
+```sh
+cargo run -p meldritch-cli -- dirty-json fixtures/basic_drums.toml --source-id 1036 --start 0 --end 48000
+```
+
 Run the standard local check suite:
 
 ```sh
