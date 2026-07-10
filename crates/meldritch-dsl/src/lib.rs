@@ -346,11 +346,11 @@ seed = 7
 
 [[samples]]
 note = 36
-path = "fixtures/audio/kick.wav"
+path = "audio/kick.wav"
 
 [[samples]]
 note = 38
-path = "fixtures/audio/snare.wav"
+path = "audio/snare.wav"
 
 [[patterns]]
 id = 1
@@ -384,8 +384,8 @@ tags = ["ghost", "probabilistic"]
         assert_eq!(
             project.samples(),
             &[
-                SampleRef::new(36, "fixtures/audio/kick.wav"),
-                SampleRef::new(38, "fixtures/audio/snare.wav"),
+                SampleRef::new(36, "audio/kick.wav"),
+                SampleRef::new(38, "audio/snare.wav"),
             ]
         );
         assert_eq!(project.patterns().len(), 1);
@@ -455,8 +455,8 @@ tags = ["ghost", "probabilistic"]
     #[test]
     fn duplicate_sample_notes_return_useful_diagnostics() {
         let input = MINIMAL_PROJECT.replace(
-            "note = 38\npath = \"fixtures/audio/snare.wav\"",
-            "note = 36\npath = \"fixtures/audio/snare.wav\"",
+            "note = 38\npath = \"audio/snare.wav\"",
+            "note = 36\npath = \"audio/snare.wav\"",
         );
         let err = parse_project(&input).unwrap_err();
         let messages = err

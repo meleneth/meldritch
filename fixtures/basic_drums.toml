@@ -6,19 +6,19 @@ seed = 11
 
 [[samples]]
 note = 36
-path = "fixtures/audio/kick.wav"
+path = "audio/kick.wav"
 
 [[samples]]
 note = 38
-path = "fixtures/audio/snare.wav"
+path = "audio/snare.wav"
 
 [[samples]]
 note = 42
-path = "fixtures/audio/hat.wav"
+path = "audio/hat.wav"
 
 [[samples]]
 note = 43
-path = "fixtures/audio/sub.wav"
+path = "audio/sub.wav"
 
 [[patterns]]
 id = 1

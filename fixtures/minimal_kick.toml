@@ -6,7 +6,7 @@ seed = 7
 
 [[samples]]
 note = 36
-path = "fixtures/audio/kick.wav"
+path = "audio/kick.wav"
 
 [[patterns]]
 id = 1

@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use meldritch_core::{FrameRange, StepIndex};
 use meldritch_render::{ArtifactCache, CacheStatus, RenderSettings};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Parser)]
 #[command(name = "meldritch")]
@@ -241,7 +241,7 @@ fn render_samples(
         .ok_or_else(|| "project has no patterns to render".to_owned())?;
     let settings =
         RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
-    let samples_by_note = load_project_samples(&project)?;
+    let samples_by_note = load_project_samples(&project, &path)?;
     let range = FrameRange::new(0, frames).map_err(|err| err.to_string())?;
     let mut block = if cache_probe {
         let mut cache = ArtifactCache::new();
@@ -347,10 +347,17 @@ fn dirty_step(path: PathBuf, step: u32, cycle: u64) -> Result<(), String> {
 
 fn load_project_samples(
     project: &meldritch_dsl::ValidatedProject,
+    project_path: &Path,
 ) -> Result<BTreeMap<u8, meldritch_audio::SampleBuffer>, String> {
     let mut samples = BTreeMap::new();
+    let base_dir = project_path.parent().unwrap_or_else(|| Path::new("."));
     for sample_ref in project.samples() {
-        let path = PathBuf::from(sample_ref.path());
+        let sample_path = PathBuf::from(sample_ref.path());
+        let path = if sample_path.is_absolute() {
+            sample_path
+        } else {
+            base_dir.join(sample_path)
+        };
         let sample = meldritch_audio::read_wav(&path)
             .map_err(|err| format!("failed to read sample {}: {err}", path.display()))?;
         samples.insert(sample_ref.note(), sample);
