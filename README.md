@@ -1,0 +1,60 @@
+# Relational TUI Groovebox
+
+This project is not “another groovebox with a terminal UI.”
+
+The thesis:
+
+> Build a TUI-first groovebox that treats sources, relationships, futures, and mix rules as first-class compositional material.
+
+Most grooveboxes sequence tracks. This one sequences relationships.
+
+The machine should:
+- Use 64-bit floating-point audio internally by default.
+- Prefer Eurorack-like patchable primitives over opaque integrated blobs.
+- Automate integrations as inspectable patch recipes when convenience matters.
+- Declare musical sources, roles, relationships, and performance rules.
+- Compile those declarations into audio/control dependency graphs.
+- Render deterministic futures across all available CPU cores.
+- Cache rendered artifacts by semantic fingerprint.
+- Pull from cache in the realtime audio path.
+- Keep the realtime path tiny, predictable, and boring.
+- Expose enough graph state that the performer can understand why the sound changed.
+
+The first public demo should not be “look, a step sequencer.”
+It should be:
+
+> A dense groove that becomes clearer, stranger, and more alive when relationship rules are enabled.
+
+## Suggested document order
+
+1. `INVARIANTS.md`
+2. `NUMERICS_AND_64BIT.md`
+3. `EURORACK_PRINCIPLES.md`
+4. `FEATURES.md`
+5. `ARCHITECTURE.md`
+6. `DSP_ALGORITHMS.md`
+7. `ROADMAP.md`
+8. `TESTING_STRATEGY.md`
+9. `CODEX_PLAN_PROMPT.md`
+
+## Initial implementation posture
+
+Build the engine in layers.
+
+Start headless. Prove:
+- clock
+- event scheduling
+- DSL parse/validate
+- graph compilation
+- deterministic offline render
+- cache keys
+- invalidation
+
+Then add:
+- audio device output
+- TUI
+- worker pool
+- speculative rendering
+- relational DSP
+
+Do not start by making a pretty grid. The grid is the cockpit. The engine is the dragon.

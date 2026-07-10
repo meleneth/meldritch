@@ -1,0 +1,15 @@
+# Rust build output
+/target/
+
+# Cargo leaves this behind after interrupted package/publish commands
+Cargo.lock.orig
+
+# Local editor and OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Local environment overrides
+.env
+.env.*
