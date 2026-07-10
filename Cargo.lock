@@ -146,6 +146,7 @@ dependencies = [
  "clap",
  "meldritch-core",
  "meldritch-dsl",
+ "meldritch-render",
 ]
 
 [[package]]

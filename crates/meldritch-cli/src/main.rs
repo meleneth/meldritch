@@ -1,4 +1,6 @@
 use clap::{Parser, Subcommand};
+use meldritch_core::FrameRange;
+use meldritch_render::RenderSettings;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -15,6 +17,14 @@ enum Command {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
     },
+    RenderClicks {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long, default_value_t = 96_000)]
+        frames: u64,
+        #[arg(long, default_value_t = 2)]
+        channels: u16,
+    },
 }
 
 fn main() {
@@ -27,6 +37,11 @@ fn main() {
 fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::Validate { project } => validate_project(project),
+        Command::RenderClicks {
+            project,
+            frames,
+            channels,
+        } => render_clicks(project, frames, channels),
     }
 }
 
@@ -47,6 +62,53 @@ fn validate_project(path: PathBuf) -> Result<(), String> {
         project.patterns().len(),
         project.tempo().bpm(),
         project.tempo().sample_rate()
+    );
+
+    Ok(())
+}
+
+fn render_clicks(path: PathBuf, frames: u64, channels: u16) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let pattern = project
+        .patterns()
+        .first()
+        .ok_or_else(|| "project has no patterns to render".to_owned())?;
+    let settings =
+        RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
+    let block = meldritch_render::render_pattern_clicks(
+        pattern,
+        project.tempo(),
+        FrameRange::new(0, frames).map_err(|err| err.to_string())?,
+        project.probability_seed(),
+        settings,
+    );
+
+    let peak = block
+        .samples()
+        .iter()
+        .fold(0.0_f64, |peak, sample| peak.max(sample.abs()));
+    let nonzero_samples = block
+        .samples()
+        .iter()
+        .filter(|sample| **sample != 0.0)
+        .count();
+    let finite = block.samples().iter().all(|sample| sample.is_finite());
+
+    println!(
+        "rendered: frames={}, channels={}, finite={}, nonzero_samples={}, peak={}",
+        block.frames(),
+        block.channels(),
+        finite,
+        nonzero_samples,
+        peak
     );
 
     Ok(())
