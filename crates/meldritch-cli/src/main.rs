@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use meldritch_core::FrameRange;
-use meldritch_render::RenderSettings;
+use meldritch_render::{ArtifactCache, CacheStatus, RenderSettings};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -29,6 +29,8 @@ enum Command {
         output: Option<PathBuf>,
         #[arg(long)]
         normalize: bool,
+        #[arg(long)]
+        cache_probe: bool,
     },
     RenderSamples {
         #[arg(value_name = "PROJECT")]
@@ -41,6 +43,8 @@ enum Command {
         output: Option<PathBuf>,
         #[arg(long)]
         normalize: bool,
+        #[arg(long)]
+        cache_probe: bool,
     },
 }
 
@@ -60,14 +64,16 @@ fn run(cli: Cli) -> Result<(), String> {
             channels,
             output,
             normalize,
-        } => render_clicks(project, frames, channels, output, normalize),
+            cache_probe,
+        } => render_clicks(project, frames, channels, output, normalize, cache_probe),
         Command::RenderSamples {
             project,
             frames,
             channels,
             output,
             normalize,
-        } => render_samples(project, frames, channels, output, normalize),
+            cache_probe,
+        } => render_samples(project, frames, channels, output, normalize, cache_probe),
     }
 }
 
@@ -99,6 +105,7 @@ fn render_clicks(
     channels: u16,
     output: Option<PathBuf>,
     normalize: bool,
+    cache_probe: bool,
 ) -> Result<(), String> {
     if let Some(output) = &output
         && output.exists()
@@ -124,13 +131,41 @@ fn render_clicks(
         .ok_or_else(|| "project has no patterns to render".to_owned())?;
     let settings =
         RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
-    let mut block = meldritch_render::render_pattern_clicks(
-        pattern,
-        project.tempo(),
-        FrameRange::new(0, frames).map_err(|err| err.to_string())?,
-        project.probability_seed(),
-        settings,
-    );
+    let range = FrameRange::new(0, frames).map_err(|err| err.to_string())?;
+    let mut block = if cache_probe {
+        let mut cache = ArtifactCache::new();
+        let first = meldritch_render::render_pattern_clicks_cached(
+            &mut cache,
+            pattern,
+            project.tempo(),
+            range,
+            project.probability_seed(),
+            settings,
+        );
+        let second = meldritch_render::render_pattern_clicks_cached(
+            &mut cache,
+            pattern,
+            project.tempo(),
+            range,
+            project.probability_seed(),
+            settings,
+        );
+        println!(
+            "cache probe: first={}, second={}, artifacts={}",
+            format_cache_status(first.status()),
+            format_cache_status(second.status()),
+            cache.len()
+        );
+        second.into_block()
+    } else {
+        meldritch_render::render_pattern_clicks(
+            pattern,
+            project.tempo(),
+            range,
+            project.probability_seed(),
+            settings,
+        )
+    };
     if normalize {
         block = block.normalized_to_peak(1.0);
     }
@@ -167,6 +202,7 @@ fn render_samples(
     channels: u16,
     output: Option<PathBuf>,
     normalize: bool,
+    cache_probe: bool,
 ) -> Result<(), String> {
     if let Some(output) = &output
         && output.exists()
@@ -193,14 +229,44 @@ fn render_samples(
     let settings =
         RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
     let samples_by_note = load_project_samples(&project)?;
-    let mut block = meldritch_render::render_pattern_samples(
-        pattern,
-        project.tempo(),
-        FrameRange::new(0, frames).map_err(|err| err.to_string())?,
-        project.probability_seed(),
-        settings,
-        &samples_by_note,
-    );
+    let range = FrameRange::new(0, frames).map_err(|err| err.to_string())?;
+    let mut block = if cache_probe {
+        let mut cache = ArtifactCache::new();
+        let first = meldritch_render::render_pattern_samples_cached(
+            &mut cache,
+            pattern,
+            project.tempo(),
+            range,
+            project.probability_seed(),
+            settings,
+            &samples_by_note,
+        );
+        let second = meldritch_render::render_pattern_samples_cached(
+            &mut cache,
+            pattern,
+            project.tempo(),
+            range,
+            project.probability_seed(),
+            settings,
+            &samples_by_note,
+        );
+        println!(
+            "cache probe: first={}, second={}, artifacts={}",
+            format_cache_status(first.status()),
+            format_cache_status(second.status()),
+            cache.len()
+        );
+        second.into_block()
+    } else {
+        meldritch_render::render_pattern_samples(
+            pattern,
+            project.tempo(),
+            range,
+            project.probability_seed(),
+            settings,
+            &samples_by_note,
+        )
+    };
     if normalize {
         block = block.normalized_to_peak(1.0);
     }
@@ -229,6 +295,13 @@ fn render_samples(
     }
 
     Ok(())
+}
+
+fn format_cache_status(status: CacheStatus) -> &'static str {
+    match status {
+        CacheStatus::Hit => "hit",
+        CacheStatus::Miss => "miss",
+    }
 }
 
 fn load_project_samples(
