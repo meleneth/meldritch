@@ -86,3 +86,9 @@ Emit scheduled events as JSON for a render range:
 ```sh
 cargo run -p meldritch-cli -- events-json fixtures/basic_drums.toml --pattern-id 1 --frames 48000
 ```
+
+Run the standard local check suite:
+
+```sh
+bash tools/check.sh
+```
