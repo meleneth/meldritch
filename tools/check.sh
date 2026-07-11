@@ -29,12 +29,14 @@ run cargo run -p meldritch-cli -- samples-json fixtures/basic_drums.toml
 run cargo run -p meldritch-cli -- events-json fixtures/basic_drums.toml --pattern-id 1 --frames 48000
 run cargo run -p meldritch-cli -- events-json fixtures/explicit_relations.toml --pattern-id 7 --frames 48000
 run cargo run -p meldritch-cli -- control-events-json fixtures/control_relations.toml --pattern-id 8 --frames 48000
+run cargo run -p meldritch-cli -- control-events-check fixtures/control_relations.toml --pattern-id 8 --frames 48000 --events 1 --controller-patterns 1 --active-events 1 --min-active-controllers 1
 run cargo run -p meldritch-cli -- dirty-json fixtures/basic_drums.toml --source-id 1036 --start 0 --end 48000
 run cargo run -p meldritch-cli -- dirty-note-json fixtures/basic_drums.toml --note 36 --start 0 --end 48000
 run cargo run -p meldritch-cli -- dirty-note-json fixtures/explicit_relations.toml --note 36 --start 0 --end 48000
 run cargo run -p meldritch-cli -- dirty-pattern-json fixtures/control_relations.toml --pattern-id 7 --start 0 --end 48000
 run cargo run -p meldritch-cli -- dirty-step fixtures/basic_drums.toml --pattern-id 1 --step 4 --cycle 2
 run bash tools/control-events.sh
+run bash tools/control-events-check.sh
 run bash tools/relations.sh
 run bash tools/dirty-pattern.sh
 rm -f artifacts/check_render.wav artifacts/check_render.manifest.json

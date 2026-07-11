@@ -57,6 +57,22 @@ enum Command {
         #[arg(long, default_value_t = 96_000)]
         frames: u64,
     },
+    ControlEventsCheck {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long)]
+        pattern_id: u64,
+        #[arg(long, default_value_t = 96_000)]
+        frames: u64,
+        #[arg(long)]
+        events: Option<usize>,
+        #[arg(long)]
+        controller_patterns: Option<usize>,
+        #[arg(long)]
+        active_events: Option<usize>,
+        #[arg(long)]
+        min_active_controllers: Option<usize>,
+    },
     DirtyJson {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -178,6 +194,25 @@ fn run(cli: Cli) -> Result<(), String> {
             pattern_id,
             frames,
         } => control_events_json(project, pattern_id, frames),
+        Command::ControlEventsCheck {
+            project,
+            pattern_id,
+            frames,
+            events,
+            controller_patterns,
+            active_events,
+            min_active_controllers,
+        } => control_events_check(
+            project,
+            ControlEventsCheckOptions {
+                pattern_id,
+                frames,
+                events,
+                controller_patterns,
+                active_events,
+                min_active_controllers,
+            },
+        ),
         Command::DirtyJson {
             project,
             source_id,
@@ -509,6 +544,19 @@ where
     }
 }
 
+fn ensure_at_least<T>(name: &str, actual: T, minimum: T) -> Result<(), String>
+where
+    T: std::fmt::Display + PartialOrd,
+{
+    if actual >= minimum {
+        Ok(())
+    } else {
+        Err(format!(
+            "manifest {name} mismatch: expected at least {minimum}, got {actual}"
+        ))
+    }
+}
+
 fn compile_project_file(path: &Path) -> Result<meldritch_dsl::CompiledProject, String> {
     let input = std::fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
@@ -580,7 +628,61 @@ fn events_json(path: PathBuf, pattern_id: Option<u64>, frames: u64) -> Result<()
 }
 
 fn control_events_json(path: PathBuf, pattern_id: u64, frames: u64) -> Result<(), String> {
-    let input = std::fs::read_to_string(&path)
+    let output = build_control_event_schedule(&path, pattern_id, frames)?;
+    let json = serde_json::to_string_pretty(&output)
+        .map_err(|err| format!("failed to encode control event schedule: {err}"))?;
+    println!("{json}");
+
+    Ok(())
+}
+
+struct ControlEventsCheckOptions {
+    pattern_id: u64,
+    frames: u64,
+    events: Option<usize>,
+    controller_patterns: Option<usize>,
+    active_events: Option<usize>,
+    min_active_controllers: Option<usize>,
+}
+
+fn control_events_check(path: PathBuf, options: ControlEventsCheckOptions) -> Result<(), String> {
+    let output = build_control_event_schedule(&path, options.pattern_id, options.frames)?;
+
+    if let Some(expected) = options.events {
+        ensure_equal("control event count", output.events.len(), expected)?;
+    }
+    if let Some(expected) = options.controller_patterns {
+        ensure_equal(
+            "controller pattern count",
+            output.controller_patterns.len(),
+            expected,
+        )?;
+    }
+    if let Some(expected) = options.active_events {
+        ensure_equal(
+            "active control event count",
+            output.active_event_count,
+            expected,
+        )?;
+    }
+    if let Some(expected) = options.min_active_controllers {
+        ensure_at_least(
+            "max active controllers",
+            output.max_active_controller_count,
+            expected,
+        )?;
+    }
+
+    println!("control events ok: {}", path.display());
+    Ok(())
+}
+
+fn build_control_event_schedule(
+    path: &Path,
+    pattern_id: u64,
+    frames: u64,
+) -> Result<ControlEventSchedule, String> {
+    let input = std::fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
     let project = meldritch_dsl::parse_project(&input).map_err(|err| {
         err.diagnostics()
@@ -628,17 +730,12 @@ fn control_events_json(path: PathBuf, pattern_id: u64, frames: u64) -> Result<()
         });
     }
 
-    let output = ControlEventSchedule::from_events(
+    Ok(ControlEventSchedule::from_events(
         pattern.id().raw(),
         range,
         &target_events,
         &controller_events,
-    );
-    let json = serde_json::to_string_pretty(&output)
-        .map_err(|err| format!("failed to encode control event schedule: {err}"))?;
-    println!("{json}");
-
-    Ok(())
+    ))
 }
 
 fn incoming_controller_patterns(
@@ -1475,6 +1572,8 @@ struct ControlEventSchedule {
     pattern_id: u64,
     range: FrameRangeSummary,
     controller_patterns: Vec<u64>,
+    active_event_count: usize,
+    max_active_controller_count: usize,
     events: Vec<ControlledEventSummary>,
 }
 
@@ -1485,6 +1584,20 @@ impl ControlEventSchedule {
         events: &[Event],
         controllers: &[ControllerEvents],
     ) -> Self {
+        let events = events
+            .iter()
+            .map(|event| ControlledEventSummary::from_event(event, controllers))
+            .collect::<Vec<_>>();
+        let active_event_count = events
+            .iter()
+            .filter(|event| event.active_controller_count > 0)
+            .count();
+        let max_active_controller_count = events
+            .iter()
+            .map(|event| event.active_controller_count)
+            .max()
+            .unwrap_or(0);
+
         Self {
             schema_version: 1,
             pattern_id,
@@ -1493,10 +1606,9 @@ impl ControlEventSchedule {
                 .iter()
                 .map(|controller| controller.pattern.raw())
                 .collect(),
-            events: events
-                .iter()
-                .map(|event| ControlledEventSummary::from_event(event, controllers))
-                .collect(),
+            active_event_count,
+            max_active_controller_count,
+            events,
         }
     }
 }

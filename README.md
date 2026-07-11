@@ -147,6 +147,12 @@ Emit target events with incoming controller activity:
 bash tools/control-events.sh fixtures/control_relations.toml
 ```
 
+Assert expected controller activity:
+
+```sh
+bash tools/control-events-check.sh fixtures/control_relations.toml
+```
+
 Emit graph invalidation from a pattern source:
 
 ```sh
