@@ -47,8 +47,10 @@ rm -f artifacts/check_control_render.wav artifacts/check_control_render.manifest
 run cargo run -p meldritch-cli -- render-samples fixtures/control_relations.toml --pattern-id 8 --frames 48000 --channels 2 --output artifacts/check_control_render.wav --manifest artifacts/check_control_render.manifest.json --normalize --cache-probe
 run cargo run -p meldritch-cli -- manifest-summary-json artifacts/check_control_render.manifest.json
 run cargo run -p meldritch-cli -- manifest-check artifacts/check_control_render.manifest.json --pattern-id 8 --sample-sources 1 --relations 2 --relation-kind SampleToPattern=1 --relation-kind PatternControlsPattern=1 --finite --nonzero
-rm -f artifacts/check_controlled_render.wav
-run cargo run -p meldritch-cli -- render-controlled-samples fixtures/control_relations.toml --pattern-id 8 --frames 48000 --channels 2 --active-scale 0.5 --output artifacts/check_controlled_render.wav
+rm -f artifacts/check_controlled_render.wav artifacts/check_controlled_render.manifest.json
+run cargo run -p meldritch-cli -- render-controlled-samples fixtures/control_relations.toml --pattern-id 8 --frames 48000 --channels 2 --active-scale 0.5 --output artifacts/check_controlled_render.wav --manifest artifacts/check_controlled_render.manifest.json
+run cargo run -p meldritch-cli -- manifest-summary-json artifacts/check_controlled_render.manifest.json
+run cargo run -p meldritch-cli -- manifest-check artifacts/check_controlled_render.manifest.json --pattern-id 8 --sample-sources 1 --relations 2 --relation-kind SampleToPattern=1 --relation-kind PatternControlsPattern=1 --finite --nonzero --active-scale 0.5 --active-events 1 --max-active-controllers 1
 MELDRITCH_OVERWRITE=1 run bash tools/render-control-fixture.sh
 MELDRITCH_OVERWRITE=1 run bash tools/render-controlled-fixture.sh
 run bash tools/manifest-summary.sh

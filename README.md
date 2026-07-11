@@ -85,6 +85,8 @@ Render the control-relation fixture with active controller velocity scaling:
 bash tools/render-controlled-fixture.sh
 ```
 
+The controlled render script also writes a manifest with the active scale and controller activity summary.
+
 Summarize a render manifest:
 
 ```sh

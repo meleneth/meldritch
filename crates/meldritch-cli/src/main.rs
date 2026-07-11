@@ -148,6 +148,8 @@ enum Command {
         channels: u16,
         #[arg(long, value_name = "WAV")]
         output: Option<PathBuf>,
+        #[arg(long, value_name = "JSON")]
+        manifest: Option<PathBuf>,
         #[arg(long, default_value_t = 0.5)]
         active_scale: f64,
         #[arg(long)]
@@ -172,6 +174,12 @@ enum Command {
         finite: bool,
         #[arg(long)]
         nonzero: bool,
+        #[arg(long)]
+        active_scale: Option<f64>,
+        #[arg(long)]
+        active_events: Option<usize>,
+        #[arg(long)]
+        max_active_controllers: Option<usize>,
     },
     DirtyStep {
         #[arg(value_name = "PROJECT")]
@@ -291,6 +299,7 @@ fn run(cli: Cli) -> Result<(), String> {
             frames,
             channels,
             output,
+            manifest,
             active_scale,
             normalize,
         } => render_controlled_samples(
@@ -300,6 +309,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 frames,
                 channels,
                 output,
+                manifest,
                 active_scale,
                 normalize,
             },
@@ -313,6 +323,9 @@ fn run(cli: Cli) -> Result<(), String> {
             relation_kinds,
             finite,
             nonzero,
+            active_scale,
+            active_events,
+            max_active_controllers,
         } => manifest_check(
             manifest,
             ManifestCheckOptions {
@@ -322,6 +335,9 @@ fn run(cli: Cli) -> Result<(), String> {
                 relation_kinds,
                 finite,
                 nonzero,
+                active_scale,
+                active_events,
+                max_active_controllers,
             },
         ),
         Command::DirtyStep {
@@ -517,6 +533,9 @@ struct ManifestCheckOptions {
     relation_kinds: Vec<String>,
     finite: bool,
     nonzero: bool,
+    active_scale: Option<f64>,
+    active_events: Option<usize>,
+    max_active_controllers: Option<usize>,
 }
 
 fn manifest_check(path: PathBuf, options: ManifestCheckOptions) -> Result<(), String> {
@@ -545,6 +564,32 @@ fn manifest_check(path: PathBuf, options: ManifestCheckOptions) -> Result<(), St
     }
     if options.nonzero && summary.result.nonzero_samples == 0 {
         return Err("manifest result has no nonzero samples".to_owned());
+    }
+    if let Some(expected) = options.active_scale {
+        let Some(control) = &summary.control else {
+            return Err("manifest has no control summary".to_owned());
+        };
+        ensure_float_close("control active_scale", control.active_scale, expected)?;
+    }
+    if let Some(expected) = options.active_events {
+        let Some(control) = &summary.control else {
+            return Err("manifest has no control summary".to_owned());
+        };
+        ensure_equal(
+            "control active_event_count",
+            control.active_event_count,
+            expected,
+        )?;
+    }
+    if let Some(expected) = options.max_active_controllers {
+        let Some(control) = &summary.control else {
+            return Err("manifest has no control summary".to_owned());
+        };
+        ensure_equal(
+            "control max_active_controller_count",
+            control.max_active_controller_count,
+            expected,
+        )?;
     }
 
     println!("manifest ok: {}", path.display());
@@ -588,6 +633,16 @@ where
     } else {
         Err(format!(
             "manifest {name} mismatch: expected at least {minimum}, got {actual}"
+        ))
+    }
+}
+
+fn ensure_float_close(name: &str, actual: f64, expected: f64) -> Result<(), String> {
+    if (actual - expected).abs() <= 1.0e-9 {
+        Ok(())
+    } else {
+        Err(format!(
+            "manifest {name} mismatch: expected {expected}, got {actual}"
         ))
     }
 }
@@ -1162,6 +1217,7 @@ struct RenderManifest {
     artifact: ArtifactSummary,
     graph: RenderGraphSummary,
     samples: Vec<RenderSampleSummary>,
+    control: Option<RenderControlSummary>,
     result: RenderResultSummary,
 }
 
@@ -1177,6 +1233,7 @@ struct RenderManifestInput<'a> {
     artifact_key: meldritch_render::ArtifactKey,
     compiled: &'a meldritch_dsl::CompiledProject,
     samples_by_note: &'a BTreeMap<u8, meldritch_audio::SampleBuffer>,
+    control: Option<RenderControlSummary>,
     peak: f64,
     nonzero_samples: usize,
     finite: bool,
@@ -1202,6 +1259,7 @@ impl RenderManifest {
                 .iter()
                 .map(|(note, sample)| RenderSampleSummary::from_sample(*note, sample))
                 .collect(),
+            control: input.control,
             result: RenderResultSummary {
                 peak: input.peak,
                 nonzero_samples: input.nonzero_samples,
@@ -1219,6 +1277,7 @@ struct RenderManifestDiagnostics {
     sample_source_count: usize,
     relation_count: usize,
     relation_kinds: BTreeMap<String, usize>,
+    control: Option<RenderControlSummary>,
     result: RenderResultSummary,
 }
 
@@ -1241,6 +1300,7 @@ impl RenderManifestDiagnostics {
             sample_source_count,
             relation_count: relations.len(),
             relation_kinds,
+            control: RenderControlSummary::from_manifest(manifest)?,
             result: RenderResultSummary {
                 peak: required_f64(manifest, &["result", "peak"])?,
                 nonzero_samples: required_u64(manifest, &["result", "nonzero_samples"])?
@@ -1249,6 +1309,54 @@ impl RenderManifestDiagnostics {
                 finite: required_bool(manifest, &["result", "finite"])?,
             },
         })
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct RenderControlSummary {
+    active_scale: f64,
+    active_event_count: usize,
+    max_active_controller_count: usize,
+    controller_patterns: Vec<u64>,
+}
+
+impl RenderControlSummary {
+    fn from_schedule(active_scale: f64, schedule: &ControlEventSchedule) -> Self {
+        Self {
+            active_scale,
+            active_event_count: schedule.active_event_count,
+            max_active_controller_count: schedule.max_active_controller_count,
+            controller_patterns: schedule.controller_patterns.clone(),
+        }
+    }
+
+    fn from_manifest(manifest: &serde_json::Value) -> Result<Option<Self>, String> {
+        let Some(control) = manifest.get("control") else {
+            return Ok(None);
+        };
+        if control.is_null() {
+            return Ok(None);
+        }
+
+        Ok(Some(Self {
+            active_scale: required_f64(control, &["active_scale"])?,
+            active_event_count: required_u64(control, &["active_event_count"])?
+                .try_into()
+                .map_err(|_| "manifest control active_event_count is too large".to_owned())?,
+            max_active_controller_count: required_u64(control, &["max_active_controller_count"])?
+                .try_into()
+                .map_err(|_| {
+                    "manifest control max_active_controller_count is too large".to_owned()
+                })?,
+            controller_patterns: required_array(control, &["controller_patterns"])?
+                .iter()
+                .map(|value| {
+                    value.as_u64().ok_or_else(|| {
+                        "manifest control controller_patterns must be unsigned integers".to_owned()
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        }))
     }
 }
 
@@ -1833,6 +1941,7 @@ struct RenderControlledSamplesOptions {
     frames: u64,
     channels: u16,
     output: Option<PathBuf>,
+    manifest: Option<PathBuf>,
     active_scale: f64,
     normalize: bool,
 }
@@ -1967,6 +2076,7 @@ fn render_samples(path: PathBuf, options: RenderSamplesOptions) -> Result<(), St
             artifact_key,
             compiled: &compiled,
             samples_by_note: &samples_by_note,
+            control: None,
             peak,
             nonzero_samples,
             finite,
@@ -1993,6 +2103,14 @@ fn render_controlled_samples(
             output.display()
         ));
     }
+    if let Some(manifest) = &options.manifest
+        && manifest.exists()
+    {
+        return Err(format!(
+            "manifest {} already exists; choose a new path",
+            manifest.display()
+        ));
+    }
     if !options.active_scale.is_finite() || options.active_scale < 0.0 {
         return Err(format!(
             "active scale must be finite and non-negative, got {}",
@@ -2010,11 +2128,26 @@ fn render_controlled_samples(
             .join("\n")
     })?;
     let pattern = select_pattern(&project, Some(options.pattern_id), "render")?;
+    let compiled = meldritch_dsl::compile_project(&project).map_err(|err| {
+        err.diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
     let settings = RenderSettings::new(options.channels)
         .map_err(|err| format!("invalid render settings: {err:?}"))?;
     let samples_by_note = load_project_samples(&project, &path)?;
     let range = FrameRange::new(0, options.frames).map_err(|err| err.to_string())?;
     let control = build_control_event_schedule(&path, options.pattern_id, options.frames)?;
+    let artifact_key = meldritch_render::pattern_sample_artifact_key(
+        pattern,
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        settings,
+        &samples_by_note,
+    );
     let active_event_starts = control
         .events
         .iter()
@@ -2064,6 +2197,34 @@ fn render_controlled_samples(
         meldritch_audio::write_wav_f32(output, &block, project.tempo().sample_rate())
             .map_err(|err| format!("failed to write {}: {err}", output.display()))?;
         println!("wrote: {}", output.display());
+    }
+
+    if let Some(manifest) = options.manifest {
+        let summary = RenderManifest::from_render(RenderManifestInput {
+            project_path: &path,
+            output_path: options.output.as_deref(),
+            pattern,
+            range,
+            channels: options.channels,
+            normalize: options.normalize,
+            cache_probe: false,
+            cache_probe_summary: None,
+            artifact_key,
+            compiled: &compiled,
+            samples_by_note: &samples_by_note,
+            control: Some(RenderControlSummary::from_schedule(
+                options.active_scale,
+                &control,
+            )),
+            peak,
+            nonzero_samples,
+            finite,
+        })?;
+        let json = serde_json::to_string_pretty(&summary)
+            .map_err(|err| format!("failed to encode render manifest: {err}"))?;
+        std::fs::write(&manifest, json)
+            .map_err(|err| format!("failed to write {}: {err}", manifest.display()))?;
+        println!("wrote manifest: {}", manifest.display());
     }
 
     Ok(())
