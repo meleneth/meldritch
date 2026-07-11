@@ -5,7 +5,9 @@
 //! internal `f64` audio blocks without touching device I/O.
 
 use meldritch_audio::{AudioBlock, SampleBuffer};
-use meldritch_core::{FrameRange, Pattern, PatternId, ProbabilitySeed, Sample, SampleRate, Tempo};
+use meldritch_core::{
+    Event, FrameRange, Pattern, PatternId, ProbabilitySeed, Sample, SampleRate, Tempo,
+};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -298,6 +300,48 @@ pub fn render_pattern_samples(
     block
 }
 
+pub fn render_pattern_samples_with_event_gain<F>(
+    pattern: &Pattern,
+    tempo: Tempo,
+    range: FrameRange,
+    probability_seed: ProbabilitySeed,
+    settings: RenderSettings,
+    samples_by_note: &BTreeMap<u8, SampleBuffer>,
+    mut event_gain: F,
+) -> AudioBlock
+where
+    F: FnMut(&Event) -> Sample,
+{
+    let frames = range
+        .end()
+        .saturating_sub(range.start())
+        .min(u64::from(u32::MAX)) as u32;
+    let mut block = AudioBlock::silent(settings.channels(), frames);
+    let mut events = Vec::new();
+    pattern.events_between(tempo, range, probability_seed, &mut events);
+
+    for event in events {
+        let Some(sample) = samples_by_note.get(&event.note()) else {
+            continue;
+        };
+        let Some(relative_frame) = event.range().start().checked_sub(range.start()) else {
+            continue;
+        };
+        if relative_frame >= u64::from(frames) {
+            continue;
+        }
+
+        mix_sample(
+            &mut block,
+            relative_frame as u32,
+            sample,
+            event.velocity() * event_gain(&event),
+        );
+    }
+
+    block
+}
+
 pub fn render_pattern_samples_cached(
     cache: &mut ArtifactCache,
     pattern: &Pattern,
@@ -468,6 +512,35 @@ mod tests {
         );
 
         assert_eq!(block.samples(), &[0.5, 0.5, 0.25, 0.25, 0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn renders_pattern_events_with_event_gain() {
+        let mut pattern = Pattern::new(PatternId::new(1), 16, 4).unwrap();
+        pattern
+            .set_step(
+                TrackId::new(1),
+                StepIndex::new(0),
+                Step::new(36).with_velocity(0.5),
+            )
+            .unwrap();
+        let mut samples_by_note = BTreeMap::new();
+        samples_by_note.insert(36, SampleBuffer::new(1, 48_000, vec![1.0, 0.5]));
+
+        let block = render_pattern_samples_with_event_gain(
+            &pattern,
+            tempo(),
+            FrameRange::new(0, 4).unwrap(),
+            ProbabilitySeed::new(0),
+            RenderSettings::new(2).unwrap(),
+            &samples_by_note,
+            |_| 0.25,
+        );
+
+        assert_eq!(
+            block.samples(),
+            &[0.125, 0.125, 0.0625, 0.0625, 0.0, 0.0, 0.0, 0.0]
+        );
     }
 
     #[test]

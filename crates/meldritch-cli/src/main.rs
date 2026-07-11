@@ -137,6 +137,22 @@ enum Command {
         #[arg(long)]
         cache_probe: bool,
     },
+    RenderControlledSamples {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long)]
+        pattern_id: u64,
+        #[arg(long, default_value_t = 96_000)]
+        frames: u64,
+        #[arg(long, default_value_t = 2)]
+        channels: u16,
+        #[arg(long, value_name = "WAV")]
+        output: Option<PathBuf>,
+        #[arg(long, default_value_t = 0.5)]
+        active_scale: f64,
+        #[arg(long)]
+        normalize: bool,
+    },
     ManifestSummaryJson {
         #[arg(value_name = "MANIFEST")]
         manifest: PathBuf,
@@ -267,6 +283,25 @@ fn run(cli: Cli) -> Result<(), String> {
                 manifest,
                 normalize,
                 cache_probe,
+            },
+        ),
+        Command::RenderControlledSamples {
+            project,
+            pattern_id,
+            frames,
+            channels,
+            output,
+            active_scale,
+            normalize,
+        } => render_controlled_samples(
+            project,
+            RenderControlledSamplesOptions {
+                pattern_id,
+                frames,
+                channels,
+                output,
+                active_scale,
+                normalize,
             },
         ),
         Command::ManifestSummaryJson { manifest } => manifest_summary_json(manifest),
@@ -1793,6 +1828,15 @@ struct RenderSamplesOptions {
     cache_probe: bool,
 }
 
+struct RenderControlledSamplesOptions {
+    pattern_id: u64,
+    frames: u64,
+    channels: u16,
+    output: Option<PathBuf>,
+    active_scale: f64,
+    normalize: bool,
+}
+
 fn render_samples(path: PathBuf, options: RenderSamplesOptions) -> Result<(), String> {
     if let Some(output) = &options.output
         && output.exists()
@@ -1932,6 +1976,94 @@ fn render_samples(path: PathBuf, options: RenderSamplesOptions) -> Result<(), St
         std::fs::write(&manifest, json)
             .map_err(|err| format!("failed to write {}: {err}", manifest.display()))?;
         println!("wrote manifest: {}", manifest.display());
+    }
+
+    Ok(())
+}
+
+fn render_controlled_samples(
+    path: PathBuf,
+    options: RenderControlledSamplesOptions,
+) -> Result<(), String> {
+    if let Some(output) = &options.output
+        && output.exists()
+    {
+        return Err(format!(
+            "output {} already exists; choose a new path",
+            output.display()
+        ));
+    }
+    if !options.active_scale.is_finite() || options.active_scale < 0.0 {
+        return Err(format!(
+            "active scale must be finite and non-negative, got {}",
+            options.active_scale
+        ));
+    }
+
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let pattern = select_pattern(&project, Some(options.pattern_id), "render")?;
+    let settings = RenderSettings::new(options.channels)
+        .map_err(|err| format!("invalid render settings: {err:?}"))?;
+    let samples_by_note = load_project_samples(&project, &path)?;
+    let range = FrameRange::new(0, options.frames).map_err(|err| err.to_string())?;
+    let control = build_control_event_schedule(&path, options.pattern_id, options.frames)?;
+    let active_event_starts = control
+        .events
+        .iter()
+        .filter(|event| event.active_controller_count > 0)
+        .map(|event| event.event.range.start)
+        .collect::<BTreeSet<_>>();
+
+    let mut block = meldritch_render::render_pattern_samples_with_event_gain(
+        pattern,
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        settings,
+        &samples_by_note,
+        |event| {
+            if active_event_starts.contains(&event.range().start()) {
+                options.active_scale
+            } else {
+                1.0
+            }
+        },
+    );
+    if options.normalize {
+        block = block.normalized_to_peak(1.0);
+    }
+
+    let peak = block.peak_abs();
+    let nonzero_samples = block
+        .samples()
+        .iter()
+        .filter(|sample| **sample != 0.0)
+        .count();
+    let finite = block.samples().iter().all(|sample| sample.is_finite());
+
+    println!(
+        "rendered controlled samples: frames={}, channels={}, finite={}, nonzero_samples={}, peak={}, active_scale={}, active_events={}",
+        block.frames(),
+        block.channels(),
+        finite,
+        nonzero_samples,
+        peak,
+        options.active_scale,
+        control.active_event_count
+    );
+
+    if let Some(output) = &options.output {
+        meldritch_audio::write_wav_f32(output, &block, project.tempo().sample_rate())
+            .map_err(|err| format!("failed to write {}: {err}", output.display()))?;
+        println!("wrote: {}", output.display());
     }
 
     Ok(())

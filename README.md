@@ -79,6 +79,12 @@ Render the control-relation fixture and manifest:
 bash tools/render-control-fixture.sh
 ```
 
+Render the control-relation fixture with active controller velocity scaling:
+
+```sh
+bash tools/render-controlled-fixture.sh
+```
+
 Summarize a render manifest:
 
 ```sh
