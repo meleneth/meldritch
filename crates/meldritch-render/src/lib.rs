@@ -8,7 +8,11 @@ use meldritch_audio::{AudioBlock, SampleBuffer};
 use meldritch_core::{
     Event, FrameRange, Pattern, PatternId, ProbabilitySeed, Sample, SampleRate, Tempo,
 };
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::collections::BinaryHeap;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread::{self, JoinHandle};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RenderSettings {
@@ -124,6 +128,262 @@ impl ArtifactCache {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RenderPriority {
+    Hot,
+    Warm,
+    Cold,
+}
+
+impl RenderPriority {
+    const fn rank(self) -> u8 {
+        match self {
+            Self::Hot => 3,
+            Self::Warm => 2,
+            Self::Cold => 1,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WorkerDiagnostics {
+    pub queued_jobs: usize,
+    pub active_jobs: usize,
+    pub completed_jobs: usize,
+}
+
+type RenderTask = Box<dyn FnOnce() -> AudioBlock + Send + 'static>;
+
+struct RenderJob {
+    key: ArtifactKey,
+    priority: RenderPriority,
+    sequence: u64,
+    task: RenderTask,
+}
+
+impl RenderJob {
+    fn new(key: ArtifactKey, priority: RenderPriority, sequence: u64, task: RenderTask) -> Self {
+        Self {
+            key,
+            priority,
+            sequence,
+            task,
+        }
+    }
+}
+
+impl Eq for RenderJob {}
+
+impl PartialEq for RenderJob {
+    fn eq(&self, other: &Self) -> bool {
+        self.priority == other.priority && self.sequence == other.sequence && self.key == other.key
+    }
+}
+
+impl Ord for RenderJob {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.priority
+            .rank()
+            .cmp(&other.priority.rank())
+            .then_with(|| other.sequence.cmp(&self.sequence))
+            .then_with(|| self.key.cmp(&other.key))
+    }
+}
+
+impl PartialOrd for RenderJob {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Default)]
+struct RenderJobQueue {
+    jobs: BinaryHeap<RenderJob>,
+    next_sequence: u64,
+}
+
+impl RenderJobQueue {
+    fn push(&mut self, key: ArtifactKey, priority: RenderPriority, task: RenderTask) {
+        let sequence = self.next_sequence;
+        self.next_sequence = self.next_sequence.wrapping_add(1);
+        self.jobs
+            .push(RenderJob::new(key, priority, sequence, task));
+    }
+
+    fn pop(&mut self) -> Option<RenderJob> {
+        self.jobs.pop()
+    }
+
+    fn len(&self) -> usize {
+        self.jobs.len()
+    }
+}
+
+#[derive(Default)]
+struct WorkerState {
+    queue: RenderJobQueue,
+    active_jobs: usize,
+    completed_jobs: usize,
+    shutdown: bool,
+}
+
+impl WorkerState {
+    fn diagnostics(&self) -> WorkerDiagnostics {
+        WorkerDiagnostics {
+            queued_jobs: self.queue.len(),
+            active_jobs: self.active_jobs,
+            completed_jobs: self.completed_jobs,
+        }
+    }
+}
+
+#[derive(Default)]
+struct WorkerShared {
+    state: Mutex<WorkerState>,
+    cache: Mutex<ArtifactCache>,
+    has_work: Condvar,
+    idle: Condvar,
+}
+
+pub struct RenderWorkerPool {
+    shared: Arc<WorkerShared>,
+    workers: Vec<JoinHandle<()>>,
+}
+
+impl RenderWorkerPool {
+    pub fn new(worker_count: usize) -> Result<Self, RenderWorkerPoolError> {
+        if worker_count == 0 {
+            return Err(RenderWorkerPoolError::ZeroWorkers);
+        }
+
+        let shared = Arc::new(WorkerShared::default());
+        let workers = (0..worker_count)
+            .map(|_| spawn_render_worker(Arc::clone(&shared)))
+            .collect();
+
+        Ok(Self { shared, workers })
+    }
+
+    pub fn submit<F>(&self, key: ArtifactKey, priority: RenderPriority, task: F)
+    where
+        F: FnOnce() -> AudioBlock + Send + 'static,
+    {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .expect("worker state lock poisoned");
+        state.queue.push(key, priority, Box::new(task));
+        self.shared.has_work.notify_one();
+    }
+
+    pub fn wait_until_idle(&self) {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .expect("worker state lock poisoned");
+        while state.active_jobs != 0 || state.queue.len() != 0 {
+            state = self
+                .shared
+                .idle
+                .wait(state)
+                .expect("worker state lock poisoned");
+        }
+    }
+
+    #[must_use]
+    pub fn diagnostics(&self) -> WorkerDiagnostics {
+        self.shared
+            .state
+            .lock()
+            .expect("worker state lock poisoned")
+            .diagnostics()
+    }
+
+    #[must_use]
+    pub fn cache_len(&self) -> usize {
+        self.shared
+            .cache
+            .lock()
+            .expect("artifact cache lock poisoned")
+            .len()
+    }
+
+    #[must_use]
+    pub fn cached_artifact(&self, key: ArtifactKey) -> Option<AudioBlock> {
+        self.shared
+            .cache
+            .lock()
+            .expect("artifact cache lock poisoned")
+            .get(key)
+            .cloned()
+    }
+
+    fn shutdown(&mut self) {
+        {
+            let mut state = self
+                .shared
+                .state
+                .lock()
+                .expect("worker state lock poisoned");
+            state.shutdown = true;
+            self.shared.has_work.notify_all();
+        }
+
+        for worker in self.workers.drain(..) {
+            worker.join().expect("render worker panicked");
+        }
+    }
+}
+
+impl Drop for RenderWorkerPool {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RenderWorkerPoolError {
+    ZeroWorkers,
+}
+
+fn spawn_render_worker(shared: Arc<WorkerShared>) -> JoinHandle<()> {
+    thread::spawn(move || {
+        loop {
+            let job = {
+                let mut state = shared.state.lock().expect("worker state lock poisoned");
+                loop {
+                    if let Some(job) = state.queue.pop() {
+                        state.active_jobs += 1;
+                        break job;
+                    }
+                    if state.shutdown {
+                        return;
+                    }
+                    state = shared
+                        .has_work
+                        .wait(state)
+                        .expect("worker state lock poisoned");
+                }
+            };
+
+            let block = (job.task)();
+            shared
+                .cache
+                .lock()
+                .expect("artifact cache lock poisoned")
+                .insert(job.key, block);
+
+            let mut state = shared.state.lock().expect("worker state lock poisoned");
+            state.active_jobs -= 1;
+            state.completed_jobs += 1;
+            if state.active_jobs == 0 && state.queue.len() == 0 {
+                shared.idle.notify_all();
+            }
+        }
+    })
+}
 impl ArtifactKey {
     #[must_use]
     pub const fn pattern(self) -> PatternId {
@@ -680,5 +940,75 @@ mod tests {
         );
 
         assert_ne!(first.fingerprint(), changed.fingerprint());
+    }
+    fn artifact_key(raw: u64) -> ArtifactKey {
+        ArtifactKey {
+            pattern: PatternId::new(raw),
+            range: FrameRange::new(raw, raw + 1).unwrap(),
+            sample_rate: 48_000,
+            fingerprint: Fingerprint::new(raw),
+        }
+    }
+
+    #[test]
+    fn render_job_queue_runs_hot_jobs_before_cold_jobs() {
+        let mut queue = RenderJobQueue::default();
+        queue.push(
+            artifact_key(1),
+            RenderPriority::Cold,
+            Box::new(|| AudioBlock::silent(1, 1)),
+        );
+        queue.push(
+            artifact_key(2),
+            RenderPriority::Hot,
+            Box::new(|| AudioBlock::silent(1, 1)),
+        );
+        queue.push(
+            artifact_key(3),
+            RenderPriority::Warm,
+            Box::new(|| AudioBlock::silent(1, 1)),
+        );
+        queue.push(
+            artifact_key(4),
+            RenderPriority::Hot,
+            Box::new(|| AudioBlock::silent(1, 1)),
+        );
+
+        assert_eq!(queue.pop().unwrap().key, artifact_key(2));
+        assert_eq!(queue.pop().unwrap().key, artifact_key(4));
+        assert_eq!(queue.pop().unwrap().key, artifact_key(3));
+        assert_eq!(queue.pop().unwrap().key, artifact_key(1));
+        assert!(queue.pop().is_none());
+    }
+
+    #[test]
+    fn render_worker_pool_completes_jobs_into_cache() {
+        let pool = RenderWorkerPool::new(1).unwrap();
+        let cold_key = artifact_key(11);
+        let hot_key = artifact_key(12);
+
+        pool.submit(cold_key, RenderPriority::Cold, || AudioBlock::silent(1, 2));
+        pool.submit(hot_key, RenderPriority::Hot, || AudioBlock::silent(2, 3));
+        pool.wait_until_idle();
+
+        assert_eq!(pool.cache_len(), 2);
+        assert_eq!(pool.cached_artifact(cold_key).unwrap().frames(), 2);
+        assert_eq!(pool.cached_artifact(hot_key).unwrap().channels(), 2);
+        assert_eq!(
+            pool.diagnostics(),
+            WorkerDiagnostics {
+                queued_jobs: 0,
+                active_jobs: 0,
+                completed_jobs: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn render_worker_pool_rejects_zero_workers() {
+        assert!(matches!(
+            RenderWorkerPool::new(0),
+            Err(RenderWorkerPoolError::ZeroWorkers)
+        ));
     }
 }
