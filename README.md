@@ -141,6 +141,12 @@ Emit scheduled events as JSON for a render range:
 cargo run -p meldritch-cli -- events-json fixtures/basic_drums.toml --pattern-id 1 --frames 48000
 ```
 
+Emit target events with incoming controller activity:
+
+```sh
+bash tools/control-events.sh fixtures/control_relations.toml
+```
+
 Emit graph invalidation from a pattern source:
 
 ```sh

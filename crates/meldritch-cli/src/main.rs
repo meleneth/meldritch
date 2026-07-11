@@ -49,6 +49,14 @@ enum Command {
         #[arg(long, default_value_t = 96_000)]
         frames: u64,
     },
+    ControlEventsJson {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long)]
+        pattern_id: u64,
+        #[arg(long, default_value_t = 96_000)]
+        frames: u64,
+    },
     DirtyJson {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -165,6 +173,11 @@ fn run(cli: Cli) -> Result<(), String> {
             pattern_id,
             frames,
         } => events_json(project, pattern_id, frames),
+        Command::ControlEventsJson {
+            project,
+            pattern_id,
+            frames,
+        } => control_events_json(project, pattern_id, frames),
         Command::DirtyJson {
             project,
             source_id,
@@ -564,6 +577,85 @@ fn events_json(path: PathBuf, pattern_id: Option<u64>, frames: u64) -> Result<()
     println!("{json}");
 
     Ok(())
+}
+
+fn control_events_json(path: PathBuf, pattern_id: u64, frames: u64) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let compiled = meldritch_dsl::compile_project(&project).map_err(|err| {
+        err.diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let pattern = select_pattern(&project, Some(pattern_id), "inspect control events")?;
+    let range = FrameRange::new(0, frames).map_err(|err| err.to_string())?;
+
+    let mut target_events = Vec::new();
+    pattern.events_between(
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        &mut target_events,
+    );
+
+    let controller_patterns = incoming_controller_patterns(&compiled, pattern.id());
+    let mut controller_events = Vec::new();
+    for controller_pattern in &controller_patterns {
+        let controller = select_pattern(
+            &project,
+            Some(controller_pattern.raw()),
+            "inspect control events",
+        )?;
+        let mut events = Vec::new();
+        controller.events_between(
+            project.tempo(),
+            range,
+            project.probability_seed(),
+            &mut events,
+        );
+        controller_events.push(ControllerEvents {
+            pattern: *controller_pattern,
+            events,
+        });
+    }
+
+    let output = ControlEventSchedule::from_events(
+        pattern.id().raw(),
+        range,
+        &target_events,
+        &controller_events,
+    );
+    let json = serde_json::to_string_pretty(&output)
+        .map_err(|err| format!("failed to encode control event schedule: {err}"))?;
+    println!("{json}");
+
+    Ok(())
+}
+
+fn incoming_controller_patterns(
+    compiled: &meldritch_dsl::CompiledProject,
+    target: meldritch_core::PatternId,
+) -> Vec<meldritch_core::PatternId> {
+    compiled
+        .relation_bindings()
+        .iter()
+        .filter_map(|binding| match binding.kind() {
+            meldritch_dsl::RelationBindingKind::PatternControlsPattern {
+                from_pattern,
+                to_pattern,
+            } if *to_pattern == target => Some(*from_pattern),
+            _ => None,
+        })
+        .collect()
 }
 
 fn summarize_project_json(path: PathBuf) -> Result<(), String> {
@@ -1368,6 +1460,91 @@ impl EventSummary {
             note: event.note(),
             velocity: event.velocity(),
             tags: event.tags().iter().map(event_tag_name).collect(),
+        }
+    }
+}
+
+struct ControllerEvents {
+    pattern: meldritch_core::PatternId,
+    events: Vec<Event>,
+}
+
+#[derive(Debug, Serialize)]
+struct ControlEventSchedule {
+    schema_version: u32,
+    pattern_id: u64,
+    range: FrameRangeSummary,
+    controller_patterns: Vec<u64>,
+    events: Vec<ControlledEventSummary>,
+}
+
+impl ControlEventSchedule {
+    fn from_events(
+        pattern_id: u64,
+        range: FrameRange,
+        events: &[Event],
+        controllers: &[ControllerEvents],
+    ) -> Self {
+        Self {
+            schema_version: 1,
+            pattern_id,
+            range: FrameRangeSummary::from_range(range),
+            controller_patterns: controllers
+                .iter()
+                .map(|controller| controller.pattern.raw())
+                .collect(),
+            events: events
+                .iter()
+                .map(|event| ControlledEventSummary::from_event(event, controllers))
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ControlledEventSummary {
+    event: EventSummary,
+    control: Vec<EventControlSummary>,
+    active_controller_count: usize,
+}
+
+impl ControlledEventSummary {
+    fn from_event(event: &Event, controllers: &[ControllerEvents]) -> Self {
+        let control = controllers
+            .iter()
+            .map(|controller| EventControlSummary::from_controller(event, controller))
+            .collect::<Vec<_>>();
+        let active_controller_count = control
+            .iter()
+            .filter(|control| control.active_event_count > 0)
+            .count();
+
+        Self {
+            event: EventSummary::from_event(event),
+            control,
+            active_controller_count,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct EventControlSummary {
+    pattern_id: u64,
+    active_event_count: usize,
+}
+
+impl EventControlSummary {
+    fn from_controller(event: &Event, controller: &ControllerEvents) -> Self {
+        let event_start = event.range().start();
+        let active_event_count = controller
+            .events
+            .iter()
+            .filter(|controller_event| controller_event.range().contains_frame(event_start))
+            .count();
+
+        Self {
+            pattern_id: controller.pattern.raw(),
+            active_event_count,
         }
     }
 }
