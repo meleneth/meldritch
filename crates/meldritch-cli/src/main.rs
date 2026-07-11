@@ -117,6 +117,22 @@ enum Command {
         #[arg(value_name = "MANIFEST")]
         manifest: PathBuf,
     },
+    ManifestCheck {
+        #[arg(value_name = "MANIFEST")]
+        manifest: PathBuf,
+        #[arg(long)]
+        pattern_id: Option<u64>,
+        #[arg(long)]
+        sample_sources: Option<usize>,
+        #[arg(long)]
+        relations: Option<usize>,
+        #[arg(long = "relation-kind", value_name = "KIND=COUNT")]
+        relation_kinds: Vec<String>,
+        #[arg(long)]
+        finite: bool,
+        #[arg(long)]
+        nonzero: bool,
+    },
     DirtyStep {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -206,6 +222,25 @@ fn run(cli: Cli) -> Result<(), String> {
             },
         ),
         Command::ManifestSummaryJson { manifest } => manifest_summary_json(manifest),
+        Command::ManifestCheck {
+            manifest,
+            pattern_id,
+            sample_sources,
+            relations,
+            relation_kinds,
+            finite,
+            nonzero,
+        } => manifest_check(
+            manifest,
+            ManifestCheckOptions {
+                pattern_id,
+                sample_sources,
+                relations,
+                relation_kinds,
+                finite,
+                nonzero,
+            },
+        ),
         Command::DirtyStep {
             project,
             pattern_id,
@@ -390,6 +425,75 @@ fn manifest_summary_json(path: PathBuf) -> Result<(), String> {
     println!("{json}");
 
     Ok(())
+}
+
+struct ManifestCheckOptions {
+    pattern_id: Option<u64>,
+    sample_sources: Option<usize>,
+    relations: Option<usize>,
+    relation_kinds: Vec<String>,
+    finite: bool,
+    nonzero: bool,
+}
+
+fn manifest_check(path: PathBuf, options: ManifestCheckOptions) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let manifest = serde_json::from_str::<serde_json::Value>(&input)
+        .map_err(|err| format!("failed to parse {}: {err}", path.display()))?;
+    let summary = RenderManifestDiagnostics::from_manifest(&manifest)?;
+
+    if let Some(expected) = options.pattern_id {
+        ensure_equal("pattern_id", summary.pattern_id, expected)?;
+    }
+    if let Some(expected) = options.sample_sources {
+        ensure_equal("sample_source_count", summary.sample_source_count, expected)?;
+    }
+    if let Some(expected) = options.relations {
+        ensure_equal("relation_count", summary.relation_count, expected)?;
+    }
+    for expected in options.relation_kinds {
+        let (kind, count) = parse_expected_relation_kind(&expected)?;
+        let actual = summary.relation_kinds.get(kind).copied().unwrap_or(0);
+        ensure_equal(&format!("relation kind {kind}"), actual, count)?;
+    }
+    if options.finite && !summary.result.finite {
+        return Err("manifest result is not finite".to_owned());
+    }
+    if options.nonzero && summary.result.nonzero_samples == 0 {
+        return Err("manifest result has no nonzero samples".to_owned());
+    }
+
+    println!("manifest ok: {}", path.display());
+    Ok(())
+}
+
+fn parse_expected_relation_kind(input: &str) -> Result<(&str, usize), String> {
+    let (kind, count) = input
+        .split_once('=')
+        .ok_or_else(|| format!("relation kind expectation must be KIND=COUNT, got '{input}'"))?;
+    if kind.is_empty() {
+        return Err(format!(
+            "relation kind expectation must include a kind, got '{input}'"
+        ));
+    }
+    let count = count
+        .parse::<usize>()
+        .map_err(|err| format!("relation kind expectation '{input}' has invalid count: {err}"))?;
+    Ok((kind, count))
+}
+
+fn ensure_equal<T>(name: &str, actual: T, expected: T) -> Result<(), String>
+where
+    T: std::fmt::Display + PartialEq,
+{
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "manifest {name} mismatch: expected {expected}, got {actual}"
+        ))
+    }
 }
 
 fn compile_project_file(path: &Path) -> Result<meldritch_dsl::CompiledProject, String> {

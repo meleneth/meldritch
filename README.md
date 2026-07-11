@@ -85,6 +85,12 @@ Summarize a render manifest:
 bash tools/manifest-summary.sh artifacts/control_relations.manifest.json
 ```
 
+Assert expected manifest graph contents:
+
+```sh
+bash tools/manifest-check.sh artifacts/control_relations.manifest.json
+```
+
 The render script writes local WAVs and render manifests under `artifacts/`, which is intentionally ignored.
 
 Emit a machine-readable project summary for scripts:
