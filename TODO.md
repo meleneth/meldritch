@@ -207,7 +207,7 @@ performed safely and reconstructed from saved performer sessions.
 - [x] Bound warehouse cockpit rendering to one phrase-length loop
 - [x] Hold immutable audio during scene invalidation and preparation
 - [x] Move DSP macro recomputation off the TUI input thread
-- [ ] Add host-side clean-playback soak diagnostics
+- [x] Add host-side clean-playback soak diagnostics
 
 Done when rapid scene and DSP changes remain audible without underruns on a
 representative release build and expose enough diagnostics to catch regressions.

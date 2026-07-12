@@ -687,6 +687,15 @@ enum Command {
         #[arg(long, default_value_t = 2)]
         workers: usize,
     },
+    /// Soak the host audio device while stressing warehouse DSP rendering.
+    WarehouseSoak {
+        #[arg(value_name = "WAV", default_value = "artifacts/warehouse.wav")]
+        audio: PathBuf,
+        #[arg(long, default_value_t = 120)]
+        seconds: u32,
+        #[arg(long)]
+        require_clean: bool,
+    },
     RenderControlledSamples {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -1059,6 +1068,11 @@ fn run(cli: Cli) -> Result<(), String> {
             Some(futures),
             true,
         ),
+        Command::WarehouseSoak {
+            audio,
+            seconds,
+            require_clean,
+        } => warehouse_soak(audio, seconds, require_clean),
         Command::RenderControlledSamples {
             project,
             pattern_id,
@@ -3720,6 +3734,105 @@ fn warehouse_showcase(
     play_showcase(output, frames, loops, require_clean)
 }
 
+fn warehouse_soak(audio: PathBuf, seconds: u32, require_clean: bool) -> Result<(), String> {
+    if seconds == 0 {
+        return Err("warehouse soak duration must be at least one second".to_owned());
+    }
+    let source = meldritch_audio::read_wav(&audio)
+        .map_err(|err| format!("failed to read {}: {err}", audio.display()))?;
+    let soak_frames = source
+        .frames()
+        .min(source.sample_rate().saturating_mul(4))
+        .max(1);
+    let channels = usize::from(source.channels());
+    let mut playback_block = meldritch_audio::AudioBlock::silent(source.channels(), soak_frames);
+    playback_block
+        .samples_mut()
+        .copy_from_slice(&source.samples()[..soak_frames as usize * channels]);
+    let requested_frames = u64::from(seconds) * u64::from(source.sample_rate());
+    let loops = requested_frames
+        .div_ceil(u64::from(soak_frames))
+        .min(u64::from(u32::MAX)) as u32;
+
+    let stress_frames = source
+        .frames()
+        .min(source.sample_rate().saturating_mul(2))
+        .max(1);
+    let mut stress_source = meldritch_audio::AudioBlock::silent(source.channels(), stress_frames);
+    stress_source
+        .samples_mut()
+        .copy_from_slice(&source.samples()[..stress_frames as usize * channels]);
+    let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let completed = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let worst_micros = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let worker_running = Arc::clone(&running);
+    let worker_completed = Arc::clone(&completed);
+    let worker_worst = Arc::clone(&worst_micros);
+    let tempo = meldritch_core::Tempo::new(142.0, source.sample_rate())
+        .map_err(|err| format!("invalid soak tempo: {err}"))?;
+    let stress = std::thread::spawn(move || {
+        let mut generation = 0_u64;
+        while worker_running.load(std::sync::atomic::Ordering::Relaxed) {
+            let phase = (generation % 8) as f64 / 7.0;
+            let settings = meldritch_render::performance_fx::PerformanceFxSettings {
+                delay_feedback: 0.2 + phase * 0.65,
+                phaser_mix: 0.15 + (1.0 - phase) * 0.7,
+                reverb_freeze: generation.is_multiple_of(7),
+                modulation_depth: phase * 0.8,
+                master_drive: 1.0 + phase * 3.0,
+            };
+            let started = Instant::now();
+            let rendered = meldritch_render::performance_fx::apply_performance_fx(
+                &stress_source,
+                tempo,
+                settings,
+            );
+            if rendered.samples().iter().all(|sample| sample.is_finite()) {
+                worker_completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            worker_worst.fetch_max(
+                started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            generation = generation.wrapping_add(1);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    });
+
+    println!(
+        "warehouse soak: requested={}s, block_frames={}, loops={}, clean_check={require_clean}",
+        seconds, soak_frames, loops
+    );
+    let report =
+        meldritch_audio::device_output::play_blocking(&playback_block, source.sample_rate(), loops);
+    running.store(false, std::sync::atomic::Ordering::Relaxed);
+    stress
+        .join()
+        .map_err(|_| "warehouse soak DSP worker panicked".to_owned())?;
+    let report = report?;
+    let completed = completed.load(std::sync::atomic::Ordering::Relaxed);
+    let worst_micros = worst_micros.load(std::sync::atomic::Ordering::Relaxed);
+    println!(
+        "warehouse soak result: device={}, callbacks={}, underruns={}, misses={}, stream_errors={}, dsp_renders={}, worst_dsp_ms={:.2}",
+        report.device_name,
+        report.callbacks,
+        report.underruns,
+        report.missed_artifacts,
+        report.stream_errors,
+        completed,
+        worst_micros as f64 / 1_000.0,
+    );
+    if require_clean
+        && (report.underruns != 0 || report.missed_artifacts != 0 || report.stream_errors != 0)
+    {
+        return Err(format!(
+            "warehouse soak failed: underruns={}, misses={}, stream_errors={}",
+            report.underruns, report.missed_artifacts, report.stream_errors
+        ));
+    }
+    Ok(())
+}
+
 fn play_samples(
     path: PathBuf,
     pattern_id: Option<u64>,
@@ -4905,6 +5018,14 @@ mod tests {
             )
             .unwrap_err()
             .contains("cannot reuse missing warehouse render")
+        );
+    }
+
+    #[test]
+    fn warehouse_soak_rejects_zero_duration_before_audio_setup() {
+        assert_eq!(
+            warehouse_soak(PathBuf::from("missing.wav"), 0, true),
+            Err("warehouse soak duration must be at least one second".to_owned())
         );
     }
 }

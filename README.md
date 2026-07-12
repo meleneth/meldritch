@@ -83,6 +83,16 @@ replacement loop is prepared, avoiding publication gaps during invalidation.
 DSP macro renders run on a latest-wins background worker, so rapid control
 changes replace obsolete pending work instead of blocking the TUI/audio path.
 
+To verify a host under concurrent audio and DSP load, first render the
+warehouse WAV and then run:
+
+```bash
+meldritch warehouse-soak --seconds 120 --require-clean
+```
+
+The soak report includes callbacks, underruns, missed artifacts, backend stream
+errors, completed DSP stress renders, and worst DSP render latency.
+
 It renders and normalizes the complete set before opening the audio device, so
 the callback only reads immutable prepared audio. Subsequent runs can skip the
 render with `meldritch warehouse-showcase --reuse`.
