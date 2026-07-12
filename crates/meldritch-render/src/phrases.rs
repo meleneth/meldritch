@@ -120,6 +120,106 @@ pub enum PhraseQueueError {
     UnknownPhrase(PhraseId),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PhraseChoice {
+    pub phrase: PhraseId,
+    /// Position within the complete set, normalized to `[0, 1]`.
+    pub phase: f64,
+}
+
+impl PhraseChoice {
+    #[must_use]
+    pub fn new(phrase: PhraseId, phase: f64) -> Self {
+        Self {
+            phrase,
+            phase: phase.clamp(0.0, 1.0),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LearnedPhraseChoice {
+    pub phrase: PhraseId,
+    pub occurrences: u64,
+    pub last_session: u64,
+    pub mean_phase: f64,
+    pub score: u64,
+}
+
+/// Compact, deterministic evidence gathered from manual phrase launches.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PhraseFutureLibrary {
+    sessions: u64,
+    learned: Vec<LearnedPhraseChoice>,
+}
+
+impl PhraseFutureLibrary {
+    #[must_use]
+    pub const fn sessions(&self) -> u64 {
+        self.sessions
+    }
+
+    #[must_use]
+    pub fn learned(&self) -> &[LearnedPhraseChoice] {
+        &self.learned
+    }
+
+    pub fn record_session(&mut self, choices: impl IntoIterator<Item = PhraseChoice>) -> u64 {
+        self.sessions = self.sessions.saturating_add(1);
+        let session = self.sessions;
+        for choice in choices {
+            if let Some(learned) = self
+                .learned
+                .iter_mut()
+                .find(|learned| learned.phrase == choice.phrase)
+            {
+                let previous = learned.occurrences;
+                learned.occurrences = learned.occurrences.saturating_add(1);
+                learned.mean_phase = (learned.mean_phase * previous as f64 + choice.phase)
+                    / learned.occurrences as f64;
+                learned.last_session = session;
+                learned.score = learned
+                    .occurrences
+                    .saturating_mul(1_000)
+                    .saturating_add(session);
+            } else {
+                self.learned.push(LearnedPhraseChoice {
+                    phrase: choice.phrase,
+                    occurrences: 1,
+                    last_session: session,
+                    mean_phase: choice.phase,
+                    score: 1_000_u64.saturating_add(session),
+                });
+            }
+        }
+        self.learned.sort_by(|left, right| {
+            right
+                .score
+                .cmp(&left.score)
+                .then_with(|| left.phrase.cmp(&right.phrase))
+        });
+        session
+    }
+
+    /// Returns the strongest learned choice near the current musical phase.
+    #[must_use]
+    pub fn choice_near(&self, phase: f64, tolerance: f64) -> Option<LearnedPhraseChoice> {
+        let phase = phase.clamp(0.0, 1.0);
+        let tolerance = tolerance.clamp(0.0, 1.0);
+        self.learned
+            .iter()
+            .copied()
+            .filter(|choice| (choice.mean_phase - phase).abs() <= tolerance)
+            .min_by(|left, right| {
+                (left.mean_phase - phase)
+                    .abs()
+                    .total_cmp(&(right.mean_phase - phase).abs())
+                    .then_with(|| right.score.cmp(&left.score))
+                    .then_with(|| left.phrase.cmp(&right.phrase))
+            })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PhraseCycler {
     bank: PhraseBank,
@@ -336,5 +436,24 @@ mod tests {
         assert_eq!(cycler.cancel(), Some(PhraseId::new(1)));
         assert_eq!(cycler.cancel(), None);
         assert_eq!(cycler.advance(144_000)[0].phrase, PhraseId::new(2));
+    }
+
+    #[test]
+    fn phrase_future_library_ranks_repeated_choices_and_replays_by_phase() {
+        let first = PhraseId::new(1);
+        let drop = PhraseId::new(4);
+        let mut library = PhraseFutureLibrary::default();
+        assert_eq!(
+            library.record_session([PhraseChoice::new(first, 0.1), PhraseChoice::new(drop, 0.72),]),
+            1
+        );
+        library.record_session([PhraseChoice::new(drop, 0.76), PhraseChoice::new(drop, 2.0)]);
+
+        assert_eq!(library.sessions(), 2);
+        assert_eq!(library.learned()[0].phrase, drop);
+        assert_eq!(library.learned()[0].occurrences, 3);
+        assert!((library.learned()[0].mean_phase - (0.72 + 0.76 + 1.0) / 3.0).abs() < 1e-12);
+        assert_eq!(library.choice_near(0.75, 0.2).unwrap().phrase, drop);
+        assert_eq!(library.choice_near(0.3, 0.05), None);
     }
 }

@@ -157,6 +157,7 @@ performer deviations can be learned, ranked, and reused in later sessions.
 - [x] 140 BPM breakbeat, acid bass, chord stab, and texture phrase set
 - [x] Long resonant sweeps with pre/post-filter distortion staging
 - [x] Performance-safe self-playing `warehouse-showcase` command
+- [x] Deterministic phrase-choice evidence, ranking, and phase-aware replay selection
 - [ ] Interactive warehouse cockpit and phrase-future learning
 
 Done when an original high-tempo set cycles through recognizable phrases,
