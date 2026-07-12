@@ -46,6 +46,7 @@ pub enum AppCommand {
     AuditionTransform,
     ReturnToLive,
     QueueNextScene,
+    QueueScene(SceneId),
     ToggleTrackMute(TrackId),
     TriggerFill(PatternId),
     CancelPerformance,
@@ -302,6 +303,7 @@ pub enum AppInput {
     AuditionTransform,
     ReturnToLive,
     QueueNextScene,
+    QueuePhrase(SceneId),
     ToggleTrackMute,
     TriggerFill,
     CancelPerformance,
@@ -631,6 +633,19 @@ impl AppController {
                     .ok_or(AppCommandError::NoPerformanceScenes)?;
                 let queued = self.performance_launcher.queue(
                     PerformanceGesture::QueueScene(scene),
+                    u64::from(self.playback.status_monitor().snapshot().position),
+                    self.editor.state().tempo(),
+                );
+                AppCommandResult::PerformanceQueued(queued)
+            }
+            AppCommand::QueueScene(scene) => {
+                if !self.performance_scenes.contains(scene)
+                    || !self.phrase_patterns.contains_key(scene)
+                {
+                    return Err(AppCommandError::NoPerformanceScenes);
+                }
+                let queued = self.performance_launcher.queue(
+                    PerformanceGesture::QueueScene(*scene),
                     u64::from(self.playback.status_monitor().snapshot().position),
                     self.editor.state().tempo(),
                 );
@@ -1093,6 +1108,7 @@ impl AppController {
             AppInput::AuditionTransform => AppCommand::AuditionTransform,
             AppInput::ReturnToLive => AppCommand::ReturnToLive,
             AppInput::QueueNextScene => AppCommand::QueueNextScene,
+            AppInput::QueuePhrase(scene) => AppCommand::QueueScene(scene),
             AppInput::ToggleTrackMute => AppCommand::ToggleTrackMute(self.selection.track),
             AppInput::TriggerFill => {
                 AppCommand::TriggerFill(self.fill_pattern.ok_or(AppCommandError::NoFillPattern)?)
@@ -1675,6 +1691,21 @@ mod tests {
             controller.view_model().performance.active_scene,
             Some(SceneId::new(1))
         );
+
+        let AppCommandResult::PerformanceQueued(direct) = controller
+            .handle_input(AppInput::QueuePhrase(SceneId::new(2)))
+            .unwrap()
+        else {
+            panic!("direct phrase pad was not queued");
+        };
+        assert_eq!(
+            direct.gesture,
+            PerformanceGesture::QueueScene(SceneId::new(2))
+        );
+        assert!(matches!(
+            controller.handle_input(AppInput::QueuePhrase(SceneId::new(9))),
+            Err(AppCommandError::NoPerformanceScenes)
+        ));
     }
 
     #[test]

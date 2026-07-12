@@ -67,7 +67,9 @@ For the interactive version, run `meldritch warehouse-cockpit`. It starts the
 next bar boundary and `C` to cancel a queued launch. Performer actions are
 saved to `artifacts/warehouse.futures.json` when the cockpit exits. On later
 runs, learned phrase choices are queued again near their original musical
-phase while leaving any pending manual launch untouched.
+phase while leaving any pending manual launch untouched. `F1`–`F4` queue a
+specific warehouse phrase directly, using the same bar quantization and future
+learning as `Q`.
 
 It renders and normalizes the complete set before opening the audio device, so
 the callback only reads immutable prepared audio. Subsequent runs can skip the

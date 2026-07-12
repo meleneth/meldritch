@@ -172,3 +172,12 @@ evolves without intervention, and accepts safe learned performance variations.
 
 Done when a saved warehouse performance reconstructs the performer's phrase
 choices at musically similar moments and makes those decisions visible.
+
+## 15. Expressive phrase performance
+
+- [x] Direct `F1`–`F4` phrase pads with bar-quantized launching
+- [ ] Phrase-pad variation selection without changing the base scene
+- [ ] Performer override grace window for learned phrase cues
+
+Done when specific phrases and their variations can be played deliberately
+without learned automation immediately fighting a live decision.

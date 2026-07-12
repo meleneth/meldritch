@@ -52,6 +52,7 @@ impl LearnedAction {
             AppInput::InvertChordUp => Self::InvertChordUp,
             AppInput::InvertChordDown => Self::InvertChordDown,
             AppInput::QueueNextScene => Self::QueueNextScene,
+            AppInput::QueuePhrase(scene) => Self::QueuePhrase(scene.raw()),
             AppInput::ToggleTrackMute => Self::ToggleTrackMute,
             AppInput::TriggerFill => Self::TriggerFill,
             _ => return None,
@@ -75,7 +76,7 @@ impl LearnedAction {
             Self::InvertChordUp => AppInput::InvertChordUp,
             Self::InvertChordDown => AppInput::InvertChordDown,
             Self::QueueNextScene => AppInput::QueueNextScene,
-            Self::QueuePhrase(_) => return None,
+            Self::QueuePhrase(scene) => AppInput::QueuePhrase(SceneId::new(scene)),
             Self::ToggleTrackMute => AppInput::ToggleTrackMute,
             Self::TriggerFill => AppInput::TriggerFill,
         })
@@ -4580,7 +4581,10 @@ mod tests {
                 .iter()
                 .any(|future| future.action == LearnedAction::QueuePhrase(4))
         );
-        assert_eq!(LearnedAction::QueuePhrase(3).input(), None);
+        assert_eq!(
+            LearnedAction::QueuePhrase(3).input(),
+            Some(meldritch_app::AppInput::QueuePhrase(SceneId::new(3)))
+        );
     }
 
     #[test]

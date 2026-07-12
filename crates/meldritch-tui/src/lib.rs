@@ -89,6 +89,9 @@ pub fn map_key(key: KeyEvent, default_step: &Step) -> Option<TuiAction> {
         KeyCode::Char('Z') => TuiAction::Input(AppInput::ToggleTrackMute),
         KeyCode::Char('P') => TuiAction::Input(AppInput::TriggerFill),
         KeyCode::Char('C') => TuiAction::Input(AppInput::CancelPerformance),
+        KeyCode::F(number @ 1..=4) => TuiAction::Input(AppInput::QueuePhrase(
+            meldritch_core::SceneId::new(u64::from(number)),
+        )),
         _ => return None,
     };
     Some(action)
@@ -770,6 +773,7 @@ fn draw_key_legend(frame: &mut ratatui::Frame<'_>, area: Rect) {
         ("[]", "gate"),
         ("<>", "probability"),
         ("Q/Z/P/C", "perform"),
+        ("F1-F4", "phrase pads"),
         ("a/z", "cutoff"),
         ("d/x", "resonance"),
         ("w", "waveform"),
@@ -1063,6 +1067,17 @@ mod tests {
                     &Step::new(36)
                 ),
                 Some(TuiAction::Input(input))
+            );
+        }
+        for number in 1..=4 {
+            assert_eq!(
+                map_key(
+                    KeyEvent::new(KeyCode::F(number), KeyModifiers::NONE),
+                    &Step::new(36)
+                ),
+                Some(TuiAction::Input(AppInput::QueuePhrase(SceneId::new(
+                    u64::from(number)
+                ))))
             );
         }
     }
