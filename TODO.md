@@ -168,7 +168,7 @@ evolves without intervention, and accepts safe learned performance variations.
 
 - [x] Persist exact phrase/scene identity in performer future evidence
 - [x] Replay learned phrase choices near their learned musical phase
-- [ ] Show learned and queued phrase identity in the cockpit status panel
+- [x] Show learned and queued phrase identity in the cockpit status panel
 
 Done when a saved warehouse performance reconstructs the performer's phrase
 choices at musically similar moments and makes those decisions visible.

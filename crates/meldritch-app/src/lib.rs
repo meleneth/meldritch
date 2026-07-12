@@ -12,11 +12,11 @@ use meldritch_render::coordinator::{RenderCoordinator, RenderCoordinatorDiagnost
 use meldritch_render::dsp::{BassVoiceSettings, Waveform, synthesize_bass_sample};
 use meldritch_render::dynamics::{DuckBands, SidechainRelation};
 use meldritch_render::effects::{ActiveSendExplanation, EffectSendRule, explain_effect_sends};
+pub use meldritch_render::futures::PerformanceGesture;
 use meldritch_render::futures::{FutureCandidateInspection, FutureWorkerDiagnostics};
 use meldritch_render::futures::{
-    FutureWorkerPool, LaunchQuantization, PerformanceGesture, PerformanceLaunch,
-    PerformanceLauncher, PerformanceLauncherDiagnostics, QueuedPerformanceGesture,
-    RenderableFuturePlan,
+    FutureWorkerPool, LaunchQuantization, PerformanceLaunch, PerformanceLauncher,
+    PerformanceLauncherDiagnostics, QueuedPerformanceGesture, RenderableFuturePlan,
 };
 use meldritch_render::live_edit::{
     LiveEditCommand, LiveEditError, LiveEditResult, LivePatternEditor,
@@ -182,6 +182,13 @@ pub struct PerformanceView {
     pub active_fill: Option<PatternId>,
     pub fill_end_frame: Option<Frame>,
     pub diagnostics: PerformanceLauncherDiagnostics,
+    pub learned_phrase_cues: Vec<LearnedPhraseCueView>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LearnedPhraseCueView {
+    pub scene: SceneId,
+    pub frame: Frame,
 }
 
 #[derive(Clone, Debug)]
@@ -326,6 +333,7 @@ pub struct AppController {
     performance_launcher: PerformanceLauncher,
     performance_scenes: Vec<SceneId>,
     phrase_patterns: BTreeMap<SceneId, Pattern>,
+    learned_phrase_cues: Vec<LearnedPhraseCueView>,
     fill_pattern: Option<PatternId>,
     transformed_audio: Option<meldritch_audio::AudioBlock>,
 }
@@ -358,6 +366,7 @@ impl AppController {
             performance_launcher: PerformanceLauncher::new(LaunchQuantization::Bar { beats: 4 }),
             performance_scenes: Vec::new(),
             phrase_patterns: BTreeMap::new(),
+            learned_phrase_cues: Vec::new(),
             fill_pattern: None,
             transformed_audio: None,
         }
@@ -446,6 +455,10 @@ impl AppController {
             u64::from(self.playback.status_monitor().snapshot().position),
             self.editor.state().tempo(),
         ))
+    }
+
+    pub fn show_learned_phrase_cues(&mut self, cues: Vec<LearnedPhraseCueView>) {
+        self.learned_phrase_cues = cues;
     }
 
     /// Launches a layout-compatible phrase pattern through the normal render
@@ -831,6 +844,7 @@ impl AppController {
                 active_fill: self.performance_launcher.active().fill,
                 fill_end_frame: self.performance_launcher.fill_end_frame(),
                 diagnostics: self.performance_launcher.diagnostics(),
+                learned_phrase_cues: self.learned_phrase_cues.clone(),
             },
             pattern_grid: PatternGridView {
                 pattern: pattern.id(),

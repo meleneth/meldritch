@@ -3994,6 +3994,15 @@ fn tui_samples(
             .then_with(|| left.action.cmp(&right.action))
     });
     let learned_phrase_cues = learned_phrase_schedule(&library, frame_count, 8);
+    controller.show_learned_phrase_cues(
+        learned_phrase_cues
+            .iter()
+            .map(|(frame, scene)| meldritch_app::LearnedPhraseCueView {
+                scene: *scene,
+                frame: u64::from(*frame),
+            })
+            .collect(),
+    );
     for learned in ranked.into_iter().take(4) {
         match learned.action {
             LearnedAction::QueuePhrase(_) => continue,

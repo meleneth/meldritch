@@ -259,6 +259,7 @@ pub fn draw_with_status(
         || view.performance.active_scene.is_some()
         || !view.performance.muted_tracks.is_empty()
         || view.performance.active_fill.is_some()
+        || !view.performance.learned_phrase_cues.is_empty()
         || view.performance.diagnostics.last_launch.is_some();
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -269,7 +270,7 @@ pub fn draw_with_status(
             Constraint::Length(if view.sidechain.is_some() { 3 } else { 0 }),
             Constraint::Length(if view.transform.is_some() { 4 } else { 0 }),
             Constraint::Length(if view.futures.is_some() { 5 } else { 0 }),
-            Constraint::Length(if performance_visible { 4 } else { 0 }),
+            Constraint::Length(if performance_visible { 5 } else { 0 }),
             Constraint::Min(7),
             Constraint::Length(5),
             Constraint::Length(3),
@@ -685,16 +686,37 @@ fn draw_performance(frame: &mut ratatui::Frame<'_>, area: Rect, view: &AppViewMo
     let performance = &view.performance;
     let queued = performance.queued.map_or_else(
         || "none".to_owned(),
-        |queued| format!("{:?}@{}", queued.gesture, queued.launch_frame),
+        |queued| {
+            format!(
+                "{}@{}",
+                performance_gesture_text(queued.gesture),
+                queued.launch_frame
+            )
+        },
     );
     let active = format!(
-        "scene:{:?} muted:{:?} fill:{:?}→{:?}",
-        performance.active_scene,
+        "phrase:{} muted:{:?} fill:{:?}→{:?}",
+        performance
+            .active_scene
+            .map_or_else(|| "none".to_owned(), |scene| scene.raw().to_string()),
         performance.muted_tracks,
         performance.active_fill,
         performance.fill_end_frame,
     );
     let diagnostics = performance.diagnostics;
+    let learned = if performance.learned_phrase_cues.is_empty() {
+        "learned none".to_owned()
+    } else {
+        format!(
+            "learned {}",
+            performance
+                .learned_phrase_cues
+                .iter()
+                .map(|cue| format!("phrase {}@{}", cue.scene.raw(), cue.frame))
+                .collect::<Vec<_>>()
+                .join("  ")
+        )
+    };
     let launches = format!(
         "queued:{} cancel:{} launch prepared:{} fallback:{} returns:{} last:{:?}",
         diagnostics.queued_gestures,
@@ -709,11 +731,21 @@ fn draw_performance(frame: &mut ratatui::Frame<'_>, area: Rect, view: &AppViewMo
             "Live Performance",
             Paragraph::new(vec![
                 Line::from(format!("queued {queued}  {active}")),
+                Line::from(learned),
                 Line::from(launches),
             ]),
         ),
         area,
     );
+}
+
+fn performance_gesture_text(gesture: meldritch_app::PerformanceGesture) -> String {
+    match gesture {
+        meldritch_app::PerformanceGesture::QueueScene(scene) => {
+            format!("phrase {}", scene.raw())
+        }
+        other => format!("{other:?}"),
+    }
 }
 
 fn draw_history(frame: &mut ratatui::Frame<'_>, area: Rect, view: &AppViewModel) {
@@ -912,6 +944,7 @@ mod tests {
                 active_fill: None,
                 fill_end_frame: None,
                 diagnostics: meldritch_render::futures::PerformanceLauncherDiagnostics::default(),
+                learned_phrase_cues: Vec::new(),
             },
             pattern_grid: PatternGridView {
                 pattern: PatternId::new(1),
@@ -1127,14 +1160,18 @@ mod tests {
 
     #[test]
     fn live_performance_panel_shows_queue_active_state_and_fallback_counts() {
-        let gesture = PerformanceGesture::TriggerFill(PatternId::new(9));
+        let gesture = PerformanceGesture::QueueScene(SceneId::new(3));
         let mut view = view();
         view.performance.queued = Some(QueuedPerformanceGesture {
             gesture,
             launch_frame: 96_000,
-            fill_end_frame: Some(192_000),
+            fill_end_frame: None,
         });
         view.performance.active_scene = Some(SceneId::new(2));
+        view.performance.learned_phrase_cues = vec![meldritch_app::LearnedPhraseCueView {
+            scene: SceneId::new(4),
+            frame: 144_000,
+        }];
         view.performance.muted_tracks = vec![TrackId::new(3)];
         view.performance.diagnostics.queued_gestures = 4;
         view.performance.diagnostics.fallback_launches = 1;
@@ -1154,8 +1191,9 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(content.contains("Live Performance"));
-        assert!(content.contains("TriggerFill(PatternId(9))@96000"));
-        assert!(content.contains("scene:Some(SceneId(2))"));
+        assert!(content.contains("phrase 3@96000"));
+        assert!(content.contains("phrase:2"));
+        assert!(content.contains("learned phrase 4@144000"));
         assert!(content.contains("fallback:1"));
         assert!(content.contains("last:Some(LiveFallback)"));
     }
