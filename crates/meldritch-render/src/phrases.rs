@@ -1,6 +1,7 @@
 //! Deterministic phrase banks and quantized phrase cycling.
 
 use meldritch_core::{Frame, Pattern, PatternId, Tempo};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PhraseId(u64);
@@ -79,6 +80,7 @@ pub enum PhraseBankError {
     NoVariations(PhraseId),
     ZeroRepeats(PhraseId),
     IncompatibleVariations(PhraseId),
+    DuplicatePhrase(PhraseId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -90,6 +92,10 @@ impl PhraseBank {
     pub fn new(phrases: Vec<Phrase>) -> Result<Self, PhraseBankError> {
         if phrases.is_empty() {
             return Err(PhraseBankError::Empty);
+        }
+        let mut ids = BTreeSet::new();
+        if let Some(duplicate) = phrases.iter().map(Phrase::id).find(|id| !ids.insert(*id)) {
+            return Err(PhraseBankError::DuplicatePhrase(duplicate));
         }
         Ok(Self { phrases })
     }
@@ -109,6 +115,11 @@ pub struct PhraseTransition {
     pub frame: Frame,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PhraseQueueError {
+    UnknownPhrase(PhraseId),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PhraseCycler {
     bank: PhraseBank,
@@ -118,6 +129,7 @@ pub struct PhraseCycler {
     cycle: u64,
     active_variation: usize,
     next_frame: Frame,
+    queued_phrase: Option<usize>,
 }
 
 impl PhraseCycler {
@@ -133,6 +145,7 @@ impl PhraseCycler {
             cycle: 0,
             active_variation,
             next_frame,
+            queued_phrase: None,
         }
     }
 
@@ -146,18 +159,45 @@ impl PhraseCycler {
         self.next_frame
     }
 
+    pub fn queue(&mut self, phrase: PhraseId) -> Result<Frame, PhraseQueueError> {
+        let index = self
+            .bank
+            .phrases
+            .iter()
+            .position(|candidate| candidate.id == phrase)
+            .ok_or(PhraseQueueError::UnknownPhrase(phrase))?;
+        self.queued_phrase = Some(index);
+        Ok(self.next_frame)
+    }
+
+    pub fn cancel(&mut self) -> Option<PhraseId> {
+        self.queued_phrase
+            .take()
+            .map(|index| self.bank.phrases[index].id)
+    }
+
+    #[must_use]
+    pub fn queued(&self) -> Option<PhraseId> {
+        self.queued_phrase.map(|index| self.bank.phrases[index].id)
+    }
+
     /// Advances through every boundary reached by `playhead`, returning the
     /// transitions in musical order.
     pub fn advance(&mut self, playhead: Frame) -> Vec<PhraseTransition> {
         let mut transitions = Vec::new();
         while playhead >= self.next_frame {
             let frame = self.next_frame;
-            self.repeat += 1;
-            if self.repeat >= self.active_phrase().repeats {
+            if let Some(index) = self.queued_phrase.take() {
+                self.phrase_index = index;
                 self.repeat = 0;
-                self.phrase_index = (self.phrase_index + 1) % self.bank.phrases.len();
-                if self.phrase_index == 0 {
-                    self.cycle = self.cycle.wrapping_add(1);
+            } else {
+                self.repeat += 1;
+                if self.repeat >= self.active_phrase().repeats {
+                    self.repeat = 0;
+                    self.phrase_index = (self.phrase_index + 1) % self.bank.phrases.len();
+                    if self.phrase_index == 0 {
+                        self.cycle = self.cycle.wrapping_add(1);
+                    }
                 }
             }
             self.active_variation =
@@ -214,6 +254,13 @@ mod tests {
             Err(PhraseBankError::IncompatibleVariations(id))
         );
         assert_eq!(PhraseBank::new(Vec::new()), Err(PhraseBankError::Empty));
+        assert_eq!(
+            PhraseBank::new(vec![
+                Phrase::new(id, vec![pattern(1, 16)], 1).unwrap(),
+                Phrase::new(id, vec![pattern(2, 16)], 1).unwrap(),
+            ]),
+            Err(PhraseBankError::DuplicatePhrase(id))
+        );
     }
 
     #[test]
@@ -261,5 +308,33 @@ mod tests {
                 .windows(2)
                 .all(|pair| pair[0].frame < pair[1].frame)
         );
+    }
+
+    #[test]
+    fn queued_phrase_launches_at_the_next_boundary_and_can_be_cancelled() {
+        let tempo = Tempo::new(120.0, 48_000).unwrap();
+        let bank = PhraseBank::new(vec![
+            Phrase::new(PhraseId::new(1), vec![pattern(10, 16)], 4).unwrap(),
+            Phrase::new(PhraseId::new(2), vec![pattern(20, 8), pattern(21, 8)], 2).unwrap(),
+        ])
+        .unwrap();
+        let mut cycler = PhraseCycler::new(bank, tempo, 0);
+        assert_eq!(
+            cycler.queue(PhraseId::new(99)),
+            Err(PhraseQueueError::UnknownPhrase(PhraseId::new(99)))
+        );
+        assert_eq!(cycler.queue(PhraseId::new(2)), Ok(96_000));
+        assert_eq!(cycler.queued(), Some(PhraseId::new(2)));
+        assert!(cycler.advance(95_999).is_empty());
+        let launched = cycler.advance(96_000);
+        assert_eq!(launched[0].phrase, PhraseId::new(2));
+        assert_eq!(launched[0].repeat, 0);
+        assert!(matches!(launched[0].pattern.raw(), 20 | 21));
+        assert_eq!(cycler.queued(), None);
+
+        assert_eq!(cycler.queue(PhraseId::new(1)), Ok(144_000));
+        assert_eq!(cycler.cancel(), Some(PhraseId::new(1)));
+        assert_eq!(cycler.cancel(), None);
+        assert_eq!(cycler.advance(144_000)[0].phrase, PhraseId::new(2));
     }
 }
