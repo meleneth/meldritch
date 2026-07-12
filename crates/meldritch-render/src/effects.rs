@@ -23,6 +23,24 @@ pub struct EffectSendRule {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TempoDelaySettings {
+    /// Delay length in quarter-note beats. `0.75` is a dotted eighth note.
+    pub beats: f64,
+    pub feedback: f64,
+    pub feedback_lowpass_hz: f64,
+}
+
+impl Default for TempoDelaySettings {
+    fn default() -> Self {
+        Self {
+            beats: 0.75,
+            feedback: 0.52,
+            feedback_lowpass_hz: 4_800.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ActiveSendExplanation {
     pub pattern: meldritch_core::PatternId,
     pub track: meldritch_core::TrackId,
@@ -71,7 +89,7 @@ pub fn effect_artifact_key(
         state.write_u64(rule.required_tag as u64);
         state.write_u64(rule.send_gain.to_bits());
     }
-    let tail = effect_tail_frames(tempo.sample_rate());
+    let tail = effect_tail_frames(tempo);
     let sample_lookbehind = samples_by_note
         .values()
         .map(SampleBuffer::frames)
@@ -139,7 +157,7 @@ pub fn render_event_aware_effects(
         };
         add_block(target, &send);
     }
-    let delay_bus = apply_delay(&delay_input, tempo.sample_rate(), 0.1875, 0.42);
+    let delay_bus = apply_tempo_ping_pong_delay(&delay_input, tempo, TempoDelaySettings::default());
     let reverb_bus = apply_reverb(&reverb_input, tempo.sample_rate());
     let mut mix = crate::render_pattern_samples(
         pattern,
@@ -234,30 +252,51 @@ fn matching_explanations(event: &Event, rules: &[EffectSendRule]) -> Vec<ActiveS
         .collect()
 }
 
-const DELAY_REPEATS: u32 = 4;
+const DELAY_TAIL_REPEATS: u32 = 6;
 
-fn effect_tail_frames(sample_rate: u32) -> u32 {
-    let delay = (0.1875 * f64::from(sample_rate)).round() as u32 * DELAY_REPEATS;
-    let reverb = (0.073 * f64::from(sample_rate)).round() as u32;
+fn effect_tail_frames(tempo: Tempo) -> u32 {
+    let delay =
+        delay_frames(tempo, TempoDelaySettings::default().beats).saturating_mul(DELAY_TAIL_REPEATS);
+    let reverb = (0.073 * f64::from(tempo.sample_rate())).round() as u32;
     delay.max(reverb)
 }
 
-fn apply_delay(input: &AudioBlock, sample_rate: u32, seconds: f64, feedback: f64) -> AudioBlock {
-    let mut output = AudioBlock::silent(input.channels(), input.frames());
-    let delay_frames = (seconds * f64::from(sample_rate)).round().max(1.0) as u32;
+fn delay_frames(tempo: Tempo, beats: f64) -> u32 {
+    (tempo.frames_per_beat() * beats.clamp(1.0 / 64.0, 16.0))
+        .round()
+        .clamp(1.0, f64::from(u32::MAX)) as u32
+}
+
+#[must_use]
+pub fn apply_tempo_ping_pong_delay(
+    input: &AudioBlock,
+    tempo: Tempo,
+    settings: TempoDelaySettings,
+) -> AudioBlock {
+    let mut output = input.clone();
+    let delay_frames = delay_frames(tempo, settings.beats);
     let channels = usize::from(input.channels());
+    let mut delay_line = vec![0.0; delay_frames as usize * channels];
+    let feedback = settings.feedback.clamp(0.0, 0.98);
+    let cutoff = settings
+        .feedback_lowpass_hz
+        .clamp(20.0, f64::from(tempo.sample_rate()) * 0.49);
+    let coefficient =
+        1.0 - (-2.0 * std::f64::consts::PI * cutoff / f64::from(tempo.sample_rate())).exp();
+    let mut filtered = vec![0.0; channels];
     for frame in 0..input.frames() {
-        for channel in 0..channels {
+        let position = frame as usize % delay_frames as usize;
+        for (channel, filtered_sample) in filtered.iter_mut().enumerate() {
             let index = frame as usize * channels + channel;
-            let mut sample = input.samples()[index];
-            for repeat in 1..=DELAY_REPEATS {
-                let offset = delay_frames * repeat;
-                if let Some(source) = frame.checked_sub(offset) {
-                    sample += input.samples()[source as usize * channels + channel]
-                        * feedback.powi(repeat as i32);
-                }
-            }
-            output.samples_mut()[index] = sample;
+            let opposite = if channels == 2 { 1 - channel } else { channel };
+            let delayed = delay_line[position * channels + opposite];
+            *filtered_sample += coefficient * (delayed - *filtered_sample);
+            output.samples_mut()[index] += delayed;
+        }
+        for (channel, filtered_sample) in filtered.iter().copied().enumerate() {
+            let index = frame as usize * channels + channel;
+            delay_line[position * channels + channel] =
+                input.samples()[index] + filtered_sample * feedback;
         }
     }
     output
@@ -400,7 +439,52 @@ mod tests {
             &full.delay_bus.samples()[8_000..],
             chunk.delay_bus.samples()
         );
-        assert!(chunk.delay_bus.samples()[1_000] > 0.0);
+        assert!(chunk.delay_bus.samples()[10_000] > 0.0);
+    }
+
+    #[test]
+    fn ping_pong_delay_tracks_tempo_and_alternates_stereo_echoes() {
+        let mut impulse = AudioBlock::silent(2, 80_000);
+        impulse.samples_mut()[0] = 1.0;
+        let settings = TempoDelaySettings {
+            beats: 0.75,
+            feedback: 0.6,
+            feedback_lowpass_hz: 20_000.0,
+        };
+        let fast =
+            apply_tempo_ping_pong_delay(&impulse, Tempo::new(120.0, 48_000).unwrap(), settings);
+        let slow =
+            apply_tempo_ping_pong_delay(&impulse, Tempo::new(60.0, 48_000).unwrap(), settings);
+
+        let fast_delay = 18_000_usize;
+        let slow_delay = 36_000_usize;
+        assert_eq!(fast.samples()[fast_delay * 2], 0.0);
+        assert_eq!(fast.samples()[fast_delay * 2 + 1], 1.0);
+        assert_eq!(slow.samples()[slow_delay * 2 + 1], 1.0);
+        assert!(fast.samples()[fast_delay * 4] > 0.0);
+        assert!(fast.samples().iter().all(|sample| sample.is_finite()));
+    }
+
+    #[test]
+    fn ping_pong_feedback_filter_damps_repeated_echoes() {
+        let mut impulse = AudioBlock::silent(1, 50_000);
+        impulse.samples_mut()[0] = 1.0;
+        let tempo = Tempo::new(120.0, 48_000).unwrap();
+        let render = |cutoff| {
+            apply_tempo_ping_pong_delay(
+                &impulse,
+                tempo,
+                TempoDelaySettings {
+                    beats: 0.5,
+                    feedback: 0.8,
+                    feedback_lowpass_hz: cutoff,
+                },
+            )
+        };
+        let dark = render(200.0);
+        let bright = render(20_000.0);
+        assert!(dark.samples()[24_000] < bright.samples()[24_000]);
+        assert!(bright.peak_abs() <= 1.0);
     }
 
     #[test]

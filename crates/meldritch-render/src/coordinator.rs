@@ -1003,7 +1003,7 @@ mod tests {
     #[test]
     fn coordinator_publishes_tagged_effect_tails_without_a_synth_layer() {
         let config =
-            RenderCoordinatorConfig::new(2, 12_000, 6_000, 1, Duration::from_millis(2)).unwrap();
+            RenderCoordinatorConfig::new(2, 24_000, 6_000, 3, Duration::from_millis(2)).unwrap();
         let mut pattern = Pattern::new(PatternId::new(1), 4, 4).unwrap();
         pattern
             .set_step(
@@ -1029,8 +1029,8 @@ mod tests {
         let (_, status, _) = realtime_status();
         let mut coordinator = RenderCoordinator::new_from_state(config, state, status).unwrap();
 
-        assert!(coordinator.wait_for_ready_chunks(2, Duration::from_secs(1)));
-        assert!(coordinator.audio_reader().snapshot().frame(9_000).unwrap()[0] > 0.0);
+        assert!(coordinator.wait_for_ready_chunks(4, Duration::from_secs(1)));
+        assert!(coordinator.audio_reader().snapshot().frame(18_000).unwrap()[0] > 0.0);
         coordinator.shutdown();
     }
 }

@@ -181,3 +181,14 @@ choices at musically similar moments and makes those decisions visible.
 
 Done when specific phrases and their variations can be played deliberately
 without learned automation immediately fighting a live decision.
+
+## 16. Flashy DSP and production effects
+
+- [x] Tempo-synced stereo ping-pong delay with filtered feedback
+- [ ] General tempo-aware LFO and modulation routing
+- [ ] Phaser and per-voice stereo spread
+- [ ] Master compressor, soft clipper, and limiter
+- [ ] Modulated reverb with damping, predelay, and freeze
+
+Done when the live set has broad rhythmic modulation, animated stereo depth,
+large controllable spaces, and a performance-safe master bus.
