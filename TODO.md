@@ -188,7 +188,7 @@ without learned automation immediately fighting a live decision.
 - [x] General tempo-aware LFO and modulation routing
 - [x] Phaser and per-voice stereo spread
 - [x] Master compressor, soft clipper, and limiter
-- [ ] Modulated reverb with damping, predelay, and freeze
+- [x] Modulated reverb with damping, predelay, and freeze
 
 Done when the live set has broad rhythmic modulation, animated stereo depth,
 large controllable spaces, and a performance-safe master bus.

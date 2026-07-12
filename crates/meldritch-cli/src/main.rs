@@ -3393,10 +3393,18 @@ fn render_showcase(
     )
     .map_err(|err| format!("failed to render showcase chords: {err:?}"))?;
     let chord_audio = if warehouse {
-        meldritch_render::stereo_fx::apply_tempo_stereo_phaser(
+        let phased = meldritch_render::stereo_fx::apply_tempo_stereo_phaser(
             &chord_audio,
             project.tempo(),
             meldritch_render::stereo_fx::PhaserSettings::default(),
+        );
+        meldritch_render::effects::apply_modulated_reverb(
+            &phased,
+            project.tempo(),
+            meldritch_render::effects::ModulatedReverbSettings {
+                mix: 0.24,
+                ..meldritch_render::effects::ModulatedReverbSettings::default()
+            },
         )
     } else {
         chord_audio

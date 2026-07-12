@@ -30,6 +30,33 @@ pub struct TempoDelaySettings {
     pub feedback_lowpass_hz: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModulatedReverbSettings {
+    pub predelay_seconds: f64,
+    pub size: f64,
+    pub decay: f64,
+    pub damping_hz: f64,
+    pub modulation_depth_seconds: f64,
+    pub modulation_cycle_beats: f64,
+    pub mix: f64,
+    pub freeze: bool,
+}
+
+impl Default for ModulatedReverbSettings {
+    fn default() -> Self {
+        Self {
+            predelay_seconds: 0.024,
+            size: 1.15,
+            decay: 0.78,
+            damping_hz: 5_500.0,
+            modulation_depth_seconds: 0.0015,
+            modulation_cycle_beats: 12.0,
+            mix: 0.38,
+            freeze: false,
+        }
+    }
+}
+
 impl Default for TempoDelaySettings {
     fn default() -> Self {
         Self {
@@ -158,7 +185,8 @@ pub fn render_event_aware_effects(
         add_block(target, &send);
     }
     let delay_bus = apply_tempo_ping_pong_delay(&delay_input, tempo, TempoDelaySettings::default());
-    let reverb_bus = apply_reverb(&reverb_input, tempo.sample_rate());
+    let reverb_bus =
+        apply_modulated_reverb(&reverb_input, tempo, ModulatedReverbSettings::default());
     let mut mix = crate::render_pattern_samples(
         pattern,
         tempo,
@@ -257,7 +285,7 @@ const DELAY_TAIL_REPEATS: u32 = 6;
 fn effect_tail_frames(tempo: Tempo) -> u32 {
     let delay =
         delay_frames(tempo, TempoDelaySettings::default().beats).saturating_mul(DELAY_TAIL_REPEATS);
-    let reverb = (0.073 * f64::from(tempo.sample_rate())).round() as u32;
+    let reverb = tempo.sample_rate().saturating_mul(3);
     delay.max(reverb)
 }
 
@@ -302,17 +330,77 @@ pub fn apply_tempo_ping_pong_delay(
     output
 }
 
-fn apply_reverb(input: &AudioBlock, sample_rate: u32) -> AudioBlock {
-    let mut output = input.clone();
+#[must_use]
+pub fn apply_modulated_reverb(
+    input: &AudioBlock,
+    tempo: Tempo,
+    settings: ModulatedReverbSettings,
+) -> AudioBlock {
     let channels = usize::from(input.channels());
-    for (seconds, gain) in [(0.031, 0.34), (0.047, 0.24), (0.073, 0.16)] {
-        let delay = (seconds * f64::from(sample_rate)).round() as u32;
-        for frame in delay..input.frames() {
-            for channel in 0..channels {
-                let target = frame as usize * channels + channel;
-                let source = (frame - delay) as usize * channels + channel;
-                output.samples_mut()[target] += input.samples()[source] * gain;
+    let mut output = input.clone();
+    let sample_rate = tempo.sample_rate();
+    let size = settings.size.clamp(0.25, 2.5);
+    let modulation_depth = (settings.modulation_depth_seconds.clamp(0.0, 0.02)
+        * f64::from(sample_rate))
+    .round() as usize;
+    let base_seconds = [0.0297, 0.0371, 0.0411, 0.0437];
+    let mut lines = base_seconds
+        .iter()
+        .enumerate()
+        .map(|(line, seconds)| {
+            (0..channels)
+                .map(|channel| {
+                    let stereo_offset = channel as f64 * 0.0017 + line as f64 * 0.0003;
+                    let base = ((seconds * size + stereo_offset) * f64::from(sample_rate)).round()
+                        as usize;
+                    vec![0.0; base.saturating_add(modulation_depth * 2).max(2)]
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let mut positions = vec![vec![0_usize; channels]; base_seconds.len()];
+    let mut damped = vec![vec![0.0; channels]; base_seconds.len()];
+    let damping = settings
+        .damping_hz
+        .clamp(20.0, f64::from(sample_rate) * 0.49);
+    let damping_coefficient =
+        1.0 - (-2.0 * std::f64::consts::PI * damping / f64::from(sample_rate)).exp();
+    let feedback = if settings.freeze {
+        0.9995
+    } else {
+        settings.decay.clamp(0.0, 0.97)
+    };
+    let predelay =
+        (settings.predelay_seconds.clamp(0.0, 0.5) * f64::from(sample_rate)).round() as usize;
+    let mix = settings.mix.clamp(0.0, 1.0);
+    for frame in 0..input.frames() as usize {
+        let modulation_phase = frame as f64
+            / (tempo.frames_per_beat() * settings.modulation_cycle_beats.clamp(0.25, 256.0));
+        for channel in 0..channels {
+            let input_index = frame * channels + channel;
+            let injected = frame
+                .checked_sub(predelay)
+                .map_or(0.0, |source| input.samples()[source * channels + channel]);
+            let mut wet = 0.0;
+            for line_index in 0..lines.len() {
+                let line = &mut lines[line_index][channel];
+                let position = positions[line_index][channel];
+                let phase = modulation_phase + line_index as f64 * 0.17 + channel as f64 * 0.25;
+                let offset = ((std::f64::consts::TAU * phase).sin() * modulation_depth as f64)
+                    .round() as isize;
+                let nominal = line.len().saturating_sub(modulation_depth).max(1) as isize;
+                let delay = (nominal + offset).clamp(1, line.len() as isize - 1) as usize;
+                let read = (position + line.len() - delay) % line.len();
+                let delayed = line[read];
+                damped[line_index][channel] +=
+                    damping_coefficient * (delayed - damped[line_index][channel]);
+                line[position] = injected * 0.25 + damped[line_index][channel] * feedback;
+                positions[line_index][channel] = (position + 1) % line.len();
+                wet += delayed;
             }
+            wet *= 0.5;
+            output.samples_mut()[input_index] =
+                input.samples()[input_index] * (1.0 - mix) + wet * mix;
         }
     }
     output
@@ -390,7 +478,7 @@ mod tests {
         assert!(rendered.delay_bus.samples()[0] > 0.0);
         assert_eq!(rendered.delay_bus.samples()[6_000], 0.0);
         assert!(rendered.reverb_bus.samples()[6_000] > 0.0);
-        assert_eq!(rendered.reverb_bus.samples()[12_000], 0.0);
+        assert!(rendered.reverb_bus.samples()[12_000] > 0.0);
         assert_eq!(rendered.explanations.len(), 2);
         assert_eq!(rendered.explanations[0].matched_tag, EventTag::Accent);
         assert_eq!(rendered.explanations[1].matched_tag, EventTag::Ghost);
@@ -485,6 +573,65 @@ mod tests {
         let bright = render(20_000.0);
         assert!(dark.samples()[24_000] < bright.samples()[24_000]);
         assert!(bright.peak_abs() <= 1.0);
+    }
+
+    #[test]
+    fn modulated_reverb_honors_predelay_and_decorrelates_stereo() {
+        let tempo = Tempo::new(120.0, 48_000).unwrap();
+        let mut impulse = AudioBlock::silent(2, 30_000);
+        impulse.samples_mut()[0] = 1.0;
+        impulse.samples_mut()[1] = 1.0;
+        let output = apply_modulated_reverb(
+            &impulse,
+            tempo,
+            ModulatedReverbSettings {
+                mix: 1.0,
+                ..ModulatedReverbSettings::default()
+            },
+        );
+        assert!(
+            output.samples()[2..2_000 * 2]
+                .iter()
+                .all(|sample| *sample == 0.0)
+        );
+        assert!(
+            output.samples()[2_000 * 2..8_000 * 2]
+                .iter()
+                .any(|sample| *sample != 0.0)
+        );
+        assert!((0..output.frames()).any(|frame| {
+            let index = frame as usize * 2;
+            output.samples()[index] != output.samples()[index + 1]
+        }));
+        assert!(output.samples().iter().all(|sample| sample.is_finite()));
+    }
+
+    #[test]
+    fn reverb_freeze_retains_more_late_energy_than_normal_decay() {
+        let tempo = Tempo::new(120.0, 48_000).unwrap();
+        let mut impulse = AudioBlock::silent(1, 180_000);
+        impulse.samples_mut()[0] = 1.0;
+        let render = |freeze| {
+            apply_modulated_reverb(
+                &impulse,
+                tempo,
+                ModulatedReverbSettings {
+                    mix: 1.0,
+                    freeze,
+                    ..ModulatedReverbSettings::default()
+                },
+            )
+        };
+        let normal = render(false);
+        let frozen = render(true);
+        let energy = |block: &AudioBlock| {
+            block.samples()[150_000..]
+                .iter()
+                .map(|sample| sample * sample)
+                .sum::<f64>()
+        };
+        assert!(energy(&frozen) > energy(&normal));
+        assert!(frozen.peak_abs() < 2.0);
     }
 
     #[test]
