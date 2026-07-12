@@ -144,6 +144,40 @@ fn merge_performer_futures(
     library.last_session = captured;
 }
 
+fn learned_phrase_schedule(
+    library: &FutureLibrary,
+    frame_count: u32,
+    limit: usize,
+) -> Vec<(u32, SceneId)> {
+    if frame_count == 0 || limit == 0 {
+        return Vec::new();
+    }
+    let last_frame = frame_count.saturating_sub(1);
+    let mut schedule = library
+        .learned
+        .iter()
+        .filter_map(|future| match future.action {
+            LearnedAction::QueuePhrase(scene) => Some((
+                (future.mean_phase.clamp(0.0, 1.0) * f64::from(last_frame)).round() as u32,
+                SceneId::new(scene),
+                future.score,
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    schedule.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| right.2.cmp(&left.2))
+            .then_with(|| left.1.cmp(&right.1))
+    });
+    schedule
+        .into_iter()
+        .take(limit)
+        .map(|(frame, scene, _)| (frame, scene))
+        .collect()
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "meldritch")]
 #[command(about = "Headless Meldritch project tooling")]
@@ -3959,18 +3993,10 @@ fn tui_samples(
             .then_with(|| right.last_session.cmp(&left.last_session))
             .then_with(|| left.action.cmp(&right.action))
     });
-    let mut phrase_prepared = false;
+    let learned_phrase_cues = learned_phrase_schedule(&library, frame_count, 8);
     for learned in ranked.into_iter().take(4) {
         match learned.action {
-            LearnedAction::QueuePhrase(scene) => {
-                if phrase_prepared {
-                    continue;
-                }
-                controller
-                    .queue_phrase_scene(SceneId::new(scene))
-                    .map_err(|err| format!("failed to prepare learned phrase: {err:?}"))?;
-                phrase_prepared = true;
-            }
+            LearnedAction::QueuePhrase(_) => continue,
             action => {
                 controller
                     .handle_input(action.input().expect("non-phrase action has an input"))
@@ -3991,6 +4017,7 @@ fn tui_samples(
     let captured = Arc::new(std::sync::Mutex::new(Vec::<CapturedFuture>::new()));
     let performer_capture = Arc::clone(&captured);
     let mut fired = vec![false; cue_frames.len()];
+    let mut phrase_fired = vec![false; learned_phrase_cues.len()];
     let mut previous_position = 0;
     meldritch_tui::run_with_hooks(
         &mut controller,
@@ -4009,8 +4036,23 @@ fn tui_samples(
             let position = controller.view_model().transport.position;
             if position < previous_position {
                 fired.fill(false);
+                phrase_fired.fill(false);
             }
             previous_position = position;
+            if warehouse && controller.view_model().performance.queued.is_none() {
+                for (index, (frame, scene)) in learned_phrase_cues.iter().enumerate() {
+                    if !phrase_fired[index] && position >= *frame {
+                        controller
+                            .queue_phrase_scene(*scene)
+                            .map_err(|err| format!("learned phrase cue failed: {err:?}"))?;
+                        phrase_fired[index] = true;
+                        return Ok(Some(format!(
+                            "Learned warehouse phrase queued: scene {}",
+                            scene.raw()
+                        )));
+                    }
+                }
+            }
             for (index, (frame, description)) in cue_frames.iter().enumerate() {
                 if !fired[index] && position >= *frame {
                     fired[index] = true;
@@ -4530,6 +4572,45 @@ mod tests {
                 .any(|future| future.action == LearnedAction::QueuePhrase(4))
         );
         assert_eq!(LearnedAction::QueuePhrase(3).input(), None);
+    }
+
+    #[test]
+    fn learned_phrase_schedule_orders_cues_by_musical_phase() {
+        let library = FutureLibrary {
+            schema_version: 2,
+            sessions: 4,
+            learned: vec![
+                LearnedFuture {
+                    action: LearnedAction::QueuePhrase(4),
+                    occurrences: 3,
+                    last_session: 4,
+                    mean_phase: 0.75,
+                    score: 3_004,
+                },
+                LearnedFuture {
+                    action: LearnedAction::IncreaseDrive,
+                    occurrences: 9,
+                    last_session: 4,
+                    mean_phase: 0.1,
+                    score: 9_004,
+                },
+                LearnedFuture {
+                    action: LearnedAction::QueuePhrase(2),
+                    occurrences: 2,
+                    last_session: 3,
+                    mean_phase: 0.25,
+                    score: 2_003,
+                },
+            ],
+            last_session: Vec::new(),
+        };
+
+        assert_eq!(
+            learned_phrase_schedule(&library, 1_001, 8),
+            vec![(250, SceneId::new(2)), (750, SceneId::new(4))]
+        );
+        assert!(learned_phrase_schedule(&library, 0, 8).is_empty());
+        assert!(learned_phrase_schedule(&library, 1_001, 0).is_empty());
     }
 
     #[test]
