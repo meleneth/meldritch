@@ -41,6 +41,56 @@ id_type!(SourceId);
 id_type!(TrackId);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum SourceRole {
+    Kick,
+    Snare,
+    Hat,
+    Bass,
+    Chords,
+    Lead,
+    Texture,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RolePriorityTable {
+    priorities: BTreeMap<SourceRole, u8>,
+}
+
+impl Default for RolePriorityTable {
+    fn default() -> Self {
+        Self {
+            priorities: [
+                (SourceRole::Kick, 100),
+                (SourceRole::Snare, 80),
+                (SourceRole::Lead, 70),
+                (SourceRole::Bass, 60),
+                (SourceRole::Chords, 50),
+                (SourceRole::Hat, 40),
+                (SourceRole::Texture, 20),
+            ]
+            .into_iter()
+            .collect(),
+        }
+    }
+}
+
+impl RolePriorityTable {
+    #[must_use]
+    pub fn priority(&self, role: SourceRole) -> u8 {
+        self.priorities.get(&role).copied().unwrap_or(0)
+    }
+
+    #[must_use]
+    pub fn should_duck(&self, source: SourceRole, target: SourceRole) -> bool {
+        self.priority(source) > self.priority(target)
+    }
+
+    pub fn set_priority(&mut self, role: SourceRole, priority: u8) {
+        self.priorities.insert(role, priority);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum EntityId {
     Node(NodeId),
     Pattern(PatternId),
@@ -138,6 +188,187 @@ impl fmt::Display for FrameRangeError {
 }
 
 impl std::error::Error for FrameRangeError {}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AutomationTarget {
+    Cutoff,
+    Resonance,
+    FilterEnvelope,
+    Drive,
+    Level,
+    Ducking,
+    Modulation,
+    Waveform,
+    Voicing,
+    Mute,
+    Scene,
+}
+
+impl AutomationTarget {
+    #[must_use]
+    pub const fn is_discrete(self) -> bool {
+        matches!(
+            self,
+            Self::Waveform | Self::Voicing | Self::Mute | Self::Scene
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AutomationValue {
+    Continuous(Param),
+    Discrete(i64),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AutomationInterpolation {
+    Linear,
+    Step,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AutomationPoint {
+    pub frame: Frame,
+    pub value: AutomationValue,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AutomationError {
+    Empty,
+    DuplicateOrUnorderedFrame,
+    NonFiniteValue,
+    ValueKindMismatch,
+    LinearDiscreteTarget,
+    PointOutOfRange,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AutomationLane {
+    target: AutomationTarget,
+    interpolation: AutomationInterpolation,
+    points: Vec<AutomationPoint>,
+}
+
+impl AutomationLane {
+    pub fn new(
+        target: AutomationTarget,
+        interpolation: AutomationInterpolation,
+        points: Vec<AutomationPoint>,
+    ) -> Result<Self, AutomationError> {
+        if points.is_empty() {
+            return Err(AutomationError::Empty);
+        }
+        if target.is_discrete() && interpolation == AutomationInterpolation::Linear {
+            return Err(AutomationError::LinearDiscreteTarget);
+        }
+        let mut previous = None;
+        for point in &points {
+            if previous.is_some_and(|frame| point.frame <= frame) {
+                return Err(AutomationError::DuplicateOrUnorderedFrame);
+            }
+            previous = Some(point.frame);
+            match point.value {
+                AutomationValue::Continuous(value) => {
+                    if target.is_discrete() {
+                        return Err(AutomationError::ValueKindMismatch);
+                    }
+                    if !value.is_finite() {
+                        return Err(AutomationError::NonFiniteValue);
+                    }
+                }
+                AutomationValue::Discrete(_) if !target.is_discrete() => {
+                    return Err(AutomationError::ValueKindMismatch);
+                }
+                AutomationValue::Discrete(_) => {}
+            }
+        }
+        Ok(Self {
+            target,
+            interpolation,
+            points,
+        })
+    }
+
+    #[must_use]
+    pub const fn target(&self) -> AutomationTarget {
+        self.target
+    }
+
+    #[must_use]
+    pub const fn interpolation(&self) -> AutomationInterpolation {
+        self.interpolation
+    }
+
+    #[must_use]
+    pub fn points(&self) -> &[AutomationPoint] {
+        &self.points
+    }
+
+    #[must_use]
+    pub fn value_at(&self, frame: Frame) -> AutomationValue {
+        let upper = self.points.partition_point(|point| point.frame <= frame);
+        if upper == 0 {
+            return self.points[0].value;
+        }
+        let left = self.points[upper - 1];
+        if self.interpolation == AutomationInterpolation::Step || upper == self.points.len() {
+            return left.value;
+        }
+        let right = self.points[upper];
+        match (left.value, right.value) {
+            (AutomationValue::Continuous(left_value), AutomationValue::Continuous(right_value)) => {
+                let span = (right.frame - left.frame) as Param;
+                let amount = (frame - left.frame) as Param / span;
+                AutomationValue::Continuous(left_value + (right_value - left_value) * amount)
+            }
+            _ => left.value,
+        }
+    }
+
+    /// Points required to reproduce this lane over `range`, including the
+    /// preceding anchor and, for linear lanes, the following anchor.
+    #[must_use]
+    pub fn points_affecting(&self, range: FrameRange) -> Vec<AutomationPoint> {
+        let first_inside = self
+            .points
+            .partition_point(|point| point.frame < range.start());
+        let mut start = first_inside.saturating_sub(1);
+        let mut end = self
+            .points
+            .partition_point(|point| point.frame < range.end());
+        if self.interpolation == AutomationInterpolation::Linear && end < self.points.len() {
+            end += 1;
+        }
+        if start >= end {
+            start = end.saturating_sub(1);
+        }
+        self.points[start..end].to_vec()
+    }
+
+    /// Exact timeline range whose evaluated values can change when the point
+    /// at `index` is edited.
+    pub fn influence_range(
+        &self,
+        index: usize,
+        timeline_end: Frame,
+    ) -> Result<FrameRange, AutomationError> {
+        let point = self
+            .points
+            .get(index)
+            .ok_or(AutomationError::PointOutOfRange)?;
+        let start = if self.interpolation == AutomationInterpolation::Linear && index > 0 {
+            self.points[index - 1].frame
+        } else {
+            point.frame
+        };
+        let end = self
+            .points
+            .get(index + 1)
+            .map_or(timeline_end, |next| next.frame)
+            .max(start);
+        FrameRange::new(start, end).map_err(|_| AutomationError::PointOutOfRange)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tempo {
@@ -353,6 +584,12 @@ impl Step {
     }
 
     #[must_use]
+    pub fn with_note(mut self, note: u8) -> Self {
+        self.note = note;
+        self
+    }
+
+    #[must_use]
     pub const fn velocity(&self) -> Param {
         self.velocity
     }
@@ -531,6 +768,15 @@ impl Pattern {
         Ok(self.steps.insert((track, step), event))
     }
 
+    pub fn clear_step(
+        &mut self,
+        track: TrackId,
+        step: StepIndex,
+    ) -> Result<Option<Step>, PatternError> {
+        self.ensure_step_in_range(step)?;
+        Ok(self.steps.remove(&(track, step)))
+    }
+
     #[must_use]
     pub fn get_step(&self, track: TrackId, step: StepIndex) -> Option<&Step> {
         self.steps.get(&(track, step))
@@ -639,6 +885,217 @@ impl Pattern {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct SceneId(u64);
+
+impl SceneId {
+    #[must_use]
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    #[must_use]
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArrangementSection {
+    pattern: Pattern,
+    repeats: u32,
+    transpose: i8,
+    muted_tracks: BTreeSet<TrackId>,
+    scene: SceneId,
+}
+
+impl ArrangementSection {
+    pub fn new(pattern: Pattern, repeats: u32, scene: SceneId) -> Result<Self, ArrangementError> {
+        if repeats == 0 {
+            return Err(ArrangementError::ZeroRepeats);
+        }
+        Ok(Self {
+            pattern,
+            repeats,
+            transpose: 0,
+            muted_tracks: BTreeSet::new(),
+            scene,
+        })
+    }
+
+    #[must_use]
+    pub fn with_transpose(mut self, semitones: i8) -> Self {
+        self.transpose = semitones;
+        self
+    }
+
+    #[must_use]
+    pub fn with_muted_track(mut self, track: TrackId) -> Self {
+        self.muted_tracks.insert(track);
+        self
+    }
+
+    #[must_use]
+    pub const fn pattern(&self) -> &Pattern {
+        &self.pattern
+    }
+
+    #[must_use]
+    pub const fn repeats(&self) -> u32 {
+        self.repeats
+    }
+
+    #[must_use]
+    pub const fn scene(&self) -> SceneId {
+        self.scene
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArrangementError {
+    Empty,
+    ZeroRepeats,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Arrangement {
+    sections: Vec<ArrangementSection>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ArrangementPosition {
+    pub section_index: usize,
+    pub scene: SceneId,
+    pub repeat_index: u32,
+    pub frame_in_repeat: Frame,
+}
+
+impl Arrangement {
+    pub fn new(sections: Vec<ArrangementSection>) -> Result<Self, ArrangementError> {
+        if sections.is_empty() {
+            return Err(ArrangementError::Empty);
+        }
+        Ok(Self { sections })
+    }
+
+    #[must_use]
+    pub fn sections(&self) -> &[ArrangementSection] {
+        &self.sections
+    }
+
+    #[must_use]
+    pub fn total_frames(&self, tempo: Tempo) -> Frame {
+        self.sections.iter().fold(0, |total, section| {
+            let cycle = tempo.step_start_frame(
+                u64::from(section.pattern.length_steps()),
+                section.pattern.steps_per_beat(),
+            );
+            total.saturating_add(cycle.saturating_mul(u64::from(section.repeats)))
+        })
+    }
+
+    #[must_use]
+    pub fn section_at_frame(&self, tempo: Tempo, frame: Frame) -> Option<(usize, SceneId)> {
+        self.position_at_frame(tempo, frame)
+            .map(|position| (position.section_index, position.scene))
+    }
+
+    #[must_use]
+    pub fn position_at_frame(&self, tempo: Tempo, frame: Frame) -> Option<ArrangementPosition> {
+        let mut cursor = 0;
+        for (index, section) in self.sections.iter().enumerate() {
+            let cycle = tempo.step_start_frame(
+                u64::from(section.pattern.length_steps()),
+                section.pattern.steps_per_beat(),
+            );
+            let end = cursor + cycle * u64::from(section.repeats);
+            if cursor <= frame && frame < end {
+                let local = frame - cursor;
+                return Some(ArrangementPosition {
+                    section_index: index,
+                    scene: section.scene,
+                    repeat_index: (local / cycle) as u32,
+                    frame_in_repeat: local % cycle,
+                });
+            }
+            cursor = end;
+        }
+        None
+    }
+
+    /// Return the half-open frame range covering the selected contiguous
+    /// sections. `end_section` is exclusive.
+    pub fn section_range(
+        &self,
+        tempo: Tempo,
+        start_section: usize,
+        end_section: usize,
+    ) -> Option<FrameRange> {
+        if start_section >= end_section || end_section > self.sections.len() {
+            return None;
+        }
+        let mut cursor = 0;
+        let mut start = None;
+        for (index, section) in self.sections.iter().enumerate() {
+            if index == start_section {
+                start = Some(cursor);
+            }
+            let cycle = tempo.step_start_frame(
+                u64::from(section.pattern.length_steps()),
+                section.pattern.steps_per_beat(),
+            );
+            cursor += cycle * u64::from(section.repeats);
+            if index + 1 == end_section {
+                return FrameRange::new(start?, cursor).ok();
+            }
+        }
+        None
+    }
+
+    pub fn events_between(
+        &self,
+        tempo: Tempo,
+        range: FrameRange,
+        probability_seed: ProbabilitySeed,
+        out: &mut Vec<Event>,
+    ) {
+        let mut cursor = 0;
+        for section in &self.sections {
+            let cycle = tempo.step_start_frame(
+                u64::from(section.pattern.length_steps()),
+                section.pattern.steps_per_beat(),
+            );
+            let section_frames = cycle * u64::from(section.repeats);
+            let section_end = cursor + section_frames;
+            let start = range.start().max(cursor);
+            let end = range.end().min(section_end);
+            if start < end {
+                let local_range = FrameRange::new(start - cursor, end - cursor)
+                    .expect("arrangement local range is ordered");
+                let mut events = Vec::new();
+                section
+                    .pattern
+                    .events_between(tempo, local_range, probability_seed, &mut events);
+                out.extend(events.into_iter().filter_map(|mut event| {
+                    if section.muted_tracks.contains(&event.track) {
+                        return None;
+                    }
+                    event.note =
+                        (i16::from(event.note) + i16::from(section.transpose)).clamp(0, 127) as u8;
+                    event.range =
+                        FrameRange::new(event.range.start() + cursor, event.range.end() + cursor)
+                            .expect("shifted arrangement event is ordered");
+                    Some(event)
+                }));
+            }
+            cursor = section_end;
+            if cursor >= range.end() {
+                break;
+            }
+        }
     }
 }
 
@@ -1822,5 +2279,165 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err, RelationGraphError::CycleDetected { from: b, to: a });
+    }
+
+    #[test]
+    fn arrangement_queries_ordered_sections_beyond_one_pattern() {
+        let tempo = Tempo::new(120.0, 48_000).unwrap();
+        let mut first = Pattern::new(PatternId::new(1), 4, 4).unwrap();
+        first
+            .set_step(TrackId::new(1), StepIndex::new(0), Step::new(60))
+            .unwrap();
+        let mut second = Pattern::new(PatternId::new(2), 4, 4).unwrap();
+        second
+            .set_step(TrackId::new(1), StepIndex::new(0), Step::new(62))
+            .unwrap();
+        second
+            .set_step(TrackId::new(2), StepIndex::new(0), Step::new(40))
+            .unwrap();
+        let arrangement = Arrangement::new(vec![
+            ArrangementSection::new(first, 2, SceneId::new(10)).unwrap(),
+            ArrangementSection::new(second, 1, SceneId::new(20))
+                .unwrap()
+                .with_transpose(5)
+                .with_muted_track(TrackId::new(2)),
+        ])
+        .unwrap();
+        let cycle_frames = 24_000;
+        let mut events = Vec::new();
+        arrangement.events_between(
+            tempo,
+            FrameRange::new(0, cycle_frames * 3).unwrap(),
+            ProbabilitySeed::new(1),
+            &mut events,
+        );
+
+        assert_eq!(arrangement.total_frames(tempo), cycle_frames * 3);
+        assert_eq!(
+            arrangement.section_at_frame(tempo, cycle_frames * 2),
+            Some((1, SceneId::new(20)))
+        );
+        assert_eq!(
+            arrangement.position_at_frame(tempo, cycle_frames + 123),
+            Some(ArrangementPosition {
+                section_index: 0,
+                scene: SceneId::new(10),
+                repeat_index: 1,
+                frame_in_repeat: 123,
+            })
+        );
+        assert_eq!(
+            arrangement.section_range(tempo, 1, 2),
+            FrameRange::new(48_000, 72_000).ok()
+        );
+        assert_eq!(arrangement.section_range(tempo, 1, 1), None);
+        assert_eq!(arrangement.position_at_frame(tempo, 72_000), None);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| (event.range().start(), event.note()))
+                .collect::<Vec<_>>(),
+            vec![(0, 60), (24_000, 60), (48_000, 67)]
+        );
+    }
+
+    #[test]
+    fn arrangement_rejects_empty_sections_and_zero_repeats() {
+        assert_eq!(Arrangement::new(Vec::new()), Err(ArrangementError::Empty));
+        assert_eq!(
+            ArrangementSection::new(
+                Pattern::new(PatternId::new(1), 4, 4).unwrap(),
+                0,
+                SceneId::new(1),
+            ),
+            Err(ArrangementError::ZeroRepeats)
+        );
+    }
+
+    #[test]
+    fn continuous_automation_interpolates_and_clamps_to_endpoints() {
+        let lane = AutomationLane::new(
+            AutomationTarget::Cutoff,
+            AutomationInterpolation::Linear,
+            vec![
+                AutomationPoint {
+                    frame: 100,
+                    value: AutomationValue::Continuous(200.0),
+                },
+                AutomationPoint {
+                    frame: 200,
+                    value: AutomationValue::Continuous(1_200.0),
+                },
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(lane.value_at(0), AutomationValue::Continuous(200.0));
+        assert_eq!(lane.value_at(150), AutomationValue::Continuous(700.0));
+        assert_eq!(lane.value_at(300), AutomationValue::Continuous(1_200.0));
+        assert_eq!(
+            lane.points_affecting(FrameRange::new(140, 160).unwrap()),
+            lane.points()
+        );
+        assert_eq!(
+            lane.influence_range(1, 400),
+            Ok(FrameRange::new(100, 400).unwrap())
+        );
+    }
+
+    #[test]
+    fn discrete_automation_steps_and_rejects_invalid_lanes() {
+        let lane = AutomationLane::new(
+            AutomationTarget::Scene,
+            AutomationInterpolation::Step,
+            vec![
+                AutomationPoint {
+                    frame: 0,
+                    value: AutomationValue::Discrete(1),
+                },
+                AutomationPoint {
+                    frame: 48_000,
+                    value: AutomationValue::Discrete(2),
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(lane.value_at(47_999), AutomationValue::Discrete(1));
+        assert_eq!(lane.value_at(48_000), AutomationValue::Discrete(2));
+        assert_eq!(
+            lane.influence_range(0, 96_000),
+            Ok(FrameRange::new(0, 48_000).unwrap())
+        );
+        assert_eq!(
+            AutomationLane::new(
+                AutomationTarget::Waveform,
+                AutomationInterpolation::Linear,
+                vec![AutomationPoint {
+                    frame: 0,
+                    value: AutomationValue::Discrete(0),
+                }],
+            ),
+            Err(AutomationError::LinearDiscreteTarget)
+        );
+        assert_eq!(
+            AutomationLane::new(
+                AutomationTarget::Drive,
+                AutomationInterpolation::Step,
+                vec![AutomationPoint {
+                    frame: 0,
+                    value: AutomationValue::Continuous(f64::NAN),
+                }],
+            ),
+            Err(AutomationError::NonFiniteValue)
+        );
+    }
+
+    #[test]
+    fn role_priorities_decide_directional_ducking() {
+        let mut priorities = RolePriorityTable::default();
+        assert!(priorities.should_duck(SourceRole::Kick, SourceRole::Bass));
+        assert!(!priorities.should_duck(SourceRole::Bass, SourceRole::Kick));
+        priorities.set_priority(SourceRole::Bass, 110);
+        assert!(priorities.should_duck(SourceRole::Bass, SourceRole::Kick));
     }
 }

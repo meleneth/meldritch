@@ -1,5 +1,8 @@
 # Roadmap
 
+The current implementation queue for arrangement, automation, polyphony, chord
+editing, and the long-form showcase lives in [`TODO.md`](TODO.md).
+
 This roadmap is ordered to reduce risk. Do not build the shiny cockpit before the engine has bones.
 
 ## Phase 0: Repository skeleton

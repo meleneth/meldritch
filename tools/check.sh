@@ -15,6 +15,7 @@ run cargo test --workspace
 run cargo run -p meldritch-cli -- validate fixtures/basic_drums.toml
 run cargo run -p meldritch-cli -- validate fixtures/explicit_relations.toml
 run cargo run -p meldritch-cli -- validate fixtures/control_relations.toml
+run cargo run -p meldritch-cli -- validate fixtures/warehouse.toml
 run cargo run -p meldritch-cli -- inspect fixtures/basic_drums.toml
 run cargo run -p meldritch-cli -- summary-json fixtures/basic_drums.toml
 run cargo run -p meldritch-cli -- summary-json fixtures/explicit_relations.toml

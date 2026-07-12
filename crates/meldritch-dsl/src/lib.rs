@@ -99,6 +99,7 @@ pub enum RelationEndpoint {
 pub enum RelationKind {
     Audio,
     Control,
+    Sidechain,
 }
 
 #[derive(Clone, Debug)]
@@ -198,6 +199,10 @@ pub enum RelationBindingKind {
         pattern: PatternId,
     },
     PatternControlsPattern {
+        from_pattern: PatternId,
+        to_pattern: PatternId,
+    },
+    PatternSidechainsPattern {
         from_pattern: PatternId,
         to_pattern: PatternId,
     },
@@ -367,6 +372,13 @@ pub fn compile_project(project: &ValidatedProject) -> Result<CompiledProject, Co
                 RelationEndpoint::Pattern(to_pattern),
                 RelationKind::Control,
             ) => graph.insert_pattern_control_relation(from_pattern, to_pattern, &mut diagnostics),
+            (
+                RelationEndpoint::Pattern(from_pattern),
+                RelationEndpoint::Pattern(to_pattern),
+                RelationKind::Sidechain,
+            ) => {
+                graph.insert_pattern_sidechain_relation(from_pattern, to_pattern, &mut diagnostics)
+            }
             _ => diagnostics.push(Diagnostic::new(
                 "explicit relation shape is not supported by the compiler",
             )),
@@ -412,10 +424,21 @@ fn pattern_control_relation_id(
         .map(RelationId::new)
 }
 
+fn pattern_sidechain_relation_id(
+    from_pattern: PatternId,
+    to_pattern: PatternId,
+) -> Option<RelationId> {
+    4_000_000_000u64
+        .checked_add(from_pattern.raw().checked_mul(1_000_000)?)
+        .and_then(|id| id.checked_add(to_pattern.raw()))
+        .map(RelationId::new)
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum CompiledRelationKey {
-    SampleToPattern { note: u8, pattern: u64 },
-    PatternControlsPattern { from_pattern: u64, to_pattern: u64 },
+    SampleAudio { note: u8, pattern: u64 },
+    PatternControl { from_pattern: u64, to_pattern: u64 },
+    PatternSidechain { from_pattern: u64, to_pattern: u64 },
 }
 
 struct CompiledGraphBuilder {
@@ -447,13 +470,10 @@ impl CompiledGraphBuilder {
         pattern: PatternId,
         diagnostics: &mut Vec<Diagnostic>,
     ) {
-        if !self
-            .relation_keys
-            .insert(CompiledRelationKey::SampleToPattern {
-                note,
-                pattern: pattern.raw(),
-            })
-        {
+        if !self.relation_keys.insert(CompiledRelationKey::SampleAudio {
+            note,
+            pattern: pattern.raw(),
+        }) {
             return;
         }
 
@@ -506,7 +526,7 @@ impl CompiledGraphBuilder {
     ) {
         if !self
             .relation_keys
-            .insert(CompiledRelationKey::PatternControlsPattern {
+            .insert(CompiledRelationKey::PatternControl {
                 from_pattern: from_pattern.raw(),
                 to_pattern: to_pattern.raw(),
             })
@@ -550,6 +570,63 @@ impl CompiledGraphBuilder {
                 from: from_node,
                 to: to_node,
                 kind: RelationBindingKind::PatternControlsPattern {
+                    from_pattern,
+                    to_pattern,
+                },
+            });
+        }
+    }
+
+    fn insert_pattern_sidechain_relation(
+        &mut self,
+        from_pattern: PatternId,
+        to_pattern: PatternId,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        if !self
+            .relation_keys
+            .insert(CompiledRelationKey::PatternSidechain {
+                from_pattern: from_pattern.raw(),
+                to_pattern: to_pattern.raw(),
+            })
+        {
+            return;
+        }
+        let Some(from_node) = self.pattern_nodes_by_id.get(&from_pattern.raw()).copied() else {
+            diagnostics.push(Diagnostic::new(format!(
+                "sidechain relation from pattern {} has no compiled pattern node",
+                from_pattern.raw()
+            )));
+            return;
+        };
+        let Some(to_node) = self.pattern_nodes_by_id.get(&to_pattern.raw()).copied() else {
+            diagnostics.push(Diagnostic::new(format!(
+                "sidechain relation to pattern {} has no compiled pattern node",
+                to_pattern.raw()
+            )));
+            return;
+        };
+        let Some(relation) = pattern_sidechain_relation_id(from_pattern, to_pattern) else {
+            diagnostics.push(Diagnostic::new(format!(
+                "pattern {} to pattern {} sidechain relation cannot be compiled",
+                from_pattern.raw(),
+                to_pattern.raw()
+            )));
+            return;
+        };
+        let edge = RelationEdge::new(relation, from_node, to_node, EdgeKind::Control);
+        if let Err(err) = self.relations.insert_edge(edge) {
+            diagnostics.push(Diagnostic::new(format!(
+                "pattern {} to pattern {} sidechain relation is invalid: {err}",
+                from_pattern.raw(),
+                to_pattern.raw()
+            )));
+        } else {
+            self.relation_bindings.push(RelationBinding {
+                relation,
+                from: from_node,
+                to: to_node,
+                kind: RelationBindingKind::PatternSidechainsPattern {
                     from_pattern,
                     to_pattern,
                 },
@@ -656,8 +733,13 @@ fn validate_relations(
                 RelationEndpoint::Pattern(_),
                 RelationKind::Control,
             ) => relations.push(RelationRef::new(from, to, kind)),
+            (
+                RelationEndpoint::Pattern(_),
+                RelationEndpoint::Pattern(_),
+                RelationKind::Sidechain,
+            ) => relations.push(RelationRef::new(from, to, kind)),
             _ => diagnostics.push(Diagnostic::new(format!(
-                "relation {relation_number} must be sample_note -> pattern audio or pattern -> pattern control"
+                "relation {relation_number} must be sample_note -> pattern audio or pattern -> pattern control/sidechain"
             ))),
         }
     }
@@ -717,6 +799,7 @@ fn validate_relation_kind(
     match kind {
         "audio" => Some(RelationKind::Audio),
         "control" => Some(RelationKind::Control),
+        "sidechain" => Some(RelationKind::Sidechain),
         _ => {
             diagnostics.push(Diagnostic::new(format!(
                 "relation {relation_number} has unknown kind '{kind}'"
@@ -1119,6 +1202,48 @@ kind = "control"
     }
 
     #[test]
+    fn sidechain_relations_compile_to_control_edges_and_propagate_dirty_ranges() {
+        let input = MINIMAL_PROJECT.to_owned()
+            + r#"
+
+[[patterns]]
+id = 2
+length_steps = 16
+steps_per_beat = 4
+
+[[patterns.tracks]]
+id = 4
+
+[[patterns.tracks.steps]]
+step = 0
+note = 36
+
+[[relations]]
+from = { pattern = 1 }
+to = { pattern = 2 }
+kind = "sidechain"
+"#;
+        let project = parse_project(&input).unwrap();
+        assert_eq!(project.relations()[0].kind(), RelationKind::Sidechain);
+        let compiled = compile_project(&project).unwrap();
+        assert!(matches!(
+            compiled.relation_bindings().last().unwrap().kind(),
+            RelationBindingKind::PatternSidechainsPattern {
+                from_pattern,
+                to_pattern,
+            } if *from_pattern == PatternId::new(1) && *to_pattern == PatternId::new(2)
+        ));
+        let range = FrameRange::new(12_000, 18_000).unwrap();
+        let dirty = compiled
+            .relations()
+            .invalidate_from(NodeId::new(1_000_000_001), range);
+        assert!(dirty.iter().any(|dirty| {
+            dirty.entity() == meldritch_core::EntityId::Node(NodeId::new(1_000_000_002))
+                && dirty.range() == range
+        }));
+    }
+
+    #[test]
     fn relation_validation_reports_unknown_targets() {
         let input = MINIMAL_PROJECT.to_owned()
             + r#"
@@ -1149,7 +1274,7 @@ kind = "audio"
 [[relations]]
 from = { sample_note = 36 }
 to = { pattern = 1 }
-kind = "sidechain"
+kind = "mystery"
 "#;
         let err = parse_project(&input).unwrap_err();
         let messages = err
@@ -1158,7 +1283,7 @@ kind = "sidechain"
             .map(|diagnostic| diagnostic.message().to_owned())
             .collect::<Vec<_>>();
 
-        assert_eq!(messages, vec!["relation 1 has unknown kind 'sidechain'"]);
+        assert_eq!(messages, vec!["relation 1 has unknown kind 'mystery'"]);
     }
 
     #[test]

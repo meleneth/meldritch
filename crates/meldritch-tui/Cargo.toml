@@ -1,17 +1,16 @@
 [package]
-name = "meldritch-cli"
+name = "meldritch-tui"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-clap.workspace = true
+crossterm.workspace = true
 meldritch-app = { path = "../meldritch-app" }
-meldritch-audio = { path = "../meldritch-audio" }
 meldritch-core = { path = "../meldritch-core" }
-meldritch-dsl = { path = "../meldritch-dsl" }
+ratatui.workspace = true
+
+[dev-dependencies]
+meldritch-audio = { path = "../meldritch-audio" }
 meldritch-render = { path = "../meldritch-render" }
-meldritch-tui = { path = "../meldritch-tui" }
-serde.workspace = true
-serde_json.workspace = true

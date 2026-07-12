@@ -1,0 +1,45 @@
+[project]
+name = "Kick Sidechains Bass"
+bpm = 120.0
+sample_rate = 48000
+seed = 34
+
+[[samples]]
+note = 36
+path = "audio/kick.wav"
+
+[[samples]]
+note = 43
+path = "audio/sub.wav"
+
+[[patterns]]
+id = 7
+length_steps = 16
+steps_per_beat = 4
+[[patterns.tracks]]
+id = 1
+[[patterns.tracks.steps]]
+step = 0
+note = 36
+velocity = 0.95
+[[patterns.tracks.steps]]
+step = 8
+note = 36
+velocity = 0.8
+
+[[patterns]]
+id = 8
+length_steps = 16
+steps_per_beat = 4
+[[patterns.tracks]]
+id = 4
+[[patterns.tracks.steps]]
+step = 0
+note = 43
+velocity = 0.75
+gate = 4.0
+
+[[relations]]
+from = { pattern = 7 }
+to = { pattern = 8 }
+kind = "sidechain"

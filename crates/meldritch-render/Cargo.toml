@@ -6,5 +6,6 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+arc-swap.workspace = true
 meldritch-audio = { path = "../meldritch-audio" }
 meldritch-core = { path = "../meldritch-core" }

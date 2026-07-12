@@ -4,6 +4,13 @@ pub use meldritch_core::{Coeff, Frame, Frames, Param, Sample, SampleRate};
 use std::fmt;
 use std::path::Path;
 
+pub mod audio_publication;
+pub mod device_output;
+pub mod published_audio;
+pub mod realtime_queue;
+pub mod realtime_status;
+pub mod transport;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioBlock {
     channels: u16,

@@ -1,0 +1,267 @@
+[project]
+name = "Meldritch Warehouse Phrases"
+bpm = 142.0
+sample_rate = 48000
+seed = 808
+
+[[samples]]
+note = 36
+path = "audio/kick.wav"
+[[samples]]
+note = 38
+path = "audio/snare.wav"
+[[samples]]
+note = 42
+path = "audio/hat.wav"
+[[samples]]
+note = 43
+path = "audio/sub.wav"
+
+# Phrase A: straight warehouse pressure with off-grid kick answers.
+[[patterns]]
+id = 201
+length_steps = 16
+steps_per_beat = 4
+[[patterns.tracks]]
+id = 1
+[[patterns.tracks.steps]]
+step = 0
+note = 36
+velocity = 1.0
+tags = ["accent"]
+[[patterns.tracks.steps]]
+step = 3
+note = 36
+velocity = 0.58
+[[patterns.tracks.steps]]
+step = 8
+note = 36
+velocity = 0.9
+[[patterns.tracks.steps]]
+step = 11
+note = 36
+velocity = 0.68
+[[patterns.tracks]]
+id = 2
+[[patterns.tracks.steps]]
+step = 4
+note = 38
+velocity = 0.94
+tags = ["accent"]
+[[patterns.tracks.steps]]
+step = 12
+note = 38
+velocity = 0.9
+[[patterns.tracks]]
+id = 3
+[[patterns.tracks.steps]]
+step = 2
+note = 42
+velocity = 0.38
+tags = ["ghost"]
+[[patterns.tracks.steps]]
+step = 6
+note = 42
+velocity = 0.48
+[[patterns.tracks.steps]]
+step = 10
+note = 42
+velocity = 0.42
+[[patterns.tracks.steps]]
+step = 14
+note = 42
+velocity = 0.62
+tags = ["accent"]
+
+# Phrase B: broken kick phrase and denser hats.
+[[patterns]]
+id = 202
+length_steps = 16
+steps_per_beat = 4
+[[patterns.tracks]]
+id = 1
+[[patterns.tracks.steps]]
+step = 0
+note = 36
+velocity = 1.0
+tags = ["accent"]
+[[patterns.tracks.steps]]
+step = 6
+note = 36
+velocity = 0.7
+[[patterns.tracks.steps]]
+step = 9
+note = 36
+velocity = 0.86
+[[patterns.tracks.steps]]
+step = 15
+note = 36
+velocity = 0.62
+[[patterns.tracks]]
+id = 2
+[[patterns.tracks.steps]]
+step = 4
+note = 38
+velocity = 0.96
+tags = ["accent"]
+[[patterns.tracks.steps]]
+step = 12
+note = 38
+velocity = 0.86
+[[patterns.tracks.steps]]
+step = 14
+note = 38
+velocity = 0.32
+tags = ["ghost"]
+[[patterns.tracks]]
+id = 3
+[[patterns.tracks.steps]]
+step = 1
+note = 42
+velocity = 0.32
+[[patterns.tracks.steps]]
+step = 3
+note = 42
+velocity = 0.44
+[[patterns.tracks.steps]]
+step = 5
+note = 42
+velocity = 0.36
+[[patterns.tracks.steps]]
+step = 7
+note = 42
+velocity = 0.52
+[[patterns.tracks.steps]]
+step = 9
+note = 42
+velocity = 0.38
+[[patterns.tracks.steps]]
+step = 11
+note = 42
+velocity = 0.55
+[[patterns.tracks.steps]]
+step = 13
+note = 42
+velocity = 0.42
+[[patterns.tracks.steps]]
+step = 15
+note = 42
+velocity = 0.7
+tags = ["accent"]
+
+# Phrase C: breakdown pulse with negative space.
+[[patterns]]
+id = 203
+length_steps = 16
+steps_per_beat = 4
+[[patterns.tracks]]
+id = 1
+[[patterns.tracks.steps]]
+step = 0
+note = 36
+velocity = 0.92
+[[patterns.tracks.steps]]
+step = 10
+note = 36
+velocity = 0.66
+[[patterns.tracks]]
+id = 2
+[[patterns.tracks.steps]]
+step = 12
+note = 38
+velocity = 0.72
+[[patterns.tracks]]
+id = 3
+[[patterns.tracks.steps]]
+step = 2
+note = 42
+velocity = 0.3
+tags = ["ghost"]
+[[patterns.tracks.steps]]
+step = 6
+note = 42
+velocity = 0.38
+[[patterns.tracks.steps]]
+step = 14
+note = 42
+velocity = 0.58
+
+# Phrase D: maximal return and transition fill.
+[[patterns]]
+id = 204
+length_steps = 16
+steps_per_beat = 4
+[[patterns.tracks]]
+id = 1
+[[patterns.tracks.steps]]
+step = 0
+note = 36
+velocity = 1.0
+tags = ["accent", "scene_transition"]
+[[patterns.tracks.steps]]
+step = 3
+note = 36
+velocity = 0.64
+[[patterns.tracks.steps]]
+step = 7
+note = 36
+velocity = 0.74
+[[patterns.tracks.steps]]
+step = 8
+note = 36
+velocity = 0.9
+[[patterns.tracks.steps]]
+step = 11
+note = 36
+velocity = 0.7
+[[patterns.tracks.steps]]
+step = 15
+note = 36
+velocity = 0.76
+[[patterns.tracks]]
+id = 2
+[[patterns.tracks.steps]]
+step = 4
+note = 38
+velocity = 1.0
+tags = ["accent"]
+[[patterns.tracks.steps]]
+step = 12
+note = 38
+velocity = 0.94
+[[patterns.tracks.steps]]
+step = 14
+note = 38
+velocity = 0.4
+tags = ["ghost"]
+[[patterns.tracks]]
+id = 3
+[[patterns.tracks.steps]]
+step = 2
+note = 42
+velocity = 0.4
+[[patterns.tracks.steps]]
+step = 5
+note = 42
+velocity = 0.48
+[[patterns.tracks.steps]]
+step = 6
+note = 42
+velocity = 0.55
+[[patterns.tracks.steps]]
+step = 9
+note = 42
+velocity = 0.44
+[[patterns.tracks.steps]]
+step = 10
+note = 42
+velocity = 0.52
+[[patterns.tracks.steps]]
+step = 13
+note = 42
+velocity = 0.5
+[[patterns.tracks.steps]]
+step = 14
+note = 42
+velocity = 0.72
+tags = ["accent"]

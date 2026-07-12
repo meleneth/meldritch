@@ -72,7 +72,7 @@ The TUI dispatches typed commands. It does not mutate engine state directly.
 Use later:
 
 ```toml
-cpal = "0.17"
+cpal = "0.18"
 ```
 
 Policy:

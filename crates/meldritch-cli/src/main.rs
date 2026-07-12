@@ -1,11 +1,146 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use meldritch_core::{
-    DirtyRange, EntityId, Event, EventTag, FrameRange, Pattern, SourceId, StepIndex,
+    Arrangement, ArrangementSection, AutomationInterpolation, AutomationLane, AutomationPoint,
+    AutomationTarget, AutomationValue, DirtyRange, EntityId, Event, EventTag, FrameRange, Pattern,
+    SceneId, SourceId, Step, StepIndex, TrackId,
 };
+use meldritch_render::coordinator::{RenderCoordinator, RenderCoordinatorConfig};
 use meldritch_render::{ArtifactCache, CacheStatus, RenderSettings};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum LearnedAction {
+    IncreaseCutoff,
+    DecreaseCutoff,
+    IncreaseResonance,
+    DecreaseResonance,
+    CycleWaveform,
+    IncreaseFilterEnvelope,
+    DecreaseFilterEnvelope,
+    IncreaseDrive,
+    DecreaseDrive,
+    TransposeChordUp,
+    TransposeChordDown,
+    InvertChordUp,
+    InvertChordDown,
+    QueueNextScene,
+    ToggleTrackMute,
+    TriggerFill,
+}
+
+impl LearnedAction {
+    fn from_input(input: &meldritch_app::AppInput) -> Option<Self> {
+        use meldritch_app::AppInput;
+        Some(match input {
+            AppInput::IncreaseCutoff => Self::IncreaseCutoff,
+            AppInput::DecreaseCutoff => Self::DecreaseCutoff,
+            AppInput::IncreaseResonance => Self::IncreaseResonance,
+            AppInput::DecreaseResonance => Self::DecreaseResonance,
+            AppInput::CycleWaveform => Self::CycleWaveform,
+            AppInput::IncreaseFilterEnvelope => Self::IncreaseFilterEnvelope,
+            AppInput::DecreaseFilterEnvelope => Self::DecreaseFilterEnvelope,
+            AppInput::IncreaseDrive => Self::IncreaseDrive,
+            AppInput::DecreaseDrive => Self::DecreaseDrive,
+            AppInput::TransposeChordUp => Self::TransposeChordUp,
+            AppInput::TransposeChordDown => Self::TransposeChordDown,
+            AppInput::InvertChordUp => Self::InvertChordUp,
+            AppInput::InvertChordDown => Self::InvertChordDown,
+            AppInput::QueueNextScene => Self::QueueNextScene,
+            AppInput::ToggleTrackMute => Self::ToggleTrackMute,
+            AppInput::TriggerFill => Self::TriggerFill,
+            _ => return None,
+        })
+    }
+
+    const fn input(self) -> meldritch_app::AppInput {
+        use meldritch_app::AppInput;
+        match self {
+            Self::IncreaseCutoff => AppInput::IncreaseCutoff,
+            Self::DecreaseCutoff => AppInput::DecreaseCutoff,
+            Self::IncreaseResonance => AppInput::IncreaseResonance,
+            Self::DecreaseResonance => AppInput::DecreaseResonance,
+            Self::CycleWaveform => AppInput::CycleWaveform,
+            Self::IncreaseFilterEnvelope => AppInput::IncreaseFilterEnvelope,
+            Self::DecreaseFilterEnvelope => AppInput::DecreaseFilterEnvelope,
+            Self::IncreaseDrive => AppInput::IncreaseDrive,
+            Self::DecreaseDrive => AppInput::DecreaseDrive,
+            Self::TransposeChordUp => AppInput::TransposeChordUp,
+            Self::TransposeChordDown => AppInput::TransposeChordDown,
+            Self::InvertChordUp => AppInput::InvertChordUp,
+            Self::InvertChordDown => AppInput::InvertChordDown,
+            Self::QueueNextScene => AppInput::QueueNextScene,
+            Self::ToggleTrackMute => AppInput::ToggleTrackMute,
+            Self::TriggerFill => AppInput::TriggerFill,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct LearnedFuture {
+    action: LearnedAction,
+    occurrences: u64,
+    last_session: u64,
+    mean_phase: f64,
+    score: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct CapturedFuture {
+    origin: String,
+    action: LearnedAction,
+    frame: u32,
+    phase: f64,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct FutureLibrary {
+    schema_version: u32,
+    sessions: u64,
+    learned: Vec<LearnedFuture>,
+    last_session: Vec<CapturedFuture>,
+}
+
+fn merge_performer_futures(
+    library: &mut FutureLibrary,
+    captured: Vec<CapturedFuture>,
+    session: u64,
+) {
+    let mut learned = std::mem::take(&mut library.learned)
+        .into_iter()
+        .map(|future| (future.action, future))
+        .collect::<BTreeMap<_, _>>();
+    for event in captured.iter().filter(|event| event.origin == "performer") {
+        let future = learned.entry(event.action).or_insert(LearnedFuture {
+            action: event.action,
+            occurrences: 0,
+            last_session: session,
+            mean_phase: event.phase,
+            score: 0,
+        });
+        let old_count = future.occurrences;
+        future.occurrences = future.occurrences.saturating_add(1);
+        future.mean_phase =
+            (future.mean_phase * old_count as f64 + event.phase) / future.occurrences as f64;
+        future.last_session = session;
+        future.score = future
+            .occurrences
+            .saturating_mul(1_000)
+            .saturating_add(session);
+    }
+    library.learned = learned.into_values().collect();
+    library.learned.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| left.action.cmp(&right.action))
+    });
+    library.last_session = captured;
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "meldritch")]
@@ -15,11 +150,48 @@ struct Cli {
     command: Command,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum TransformKindArg {
+    Reverse,
+    Reslice,
+    Freeze,
+    Smear,
+}
+
 #[derive(Debug, Subcommand)]
 enum Command {
     Validate {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
+    },
+    /// Capture and transform a range from a WAV into a derived artifact.
+    TransformChunk {
+        #[arg(value_name = "WAV")]
+        input: PathBuf,
+        #[arg(long, value_enum)]
+        kind: TransformKindArg,
+        #[arg(long, default_value_t = 0)]
+        start: u32,
+        /// Frames to capture; defaults to the remainder of the input.
+        #[arg(long)]
+        frames: Option<u32>,
+        /// Comma-separated reslice permutation, for example `3,2,1,0`.
+        #[arg(long, default_value = "1,0")]
+        order: String,
+        #[arg(long, default_value_t = 0)]
+        freeze_frame: u32,
+        #[arg(long, default_value_t = 256)]
+        smear_radius: u32,
+        #[arg(long, default_value = "artifacts/transformed.wav", value_name = "WAV")]
+        output: PathBuf,
+        #[arg(
+            long,
+            default_value = "artifacts/transformed.manifest.json",
+            value_name = "JSON"
+        )]
+        manifest: PathBuf,
+        #[arg(long)]
+        play: bool,
     },
     Inspect {
         #[arg(value_name = "PROJECT")]
@@ -137,6 +309,226 @@ enum Command {
         #[arg(long)]
         cache_probe: bool,
     },
+    /// Layer a native synthesized bassline onto a sample-backed drum pattern.
+    RenderBassline {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long)]
+        pattern_id: Option<u64>,
+        #[arg(long)]
+        frames: Option<u64>,
+        #[arg(long, default_value_t = 2)]
+        channels: u16,
+        #[arg(long, default_value = "artifacts/bassline.wav", value_name = "WAV")]
+        output: PathBuf,
+        #[arg(long)]
+        normalize: bool,
+    },
+    /// Render drums, relational bass, and a polyphonic chord progression.
+    RenderPolyDemo {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long, default_value = "artifacts/poly_demo.wav", value_name = "WAV")]
+        output: PathBuf,
+        #[arg(long, default_value_t = 768_000)]
+        frames: u64,
+        #[arg(long)]
+        normalize: bool,
+    },
+    /// Render a long intro, groove, breakdown, and full-return arrangement.
+    RenderArrangement {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long, default_value = "artifacts/arrangement.wav", value_name = "WAV")]
+        output: PathBuf,
+        #[arg(long)]
+        normalize: bool,
+    },
+    /// Render the deterministic 32-bar arrangement, synth layers, and manifest.
+    RenderShowcase {
+        #[arg(value_name = "PROJECT", default_value = "fixtures/showcase.toml")]
+        project: PathBuf,
+        #[arg(long, default_value = "artifacts/showcase.wav", value_name = "WAV")]
+        output: PathBuf,
+        #[arg(
+            long,
+            default_value = "artifacts/showcase.manifest.json",
+            value_name = "JSON"
+        )]
+        manifest: PathBuf,
+        #[arg(long)]
+        normalize: bool,
+    },
+    /// Render the original 142 BPM warehouse phrase set and sync-fold synths.
+    RenderWarehouse {
+        #[arg(value_name = "PROJECT", default_value = "fixtures/warehouse.toml")]
+        project: PathBuf,
+        #[arg(long, default_value = "artifacts/warehouse.wav", value_name = "WAV")]
+        output: PathBuf,
+        #[arg(
+            long,
+            default_value = "artifacts/warehouse.manifest.json",
+            value_name = "JSON"
+        )]
+        manifest: PathBuf,
+        #[arg(long)]
+        normalize: bool,
+    },
+    /// Render and automatically play the complete 142 BPM warehouse set.
+    WarehouseShowcase {
+        #[arg(value_name = "PROJECT", default_value = "fixtures/warehouse.toml")]
+        project: PathBuf,
+        #[arg(long, default_value = "artifacts/warehouse.wav", value_name = "WAV")]
+        output: PathBuf,
+        #[arg(
+            long,
+            default_value = "artifacts/warehouse.manifest.json",
+            value_name = "JSON"
+        )]
+        manifest: PathBuf,
+        #[arg(long, default_value_t = 1)]
+        loops: u32,
+        /// Reuse an existing WAV instead of rendering it again.
+        #[arg(long)]
+        reuse: bool,
+        /// Fail if device playback reports an underrun or missed artifact.
+        #[arg(long)]
+        require_clean: bool,
+        /// Limit playback frames for smoke testing.
+        #[arg(long)]
+        frames: Option<u32>,
+    },
+    /// Play a rendered showcase through the default host audio device.
+    PlayShowcase {
+        #[arg(value_name = "WAV", default_value = "artifacts/showcase.wav")]
+        audio: PathBuf,
+        /// Limit playback for smoke checks; defaults to the complete WAV.
+        #[arg(long)]
+        frames: Option<u32>,
+        #[arg(long, default_value_t = 1)]
+        loops: u32,
+        /// Fail on any render underrun or missed audio artifact.
+        #[arg(long)]
+        require_clean: bool,
+    },
+    /// Play a contiguous range of the demo arrangement on the default device.
+    PlayArrangement {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long, default_value_t = 0)]
+        from_section: usize,
+        #[arg(long, default_value_t = 4)]
+        to_section: usize,
+        #[arg(long, default_value_t = 1)]
+        loops: u32,
+        #[arg(long)]
+        normalize: bool,
+    },
+    /// Render a sample pattern ahead of time and play it on the default device.
+    PlaySamples {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long)]
+        pattern_id: Option<u64>,
+        /// Frames per loop; defaults to one complete pattern cycle.
+        #[arg(long)]
+        frames: Option<u64>,
+        #[arg(long, default_value_t = 2)]
+        channels: u16,
+        #[arg(long, default_value_t = 4)]
+        loops: u32,
+        #[arg(long)]
+        normalize: bool,
+    },
+    /// Render future chunks on workers while playing the default device.
+    PlayRealtimeSamples {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long)]
+        pattern_id: Option<u64>,
+        /// Frames per loop; defaults to one complete pattern cycle.
+        #[arg(long)]
+        frames: Option<u64>,
+        #[arg(long, default_value_t = 2)]
+        channels: u16,
+        #[arg(long, default_value_t = 4)]
+        loops: u32,
+        #[arg(long, default_value_t = 4096)]
+        chunk_frames: u32,
+        #[arg(long, default_value_t = 4)]
+        warm_chunks: usize,
+        /// Render workers; zero selects available parallelism.
+        #[arg(long, default_value_t = 0)]
+        workers: usize,
+    },
+    /// Open the interactive realtime sample-pattern cockpit.
+    TuiSamples {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long)]
+        pattern_id: Option<u64>,
+        #[arg(long)]
+        frames: Option<u64>,
+        #[arg(long, default_value_t = 2)]
+        channels: u16,
+        #[arg(long, default_value_t = 4096)]
+        chunk_frames: u32,
+        #[arg(long, default_value_t = 4)]
+        warm_chunks: usize,
+        #[arg(long, default_value_t = 0)]
+        workers: usize,
+        /// Note used when toggling an empty step.
+        #[arg(long, default_value_t = 36)]
+        note: u8,
+    },
+    /// Open the realtime cockpit with a native synthesized bassline track.
+    TuiBassline {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long)]
+        pattern_id: Option<u64>,
+        #[arg(long)]
+        frames: Option<u64>,
+        #[arg(long, default_value_t = 2)]
+        channels: u16,
+        #[arg(long, default_value_t = 4096)]
+        chunk_frames: u32,
+        #[arg(long, default_value_t = 4)]
+        warm_chunks: usize,
+        #[arg(long, default_value_t = 0)]
+        workers: usize,
+        /// Bass note used when toggling an empty step.
+        #[arg(long, default_value_t = 24)]
+        note: u8,
+    },
+    /// Open the realtime cockpit with drums, bass, and polyphonic chords.
+    TuiPolyDemo {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        #[arg(long, default_value_t = 4096)]
+        chunk_frames: u32,
+        #[arg(long, default_value_t = 4)]
+        warm_chunks: usize,
+        #[arg(long, default_value_t = 0)]
+        workers: usize,
+    },
+    /// Start an evolving polyphonic set; manual tweaks are saved as future evidence.
+    LiveShowcase {
+        #[arg(value_name = "PROJECT", default_value = "fixtures/basic_drums.toml")]
+        project: PathBuf,
+        #[arg(
+            long,
+            default_value = "artifacts/live_showcase.futures.json",
+            value_name = "JSON"
+        )]
+        futures: PathBuf,
+        #[arg(long, default_value_t = 16_384)]
+        chunk_frames: u32,
+        #[arg(long, default_value_t = 16)]
+        warm_chunks: usize,
+        #[arg(long, default_value_t = 2)]
+        workers: usize,
+    },
     RenderControlledSamples {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -203,6 +595,29 @@ fn main() {
 fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::Validate { project } => validate_project(project),
+        Command::TransformChunk {
+            input,
+            kind,
+            start,
+            frames,
+            order,
+            freeze_frame,
+            smear_radius,
+            output,
+            manifest,
+            play,
+        } => transform_chunk_command(
+            input,
+            kind,
+            start,
+            frames,
+            order,
+            freeze_frame,
+            smear_radius,
+            output,
+            manifest,
+            play,
+        ),
         Command::Inspect { project } => inspect_project(project),
         Command::SummaryJson { project } => summarize_project_json(project),
         Command::GraphJson { project } => graph_json(project),
@@ -292,6 +707,175 @@ fn run(cli: Cli) -> Result<(), String> {
                 normalize,
                 cache_probe,
             },
+        ),
+        Command::PlaySamples {
+            project,
+            pattern_id,
+            frames,
+            channels,
+            loops,
+            normalize,
+        } => play_samples(project, pattern_id, frames, channels, loops, normalize),
+        Command::RenderBassline {
+            project,
+            pattern_id,
+            frames,
+            channels,
+            output,
+            normalize,
+        } => render_bassline(project, pattern_id, frames, channels, output, normalize),
+        Command::RenderPolyDemo {
+            project,
+            output,
+            frames,
+            normalize,
+        } => render_poly_demo(project, output, frames, normalize),
+        Command::RenderArrangement {
+            project,
+            output,
+            normalize,
+        } => render_arrangement(project, output, normalize),
+        Command::RenderShowcase {
+            project,
+            output,
+            manifest,
+            normalize,
+        } => render_showcase(project, output, manifest, normalize, false),
+        Command::RenderWarehouse {
+            project,
+            output,
+            manifest,
+            normalize,
+        } => render_showcase(project, output, manifest, normalize, true),
+        Command::WarehouseShowcase {
+            project,
+            output,
+            manifest,
+            loops,
+            reuse,
+            require_clean,
+            frames,
+        } => warehouse_showcase(
+            project,
+            output,
+            manifest,
+            loops,
+            reuse,
+            require_clean,
+            frames,
+        ),
+        Command::PlayShowcase {
+            audio,
+            frames,
+            loops,
+            require_clean,
+        } => play_showcase(audio, frames, loops, require_clean),
+        Command::PlayArrangement {
+            project,
+            from_section,
+            to_section,
+            loops,
+            normalize,
+        } => play_arrangement(project, from_section, to_section, loops, normalize),
+        Command::PlayRealtimeSamples {
+            project,
+            pattern_id,
+            frames,
+            channels,
+            loops,
+            chunk_frames,
+            warm_chunks,
+            workers,
+        } => play_realtime_samples(
+            project,
+            pattern_id,
+            frames,
+            channels,
+            loops,
+            chunk_frames,
+            warm_chunks,
+            workers,
+        ),
+        Command::TuiSamples {
+            project,
+            pattern_id,
+            frames,
+            channels,
+            chunk_frames,
+            warm_chunks,
+            workers,
+            note,
+        } => tui_samples(
+            project,
+            pattern_id,
+            frames,
+            channels,
+            chunk_frames,
+            warm_chunks,
+            workers,
+            note,
+            false,
+            false,
+            None,
+        ),
+        Command::TuiBassline {
+            project,
+            pattern_id,
+            frames,
+            channels,
+            chunk_frames,
+            warm_chunks,
+            workers,
+            note,
+        } => tui_samples(
+            project,
+            pattern_id,
+            frames,
+            channels,
+            chunk_frames,
+            warm_chunks,
+            workers,
+            note,
+            true,
+            false,
+            None,
+        ),
+        Command::TuiPolyDemo {
+            project,
+            chunk_frames,
+            warm_chunks,
+            workers,
+        } => tui_samples(
+            project,
+            None,
+            None,
+            2,
+            chunk_frames,
+            warm_chunks,
+            workers,
+            24,
+            true,
+            true,
+            None,
+        ),
+        Command::LiveShowcase {
+            project,
+            futures,
+            chunk_frames,
+            warm_chunks,
+            workers,
+        } => tui_samples(
+            project,
+            None,
+            Some(768_000),
+            2,
+            chunk_frames,
+            warm_chunks,
+            workers,
+            24,
+            true,
+            true,
+            Some(futures),
         ),
         Command::RenderControlledSamples {
             project,
@@ -886,6 +1470,110 @@ fn validate_project(path: PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn transform_chunk_command(
+    input: PathBuf,
+    kind: TransformKindArg,
+    start: u32,
+    requested_frames: Option<u32>,
+    order: String,
+    freeze_frame: u32,
+    smear_radius: u32,
+    output: PathBuf,
+    manifest: PathBuf,
+    play: bool,
+) -> Result<(), String> {
+    let source = meldritch_audio::read_wav(&input)
+        .map_err(|err| format!("failed to read {}: {err}", input.display()))?;
+    if start >= source.frames() {
+        return Err(format!(
+            "capture start {start} is outside input with {} frames",
+            source.frames()
+        ));
+    }
+    let frames = requested_frames
+        .unwrap_or_else(|| source.frames() - start)
+        .min(source.frames() - start);
+    if frames == 0 {
+        return Err("transform capture must contain at least one frame".to_owned());
+    }
+    let channels = usize::from(source.channels());
+    let source_start = start as usize * channels;
+    let source_end = source_start + frames as usize * channels;
+    let mut captured = meldritch_audio::AudioBlock::silent(source.channels(), frames);
+    captured
+        .samples_mut()
+        .copy_from_slice(&source.samples()[source_start..source_end]);
+    let transform = match kind {
+        TransformKindArg::Reverse => meldritch_render::transforms::ChunkTransform::Reverse,
+        TransformKindArg::Reslice => {
+            let order = order
+                .split(',')
+                .map(|value| {
+                    value
+                        .trim()
+                        .parse::<usize>()
+                        .map_err(|err| format!("invalid reslice index '{}': {err}", value.trim()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            meldritch_render::transforms::ChunkTransform::Reslice { order }
+        }
+        TransformKindArg::Freeze => meldritch_render::transforms::ChunkTransform::Freeze {
+            frame: freeze_frame,
+        },
+        TransformKindArg::Smear => meldritch_render::transforms::ChunkTransform::Smear {
+            radius_frames: smear_radius,
+        },
+    };
+    let mut cache = meldritch_render::transforms::TransformArtifactCache::default();
+    let transformed = cache
+        .render(&captured, &transform)
+        .map_err(|err| format!("invalid transform: {err:?}"))?;
+    for target in [&output, &manifest] {
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+        }
+    }
+    meldritch_audio::write_wav_f32(&output, &transformed.block, source.sample_rate())
+        .map_err(|err| format!("failed to write {}: {err}", output.display()))?;
+    let manifest_value = serde_json::json!({
+        "schema_version": 1,
+        "source": input,
+        "capture": { "start": start, "frames": frames },
+        "transform": format!("{transform:?}"),
+        "artifact_fingerprint": transformed.key.fingerprint.raw(),
+        "channels": transformed.block.channels(),
+        "sample_rate": source.sample_rate(),
+        "peak": transformed.block.peak_abs(),
+        "finite": transformed.block.samples().iter().all(|sample| sample.is_finite()),
+    });
+    std::fs::write(
+        &manifest,
+        serde_json::to_string_pretty(&manifest_value)
+            .map_err(|err| format!("failed to encode transform manifest: {err}"))?,
+    )
+    .map_err(|err| format!("failed to write {}: {err}", manifest.display()))?;
+    println!(
+        "transformed chunk: kind={transform:?}, frames={frames}, peak={:.3}, output={}, manifest={}",
+        transformed.block.peak_abs(),
+        output.display(),
+        manifest.display()
+    );
+    if play {
+        let report = meldritch_audio::device_output::play_blocking(
+            &transformed.block,
+            source.sample_rate(),
+            1,
+        )?;
+        println!(
+            "played transformed chunk: device={}, callbacks={}, underruns={}, misses={}",
+            report.device_name, report.callbacks, report.underruns, report.missed_artifacts
+        );
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize)]
 struct ProjectSummary {
     schema_version: u32,
@@ -984,6 +1672,7 @@ impl ProjectRelationSummary {
             kind: match relation.kind() {
                 meldritch_dsl::RelationKind::Audio => "audio",
                 meldritch_dsl::RelationKind::Control => "control",
+                meldritch_dsl::RelationKind::Sidechain => "sidechain",
             },
         }
     }
@@ -1129,12 +1818,17 @@ impl CompiledRelationSummary {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
+#[allow(clippy::enum_variant_names)]
 enum CompiledRelationKindSummary {
     SampleToPattern {
         note: u8,
         pattern_id: u64,
     },
     PatternControlsPattern {
+        from_pattern_id: u64,
+        to_pattern_id: u64,
+    },
+    PatternSidechainsPattern {
         from_pattern_id: u64,
         to_pattern_id: u64,
     },
@@ -1153,6 +1847,13 @@ impl CompiledRelationKindSummary {
                 from_pattern,
                 to_pattern,
             } => Self::PatternControlsPattern {
+                from_pattern_id: from_pattern.raw(),
+                to_pattern_id: to_pattern.raw(),
+            },
+            meldritch_dsl::RelationBindingKind::PatternSidechainsPattern {
+                from_pattern,
+                to_pattern,
+            } => Self::PatternSidechainsPattern {
                 from_pattern_id: from_pattern.raw(),
                 to_pattern_id: to_pattern.raw(),
             },
@@ -1461,12 +2162,17 @@ impl RenderGraphRelationSummary {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
+#[allow(clippy::enum_variant_names)]
 enum RenderGraphRelationKindSummary {
     SampleToPattern {
         note: u8,
         pattern_id: u64,
     },
     PatternControlsPattern {
+        from_pattern_id: u64,
+        to_pattern_id: u64,
+    },
+    PatternSidechainsPattern {
         from_pattern_id: u64,
         to_pattern_id: u64,
     },
@@ -1485,6 +2191,13 @@ impl RenderGraphRelationKindSummary {
                 from_pattern,
                 to_pattern,
             } => Self::PatternControlsPattern {
+                from_pattern_id: from_pattern.raw(),
+                to_pattern_id: to_pattern.raw(),
+            },
+            meldritch_dsl::RelationBindingKind::PatternSidechainsPattern {
+                from_pattern,
+                to_pattern,
+            } => Self::PatternSidechainsPattern {
                 from_pattern_id: from_pattern.raw(),
                 to_pattern_id: to_pattern.raw(),
             },
@@ -1946,6 +2659,1309 @@ struct RenderControlledSamplesOptions {
     normalize: bool,
 }
 
+fn render_bassline(
+    path: PathBuf,
+    pattern_id: Option<u64>,
+    frames: Option<u64>,
+    channels: u16,
+    output: PathBuf,
+    normalize: bool,
+) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let drums = select_pattern(&project, pattern_id, "bassline render")?;
+    let frame_count = frames.unwrap_or_else(|| {
+        project
+            .tempo()
+            .step_start_frame(u64::from(drums.length_steps()), drums.steps_per_beat())
+    });
+    let range = FrameRange::new(0, frame_count).map_err(|err| err.to_string())?;
+    let settings =
+        RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
+    let samples = load_project_samples(&project, &path)?;
+    let mut mix = meldritch_render::render_pattern_samples(
+        drums,
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        settings,
+        &samples,
+    );
+
+    let mut bass = Pattern::new(
+        meldritch_core::PatternId::new(9_001),
+        drums.length_steps(),
+        drums.steps_per_beat(),
+    )
+    .map_err(|err| format!("failed to create bass pattern: {err:?}"))?;
+    let phrase = [
+        (0, 36, 0.85),
+        (3, 36, 0.65),
+        (6, 39, 0.75),
+        (10, 43, 0.8),
+        (14, 34, 0.7),
+    ];
+    for (step, note, velocity) in phrase {
+        if step >= drums.length_steps() {
+            continue;
+        }
+        let mut value = Step::new(note).with_velocity(velocity).with_gate(0.8);
+        if matches!(step, 0 | 10) {
+            value = value.with_tag(EventTag::Accent);
+        }
+        bass.set_step(TrackId::new(1), StepIndex::new(step), value)
+            .map_err(|err| format!("failed to program bass step {step}: {err:?}"))?;
+    }
+    let bass_settings = meldritch_render::dsp::BassVoiceSettings::default();
+    let mut bass_audio = meldritch_render::dsp::render_monophonic_pattern_bass_with_filter_control(
+        &bass,
+        drums,
+        TrackId::new(3),
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        settings,
+        bass_settings,
+    );
+    meldritch_render::dsp::apply_pattern_ducking(
+        &mut bass_audio,
+        drums,
+        TrackId::new(1),
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        bass_settings.ducking_amount,
+        bass_settings.ducking_release_seconds,
+    );
+    for (output_sample, bass_sample) in mix.samples_mut().iter_mut().zip(bass_audio.samples()) {
+        *output_sample += bass_sample;
+    }
+    if normalize {
+        mix = mix.normalized_to_peak(0.9);
+    }
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+    }
+    meldritch_audio::write_wav_f32(&output, &mix, project.tempo().sample_rate())
+        .map_err(|err| format!("failed to write {}: {err}", output.display()))?;
+    println!(
+        "rendered bassline mix: pattern={}, frames={}, channels={}, peak={:.3}, output={}",
+        drums.id().raw(),
+        mix.frames(),
+        mix.channels(),
+        mix.peak_abs(),
+        output.display()
+    );
+    Ok(())
+}
+
+fn render_poly_demo(
+    path: PathBuf,
+    output: PathBuf,
+    frame_count: u64,
+    normalize: bool,
+) -> Result<(), String> {
+    if frame_count < 4 {
+        return Err("poly demo requires at least four frames".to_owned());
+    }
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let drums = select_pattern(&project, None, "polyphonic demo")?;
+    let range = FrameRange::new(0, frame_count).map_err(|err| err.to_string())?;
+    let render_settings = RenderSettings::new(2).expect("stereo settings are valid");
+    let samples = load_project_samples(&project, &path)?;
+    let mut mix = meldritch_render::render_pattern_samples(
+        drums,
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        render_settings,
+        &samples,
+    );
+
+    let mut bass = Pattern::new(
+        meldritch_core::PatternId::new(9_001),
+        drums.length_steps(),
+        drums.steps_per_beat(),
+    )
+    .map_err(|err| format!("failed to create bass pattern: {err:?}"))?;
+    for (step, note, velocity) in [
+        (0, 24, 0.85),
+        (3, 24, 0.65),
+        (6, 27, 0.75),
+        (10, 31, 0.8),
+        (14, 22, 0.7),
+    ] {
+        let mut value = Step::new(note).with_velocity(velocity).with_gate(0.8);
+        if matches!(step, 0 | 10) {
+            value = value.with_tag(EventTag::Accent);
+        }
+        bass.set_step(TrackId::new(4), StepIndex::new(step), value)
+            .map_err(|err| format!("failed to program bass: {err:?}"))?;
+    }
+    let bass_settings = meldritch_render::dsp::BassVoiceSettings::default();
+    let bass_lanes = demo_automation_lanes(frame_count, false)?;
+    let bass_audio = meldritch_render::dsp::render_monophonic_pattern_bass_with_automation(
+        &bass,
+        Some((drums, TrackId::new(1))),
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        render_settings,
+        bass_settings,
+        &bass_lanes,
+    );
+
+    let mut chords = Pattern::new(
+        meldritch_core::PatternId::new(9_002),
+        drums.length_steps(),
+        drums.steps_per_beat(),
+    )
+    .map_err(|err| format!("failed to create chord pattern: {err:?}"))?;
+    for (step, notes) in [
+        (0, [60, 63, 67]),
+        (4, [56, 60, 63]),
+        (8, [63, 67, 70]),
+        (12, [58, 62, 65]),
+    ] {
+        for (lane, note) in notes.into_iter().enumerate() {
+            chords
+                .set_step(
+                    TrackId::new(10 + lane as u64),
+                    StepIndex::new(step),
+                    Step::new(note).with_velocity(0.55),
+                )
+                .map_err(|err| format!("failed to program chord: {err:?}"))?;
+        }
+    }
+    let chord_settings = meldritch_render::dsp::BassVoiceSettings {
+        level: 0.18,
+        cutoff_hz: 1_200.0,
+        resonance: 0.25,
+        filter_envelope_octaves: 0.75,
+        sub_level: 0.0,
+        glide_seconds: 0.0,
+        ..meldritch_render::dsp::BassVoiceSettings::default()
+    };
+    let chord_lanes = demo_automation_lanes(frame_count, true)?;
+    let chord_audio = meldritch_render::dsp::render_polyphonic_pattern_with_automation(
+        &chords,
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        render_settings,
+        chord_settings,
+        8,
+        &chord_lanes,
+    )
+    .map_err(|err| format!("failed to render chord synth: {err:?}"))?;
+    for ((output_sample, bass_sample), chord_sample) in mix
+        .samples_mut()
+        .iter_mut()
+        .zip(bass_audio.samples())
+        .zip(chord_audio.samples())
+    {
+        *output_sample += bass_sample + chord_sample;
+    }
+    if normalize {
+        mix = mix.normalized_to_peak(0.9);
+    }
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+    }
+    meldritch_audio::write_wav_f32(&output, &mix, project.tempo().sample_rate())
+        .map_err(|err| format!("failed to write {}: {err}", output.display()))?;
+    println!(
+        "rendered automated poly demo: frames={}, voices=8, progression=Cm-Ab-Eb-Bb, automation=continuous+waveform/voicing/mute/scenes, peak={:.3}, output={}",
+        mix.frames(),
+        mix.peak_abs(),
+        output.display()
+    );
+    Ok(())
+}
+
+fn demo_automation_lanes(frame_count: u64, chords: bool) -> Result<Vec<AutomationLane>, String> {
+    let midpoint = frame_count / 2;
+    let lane = |target, values: [f64; 3]| {
+        AutomationLane::new(
+            target,
+            AutomationInterpolation::Linear,
+            [0, midpoint, frame_count]
+                .into_iter()
+                .zip(values)
+                .map(|(frame, value)| AutomationPoint {
+                    frame,
+                    value: AutomationValue::Continuous(value),
+                })
+                .collect(),
+        )
+        .map_err(|err| format!("invalid demo automation lane: {err:?}"))
+    };
+    let discrete = |target, points: &[(u64, i64)]| {
+        AutomationLane::new(
+            target,
+            AutomationInterpolation::Step,
+            points
+                .iter()
+                .map(|(frame, value)| AutomationPoint {
+                    frame: *frame,
+                    value: AutomationValue::Discrete(*value),
+                })
+                .collect(),
+        )
+        .map_err(|err| format!("invalid discrete demo automation lane: {err:?}"))
+    };
+    let mut lanes = vec![
+        lane(
+            AutomationTarget::Cutoff,
+            if chords {
+                [350.0, 2_800.0, 700.0]
+            } else {
+                [100.0, 900.0, 180.0]
+            },
+        )?,
+        lane(AutomationTarget::Drive, [0.8, 2.8, 1.4])?,
+        lane(
+            AutomationTarget::Level,
+            if chords {
+                [0.08, 0.24, 0.16]
+            } else {
+                [0.18, 0.42, 0.3]
+            },
+        )?,
+        lane(AutomationTarget::Modulation, [0.0, 1.25, 0.2])?,
+        lane(AutomationTarget::Ducking, [0.15, 0.55, 0.35])?,
+        discrete(
+            AutomationTarget::Waveform,
+            &[(0, 2), (midpoint, if chords { 1 } else { 3 })],
+        )?,
+        discrete(
+            AutomationTarget::Scene,
+            &[
+                (0, 1),
+                (frame_count / 4, 2),
+                (midpoint, 3),
+                (frame_count * 3 / 4, 4),
+            ],
+        )?,
+    ];
+    if chords {
+        lanes.push(discrete(
+            AutomationTarget::Voicing,
+            &[(0, 0), (midpoint, 5), (frame_count * 3 / 4, 0)],
+        )?);
+        lanes.push(discrete(
+            AutomationTarget::Mute,
+            &[(0, 0), (midpoint, 1), (frame_count * 3 / 4, 0)],
+        )?);
+    }
+    Ok(lanes)
+}
+
+fn warehouse_automation_lanes(
+    frame_count: u64,
+    chords: bool,
+) -> Result<Vec<AutomationLane>, String> {
+    let mut lanes = demo_automation_lanes(frame_count, chords)?;
+    lanes.retain(|lane| {
+        !matches!(
+            lane.target(),
+            AutomationTarget::Cutoff
+                | AutomationTarget::Drive
+                | AutomationTarget::Modulation
+                | AutomationTarget::Waveform
+        )
+    });
+    let continuous = |target, values: [f64; 5]| {
+        AutomationLane::new(
+            target,
+            AutomationInterpolation::Linear,
+            [
+                0,
+                frame_count / 4,
+                frame_count / 2,
+                frame_count * 3 / 4,
+                frame_count,
+            ]
+            .into_iter()
+            .zip(values)
+            .map(|(frame, value)| AutomationPoint {
+                frame,
+                value: AutomationValue::Continuous(value),
+            })
+            .collect(),
+        )
+        .map_err(|err| format!("invalid warehouse automation lane: {err:?}"))
+    };
+    lanes.push(continuous(
+        AutomationTarget::Cutoff,
+        if chords {
+            [180.0, 4_800.0, 320.0, 7_200.0, 700.0]
+        } else {
+            [70.0, 3_600.0, 110.0, 6_500.0, 160.0]
+        },
+    )?);
+    lanes.push(continuous(
+        AutomationTarget::Drive,
+        [1.4, 4.8, 2.0, 7.5, 2.8],
+    )?);
+    lanes.push(continuous(
+        AutomationTarget::Modulation,
+        [0.15, 1.8, 0.35, 2.6, 0.5],
+    )?);
+    lanes.push(
+        AutomationLane::new(
+            AutomationTarget::Waveform,
+            AutomationInterpolation::Step,
+            vec![
+                AutomationPoint {
+                    frame: 0,
+                    value: AutomationValue::Discrete(4),
+                },
+                AutomationPoint {
+                    frame: frame_count / 2,
+                    value: AutomationValue::Discrete(2),
+                },
+                AutomationPoint {
+                    frame: frame_count * 3 / 4,
+                    value: AutomationValue::Discrete(4),
+                },
+            ],
+        )
+        .map_err(|err| format!("invalid warehouse waveform lane: {err:?}"))?,
+    );
+    Ok(lanes)
+}
+
+fn render_arrangement(path: PathBuf, output: PathBuf, normalize: bool) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let pattern = select_pattern(&project, None, "arrangement render")?;
+    let arrangement = demo_arrangement(pattern)?;
+    let frame_count = arrangement.total_frames(project.tempo());
+    let range = FrameRange::new(0, frame_count).map_err(|err| err.to_string())?;
+    let settings = RenderSettings::new(2).expect("stereo settings are valid");
+    let samples = load_project_samples(&project, &path)?;
+    let mut block = meldritch_render::render_arrangement_samples(
+        &arrangement,
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        settings,
+        &samples,
+    );
+    if normalize {
+        block = block.normalized_to_peak(0.9);
+    }
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+    }
+    meldritch_audio::write_wav_f32(&output, &block, project.tempo().sample_rate())
+        .map_err(|err| format!("failed to write {}: {err}", output.display()))?;
+    let seconds = f64::from(block.frames()) / f64::from(project.tempo().sample_rate());
+    println!(
+        "rendered arrangement: sections=4, frames={}, duration={seconds:.1}s, peak={:.3}, output={}",
+        block.frames(),
+        block.peak_abs(),
+        output.display()
+    );
+    Ok(())
+}
+
+fn demo_arrangement(pattern: &Pattern) -> Result<Arrangement, String> {
+    let sections = vec![
+        ArrangementSection::new(pattern.clone(), 2, SceneId::new(1))
+            .map_err(|err| format!("invalid intro section: {err:?}"))?
+            .with_muted_track(TrackId::new(2)),
+        ArrangementSection::new(pattern.clone(), 2, SceneId::new(2))
+            .map_err(|err| format!("invalid groove section: {err:?}"))?,
+        ArrangementSection::new(pattern.clone(), 2, SceneId::new(3))
+            .map_err(|err| format!("invalid breakdown section: {err:?}"))?
+            .with_muted_track(TrackId::new(1)),
+        ArrangementSection::new(pattern.clone(), 2, SceneId::new(4))
+            .map_err(|err| format!("invalid return section: {err:?}"))?,
+    ];
+    Arrangement::new(sections).map_err(|err| format!("failed to build arrangement: {err:?}"))
+}
+
+fn render_showcase(
+    path: PathBuf,
+    output: PathBuf,
+    manifest: PathBuf,
+    normalize: bool,
+    warehouse: bool,
+) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    if project.patterns().len() < 4 {
+        return Err("showcase fixture requires four drum patterns".to_owned());
+    }
+    let order = [0, 1, 3, 1, 2, 1, 3, 0];
+    let names = [
+        "intro",
+        "groove",
+        "full",
+        "variation",
+        "breakdown",
+        "build",
+        "climax",
+        "outro",
+    ];
+    let sections = order
+        .into_iter()
+        .enumerate()
+        .map(|(index, pattern)| {
+            ArrangementSection::new(
+                project.patterns()[pattern].clone(),
+                4,
+                SceneId::new(index as u64 + 1),
+            )
+            .map_err(|err| format!("invalid showcase section: {err:?}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let arrangement =
+        Arrangement::new(sections).map_err(|err| format!("failed to build showcase: {err:?}"))?;
+    let frame_count = arrangement.total_frames(project.tempo());
+    let range = FrameRange::new(0, frame_count).map_err(|err| err.to_string())?;
+    let settings = RenderSettings::new(2).expect("stereo settings are valid");
+    let samples = load_project_samples(&project, &path)?;
+    let mut mix = meldritch_render::render_arrangement_samples(
+        &arrangement,
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        settings,
+        &samples,
+    );
+
+    let mut bass = Pattern::new(meldritch_core::PatternId::new(9_101), 64, 4)
+        .map_err(|err| format!("failed to create showcase bass: {err:?}"))?;
+    let bass_phrase: &[(u32, u8)] = if warehouse {
+        &[
+            (0, 24),
+            (3, 24),
+            (7, 31),
+            (10, 27),
+            (14, 22),
+            (16, 24),
+            (19, 36),
+            (23, 31),
+            (27, 22),
+            (30, 27),
+            (32, 20),
+            (38, 27),
+            (43, 24),
+            (48, 31),
+            (51, 34),
+            (55, 27),
+            (59, 22),
+            (62, 36),
+        ]
+    } else {
+        &[(0, 24), (12, 24), (16, 20), (32, 27), (48, 22)]
+    };
+    for &(step, note) in bass_phrase {
+        bass.set_step(
+            TrackId::new(4),
+            StepIndex::new(step),
+            Step::new(note).with_velocity(0.78).with_gate(0.85),
+        )
+        .map_err(|err| format!("failed to program showcase bass: {err:?}"))?;
+    }
+    let automation = if warehouse {
+        warehouse_automation_lanes(frame_count, false)?
+    } else {
+        demo_automation_lanes(frame_count, false)?
+    };
+    let bass_settings = if warehouse {
+        meldritch_render::dsp::BassVoiceSettings {
+            level: 0.42,
+            waveform: meldritch_render::dsp::Waveform::SyncFold,
+            cutoff_hz: 85.0,
+            resonance: 0.86,
+            filter_envelope_octaves: 4.5,
+            pre_filter_drive: 4.5,
+            drive: 3.2,
+            sub_level: 0.16,
+            glide_seconds: 0.055,
+            ..meldritch_render::dsp::BassVoiceSettings::default()
+        }
+    } else {
+        meldritch_render::dsp::BassVoiceSettings::default()
+    };
+    let bass_audio = meldritch_render::dsp::render_monophonic_pattern_bass_with_automation(
+        &bass,
+        Some((&project.patterns()[3], TrackId::new(1))),
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        settings,
+        bass_settings,
+        &automation,
+    );
+
+    let mut chords = Pattern::new(meldritch_core::PatternId::new(9_102), 64, 4)
+        .map_err(|err| format!("failed to create showcase chords: {err:?}"))?;
+    for (step, notes) in [
+        (0, [60, 63, 67]),
+        (16, [56, 60, 63]),
+        (32, [63, 67, 70]),
+        (48, [58, 62, 65]),
+    ] {
+        for (lane, note) in notes.into_iter().enumerate() {
+            chords
+                .set_step(
+                    TrackId::new(10 + lane as u64),
+                    StepIndex::new(step),
+                    Step::new(note).with_velocity(0.55).with_gate(4.0),
+                )
+                .map_err(|err| format!("failed to program showcase chord: {err:?}"))?;
+        }
+    }
+    let chord_settings = meldritch_render::dsp::BassVoiceSettings {
+        level: 0.18,
+        waveform: if warehouse {
+            meldritch_render::dsp::Waveform::SyncFold
+        } else {
+            meldritch_render::dsp::Waveform::Saw
+        },
+        cutoff_hz: 900.0,
+        resonance: 0.3,
+        filter_envelope_octaves: 0.8,
+        pre_filter_drive: if warehouse { 2.8 } else { 1.0 },
+        sub_level: 0.0,
+        glide_seconds: 0.0,
+        ..meldritch_render::dsp::BassVoiceSettings::default()
+    };
+    let chord_automation = if warehouse {
+        warehouse_automation_lanes(frame_count, true)?
+    } else {
+        demo_automation_lanes(frame_count, true)?
+    };
+    let chord_audio = meldritch_render::dsp::render_polyphonic_pattern_with_automation(
+        &chords,
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        settings,
+        chord_settings,
+        8,
+        &chord_automation,
+    )
+    .map_err(|err| format!("failed to render showcase chords: {err:?}"))?;
+    for ((output, bass), chords) in mix
+        .samples_mut()
+        .iter_mut()
+        .zip(bass_audio.samples())
+        .zip(chord_audio.samples())
+    {
+        *output += bass + chords;
+    }
+    if normalize {
+        mix = mix.normalized_to_peak(0.9);
+    }
+    for target in [&output, &manifest] {
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+        }
+    }
+    meldritch_audio::write_wav_f32(&output, &mix, project.tempo().sample_rate())
+        .map_err(|err| format!("failed to write {}: {err}", output.display()))?;
+    let manifest_value = serde_json::json!({
+        "schema_version": 1,
+        "name": project.name(),
+        "style": if warehouse { "warehouse" } else { "showcase" },
+        "bars": 32,
+        "frames": frame_count,
+        "duration_seconds": frame_count as f64 / f64::from(project.tempo().sample_rate()),
+        "voices": 8,
+        "sections": names,
+        "drum_pattern_ids": project.patterns().iter().map(|pattern| pattern.id().raw()).collect::<Vec<_>>(),
+        "automation_targets": ["cutoff", "drive", "level", "ducking", "modulation", "waveform", "voicing", "mute", "scene"],
+        "peak": mix.peak_abs(),
+        "finite": mix.samples().iter().all(|sample| sample.is_finite()),
+    });
+    std::fs::write(
+        &manifest,
+        serde_json::to_string_pretty(&manifest_value)
+            .map_err(|err| format!("failed to encode showcase manifest: {err}"))?,
+    )
+    .map_err(|err| format!("failed to write {}: {err}", manifest.display()))?;
+    println!(
+        "rendered 32-bar {}: sections=8, duration={:.1}s, peak={:.3}, output={}, manifest={}",
+        if warehouse {
+            "warehouse set"
+        } else {
+            "showcase"
+        },
+        frame_count as f64 / f64::from(project.tempo().sample_rate()),
+        mix.peak_abs(),
+        output.display(),
+        manifest.display()
+    );
+    Ok(())
+}
+
+fn play_arrangement(
+    path: PathBuf,
+    from_section: usize,
+    to_section: usize,
+    loops: u32,
+    normalize: bool,
+) -> Result<(), String> {
+    if loops == 0 {
+        return Err("playback loop count must be at least one".to_owned());
+    }
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let pattern = select_pattern(&project, None, "arrangement playback")?;
+    let arrangement = demo_arrangement(pattern)?;
+    let range = arrangement
+        .section_range(project.tempo(), from_section, to_section)
+        .ok_or_else(|| {
+            format!(
+                "invalid section range {from_section}..{to_section}; arrangement has {} sections",
+                arrangement.sections().len()
+            )
+        })?;
+    let settings = RenderSettings::new(2).expect("stereo settings are valid");
+    let samples = load_project_samples(&project, &path)?;
+    let mut block = meldritch_render::render_arrangement_samples(
+        &arrangement,
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        settings,
+        &samples,
+    );
+    if normalize {
+        block = block.normalized_to_peak(0.9);
+    }
+    println!(
+        "playing arrangement sections {from_section}..{to_section}: source_frames={}..{}, loops={loops}, peak={:.3}",
+        range.start(),
+        range.end(),
+        block.peak_abs()
+    );
+    let report = meldritch_audio::device_output::play_blocking(
+        &block,
+        project.tempo().sample_rate(),
+        loops,
+    )?;
+    println!(
+        "played arrangement: callbacks={}, underruns={}, misses={}, final_position={}",
+        report.callbacks, report.underruns, report.missed_artifacts, report.final_position
+    );
+    Ok(())
+}
+
+fn play_showcase(
+    audio: PathBuf,
+    frame_limit: Option<u32>,
+    loops: u32,
+    require_clean: bool,
+) -> Result<(), String> {
+    if loops == 0 {
+        return Err("playback loop count must be at least one".to_owned());
+    }
+    let source = meldritch_audio::read_wav(&audio)
+        .map_err(|err| format!("failed to read {}: {err}", audio.display()))?;
+    let frames = frame_limit
+        .unwrap_or_else(|| source.frames())
+        .min(source.frames());
+    if frames == 0 {
+        return Err("showcase playback must contain at least one frame".to_owned());
+    }
+    let channels = usize::from(source.channels());
+    let mut block = meldritch_audio::AudioBlock::silent(source.channels(), frames);
+    block
+        .samples_mut()
+        .copy_from_slice(&source.samples()[..frames as usize * channels]);
+    println!(
+        "playing showcase: frames={}, duration={:.2}s, loops={}, clean_check={require_clean}",
+        frames,
+        f64::from(frames) / f64::from(source.sample_rate()),
+        loops
+    );
+    let report =
+        meldritch_audio::device_output::play_blocking(&block, source.sample_rate(), loops)?;
+    println!(
+        "showcase playback: device={}, callbacks={}, stream_errors={}, underruns={}, misses={}, final_position={}",
+        report.device_name,
+        report.callbacks,
+        report.stream_errors,
+        report.underruns,
+        report.missed_artifacts,
+        report.final_position
+    );
+    if require_clean && (report.underruns != 0 || report.missed_artifacts != 0) {
+        return Err(format!(
+            "showcase smoke failed: underruns={}, misses={}",
+            report.underruns, report.missed_artifacts
+        ));
+    }
+    if report.stream_errors != 0 {
+        eprintln!(
+            "warning: host reported {} backend stream notification(s)",
+            report.stream_errors
+        );
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn warehouse_showcase(
+    project: PathBuf,
+    output: PathBuf,
+    manifest: PathBuf,
+    loops: u32,
+    reuse: bool,
+    require_clean: bool,
+    frames: Option<u32>,
+) -> Result<(), String> {
+    if loops == 0 {
+        return Err("warehouse loop count must be at least one".to_owned());
+    }
+    if reuse {
+        if !output.exists() {
+            return Err(format!(
+                "cannot reuse missing warehouse render {}",
+                output.display()
+            ));
+        }
+        println!("reusing warehouse render: {}", output.display());
+    } else {
+        println!(
+            "preparing warehouse showcase: project={}, output={}",
+            project.display(),
+            output.display()
+        );
+        render_showcase(project, output.clone(), manifest, true, true)?;
+    }
+    play_showcase(output, frames, loops, require_clean)
+}
+
+fn play_samples(
+    path: PathBuf,
+    pattern_id: Option<u64>,
+    frames: Option<u64>,
+    channels: u16,
+    loops: u32,
+    normalize: bool,
+) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let pattern = select_pattern(&project, pattern_id, "play")?;
+    let frame_count = frames.unwrap_or_else(|| {
+        project
+            .tempo()
+            .step_start_frame(u64::from(pattern.length_steps()), pattern.steps_per_beat())
+    });
+    let range = FrameRange::new(0, frame_count).map_err(|err| err.to_string())?;
+    let settings =
+        RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
+    let samples_by_note = load_project_samples(&project, &path)?;
+    let mut block = meldritch_render::render_pattern_samples(
+        pattern,
+        project.tempo(),
+        range,
+        project.probability_seed(),
+        settings,
+        &samples_by_note,
+    );
+    if normalize {
+        block = block.normalized_to_peak(0.9);
+    }
+    if block.peak_abs() == 0.0 {
+        return Err("rendered pattern is silent; nothing to play".to_owned());
+    }
+
+    println!(
+        "playing pattern {}: frames={}, loops={}, peak={:.3}",
+        pattern.id().raw(),
+        block.frames(),
+        loops,
+        block.peak_abs()
+    );
+    let report = meldritch_audio::device_output::play_blocking(
+        &block,
+        project.tempo().sample_rate(),
+        loops,
+    )?;
+    println!(
+        "played: device={}, rate={}, channels={}, format={}, callbacks={}, stream_errors={}, commands_applied={}, commands_dropped={}, underruns={}, missed_artifacts={}, final_position={}",
+        report.device_name,
+        report.sample_rate,
+        report.channels,
+        report.sample_format,
+        report.callbacks,
+        report.stream_errors,
+        report.commands_applied,
+        report.commands_dropped,
+        report.underruns,
+        report.missed_artifacts,
+        report.final_position
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn play_realtime_samples(
+    path: PathBuf,
+    pattern_id: Option<u64>,
+    frames: Option<u64>,
+    channels: u16,
+    loops: u32,
+    chunk_frames: u32,
+    warm_chunks: usize,
+    workers: usize,
+) -> Result<(), String> {
+    if loops == 0 {
+        return Err("playback loop count must be at least one".to_owned());
+    }
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let pattern = select_pattern(&project, pattern_id, "realtime playback")?;
+    let frame_count = frames.unwrap_or_else(|| {
+        project
+            .tempo()
+            .step_start_frame(u64::from(pattern.length_steps()), pattern.steps_per_beat())
+    });
+    let frame_count = u32::try_from(frame_count)
+        .map_err(|_| "realtime playback frame count exceeds u32::MAX".to_owned())?;
+    let settings =
+        RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
+    let samples_by_note = Arc::new(load_project_samples(&project, &path)?);
+    let worker_count = if workers == 0 {
+        std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
+    } else {
+        workers
+    };
+    let (control, engine) = meldritch_audio::device_output::playback_session_parts(16)?;
+    let config = RenderCoordinatorConfig::new(
+        worker_count,
+        frame_count,
+        chunk_frames,
+        warm_chunks,
+        Duration::from_millis(10),
+    )
+    .map_err(|err| format!("invalid realtime render configuration: {err:?}"))?;
+    let mut coordinator = RenderCoordinator::new(
+        config,
+        pattern.clone(),
+        project.tempo(),
+        project.probability_seed(),
+        settings,
+        samples_by_note,
+        control.status_monitor(),
+    )
+    .map_err(|err| format!("failed to start render coordinator: {err:?}"))?;
+    let session = meldritch_audio::device_output::RealtimePlaybackSession::open_default(
+        coordinator.audio_reader(),
+        project.tempo().sample_rate(),
+        loops,
+        &control,
+        engine,
+    )?;
+
+    println!(
+        "realtime playing pattern {}: frames={}, chunks={}, workers={}, loops={}",
+        pattern.id().raw(),
+        frame_count,
+        frame_count.div_ceil(chunk_frames),
+        worker_count,
+        loops
+    );
+    control
+        .play()
+        .map_err(|_| "failed to enqueue realtime play command".to_owned())?;
+    let audio_duration = Duration::from_secs_f64(
+        f64::from(frame_count) * f64::from(loops) / f64::from(project.tempo().sample_rate()),
+    );
+    let deadline = Instant::now() + audio_duration + Duration::from_secs(5);
+    while !session.is_finished() {
+        if Instant::now() >= deadline {
+            return Err("realtime playback timed out before completion".to_owned());
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    let playback = session.report();
+    let refreshes = coordinator.diagnostics().refreshes;
+    coordinator.wake();
+    let _ = coordinator.wait_for_refreshes(refreshes + 1, Duration::from_secs(1));
+    let render = coordinator.diagnostics();
+    coordinator.shutdown();
+    println!(
+        "realtime played: device={}, callbacks={}, underruns={}, missed_artifacts={}, ready_chunks={}, published_artifacts={}, rejected_artifacts={}, refreshes={}, completed_jobs={}",
+        playback.device_name,
+        playback.callbacks,
+        playback.underruns,
+        playback.missed_artifacts,
+        render.publication.ready_chunks,
+        render.publication.published_artifacts,
+        render.publication.rejected_artifacts,
+        render.refreshes,
+        render.workers.completed_jobs,
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn tui_samples(
+    path: PathBuf,
+    pattern_id: Option<u64>,
+    frames: Option<u64>,
+    channels: u16,
+    chunk_frames: u32,
+    warm_chunks: usize,
+    workers: usize,
+    note: u8,
+    bassline: bool,
+    chords: bool,
+    future_log: Option<PathBuf>,
+) -> Result<(), String> {
+    let input = std::fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    let project = meldritch_dsl::parse_project(&input).map_err(|err| {
+        err.diagnostics()
+            .into_iter()
+            .map(|diagnostic| diagnostic.message().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let mut pattern = select_pattern(&project, pattern_id, "TUI playback")?.clone();
+    let frame_count = frames.unwrap_or_else(|| {
+        project
+            .tempo()
+            .step_start_frame(u64::from(pattern.length_steps()), pattern.steps_per_beat())
+    });
+    let frame_count = u32::try_from(frame_count)
+        .map_err(|_| "TUI playback frame count exceeds u32::MAX".to_owned())?;
+    let settings =
+        RenderSettings::new(channels).map_err(|err| format!("invalid render settings: {err:?}"))?;
+    let mut samples_by_note = load_project_samples(&project, &path)?;
+    if bassline {
+        let bass_track = TrackId::new(4);
+        let phrase = [
+            (0, 24, 0.85),
+            (3, 24, 0.65),
+            (6, 27, 0.75),
+            (10, 31, 0.8),
+            (14, 22, 0.7),
+        ];
+        for (step, bass_note, velocity) in phrase {
+            if step < pattern.length_steps() {
+                let mut value = Step::new(bass_note).with_velocity(velocity).with_gate(0.8);
+                if matches!(step, 0 | 10) {
+                    value = value.with_tag(EventTag::Accent);
+                }
+                pattern
+                    .set_step(bass_track, StepIndex::new(step), value)
+                    .map_err(|err| format!("failed to program bass step: {err:?}"))?;
+            }
+        }
+        for bass_note in [22, 24, 27, 31, note] {
+            samples_by_note.entry(bass_note).or_insert_with(|| {
+                meldritch_render::dsp::synthesize_bass_sample(
+                    bass_note,
+                    project.tempo().sample_rate(),
+                    12_000,
+                    meldritch_render::dsp::BassVoiceSettings::default(),
+                )
+            });
+        }
+    }
+    if chords {
+        for (step, notes) in [
+            (0, [60, 63, 67]),
+            (4, [56, 60, 63]),
+            (8, [63, 67, 70]),
+            (12, [58, 62, 65]),
+        ] {
+            for (lane, chord_note) in notes.into_iter().enumerate() {
+                pattern
+                    .set_step(
+                        TrackId::new(10 + lane as u64),
+                        StepIndex::new(step),
+                        Step::new(chord_note).with_velocity(0.55),
+                    )
+                    .map_err(|err| format!("failed to program chord: {err:?}"))?;
+            }
+        }
+    }
+    let samples_by_note = Arc::new(samples_by_note);
+    if !samples_by_note.contains_key(&note) {
+        return Err(format!("toggle note {note} has no loaded sample"));
+    }
+    let worker_count = if workers == 0 {
+        std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
+    } else {
+        workers
+    };
+    let (playback, engine) = meldritch_audio::device_output::playback_session_parts(32)?;
+    let mut state = meldritch_render::coordinator::SampleRenderState::new(
+        pattern.clone(),
+        project.tempo(),
+        project.probability_seed(),
+        settings,
+        Arc::clone(&samples_by_note),
+    );
+    let effect_rules = if chords {
+        vec![
+            meldritch_render::effects::EffectSendRule {
+                bus: meldritch_render::effects::EffectBus::Delay,
+                required_tag: EventTag::Accent,
+                send_gain: 0.32,
+            },
+            meldritch_render::effects::EffectSendRule {
+                bus: meldritch_render::effects::EffectBus::Reverb,
+                required_tag: EventTag::Ghost,
+                send_gain: 0.24,
+            },
+        ]
+    } else {
+        Vec::new()
+    };
+    if !effect_rules.is_empty() {
+        state = state.with_effect_rules(effect_rules.clone());
+    }
+    if bassline {
+        state = state.with_bass_layer(
+            TrackId::new(4),
+            meldritch_render::dsp::BassVoiceSettings::default(),
+        );
+    }
+    if chords {
+        state = state
+            .with_chord_layer(meldritch_render::coordinator::ChordLayer {
+                first_track: TrackId::new(10),
+                last_track: TrackId::new(12),
+                settings: meldritch_render::dsp::BassVoiceSettings {
+                    level: 0.18,
+                    cutoff_hz: 1_200.0,
+                    resonance: 0.25,
+                    filter_envelope_octaves: 0.75,
+                    sub_level: 0.0,
+                    glide_seconds: 0.0,
+                    ..meldritch_render::dsp::BassVoiceSettings::default()
+                },
+                voice_count: 8,
+            })
+            .with_automation(demo_automation_lanes(u64::from(frame_count), true)?)
+            .with_sidechain(meldritch_render::dynamics::SidechainRelation {
+                control_track: TrackId::new(1),
+                source_role: meldritch_core::SourceRole::Kick,
+                target_role: meldritch_core::SourceRole::Bass,
+                settings: meldritch_render::dynamics::SidechainSettings::default(),
+            });
+    }
+    let config = RenderCoordinatorConfig::new(
+        worker_count,
+        frame_count,
+        chunk_frames,
+        warm_chunks,
+        Duration::from_millis(10),
+    )
+    .map_err(|err| format!("invalid TUI render configuration: {err:?}"))?;
+    let coordinator =
+        RenderCoordinator::new_from_state(config, state.clone(), playback.status_monitor())
+            .map_err(|err| format!("failed to start render coordinator: {err:?}"))?;
+    let automation_view = state.automation().to_vec();
+    let sidechain_view = state.sidechain();
+    let editor = meldritch_render::live_edit::LivePatternEditor::new(state, frame_count);
+    let mut controller = meldritch_app::AppController::new(
+        playback,
+        coordinator,
+        editor,
+        meldritch_app::Selection {
+            track: TrackId::new(if bassline { 4 } else { 1 }),
+            step: StepIndex::new(0),
+        },
+        256,
+    );
+    if bassline {
+        controller.enable_bass_synth(
+            meldritch_render::dsp::BassVoiceSettings::default(),
+            [22, 24, 27, 31, note].into_iter().collect(),
+            12_000,
+        );
+    }
+    if !automation_view.is_empty() {
+        controller.show_automation(automation_view);
+    }
+    if !effect_rules.is_empty() {
+        controller.show_effect_sends(effect_rules);
+    }
+    if let Some(relation) = sidechain_view {
+        controller.show_sidechain(relation);
+    }
+    let _session = meldritch_audio::device_output::RealtimePlaybackSession::open_default(
+        controller.coordinator().audio_reader(),
+        project.tempo().sample_rate(),
+        u32::MAX,
+        controller.playback_control(),
+        engine,
+    )?;
+    if future_log.is_none() {
+        return meldritch_tui::run(&mut controller, Step::new(note))
+            .map_err(|err| format!("TUI failed: {err}"));
+    }
+
+    let future_log = future_log.expect("live showcase has a future log path");
+    let mut library = if future_log.exists() {
+        serde_json::from_str::<FutureLibrary>(
+            &std::fs::read_to_string(&future_log)
+                .map_err(|err| format!("failed to read {}: {err}", future_log.display()))?,
+        )
+        .unwrap_or_default()
+    } else {
+        FutureLibrary::default()
+    };
+    library.schema_version = 2;
+    library.sessions = library.sessions.saturating_add(1);
+    let session = library.sessions;
+    let cue_frames = [
+        (frame_count / 8, "filter opening"),
+        (frame_count / 4, "scene 2 / modulation rising"),
+        (frame_count * 3 / 8, "drive build"),
+        (frame_count / 2, "waveform and voicing change"),
+        (frame_count * 5 / 8, "breakdown"),
+        (frame_count * 3 / 4, "full-pattern return"),
+        (frame_count * 7 / 8, "filter landing"),
+    ];
+    let mut ranked = library.learned.clone();
+    ranked.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| right.last_session.cmp(&left.last_session))
+            .then_with(|| left.action.cmp(&right.action))
+    });
+    for learned in ranked.into_iter().take(4) {
+        controller
+            .handle_input(learned.action.input())
+            .map_err(|err| format!("failed to prepare learned future: {err:?}"))?;
+    }
+    let wanted_ready = warm_chunks.min(frame_count.div_ceil(chunk_frames) as usize);
+    if !controller
+        .coordinator()
+        .wait_for_ready_chunks(wanted_ready.max(1), Duration::from_secs(10))
+    {
+        return Err("live showcase could not prepare its initial audio horizon".to_owned());
+    }
+    controller
+        .dispatch(meldritch_app::AppCommand::Play)
+        .map_err(|err| format!("failed to start showcase transport: {err:?}"))?;
+    let captured = Arc::new(std::sync::Mutex::new(Vec::<CapturedFuture>::new()));
+    let performer_capture = Arc::clone(&captured);
+    let mut fired = vec![false; cue_frames.len()];
+    let mut previous_position = 0;
+    meldritch_tui::run_with_hooks(
+        &mut controller,
+        Step::new(note),
+        move |controller| {
+            let position = controller.view_model().transport.position;
+            if position < previous_position {
+                fired.fill(false);
+            }
+            previous_position = position;
+            for (index, (frame, description)) in cue_frames.iter().enumerate() {
+                if !fired[index] && position >= *frame {
+                    fired[index] = true;
+                    return Ok(Some(format!("Autopilot: {description}")));
+                }
+            }
+            Ok(None)
+        },
+        move |controller, input| {
+            if let Some(action) = LearnedAction::from_input(input) {
+                let position = controller.view_model().transport.position;
+                performer_capture
+                    .lock()
+                    .expect("future capture lock poisoned")
+                    .push(CapturedFuture {
+                        origin: "performer".to_owned(),
+                        action,
+                        frame: position,
+                        phase: f64::from(position) / f64::from(frame_count),
+                    });
+            }
+        },
+    )
+    .map_err(|err| format!("TUI failed: {err}"))?;
+    let captured = Arc::try_unwrap(captured)
+        .expect("future capture has no remaining owners")
+        .into_inner()
+        .expect("future capture lock poisoned");
+    merge_performer_futures(&mut library, captured, session);
+    if let Some(parent) = future_log.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+    }
+    std::fs::write(
+        &future_log,
+        serde_json::to_string_pretty(&library)
+            .map_err(|err| format!("failed to encode future log: {err}"))?,
+    )
+    .map_err(|err| format!("failed to write {}: {err}", future_log.display()))?;
+    println!("saved possible futures: {}", future_log.display());
+    Ok(())
+}
+
 fn render_samples(path: PathBuf, options: RenderSamplesOptions) -> Result<(), String> {
     if let Some(output) = &options.output
         && output.exists()
@@ -2304,5 +4320,100 @@ fn resolve_project_path(project_path: &Path, relative_or_absolute: &str) -> Path
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn performer_actions_are_ranked_across_sessions_and_autopilot_is_not_learned() {
+        let mut library = FutureLibrary::default();
+        merge_performer_futures(
+            &mut library,
+            vec![
+                CapturedFuture {
+                    origin: "autopilot".to_owned(),
+                    action: LearnedAction::IncreaseDrive,
+                    frame: 10,
+                    phase: 0.1,
+                },
+                CapturedFuture {
+                    origin: "performer".to_owned(),
+                    action: LearnedAction::IncreaseCutoff,
+                    frame: 20,
+                    phase: 0.2,
+                },
+            ],
+            1,
+        );
+        merge_performer_futures(
+            &mut library,
+            vec![CapturedFuture {
+                origin: "performer".to_owned(),
+                action: LearnedAction::IncreaseCutoff,
+                frame: 60,
+                phase: 0.6,
+            }],
+            2,
+        );
+
+        assert_eq!(library.learned.len(), 1);
+        let learned = &library.learned[0];
+        assert_eq!(learned.action, LearnedAction::IncreaseCutoff);
+        assert_eq!(learned.occurrences, 2);
+        assert!((learned.mean_phase - 0.4).abs() < f64::EPSILON);
+        assert_eq!(learned.score, 2_002);
+        assert_eq!(learned.last_session, 2);
+    }
+
+    #[test]
+    fn typed_future_library_round_trips_as_json() {
+        let library = FutureLibrary {
+            schema_version: 2,
+            sessions: 3,
+            learned: vec![LearnedFuture {
+                action: LearnedAction::InvertChordUp,
+                occurrences: 2,
+                last_session: 3,
+                mean_phase: 0.5,
+                score: 2_003,
+            }],
+            last_session: Vec::new(),
+        };
+        let json = serde_json::to_string(&library).unwrap();
+        let decoded: FutureLibrary = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.learned[0].action, LearnedAction::InvertChordUp);
+        assert_eq!(decoded.learned[0].score, 2_003);
+    }
+
+    #[test]
+    fn warehouse_showcase_rejects_invalid_reuse_before_audio_setup() {
+        assert_eq!(
+            warehouse_showcase(
+                PathBuf::from("missing-project.toml"),
+                PathBuf::from("/tmp/meldritch-definitely-missing.wav"),
+                PathBuf::from("/tmp/meldritch-definitely-missing.json"),
+                0,
+                true,
+                false,
+                Some(1),
+            ),
+            Err("warehouse loop count must be at least one".to_owned())
+        );
+        assert!(
+            warehouse_showcase(
+                PathBuf::from("missing-project.toml"),
+                PathBuf::from("/tmp/meldritch-definitely-missing.wav"),
+                PathBuf::from("/tmp/meldritch-definitely-missing.json"),
+                1,
+                true,
+                false,
+                Some(1),
+            )
+            .unwrap_err()
+            .contains("cannot reuse missing warehouse render")
+        );
     }
 }

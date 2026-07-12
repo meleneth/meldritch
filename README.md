@@ -1,5 +1,79 @@
 # Relational TUI Groovebox
 
+## Install
+
+From the repository root:
+
+```sh
+cargo install --path . --locked
+meldritch --help
+```
+
+This installs the `meldritch` executable into Cargo's normal binary directory
+(usually `~/.cargo/bin`). Rust 1.97 or newer is required. On Linux, CPAL also
+requires the system ALSA development package (commonly `libasound2-dev` on
+Debian/Ubuntu or `alsa-lib-devel` on Fedora).
+
+## Live showcase
+
+Start the self-performing drums, bass, chords, automation, effects, sidechain,
+and realtime-rendering cockpit:
+
+```sh
+meldritch live-showcase
+```
+
+Playback starts automatically. Across each cycle the render-safe automation
+changes filter, waveform, voicing, mute, modulation, ducking, level, scenes, and
+drive without invalidating the live timeline. Normal
+cockpit controls remain active, so these are a baseline rather than a fixed
+render. Press `q` to finish; typed supported actions are written to
+`artifacts/live_showcase.futures.json` with musical phase and
+`autopilot`/`performer` provenance. Performer actions accumulate occurrence and
+recency scores across sessions. On the next run, the four highest-ranked learned
+actions are applied while transport is stopped, then the prepared horizon is
+verified before playback begins. Select another library with `--futures PATH`.
+
+The live preset defaults to two render workers, 16,384-frame chunks, and sixteen
+warm chunks. Override these with `--workers`, `--chunk-frames`, and
+`--warm-chunks`, but the bounded defaults are intended to avoid starving the
+audio callback or saturating every CPU core.
+
+The synth engine also includes `SyncFold`, an aggressive bounded oscillator that
+combines synchronized phase resets, phase modulation, and wavefolding. It is
+available through waveform automation and the cockpit's `w` waveform cycle.
+
+Phrase banks group compatible pattern variations into ordered musical sections
+with per-phrase repeat counts. The phrase cycler changes only at complete pattern
+boundaries, selects variations deterministically, and emits every intervening
+transition if a frontend polls late.
+
+Render the original 142 BPM warehouse set with four breakbeat phrases, sync-fold
+acid bass, chord stabs, octave jumps, glide, and long automation builds:
+
+```sh
+meldritch render-warehouse --normalize
+meldritch play-showcase artifacts/warehouse.wav
+```
+
+Or prepare and play the complete set with one performance-safe command:
+
+```sh
+meldritch warehouse-showcase --require-clean
+```
+
+It renders and normalizes the complete set before opening the audio device, so
+the callback only reads immutable prepared audio. Subsequent runs can skip the
+render with `meldritch warehouse-showcase --reuse`.
+
+The default render is 32 bars (about 54 seconds) and writes
+`artifacts/warehouse.manifest.json` alongside the WAV.
+
+Warehouse synth voices use two independent normalized saturation stages:
+pre-filter drive excites the resonant filter input, while post-filter drive
+compresses and hardens its output. Both stages are bounded and remain finite
+through the complete high-resonance sweep render.
+
 This project is not “another groovebox with a terminal UI.”
 
 The thesis:
@@ -72,6 +146,176 @@ Render the sample-backed drum fixture through the Rust CLI:
 ```sh
 bash tools/render-fixture.sh
 ```
+
+Layer the native saw/envelope/low-pass bass voice onto that beat:
+
+```sh
+cargo run -p meldritch-cli -- render-bassline fixtures/basic_drums.toml --normalize
+```
+
+This writes `artifacts/bassline.wav` by default.
+
+Render the first polyphonic showcase with drums, relational bass, and an
+eight-voice chord progression:
+
+```sh
+cargo run -p meldritch-cli -- render-poly-demo fixtures/basic_drums.toml --normalize
+```
+
+The poly demo now defaults to 16 seconds and applies sample-accurate cutoff,
+drive, level, modulation, and ducking automation plus stepped waveform,
+voicing, mute, and scene changes to its bass and chord voices.
+
+Render a longer four-section drum arrangement (intro, groove, breakdown, full
+return) to `artifacts/arrangement.wav`:
+
+```sh
+cargo run -p meldritch-cli -- render-arrangement fixtures/basic_drums.toml --normalize
+```
+
+Play the whole arrangement, or loop a half-open section range such as the
+groove and breakdown (`1..3`):
+
+```sh
+cargo run -p meldritch-cli -- play-arrangement fixtures/basic_drums.toml --from-section 1 --to-section 3 --loops 2 --normalize
+```
+
+Arrangement-enabled TUI sessions show a section strip above the pattern grid:
+the active section is yellow, sections inside the selected loop are cyan, and
+the label reports scene, repeat count, and current repeat.
+
+This writes `artifacts/poly_demo.wav` by default.
+
+Run the drum, monophonic bass, and polyphonic chord layers through the realtime
+worker horizon and interactive cockpit:
+
+```sh
+cargo run -p meldritch-cli -- tui-poly-demo fixtures/basic_drums.toml
+```
+
+The polyphonic TUI includes a realtime automation inspector showing each
+lane's current value, interpolation mode, next point, and active scene. The
+same lanes are included in worker artifact keys and rendered DSP chunks.
+
+Render the 32-bar showcase and its JSON manifest:
+
+```sh
+cargo run -p meldritch-cli -- render-showcase --normalize
+```
+
+The deterministic section sequence is intro → groove → full → variation →
+breakdown → build → climax → outro. It uses four drum patterns, a four-bar bass
+phrase, Cm–Ab–Eb–Bb chords, automated voicing and waveform changes, filter and
+drive movement, kick ducking, a muted chord breakdown, and a full return. The
+outputs are `artifacts/showcase.wav` and `artifacts/showcase.manifest.json`.
+
+Play the full showcase through the default device, or run a one-second strict
+render-delivery smoke check:
+
+```sh
+cargo run -p meldritch-cli -- play-showcase
+cargo run -p meldritch-cli -- play-showcase --frames 48000 --require-clean
+```
+
+`--require-clean` fails on render underruns or missed artifacts. Backend stream
+notifications are reported separately because virtual/default host devices may
+emit them even when every source frame is delivered.
+
+The render layer also supports event-aware effect rules: an `Accent` tag can
+feed the delay bus while a `Ghost` tag feeds reverb. Each matched send produces
+an explanation record containing its source pattern, track, step, frame, tag,
+bus, and gain.
+
+In `tui-poly-demo`, these buses are rendered by the worker coordinator and the
+“Effect Sends · why” panel shows recent routed events with their track, step,
+bus, matched tag, and gain.
+
+Role-aware dynamics provide directional priority (kick over bass by default),
+attack/release envelope following, selectable low/high/full-band ducking, and
+an explanation containing the source and target roles, active bands, detector
+peak, and maximum attenuation.
+
+`tui-poly-demo` declares a kick-to-bass low-band sidechain. The coordinator
+renders a kick-only detector signal, fingerprints the relation and settings,
+and the “Sidechain · attenuation” panel shows roles, selected bands, and live
+attenuation.
+
+Projects can declare the dependency directly:
+
+```toml
+[[relations]]
+from = { pattern = 7 }
+to = { pattern = 8 }
+kind = "sidechain"
+```
+
+The DSL validates pattern endpoints and compiles this to a distinct
+`PatternSidechainsPattern` binding backed by a control edge, so dirty ranges
+from the source propagate to the ducked target. See
+`fixtures/sidechain_relations.toml`.
+
+Finite audio chunks can be transformed deterministically with reverse, slice
+reordering, single-frame freeze, or moving-window smear. Transform artifact
+keys cover both source samples and the complete validated transform spec.
+
+Capture and reorder a rendered bar into a new WAV and provenance manifest:
+
+```sh
+cargo run -p meldritch-cli -- transform-chunk artifacts/basic_drums.wav \
+  --kind reslice --frames 96000 --order 3,2,1,0 \
+  --output artifacts/resliced_drums.wav \
+  --manifest artifacts/resliced_drums.manifest.json
+```
+
+Use `--kind reverse`, `--kind freeze --freeze-frame N`, or
+`--kind smear --smear-radius N`; add `--play` to audition through the host.
+
+In the TUI, uppercase `R/S/F/E` captures the currently published timeline and
+creates reverse, four-way reslice, playhead freeze, or smear artifacts. The
+derived-transform panel shows the specification, cache hit/miss, layout, and
+provenance fingerprint.
+
+Press `A` to atomically audition the derived timeline through the existing
+audio stream and `D` to return to the latest worker-assembled live snapshot.
+Transport position and device state are preserved across both swaps.
+
+The speculative-futures planner models queued scenes, track mutes/unmutes, and
+fills. Candidates are deduplicated and ranked deterministically: queued first,
+then selected, then recent, with a configurable plan capacity.
+
+Play the sample-backed drum fixture on the default audio device:
+
+```sh
+cargo run -p meldritch-cli -- play-samples fixtures/basic_drums.toml --loops 4 --normalize
+```
+
+Playback renders one pattern cycle ahead of time by default, then loops it in
+the realtime callback. Use `--frames` to choose a different loop length.
+
+Render future chunks on workers while playback is running:
+
+```sh
+cargo run -p meldritch-cli -- play-realtime-samples fixtures/basic_drums.toml --loops 4
+```
+
+Use `--chunk-frames`, `--warm-chunks`, and `--workers` to tune the render
+horizon. Missing chunks fall back to silence and appear in playback diagnostics.
+
+Open the interactive terminal cockpit (`p` play/pause, arrows or `hjkl` move,
+space toggles a step, `r` rewinds, and `q` quits):
+
+```sh
+cargo run -p meldritch-cli -- tui-samples fixtures/basic_drums.toml
+```
+
+Open the same realtime cockpit with a native synthesized bass track selected:
+
+```sh
+cargo run -p meldritch-cli -- tui-bassline fixtures/basic_drums.toml
+```
+
+The bass track uses the same live velocity, gate, probability, invalidation,
+worker rendering, and atomic chunk publication path as the drums.
 
 Render the control-relation fixture and manifest:
 
@@ -184,3 +428,43 @@ Run the standard local check suite:
 ```sh
 bash tools/check.sh
 ```
+
+Speculative rendering resolves scored performance gestures into complete scene,
+track-mix, or fill recipes before worker submission. Future artifact keys cover
+the render range, sample rate, sorted mute state, and current content
+fingerprints for every participating pattern; missing mappings or content are
+reported as unresolved candidates.
+
+The speculative worker pool consumes those recipes in score order, deduplicates
+in-flight artifacts, and reports desired, clean, queued, active, and completed
+counts. Re-submitting an entirely clean plan is cache-only and leaves its worker
+threads asleep.
+
+Frontends can snapshot each desired candidate as missing, queued, rendering, or
+clean. The TUI performance-futures panel shows those ranked candidates beside
+aggregate cache health and whether speculative workers are working or asleep.
+
+The performance launcher queues gestures to deterministic beat or bar
+boundaries. When a gesture becomes due it updates the active scene, mute, or
+fill state and selects its clean speculative artifact; if that artifact is not
+ready, the launch is retained as a live-render fallback rather than delayed or
+dropped.
+
+At execution time, a clean speculative launch atomically replaces the realtime
+immutable audio snapshot. A cache miss atomically restores the coordinator's
+live chunk snapshot, keeping publication non-blocking on both paths.
+
+Fill launches carry a tempo-derived end boundary. Their configurable beat
+lifetime is fixed when queued; at expiry the overlay state clears and realtime
+publication atomically returns to the live base-pattern snapshot.
+
+Live performance controls are `Q` for the next arrangement scene, `Z` for the
+selected track's mute/unmute, `P` for the configured fill, and `C` to cancel the
+queued gesture. Commands use the current realtime playhead, and the application
+performance tick executes due gestures through the future cache and realtime
+publisher.
+
+The conditional Live Performance cockpit panel reports the queued gesture and
+boundary, active scene, muted tracks, fill expiry, cancellations, prepared and
+fallback launch totals, automatic fill returns, and the most recent audio-source
+decision.

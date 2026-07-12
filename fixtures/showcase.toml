@@ -1,0 +1,179 @@
+[project]
+name = "Meldritch 32-Bar Showcase"
+bpm = 120.0
+sample_rate = 48000
+seed = 32
+
+[[samples]]
+note = 36
+path = "audio/kick.wav"
+
+[[samples]]
+note = 38
+path = "audio/snare.wav"
+
+[[samples]]
+note = 42
+path = "audio/hat.wav"
+
+[[samples]]
+note = 43
+path = "audio/sub.wav"
+
+[[patterns]]
+id = 101
+length_steps = 16
+steps_per_beat = 4
+[[patterns.tracks]]
+id = 1
+[[patterns.tracks.steps]]
+step = 0
+note = 36
+velocity = 0.95
+tags = ["accent"]
+[[patterns.tracks.steps]]
+step = 8
+note = 36
+velocity = 0.78
+[[patterns.tracks]]
+id = 2
+[[patterns.tracks.steps]]
+step = 4
+note = 38
+velocity = 0.82
+[[patterns.tracks.steps]]
+step = 12
+note = 38
+velocity = 0.72
+
+[[patterns]]
+id = 102
+length_steps = 16
+steps_per_beat = 4
+[[patterns.tracks]]
+id = 1
+[[patterns.tracks.steps]]
+step = 0
+note = 36
+velocity = 0.95
+tags = ["accent"]
+[[patterns.tracks.steps]]
+step = 7
+note = 36
+velocity = 0.62
+[[patterns.tracks.steps]]
+step = 10
+note = 36
+velocity = 0.8
+[[patterns.tracks]]
+id = 2
+[[patterns.tracks.steps]]
+step = 4
+note = 38
+velocity = 0.85
+[[patterns.tracks.steps]]
+step = 12
+note = 38
+velocity = 0.78
+[[patterns.tracks]]
+id = 3
+[[patterns.tracks.steps]]
+step = 2
+note = 42
+velocity = 0.4
+[[patterns.tracks.steps]]
+step = 6
+note = 42
+velocity = 0.46
+[[patterns.tracks.steps]]
+step = 10
+note = 42
+velocity = 0.42
+[[patterns.tracks.steps]]
+step = 14
+note = 42
+velocity = 0.52
+
+[[patterns]]
+id = 103
+length_steps = 16
+steps_per_beat = 4
+[[patterns.tracks]]
+id = 1
+[[patterns.tracks.steps]]
+step = 0
+note = 36
+velocity = 0.9
+[[patterns.tracks.steps]]
+step = 11
+note = 36
+velocity = 0.7
+[[patterns.tracks]]
+id = 3
+[[patterns.tracks.steps]]
+step = 2
+note = 42
+velocity = 0.35
+tags = ["ghost"]
+[[patterns.tracks.steps]]
+step = 6
+note = 42
+velocity = 0.4
+[[patterns.tracks.steps]]
+step = 14
+note = 42
+velocity = 0.48
+
+[[patterns]]
+id = 104
+length_steps = 16
+steps_per_beat = 4
+[[patterns.tracks]]
+id = 1
+[[patterns.tracks.steps]]
+step = 0
+note = 36
+velocity = 1.0
+tags = ["accent", "scene_transition"]
+[[patterns.tracks.steps]]
+step = 3
+note = 36
+velocity = 0.65
+[[patterns.tracks.steps]]
+step = 8
+note = 36
+velocity = 0.82
+[[patterns.tracks.steps]]
+step = 11
+note = 36
+velocity = 0.68
+[[patterns.tracks]]
+id = 2
+[[patterns.tracks.steps]]
+step = 4
+note = 38
+velocity = 0.9
+tags = ["accent"]
+[[patterns.tracks.steps]]
+step = 12
+note = 38
+velocity = 0.84
+[[patterns.tracks]]
+id = 3
+[[patterns.tracks.steps]]
+step = 2
+note = 42
+velocity = 0.45
+[[patterns.tracks.steps]]
+step = 6
+note = 42
+velocity = 0.5
+[[patterns.tracks.steps]]
+step = 10
+note = 42
+velocity = 0.48
+[[patterns.tracks.steps]]
+step = 14
+note = 42
+velocity = 0.6
+tags = ["accent"]
