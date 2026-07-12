@@ -12,6 +12,7 @@ pub mod futures;
 pub mod live_edit;
 pub mod mastering;
 pub mod modulation;
+pub mod performance_fx;
 pub mod phrases;
 pub mod stereo_fx;
 pub mod transforms;
