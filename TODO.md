@@ -185,7 +185,7 @@ without learned automation immediately fighting a live decision.
 ## 16. Flashy DSP and production effects
 
 - [x] Tempo-synced stereo ping-pong delay with filtered feedback
-- [ ] General tempo-aware LFO and modulation routing
+- [x] General tempo-aware LFO and modulation routing
 - [ ] Phaser and per-voice stereo spread
 - [ ] Master compressor, soft clipper, and limiter
 - [ ] Modulated reverb with damping, predelay, and freeze

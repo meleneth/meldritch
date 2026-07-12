@@ -10,6 +10,7 @@ pub mod dynamics;
 pub mod effects;
 pub mod futures;
 pub mod live_edit;
+pub mod modulation;
 pub mod phrases;
 pub mod transforms;
 

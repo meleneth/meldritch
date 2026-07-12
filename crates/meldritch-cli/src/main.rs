@@ -3298,7 +3298,39 @@ fn render_showcase(
     } else {
         meldritch_render::dsp::BassVoiceSettings::default()
     };
-    let bass_audio = meldritch_render::dsp::render_monophonic_pattern_bass_with_automation(
+    let bass_modulation = if warehouse {
+        use meldritch_render::modulation::{
+            Lfo, LfoRate, LfoShape, ModulationDestination, ModulationMatrix, ModulationPolarity,
+            ModulationRoute,
+        };
+        ModulationMatrix::new(vec![
+            ModulationRoute {
+                source: Lfo {
+                    shape: LfoShape::Triangle,
+                    rate: LfoRate::Beats(8.0),
+                    phase: 0.0,
+                    seed: 808,
+                },
+                destination: ModulationDestination::FilterOctaves,
+                depth: 1.4,
+                polarity: ModulationPolarity::Bipolar,
+            },
+            ModulationRoute {
+                source: Lfo {
+                    shape: LfoShape::SampleAndHold,
+                    rate: LfoRate::Beats(0.5),
+                    phase: 0.0,
+                    seed: 909,
+                },
+                destination: ModulationDestination::DriveOctaves,
+                depth: 0.28,
+                polarity: ModulationPolarity::Unipolar,
+            },
+        ])
+    } else {
+        meldritch_render::modulation::ModulationMatrix::default()
+    };
+    let bass_audio = meldritch_render::dsp::render_monophonic_pattern_bass_with_modulation(
         &bass,
         Some((&project.patterns()[3], TrackId::new(1))),
         project.tempo(),
@@ -3307,6 +3339,7 @@ fn render_showcase(
         settings,
         bass_settings,
         &automation,
+        &bass_modulation,
     );
 
     let mut chords = Pattern::new(meldritch_core::PatternId::new(9_102), 64, 4)

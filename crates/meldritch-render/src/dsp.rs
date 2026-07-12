@@ -5,6 +5,7 @@ use meldritch_core::{
 };
 
 use crate::RenderSettings;
+use crate::modulation::{ModulationDestination, ModulationMatrix};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Waveform {
@@ -970,6 +971,32 @@ pub fn render_monophonic_pattern_bass_with_automation(
     settings: BassVoiceSettings,
     lanes: &[AutomationLane],
 ) -> AudioBlock {
+    render_monophonic_pattern_bass_with_modulation(
+        pattern,
+        ducking_control,
+        tempo,
+        range,
+        probability_seed,
+        render_settings,
+        settings,
+        lanes,
+        &ModulationMatrix::default(),
+    )
+}
+
+/// Render the automated monophonic voice with deterministic LFO routing.
+#[allow(clippy::too_many_arguments)]
+pub fn render_monophonic_pattern_bass_with_modulation(
+    pattern: &Pattern,
+    ducking_control: Option<(&Pattern, meldritch_core::TrackId)>,
+    tempo: Tempo,
+    range: FrameRange,
+    probability_seed: ProbabilitySeed,
+    render_settings: RenderSettings,
+    settings: BassVoiceSettings,
+    lanes: &[AutomationLane],
+    modulation_matrix: &ModulationMatrix,
+) -> AudioBlock {
     let frames = (range.end() - range.start()).min(u64::from(u32::MAX)) as u32;
     let mut block = AudioBlock::silent(render_settings.channels(), frames);
     let history = FrameRange::new(0, range.end()).expect("automation preroll range is ordered");
@@ -1039,13 +1066,22 @@ pub fn render_monophonic_pattern_bass_with_automation(
             AutomationTarget::Cutoff,
             absolute_frame,
             settings.cutoff_hz,
-        );
-        let resonance = automated_value(
+        ) * 2.0_f64.powf(modulation_matrix.value_at(
+            ModulationDestination::FilterOctaves,
+            absolute_frame,
+            tempo,
+        ));
+        let resonance = (automated_value(
             lanes,
             AutomationTarget::Resonance,
             absolute_frame,
             settings.resonance,
-        );
+        ) + modulation_matrix.value_at(
+            ModulationDestination::Resonance,
+            absolute_frame,
+            tempo,
+        ))
+        .clamp(0.0, 1.0);
         let filter_envelope = automated_value(
             lanes,
             AutomationTarget::FilterEnvelope,
@@ -1057,13 +1093,19 @@ pub fn render_monophonic_pattern_bass_with_automation(
             AutomationTarget::Drive,
             absolute_frame,
             settings.drive,
-        );
-        let level = automated_value(
+        ) * 2.0_f64.powf(modulation_matrix.value_at(
+            ModulationDestination::DriveOctaves,
+            absolute_frame,
+            tempo,
+        ));
+        let level = (automated_value(
             lanes,
             AutomationTarget::Level,
             absolute_frame,
             settings.level,
-        );
+        ) * (1.0
+            + modulation_matrix.value_at(ModulationDestination::Level, absolute_frame, tempo)))
+        .clamp(0.0, 1.0);
         let modulation = automated_value(lanes, AutomationTarget::Modulation, absolute_frame, 0.0);
         let mut sample = voice.next_sample_with_parameters(
             modulation,
@@ -1439,6 +1481,7 @@ fn render_bass_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::modulation::{Lfo, LfoRate, LfoShape, ModulationPolarity, ModulationRoute};
     use meldritch_core::{
         AutomationInterpolation, AutomationPoint, PatternId, Step, StepIndex, TrackId,
     };
@@ -1516,6 +1559,50 @@ mod tests {
 
         assert!(full.peak_abs() > 0.0);
         assert_eq!(&full.samples()[6_000..], tail.samples());
+        assert!(full.samples().iter().all(|sample| sample.is_finite()));
+    }
+
+    #[test]
+    fn tempo_modulation_changes_bass_and_remains_chunk_identical() {
+        let tempo = Tempo::new(120.0, 48_000).unwrap();
+        let mut bass = Pattern::new(PatternId::new(1), 8, 4).unwrap();
+        bass.set_step(
+            TrackId::new(1),
+            StepIndex::new(0),
+            Step::new(36).with_gate(1.0),
+        )
+        .unwrap();
+        let matrix = ModulationMatrix::new(vec![ModulationRoute {
+            source: Lfo {
+                shape: LfoShape::Triangle,
+                rate: LfoRate::Beats(1.0),
+                phase: 0.0,
+                seed: 808,
+            },
+            destination: ModulationDestination::FilterOctaves,
+            depth: 3.0,
+            polarity: ModulationPolarity::Unipolar,
+        }]);
+        let range = FrameRange::new(0, 24_000).unwrap();
+        let render = |range, matrix: &ModulationMatrix| {
+            render_monophonic_pattern_bass_with_modulation(
+                &bass,
+                None,
+                tempo,
+                range,
+                ProbabilitySeed::new(1),
+                RenderSettings::new(1).unwrap(),
+                BassVoiceSettings::default(),
+                &[],
+                matrix,
+            )
+        };
+        let full = render(range, &matrix);
+        let plain = render(range, &ModulationMatrix::default());
+        let tail = render(FrameRange::new(12_000, 24_000).unwrap(), &matrix);
+
+        assert_ne!(full.samples(), plain.samples());
+        assert_eq!(&full.samples()[12_000..], tail.samples());
         assert!(full.samples().iter().all(|sample| sample.is_finite()));
     }
 
