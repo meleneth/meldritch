@@ -44,6 +44,7 @@ pub struct LiveEditResult {
 #[derive(Debug)]
 pub enum LiveEditError {
     Pattern(PatternError),
+    IncompatiblePattern,
     RenderState(RenderStateUpdateError),
 }
 
@@ -134,6 +135,33 @@ impl LivePatternEditor {
         let range = FrameRange::new(0, u64::from(self.timeline_frames))
             .expect("live editor timeline is ordered");
         let next_state = self.state.with_samples(samples_by_note);
+        let invalidated = coordinator
+            .update_render_state(next_state.clone(), range)
+            .map_err(LiveEditError::RenderState)?;
+        self.state = next_state;
+        Ok(invalidated)
+    }
+
+    /// Replaces the repeating pattern as one control-side operation. Phrase
+    /// launchers use this only for layout-compatible patterns at quantized
+    /// boundaries, allowing the coordinator to rebuild the complete horizon.
+    pub fn replace_pattern(
+        &mut self,
+        coordinator: &RenderCoordinator,
+        pattern: meldritch_core::Pattern,
+    ) -> Result<usize, LiveEditError> {
+        if pattern.length_steps() != self.state.pattern().length_steps()
+            || pattern.steps_per_beat() != self.state.pattern().steps_per_beat()
+        {
+            return Err(LiveEditError::IncompatiblePattern);
+        }
+        let pattern = pattern.reidentified(self.state.pattern().id());
+        if pattern == *self.state.pattern() {
+            return Ok(0);
+        }
+        let range = FrameRange::new(0, u64::from(self.timeline_frames))
+            .expect("live editor timeline is ordered");
+        let next_state = self.state.with_pattern(pattern);
         let invalidated = coordinator
             .update_render_state(next_state.clone(), range)
             .map_err(LiveEditError::RenderState)?;
@@ -364,6 +392,45 @@ mod tests {
             coordinator.audio_reader().snapshot().frame(0),
             Ok([0.7].as_slice())
         );
+        coordinator.shutdown();
+    }
+
+    #[test]
+    fn replacing_phrase_pattern_rebuilds_horizon_and_rejects_layout_changes() {
+        let pattern = Pattern::new(PatternId::new(1), 4, 4).unwrap();
+        let mut samples = BTreeMap::new();
+        samples.insert(36, SampleBuffer::new(1, 48_000, vec![0.8; 2]));
+        let state = SampleRenderState::new(
+            pattern,
+            Tempo::new(120.0, 48_000).unwrap(),
+            ProbabilitySeed::new(1),
+            RenderSettings::new(1).unwrap(),
+            Arc::new(samples),
+        );
+        let (_, status, _) = realtime_status();
+        let config = RenderCoordinatorConfig::new(1, 8, 2, 1, Duration::from_millis(2)).unwrap();
+        let mut coordinator =
+            RenderCoordinator::new_from_state(config, state.clone(), status).unwrap();
+        let mut editor = LivePatternEditor::new(state, 8);
+        assert!(coordinator.wait_for_ready_chunks(4, Duration::from_secs(1)));
+
+        let mut phrase = Pattern::new(PatternId::new(2), 4, 4).unwrap();
+        phrase
+            .set_step(TrackId::new(1), StepIndex::new(0), Step::new(36))
+            .unwrap();
+        assert_eq!(editor.replace_pattern(&coordinator, phrase).unwrap(), 4);
+        assert!(coordinator.wait_for_ready_chunks(4, Duration::from_secs(1)));
+        assert_eq!(editor.state().pattern().id(), PatternId::new(1));
+        assert_eq!(
+            coordinator.audio_reader().snapshot().frame(0),
+            Ok([0.8].as_slice())
+        );
+
+        let incompatible = Pattern::new(PatternId::new(3), 8, 4).unwrap();
+        assert!(matches!(
+            editor.replace_pattern(&coordinator, incompatible),
+            Err(LiveEditError::IncompatiblePattern)
+        ));
         coordinator.shutdown();
     }
 

@@ -6,7 +6,7 @@ use meldritch_audio::realtime_status::RealtimeStatusSnapshot;
 use meldritch_audio::transport::TransportState;
 use meldritch_core::{
     Arrangement, AutomationInterpolation, AutomationLane, AutomationTarget, AutomationValue,
-    DirtyRange, Frame, PatternId, Probability, SceneId, Step, StepIndex, Tempo, TrackId,
+    DirtyRange, Frame, Pattern, PatternId, Probability, SceneId, Step, StepIndex, Tempo, TrackId,
 };
 use meldritch_render::coordinator::{RenderCoordinator, RenderCoordinatorDiagnostics};
 use meldritch_render::dsp::{BassVoiceSettings, Waveform, synthesize_bass_sample};
@@ -406,6 +406,14 @@ impl AppController {
 
     pub fn set_fill_pattern(&mut self, pattern: PatternId) {
         self.fill_pattern = Some(pattern);
+    }
+
+    /// Launches a layout-compatible phrase pattern through the normal render
+    /// coordinator, returning the number of invalidated horizon chunks.
+    pub fn launch_pattern(&mut self, pattern: Pattern) -> Result<usize, AppCommandError> {
+        self.editor
+            .replace_pattern(&self.coordinator, pattern)
+            .map_err(AppCommandError::LiveEdit)
     }
 
     #[must_use]

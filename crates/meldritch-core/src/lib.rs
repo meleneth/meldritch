@@ -747,6 +747,16 @@ impl Pattern {
         self.id
     }
 
+    /// Copies this pattern's musical contents into another identity slot.
+    /// Realtime phrase launchers use a stable slot ID so render artifacts are
+    /// invalidated and republished without changing graph topology.
+    #[must_use]
+    pub fn reidentified(&self, id: PatternId) -> Self {
+        let mut pattern = self.clone();
+        pattern.id = id;
+        pattern
+    }
+
     #[must_use]
     pub const fn length_steps(&self) -> u32 {
         self.length_steps
