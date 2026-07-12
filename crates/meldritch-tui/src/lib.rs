@@ -1,6 +1,6 @@
 //! Ratatui/Crossterm frontend for the headless application controller.
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -89,6 +89,12 @@ pub fn map_key(key: KeyEvent, default_step: &Step) -> Option<TuiAction> {
         KeyCode::Char('Z') => TuiAction::Input(AppInput::ToggleTrackMute),
         KeyCode::Char('P') => TuiAction::Input(AppInput::TriggerFill),
         KeyCode::Char('C') => TuiAction::Input(AppInput::CancelPerformance),
+        KeyCode::F(number @ 1..=4) if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            TuiAction::Input(AppInput::QueuePhraseVariation(
+                meldritch_core::SceneId::new(u64::from(number)),
+                1,
+            ))
+        }
         KeyCode::F(number @ 1..=4) => TuiAction::Input(AppInput::QueuePhrase(
             meldritch_core::SceneId::new(u64::from(number)),
         )),
@@ -274,10 +280,10 @@ pub fn draw_with_status(
             Constraint::Length(if view.transform.is_some() { 4 } else { 0 }),
             Constraint::Length(if view.futures.is_some() { 5 } else { 0 }),
             Constraint::Length(if performance_visible { 5 } else { 0 }),
-            Constraint::Min(7),
+            Constraint::Min(6),
             Constraint::Length(5),
             Constraint::Length(3),
-            Constraint::Length(6),
+            Constraint::Length(7),
         ])
         .split(frame.area());
     if view.arrangement.is_some() {
@@ -774,6 +780,7 @@ fn draw_key_legend(frame: &mut ratatui::Frame<'_>, area: Rect) {
         ("<>", "probability"),
         ("Q/Z/P/C", "perform"),
         ("F1-F4", "phrase pads"),
+        ("Shift+F1-F4", "variations"),
         ("a/z", "cutoff"),
         ("d/x", "resonance"),
         ("w", "waveform"),
@@ -797,16 +804,18 @@ fn draw_key_legend(frame: &mut ratatui::Frame<'_>, area: Rect) {
         ("r", "rewind"),
         ("q", "quit"),
     ];
-    let mut lines = vec![Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    let mut lines = vec![Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
     for (index, (key, action)) in keys.into_iter().enumerate() {
-        let line = if index < 8 {
+        let line = if index < 6 {
             0
-        } else if index < 15 {
+        } else if index < 12 {
             1
-        } else if index < 22 {
+        } else if index < 18 {
             2
-        } else {
+        } else if index < 24 {
             3
+        } else {
+            4
         };
         if !lines[line].is_empty() {
             lines[line].push(Span::raw("  "));
@@ -1078,6 +1087,16 @@ mod tests {
                 Some(TuiAction::Input(AppInput::QueuePhrase(SceneId::new(
                     u64::from(number)
                 ))))
+            );
+            assert_eq!(
+                map_key(
+                    KeyEvent::new(KeyCode::F(number), KeyModifiers::SHIFT),
+                    &Step::new(36)
+                ),
+                Some(TuiAction::Input(AppInput::QueuePhraseVariation(
+                    SceneId::new(u64::from(number)),
+                    1
+                )))
             );
         }
     }

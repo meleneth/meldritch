@@ -176,7 +176,7 @@ choices at musically similar moments and makes those decisions visible.
 ## 15. Expressive phrase performance
 
 - [x] Direct `F1`–`F4` phrase pads with bar-quantized launching
-- [ ] Phrase-pad variation selection without changing the base scene
+- [x] Phrase-pad variation selection without changing the base scene
 - [x] Performer override grace window for learned phrase cues
 
 Done when specific phrases and their variations can be played deliberately

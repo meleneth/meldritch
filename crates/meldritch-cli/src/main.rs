@@ -30,6 +30,7 @@ enum LearnedAction {
     InvertChordDown,
     QueueNextScene,
     QueuePhrase(u64),
+    QueuePhraseVariation(u64, usize),
     ToggleTrackMute,
     TriggerFill,
 }
@@ -53,6 +54,9 @@ impl LearnedAction {
             AppInput::InvertChordDown => Self::InvertChordDown,
             AppInput::QueueNextScene => Self::QueueNextScene,
             AppInput::QueuePhrase(scene) => Self::QueuePhrase(scene.raw()),
+            AppInput::QueuePhraseVariation(scene, variation) => {
+                Self::QueuePhraseVariation(scene.raw(), *variation)
+            }
             AppInput::ToggleTrackMute => Self::ToggleTrackMute,
             AppInput::TriggerFill => Self::TriggerFill,
             _ => return None,
@@ -77,6 +81,9 @@ impl LearnedAction {
             Self::InvertChordDown => AppInput::InvertChordDown,
             Self::QueueNextScene => AppInput::QueueNextScene,
             Self::QueuePhrase(scene) => AppInput::QueuePhrase(SceneId::new(scene)),
+            Self::QueuePhraseVariation(scene, variation) => {
+                AppInput::QueuePhraseVariation(SceneId::new(scene), variation)
+            }
             Self::ToggleTrackMute => AppInput::ToggleTrackMute,
             Self::TriggerFill => AppInput::TriggerFill,
         })
@@ -159,6 +166,11 @@ fn learned_phrase_schedule(
         .iter()
         .filter_map(|future| match future.action {
             LearnedAction::QueuePhrase(scene) => Some((
+                (future.mean_phase.clamp(0.0, 1.0) * f64::from(last_frame)).round() as u32,
+                SceneId::new(scene),
+                future.score,
+            )),
+            LearnedAction::QueuePhraseVariation(scene, _) => Some((
                 (future.mean_phase.clamp(0.0, 1.0) * f64::from(last_frame)).round() as u32,
                 SceneId::new(scene),
                 future.score,
@@ -4016,13 +4028,25 @@ fn tui_samples(
     }
     if warehouse {
         controller
-            .configure_phrase_scenes(
-                project
-                    .patterns()
-                    .iter()
-                    .enumerate()
-                    .map(|(index, pattern)| (SceneId::new(index as u64 + 1), pattern.clone())),
-            )
+            .configure_phrase_variations(project.patterns().iter().enumerate().map(
+                |(index, pattern)| {
+                    let mut variation = pattern.clone();
+                    variation
+                        .set_step(
+                            TrackId::new(3),
+                            StepIndex::new(15),
+                            Step::new(42)
+                                .with_velocity(0.82)
+                                .with_tag(EventTag::Fill)
+                                .with_tag(EventTag::Accent),
+                        )
+                        .expect("warehouse variation step is in range");
+                    (
+                        SceneId::new(index as u64 + 1),
+                        vec![pattern.clone(), variation],
+                    )
+                },
+            ))
             .map_err(|err| format!("failed to configure warehouse phrases: {err}"))?;
     }
     if !automation_view.is_empty() {
@@ -4088,7 +4112,7 @@ fn tui_samples(
     );
     for learned in ranked.into_iter().take(4) {
         match learned.action {
-            LearnedAction::QueuePhrase(_) => continue,
+            LearnedAction::QueuePhrase(_) | LearnedAction::QueuePhraseVariation(_, _) => continue,
             action => {
                 controller
                     .handle_input(action.input().expect("non-phrase action has an input"))
@@ -4174,6 +4198,7 @@ fn tui_samples(
                     input,
                     meldritch_app::AppInput::QueueNextScene
                         | meldritch_app::AppInput::QueuePhrase(_)
+                        | meldritch_app::AppInput::QueuePhraseVariation(_, _)
                 )
             {
                 input_override_grace

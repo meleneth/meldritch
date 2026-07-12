@@ -47,6 +47,7 @@ pub enum AppCommand {
     ReturnToLive,
     QueueNextScene,
     QueueScene(SceneId),
+    QueueSceneVariation(SceneId, usize),
     ToggleTrackMute(TrackId),
     TriggerFill(PatternId),
     CancelPerformance,
@@ -304,6 +305,7 @@ pub enum AppInput {
     ReturnToLive,
     QueueNextScene,
     QueuePhrase(SceneId),
+    QueuePhraseVariation(SceneId, usize),
     ToggleTrackMute,
     TriggerFill,
     CancelPerformance,
@@ -334,7 +336,8 @@ pub struct AppController {
     future_cache_view: Option<FutureCacheView>,
     performance_launcher: PerformanceLauncher,
     performance_scenes: Vec<SceneId>,
-    phrase_patterns: BTreeMap<SceneId, Pattern>,
+    phrase_patterns: BTreeMap<SceneId, Vec<Pattern>>,
+    queued_phrase_variation: Option<(SceneId, usize)>,
     learned_phrase_cues: Vec<LearnedPhraseCueView>,
     fill_pattern: Option<PatternId>,
     transformed_audio: Option<meldritch_audio::AudioBlock>,
@@ -368,6 +371,7 @@ impl AppController {
             performance_launcher: PerformanceLauncher::new(LaunchQuantization::Bar { beats: 4 }),
             performance_scenes: Vec::new(),
             phrase_patterns: BTreeMap::new(),
+            queued_phrase_variation: None,
             learned_phrase_cues: Vec::new(),
             fill_pattern: None,
             transformed_audio: None,
@@ -436,6 +440,38 @@ impl AppController {
         }) {
             return Err("phrase scene layouts must match the live pattern");
         }
+        let patterns = phrases
+            .iter()
+            .cloned()
+            .map(|(scene, pattern)| (scene, vec![pattern]))
+            .collect::<BTreeMap<_, _>>();
+        if patterns.len() != phrases.len() {
+            return Err("phrase scene IDs must be unique");
+        }
+        self.performance_scenes = phrases.iter().map(|(scene, _)| *scene).collect();
+        self.phrase_patterns = patterns;
+        Ok(())
+    }
+
+    pub fn configure_phrase_variations(
+        &mut self,
+        phrases: impl IntoIterator<Item = (SceneId, Vec<Pattern>)>,
+    ) -> Result<(), &'static str> {
+        let phrases = phrases.into_iter().collect::<Vec<_>>();
+        if phrases.is_empty() || phrases.iter().any(|(_, patterns)| patterns.is_empty()) {
+            return Err("phrase variation banks must not be empty");
+        }
+        let current = self.editor.state().pattern();
+        if phrases
+            .iter()
+            .flat_map(|(_, patterns)| patterns)
+            .any(|pattern| {
+                pattern.length_steps() != current.length_steps()
+                    || pattern.steps_per_beat() != current.steps_per_beat()
+            })
+        {
+            return Err("phrase variation layouts must match the live pattern");
+        }
         let patterns = phrases.iter().cloned().collect::<BTreeMap<_, _>>();
         if patterns.len() != phrases.len() {
             return Err("phrase scene IDs must be unique");
@@ -452,6 +488,28 @@ impl AppController {
         if !self.performance_scenes.contains(&scene) || !self.phrase_patterns.contains_key(&scene) {
             return Err(AppCommandError::NoPerformanceScenes);
         }
+        self.queued_phrase_variation = None;
+        Ok(self.performance_launcher.queue(
+            PerformanceGesture::QueueScene(scene),
+            u64::from(self.playback.status_monitor().snapshot().position),
+            self.editor.state().tempo(),
+        ))
+    }
+
+    pub fn queue_phrase_variation(
+        &mut self,
+        scene: SceneId,
+        variation: usize,
+    ) -> Result<QueuedPerformanceGesture, AppCommandError> {
+        if !self.performance_scenes.contains(&scene)
+            || self
+                .phrase_patterns
+                .get(&scene)
+                .is_none_or(|patterns| variation >= patterns.len())
+        {
+            return Err(AppCommandError::NoPerformanceScenes);
+        }
+        self.queued_phrase_variation = Some((scene, variation));
         Ok(self.performance_launcher.queue(
             PerformanceGesture::QueueScene(scene),
             u64::from(self.playback.status_monitor().snapshot().position),
@@ -631,6 +689,7 @@ impl AppController {
                     .performance_scenes
                     .get(index)
                     .ok_or(AppCommandError::NoPerformanceScenes)?;
+                self.queued_phrase_variation = None;
                 let queued = self.performance_launcher.queue(
                     PerformanceGesture::QueueScene(scene),
                     u64::from(self.playback.status_monitor().snapshot().position),
@@ -644,12 +703,18 @@ impl AppController {
                 {
                     return Err(AppCommandError::NoPerformanceScenes);
                 }
+                self.queued_phrase_variation = None;
                 let queued = self.performance_launcher.queue(
                     PerformanceGesture::QueueScene(*scene),
                     u64::from(self.playback.status_monitor().snapshot().position),
                     self.editor.state().tempo(),
                 );
                 AppCommandResult::PerformanceQueued(queued)
+            }
+            AppCommand::QueueSceneVariation(scene, variation) => {
+                return self
+                    .queue_phrase_variation(*scene, *variation)
+                    .map(AppCommandResult::PerformanceQueued);
             }
             AppCommand::ToggleTrackMute(track) => {
                 let gesture = if self
@@ -1109,6 +1174,9 @@ impl AppController {
             AppInput::ReturnToLive => AppCommand::ReturnToLive,
             AppInput::QueueNextScene => AppCommand::QueueNextScene,
             AppInput::QueuePhrase(scene) => AppCommand::QueueScene(scene),
+            AppInput::QueuePhraseVariation(scene, variation) => {
+                AppCommand::QueueSceneVariation(scene, variation)
+            }
             AppInput::ToggleTrackMute => AppCommand::ToggleTrackMute(self.selection.track),
             AppInput::TriggerFill => {
                 AppCommand::TriggerFill(self.fill_pattern.ok_or(AppCommandError::NoFillPattern)?)
@@ -1139,9 +1207,15 @@ impl AppController {
             return Ok(None);
         };
         if let PerformanceGesture::QueueScene(scene) = launch.gesture {
+            let variation = self
+                .queued_phrase_variation
+                .take()
+                .filter(|(queued_scene, _)| *queued_scene == scene)
+                .map_or(0, |(_, variation)| variation);
             let pattern = self
                 .phrase_patterns
                 .get(&scene)
+                .and_then(|patterns| patterns.get(variation))
                 .cloned()
                 .ok_or(AppCommandError::NoPerformanceScenes)?;
             self.editor
@@ -1663,8 +1737,15 @@ mod tests {
         second
             .set_step(TrackId::new(1), StepIndex::new(1), Step::new(36))
             .unwrap();
+        let mut first_variation = first.clone();
+        first_variation
+            .set_step(TrackId::new(1), StepIndex::new(2), Step::new(36))
+            .unwrap();
         controller
-            .configure_phrase_scenes([(SceneId::new(1), first), (SceneId::new(2), second)])
+            .configure_phrase_variations([
+                (SceneId::new(1), vec![first, first_variation]),
+                (SceneId::new(2), vec![second]),
+            ])
             .unwrap();
 
         controller.handle_input(AppInput::QueueNextScene).unwrap();
@@ -1704,6 +1785,22 @@ mod tests {
         );
         assert!(matches!(
             controller.handle_input(AppInput::QueuePhrase(SceneId::new(9))),
+            Err(AppCommandError::NoPerformanceScenes)
+        ));
+        controller
+            .handle_input(AppInput::QueuePhraseVariation(SceneId::new(1), 1))
+            .unwrap();
+        controller.tick_phrase_launch().unwrap().unwrap();
+        assert!(
+            controller
+                .editor
+                .state()
+                .pattern()
+                .get_step(TrackId::new(1), StepIndex::new(2))
+                .is_some()
+        );
+        assert!(matches!(
+            controller.handle_input(AppInput::QueuePhraseVariation(SceneId::new(2), 1)),
             Err(AppCommandError::NoPerformanceScenes)
         ));
     }
