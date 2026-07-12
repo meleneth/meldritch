@@ -12,6 +12,7 @@ pub mod futures;
 pub mod live_edit;
 pub mod modulation;
 pub mod phrases;
+pub mod stereo_fx;
 pub mod transforms;
 
 use meldritch_audio::audio_publication::{

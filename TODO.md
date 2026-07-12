@@ -186,7 +186,7 @@ without learned automation immediately fighting a live decision.
 
 - [x] Tempo-synced stereo ping-pong delay with filtered feedback
 - [x] General tempo-aware LFO and modulation routing
-- [ ] Phaser and per-voice stereo spread
+- [x] Phaser and per-voice stereo spread
 - [ ] Master compressor, soft clipper, and limiter
 - [ ] Modulated reverb with damping, predelay, and freeze
 

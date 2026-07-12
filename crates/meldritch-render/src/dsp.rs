@@ -707,6 +707,41 @@ impl PolyphonicSynth {
         mixed / (self.voices.len() as f64).sqrt()
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn next_stereo_with_parameters(
+        &mut self,
+        filter_octaves: f64,
+        cutoff_hz: f64,
+        resonance: f64,
+        filter_envelope_octaves: f64,
+        drive: f64,
+        level: f64,
+        spread: f64,
+    ) -> [f64; 2] {
+        let spread = spread.clamp(0.0, 1.0);
+        let last = self.voices.len().saturating_sub(1).max(1) as f64;
+        let normalization = (self.voices.len() as f64).sqrt();
+        let mut output = [0.0, 0.0];
+        for (index, slot) in self.voices.iter_mut().enumerate() {
+            let sample = slot.voice.next_sample_with_parameters(
+                filter_octaves,
+                cutoff_hz,
+                resonance,
+                filter_envelope_octaves,
+                drive,
+                level,
+            );
+            let position = (index as f64 / last).mul_add(2.0, -1.0) * spread;
+            let angle = (position + 1.0) * std::f64::consts::FRAC_PI_4;
+            output[0] += sample * angle.cos();
+            output[1] += sample * angle.sin();
+            if !slot.held && slot.voice.is_idle() {
+                slot.note = None;
+            }
+        }
+        [output[0] / normalization, output[1] / normalization]
+    }
+
     #[must_use]
     pub fn active_notes(&self) -> Vec<u8> {
         self.voices.iter().filter_map(|slot| slot.note).collect()
@@ -786,6 +821,31 @@ pub fn render_polyphonic_pattern_with_automation(
     voice_count: usize,
     lanes: &[AutomationLane],
 ) -> Result<AudioBlock, PolyphonicSynthError> {
+    render_polyphonic_pattern_with_stereo_spread(
+        pattern,
+        tempo,
+        range,
+        probability_seed,
+        render_settings,
+        settings,
+        voice_count,
+        lanes,
+        0.0,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_polyphonic_pattern_with_stereo_spread(
+    pattern: &Pattern,
+    tempo: Tempo,
+    range: FrameRange,
+    probability_seed: ProbabilitySeed,
+    render_settings: RenderSettings,
+    settings: BassVoiceSettings,
+    voice_count: usize,
+    lanes: &[AutomationLane],
+    spread: f64,
+) -> Result<AudioBlock, PolyphonicSynthError> {
     let frames = (range.end() - range.start()).min(u64::from(u32::MAX)) as u32;
     let mut block = AudioBlock::silent(render_settings.channels(), frames);
     let history = FrameRange::new(0, range.end()).expect("polyphonic history is ordered");
@@ -834,48 +894,95 @@ pub fn render_polyphonic_pattern_with_automation(
         if let Some(waveform) = automated_waveform(lanes, absolute_frame) {
             synth.set_waveform(waveform);
         }
-        let mut sample = synth.next_sample_with_parameters(
-            automated_value(lanes, AutomationTarget::Modulation, absolute_frame, 0.0),
-            automated_value(
-                lanes,
-                AutomationTarget::Cutoff,
-                absolute_frame,
-                settings.cutoff_hz,
-            ),
-            automated_value(
-                lanes,
-                AutomationTarget::Resonance,
-                absolute_frame,
-                settings.resonance,
-            ),
-            automated_value(
-                lanes,
-                AutomationTarget::FilterEnvelope,
-                absolute_frame,
-                settings.filter_envelope_octaves,
-            ),
-            automated_value(
-                lanes,
-                AutomationTarget::Drive,
-                absolute_frame,
-                settings.drive,
-            ),
-            automated_value(
-                lanes,
-                AutomationTarget::Level,
-                absolute_frame,
-                settings.level,
-            ),
+        let filter_octaves =
+            automated_value(lanes, AutomationTarget::Modulation, absolute_frame, 0.0);
+        let cutoff = automated_value(
+            lanes,
+            AutomationTarget::Cutoff,
+            absolute_frame,
+            settings.cutoff_hz,
         );
-        if discrete_automation_value(lanes, AutomationTarget::Mute, absolute_frame)
-            .is_some_and(|value| value != 0)
-        {
-            sample = 0.0;
-        }
+        let resonance = automated_value(
+            lanes,
+            AutomationTarget::Resonance,
+            absolute_frame,
+            settings.resonance,
+        );
+        let filter_envelope = automated_value(
+            lanes,
+            AutomationTarget::FilterEnvelope,
+            absolute_frame,
+            settings.filter_envelope_octaves,
+        );
+        let drive = automated_value(
+            lanes,
+            AutomationTarget::Drive,
+            absolute_frame,
+            settings.drive,
+        );
+        let level = automated_value(
+            lanes,
+            AutomationTarget::Level,
+            absolute_frame,
+            settings.level,
+        );
+        let muted = discrete_automation_value(lanes, AutomationTarget::Mute, absolute_frame)
+            .is_some_and(|value| value != 0);
         if absolute_frame >= range.start() {
             let relative = (absolute_frame - range.start()) as usize;
             let offset = relative * channels;
-            block.samples_mut()[offset..offset + channels].fill(sample);
+            if channels >= 2 && spread > 0.0 {
+                let stereo = synth.next_stereo_with_parameters(
+                    filter_octaves,
+                    cutoff,
+                    resonance,
+                    filter_envelope,
+                    drive,
+                    level,
+                    spread,
+                );
+                block.samples_mut()[offset] = if muted { 0.0 } else { stereo[0] };
+                block.samples_mut()[offset + 1] = if muted { 0.0 } else { stereo[1] };
+                let center = (stereo[0] + stereo[1]) * std::f64::consts::FRAC_1_SQRT_2;
+                block.samples_mut()[offset + 2..offset + channels].fill(if muted {
+                    0.0
+                } else {
+                    center
+                });
+            } else {
+                let sample = synth.next_sample_with_parameters(
+                    filter_octaves,
+                    cutoff,
+                    resonance,
+                    filter_envelope,
+                    drive,
+                    level,
+                );
+                block.samples_mut()[offset..offset + channels].fill(if muted {
+                    0.0
+                } else {
+                    sample
+                });
+            }
+        } else if channels >= 2 && spread > 0.0 {
+            let _ = synth.next_stereo_with_parameters(
+                filter_octaves,
+                cutoff,
+                resonance,
+                filter_envelope,
+                drive,
+                level,
+                spread,
+            );
+        } else {
+            let _ = synth.next_sample_with_parameters(
+                filter_octaves,
+                cutoff,
+                resonance,
+                filter_envelope,
+                drive,
+                level,
+            );
         }
     }
     Ok(block)
@@ -2142,6 +2249,40 @@ mod tests {
                 .chunks_exact(2)
                 .all(|frame| frame[0] == frame[1])
         );
+    }
+
+    #[test]
+    fn per_voice_spread_is_stereo_and_chunk_identical() {
+        let mut pattern = Pattern::new(PatternId::new(5), 8, 4).unwrap();
+        for (track, note) in [(10, 60), (11, 64), (12, 67)] {
+            pattern
+                .set_step(TrackId::new(track), StepIndex::new(0), Step::new(note))
+                .unwrap();
+        }
+        let tempo = Tempo::new(120.0, 48_000).unwrap();
+        let render = |range| {
+            render_polyphonic_pattern_with_stereo_spread(
+                &pattern,
+                tempo,
+                range,
+                ProbabilitySeed::new(1),
+                RenderSettings::new(2).unwrap(),
+                BassVoiceSettings::default(),
+                8,
+                &[],
+                0.9,
+            )
+            .unwrap()
+        };
+        let full = render(FrameRange::new(0, 24_000).unwrap());
+        let tail = render(FrameRange::new(12_000, 24_000).unwrap());
+        assert!(
+            full.samples()
+                .chunks_exact(2)
+                .any(|frame| frame[0] != frame[1])
+        );
+        assert_eq!(&full.samples()[24_000..], tail.samples());
+        assert!(full.samples().iter().all(|sample| sample.is_finite()));
     }
 
     #[test]

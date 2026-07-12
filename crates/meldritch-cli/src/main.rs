@@ -3380,7 +3380,7 @@ fn render_showcase(
     } else {
         demo_automation_lanes(frame_count, true)?
     };
-    let chord_audio = meldritch_render::dsp::render_polyphonic_pattern_with_automation(
+    let chord_audio = meldritch_render::dsp::render_polyphonic_pattern_with_stereo_spread(
         &chords,
         project.tempo(),
         range,
@@ -3389,8 +3389,18 @@ fn render_showcase(
         chord_settings,
         8,
         &chord_automation,
+        if warehouse { 0.9 } else { 0.0 },
     )
     .map_err(|err| format!("failed to render showcase chords: {err:?}"))?;
+    let chord_audio = if warehouse {
+        meldritch_render::stereo_fx::apply_tempo_stereo_phaser(
+            &chord_audio,
+            project.tempo(),
+            meldritch_render::stereo_fx::PhaserSettings::default(),
+        )
+    } else {
+        chord_audio
+    };
     for ((output, bass), chords) in mix
         .samples_mut()
         .iter_mut()
