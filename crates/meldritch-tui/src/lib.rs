@@ -98,6 +98,15 @@ pub fn map_key(key: KeyEvent, default_step: &Step) -> Option<TuiAction> {
         KeyCode::F(number @ 1..=4) => TuiAction::Input(AppInput::QueuePhrase(
             meldritch_core::SceneId::new(u64::from(number)),
         )),
+        KeyCode::Char('}') => TuiAction::Input(AppInput::IncreaseDelayFeedback),
+        KeyCode::Char('{') => TuiAction::Input(AppInput::DecreaseDelayFeedback),
+        KeyCode::Char('f') => TuiAction::Input(AppInput::IncreasePhaserMix),
+        KeyCode::Char('e') => TuiAction::Input(AppInput::DecreasePhaserMix),
+        KeyCode::Char('V') => TuiAction::Input(AppInput::ToggleReverbFreeze),
+        KeyCode::Char('O') => TuiAction::Input(AppInput::IncreaseModulationDepth),
+        KeyCode::Char('K') => TuiAction::Input(AppInput::DecreaseModulationDepth),
+        KeyCode::Char('W') => TuiAction::Input(AppInput::IncreaseMasterDrive),
+        KeyCode::Char('X') => TuiAction::Input(AppInput::DecreaseMasterDrive),
         _ => return None,
     };
     Some(action)
@@ -280,10 +289,10 @@ pub fn draw_with_status(
             Constraint::Length(if view.transform.is_some() { 4 } else { 0 }),
             Constraint::Length(if view.futures.is_some() { 5 } else { 0 }),
             Constraint::Length(if performance_visible { 5 } else { 0 }),
-            Constraint::Min(6),
+            Constraint::Min(5),
             Constraint::Length(5),
             Constraint::Length(3),
-            Constraint::Length(7),
+            Constraint::Length(8),
         ])
         .split(frame.area());
     if view.arrangement.is_some() {
@@ -781,6 +790,11 @@ fn draw_key_legend(frame: &mut ratatui::Frame<'_>, area: Rect) {
         ("Q/Z/P/C", "perform"),
         ("F1-F4", "phrase pads"),
         ("Shift+F1-F4", "variations"),
+        ("{/}", "delay fb"),
+        ("e/f", "phaser"),
+        ("V", "reverb freeze"),
+        ("K/O", "mod depth"),
+        ("X/W", "master drive"),
         ("a/z", "cutoff"),
         ("d/x", "resonance"),
         ("w", "waveform"),
@@ -804,7 +818,14 @@ fn draw_key_legend(frame: &mut ratatui::Frame<'_>, area: Rect) {
         ("r", "rewind"),
         ("q", "quit"),
     ];
-    let mut lines = vec![Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    let mut lines = vec![
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    ];
     for (index, (key, action)) in keys.into_iter().enumerate() {
         let line = if index < 6 {
             0
@@ -814,8 +835,10 @@ fn draw_key_legend(frame: &mut ratatui::Frame<'_>, area: Rect) {
             2
         } else if index < 24 {
             3
-        } else {
+        } else if index < 30 {
             4
+        } else {
+            5
         };
         if !lines[line].is_empty() {
             lines[line].push(Span::raw("  "));
@@ -866,6 +889,14 @@ fn command_result_text(result: &AppCommandResult) -> String {
         AppCommandResult::SynthUpdated { invalidated_chunks } => {
             format!("Synth updated, invalidated {invalidated_chunks} chunk(s)")
         }
+        AppCommandResult::PerformanceFxUpdated(settings) => format!(
+            "FX delay:{:.2} phaser:{:.2} freeze:{} mod:{:.2} drive:{:.2}",
+            settings.delay_feedback,
+            settings.phaser_mix,
+            settings.reverb_freeze,
+            settings.modulation_depth,
+            settings.master_drive,
+        ),
         AppCommandResult::TransformCreated { key, status } => format!(
             "Transform {status:?}: fingerprint {}",
             key.fingerprint.raw()
@@ -995,6 +1026,7 @@ mod tests {
             },
             history: Vec::new(),
             bass_voice: None,
+            performance_fx: None,
         }
     }
 
@@ -1069,6 +1101,15 @@ mod tests {
             ('Z', AppInput::ToggleTrackMute),
             ('P', AppInput::TriggerFill),
             ('C', AppInput::CancelPerformance),
+            ('}', AppInput::IncreaseDelayFeedback),
+            ('{', AppInput::DecreaseDelayFeedback),
+            ('f', AppInput::IncreasePhaserMix),
+            ('e', AppInput::DecreasePhaserMix),
+            ('V', AppInput::ToggleReverbFreeze),
+            ('O', AppInput::IncreaseModulationDepth),
+            ('K', AppInput::DecreaseModulationDepth),
+            ('W', AppInput::IncreaseMasterDrive),
+            ('X', AppInput::DecreaseMasterDrive),
         ] {
             assert_eq!(
                 map_key(

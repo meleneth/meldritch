@@ -196,8 +196,8 @@ large controllable spaces, and a performance-safe master bus.
 ## 17. Learnable live DSP macros
 
 - [x] Typed deterministic performance FX rack with bounded macro settings
-- [ ] Cockpit keys and realtime publication for all five DSP macros
-- [ ] Persist, rank, and phase-replay performer DSP gestures
+- [x] Cockpit keys and realtime publication for all five DSP macros
+- [x] Persist, rank, and phase-replay performer DSP gestures
 
 Done when delay, phaser, reverb freeze, modulation, and master drive can be
 performed safely and reconstructed from saved performer sessions.

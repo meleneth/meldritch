@@ -33,6 +33,15 @@ enum LearnedAction {
     QueuePhraseVariation(u64, usize),
     ToggleTrackMute,
     TriggerFill,
+    IncreaseDelayFeedback,
+    DecreaseDelayFeedback,
+    IncreasePhaserMix,
+    DecreasePhaserMix,
+    ToggleReverbFreeze,
+    IncreaseModulationDepth,
+    DecreaseModulationDepth,
+    IncreaseMasterDrive,
+    DecreaseMasterDrive,
 }
 
 impl LearnedAction {
@@ -59,6 +68,15 @@ impl LearnedAction {
             }
             AppInput::ToggleTrackMute => Self::ToggleTrackMute,
             AppInput::TriggerFill => Self::TriggerFill,
+            AppInput::IncreaseDelayFeedback => Self::IncreaseDelayFeedback,
+            AppInput::DecreaseDelayFeedback => Self::DecreaseDelayFeedback,
+            AppInput::IncreasePhaserMix => Self::IncreasePhaserMix,
+            AppInput::DecreasePhaserMix => Self::DecreasePhaserMix,
+            AppInput::ToggleReverbFreeze => Self::ToggleReverbFreeze,
+            AppInput::IncreaseModulationDepth => Self::IncreaseModulationDepth,
+            AppInput::DecreaseModulationDepth => Self::DecreaseModulationDepth,
+            AppInput::IncreaseMasterDrive => Self::IncreaseMasterDrive,
+            AppInput::DecreaseMasterDrive => Self::DecreaseMasterDrive,
             _ => return None,
         })
     }
@@ -86,6 +104,15 @@ impl LearnedAction {
             }
             Self::ToggleTrackMute => AppInput::ToggleTrackMute,
             Self::TriggerFill => AppInput::TriggerFill,
+            Self::IncreaseDelayFeedback => AppInput::IncreaseDelayFeedback,
+            Self::DecreaseDelayFeedback => AppInput::DecreaseDelayFeedback,
+            Self::IncreasePhaserMix => AppInput::IncreasePhaserMix,
+            Self::DecreasePhaserMix => AppInput::DecreasePhaserMix,
+            Self::ToggleReverbFreeze => AppInput::ToggleReverbFreeze,
+            Self::IncreaseModulationDepth => AppInput::IncreaseModulationDepth,
+            Self::DecreaseModulationDepth => AppInput::DecreaseModulationDepth,
+            Self::IncreaseMasterDrive => AppInput::IncreaseMasterDrive,
+            Self::DecreaseMasterDrive => AppInput::DecreaseMasterDrive,
         })
     }
 }
@@ -188,6 +215,47 @@ fn learned_phrase_schedule(
         .into_iter()
         .take(limit)
         .map(|(frame, scene, _)| (frame, scene))
+        .collect()
+}
+
+fn is_dsp_action(action: LearnedAction) -> bool {
+    matches!(
+        action,
+        LearnedAction::IncreaseDelayFeedback
+            | LearnedAction::DecreaseDelayFeedback
+            | LearnedAction::IncreasePhaserMix
+            | LearnedAction::DecreasePhaserMix
+            | LearnedAction::ToggleReverbFreeze
+            | LearnedAction::IncreaseModulationDepth
+            | LearnedAction::DecreaseModulationDepth
+            | LearnedAction::IncreaseMasterDrive
+            | LearnedAction::DecreaseMasterDrive
+    )
+}
+
+fn learned_dsp_schedule(
+    library: &FutureLibrary,
+    frame_count: u32,
+    limit: usize,
+) -> Vec<(u32, LearnedAction)> {
+    let last = frame_count.saturating_sub(1);
+    let mut schedule = library
+        .learned
+        .iter()
+        .filter(|future| is_dsp_action(future.action))
+        .map(|future| {
+            (
+                (future.mean_phase.clamp(0.0, 1.0) * f64::from(last)).round() as u32,
+                future.action,
+                future.score,
+            )
+        })
+        .collect::<Vec<_>>();
+    schedule.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| right.2.cmp(&left.2)));
+    schedule
+        .into_iter()
+        .take(limit)
+        .map(|(frame, action, _)| (frame, action))
         .collect()
 }
 
@@ -4027,6 +4095,9 @@ fn tui_samples(
         );
     }
     if warehouse {
+        controller.enable_performance_fx(
+            meldritch_render::performance_fx::PerformanceFxSettings::default(),
+        );
         controller
             .configure_phrase_variations(project.patterns().iter().enumerate().map(
                 |(index, pattern)| {
@@ -4101,6 +4172,7 @@ fn tui_samples(
             .then_with(|| left.action.cmp(&right.action))
     });
     let learned_phrase_cues = learned_phrase_schedule(&library, frame_count, 8);
+    let learned_dsp_cues = learned_dsp_schedule(&library, frame_count, 12);
     controller.show_learned_phrase_cues(
         learned_phrase_cues
             .iter()
@@ -4110,22 +4182,23 @@ fn tui_samples(
             })
             .collect(),
     );
-    for learned in ranked.into_iter().take(4) {
-        match learned.action {
-            LearnedAction::QueuePhrase(_) | LearnedAction::QueuePhraseVariation(_, _) => continue,
-            action => {
-                controller
-                    .handle_input(action.input().expect("non-phrase action has an input"))
-                    .map_err(|err| format!("failed to prepare learned future: {err:?}"))?;
-            }
-        }
-    }
     let wanted_ready = warm_chunks.min(frame_count.div_ceil(chunk_frames) as usize);
     if !controller
         .coordinator()
         .wait_for_ready_chunks(wanted_ready.max(1), Duration::from_secs(10))
     {
         return Err("live showcase could not prepare its initial audio horizon".to_owned());
+    }
+    for learned in ranked.into_iter().take(4) {
+        match learned.action {
+            LearnedAction::QueuePhrase(_) | LearnedAction::QueuePhraseVariation(_, _) => continue,
+            action if is_dsp_action(action) => continue,
+            action => {
+                controller
+                    .handle_input(action.input().expect("non-phrase action has an input"))
+                    .map_err(|err| format!("failed to prepare learned future: {err:?}"))?;
+            }
+        }
     }
     controller
         .dispatch(meldritch_app::AppCommand::Play)
@@ -4138,6 +4211,7 @@ fn tui_samples(
     let override_grace_frames = (project.tempo().frames_per_beat() * 4.0).round() as u32;
     let mut fired = vec![false; cue_frames.len()];
     let mut phrase_fired = vec![false; learned_phrase_cues.len()];
+    let mut dsp_fired = vec![false; learned_dsp_cues.len()];
     let mut previous_position = 0;
     meldritch_tui::run_with_hooks(
         &mut controller,
@@ -4157,6 +4231,7 @@ fn tui_samples(
             if position < previous_position {
                 fired.fill(false);
                 phrase_fired.fill(false);
+                dsp_fired.fill(false);
                 tick_override_grace
                     .lock()
                     .expect("performer override lock poisoned")
@@ -4184,6 +4259,17 @@ fn tui_samples(
                     }
                 }
             }
+            if warehouse && !performer_override {
+                for (index, (frame, action)) in learned_dsp_cues.iter().enumerate() {
+                    if !dsp_fired[index] && position >= *frame {
+                        controller
+                            .handle_input(action.input().expect("DSP action has an input"))
+                            .map_err(|err| format!("learned DSP cue failed: {err:?}"))?;
+                        dsp_fired[index] = true;
+                        return Ok(Some(format!("Learned DSP gesture: {action:?}")));
+                    }
+                }
+            }
             for (index, (frame, description)) in cue_frames.iter().enumerate() {
                 if !fired[index] && position >= *frame {
                     fired[index] = true;
@@ -4199,6 +4285,15 @@ fn tui_samples(
                     meldritch_app::AppInput::QueueNextScene
                         | meldritch_app::AppInput::QueuePhrase(_)
                         | meldritch_app::AppInput::QueuePhraseVariation(_, _)
+                        | meldritch_app::AppInput::IncreaseDelayFeedback
+                        | meldritch_app::AppInput::DecreaseDelayFeedback
+                        | meldritch_app::AppInput::IncreasePhaserMix
+                        | meldritch_app::AppInput::DecreasePhaserMix
+                        | meldritch_app::AppInput::ToggleReverbFreeze
+                        | meldritch_app::AppInput::IncreaseModulationDepth
+                        | meldritch_app::AppInput::DecreaseModulationDepth
+                        | meldritch_app::AppInput::IncreaseMasterDrive
+                        | meldritch_app::AppInput::DecreaseMasterDrive
                 )
             {
                 input_override_grace

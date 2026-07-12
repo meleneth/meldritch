@@ -21,6 +21,7 @@ use meldritch_render::futures::{
 use meldritch_render::live_edit::{
     LiveEditCommand, LiveEditError, LiveEditResult, LivePatternEditor,
 };
+use meldritch_render::performance_fx::{PerformanceFxSettings, apply_performance_fx};
 use meldritch_render::transforms::{
     ChunkTransform, ChunkTransformError, TransformArtifactCache, TransformArtifactKey,
     TransformCacheStatus,
@@ -42,6 +43,7 @@ pub enum AppCommand {
     Select(Selection),
     Edit(LiveEditCommand),
     SetBassVoice(BassVoiceSettings),
+    SetPerformanceFx(PerformanceFxSettings),
     Transform(ChunkTransform),
     AuditionTransform,
     ReturnToLive,
@@ -72,6 +74,7 @@ pub enum AppCommandResult {
     SynthUpdated {
         invalidated_chunks: usize,
     },
+    PerformanceFxUpdated(PerformanceFxSettings),
     TransformCreated {
         key: TransformArtifactKey,
         status: TransformCacheStatus,
@@ -242,6 +245,7 @@ pub struct AppViewModel {
     pub diagnostics: AppDiagnostics,
     pub history: Vec<CommandRecord>,
     pub bass_voice: Option<BassVoiceSettings>,
+    pub performance_fx: Option<PerformanceFxSettings>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -309,6 +313,15 @@ pub enum AppInput {
     ToggleTrackMute,
     TriggerFill,
     CancelPerformance,
+    IncreaseDelayFeedback,
+    DecreaseDelayFeedback,
+    IncreasePhaserMix,
+    DecreasePhaserMix,
+    ToggleReverbFreeze,
+    IncreaseModulationDepth,
+    DecreaseModulationDepth,
+    IncreaseMasterDrive,
+    DecreaseMasterDrive,
 }
 
 struct BassSynthControl {
@@ -341,6 +354,8 @@ pub struct AppController {
     learned_phrase_cues: Vec<LearnedPhraseCueView>,
     fill_pattern: Option<PatternId>,
     transformed_audio: Option<meldritch_audio::AudioBlock>,
+    performance_fx: Option<PerformanceFxSettings>,
+    performance_fx_source: Option<meldritch_audio::AudioBlock>,
 }
 
 impl AppController {
@@ -375,6 +390,8 @@ impl AppController {
             learned_phrase_cues: Vec::new(),
             fill_pattern: None,
             transformed_audio: None,
+            performance_fx: None,
+            performance_fx_source: None,
         }
     }
 
@@ -614,6 +631,23 @@ impl AppController {
                     AppCommandResult::SynthUpdated { invalidated_chunks }
                 }
             }
+            AppCommand::SetPerformanceFx(settings) => {
+                let settings = settings.normalized();
+                let source = if let Some(source) = &self.performance_fx_source {
+                    source.clone()
+                } else {
+                    let source = self.capture_published_audio()?;
+                    self.performance_fx_source = Some(source.clone());
+                    source
+                };
+                let processed =
+                    apply_performance_fx(&source, self.editor.state().tempo(), settings);
+                self.coordinator
+                    .audition_block(&processed)
+                    .map_err(AppCommandError::Publication)?;
+                self.performance_fx = Some(settings);
+                AppCommandResult::PerformanceFxUpdated(settings)
+            }
             AppCommand::Transform(transform) => {
                 let snapshot = self.coordinator.audio_reader().snapshot();
                 let mut source =
@@ -755,6 +789,7 @@ impl AppController {
             AppCommandResult::SynthUpdated { invalidated_chunks } => {
                 (*invalidated_chunks != 0, Vec::new())
             }
+            AppCommandResult::PerformanceFxUpdated(_) => (true, Vec::new()),
             AppCommandResult::TransformCreated { .. } => (true, Vec::new()),
             AppCommandResult::AudioSourceSwitched { .. } => (true, Vec::new()),
             AppCommandResult::PerformanceQueued(_) => (true, Vec::new()),
@@ -940,6 +975,7 @@ impl AppController {
             diagnostics,
             history: self.history.iter().cloned().collect(),
             bass_voice: self.bass_synth.as_ref().map(|synth| synth.settings),
+            performance_fx: self.performance_fx,
         }
     }
 
@@ -1154,6 +1190,35 @@ impl AppController {
             AppInput::TransposeChordDown => return self.transpose_chord(-1),
             AppInput::InvertChordUp => return self.invert_chord(true),
             AppInput::InvertChordDown => return self.invert_chord(false),
+            AppInput::IncreaseDelayFeedback => {
+                return self.adjust_performance_fx(|settings| settings.delay_feedback += 0.08);
+            }
+            AppInput::DecreaseDelayFeedback => {
+                return self.adjust_performance_fx(|settings| settings.delay_feedback -= 0.08);
+            }
+            AppInput::IncreasePhaserMix => {
+                return self.adjust_performance_fx(|settings| settings.phaser_mix += 0.1);
+            }
+            AppInput::DecreasePhaserMix => {
+                return self.adjust_performance_fx(|settings| settings.phaser_mix -= 0.1);
+            }
+            AppInput::ToggleReverbFreeze => {
+                return self.adjust_performance_fx(|settings| {
+                    settings.reverb_freeze = !settings.reverb_freeze;
+                });
+            }
+            AppInput::IncreaseModulationDepth => {
+                return self.adjust_performance_fx(|settings| settings.modulation_depth += 0.1);
+            }
+            AppInput::DecreaseModulationDepth => {
+                return self.adjust_performance_fx(|settings| settings.modulation_depth -= 0.1);
+            }
+            AppInput::IncreaseMasterDrive => {
+                return self.adjust_performance_fx(|settings| settings.master_drive += 0.35);
+            }
+            AppInput::DecreaseMasterDrive => {
+                return self.adjust_performance_fx(|settings| settings.master_drive -= 0.35);
+            }
             AppInput::CreateReverse => AppCommand::Transform(ChunkTransform::Reverse),
             AppInput::CreateReslice => AppCommand::Transform(ChunkTransform::Reslice {
                 order: vec![3, 2, 1, 0],
@@ -1237,6 +1302,35 @@ impl AppController {
             notes,
             sample_frames,
         });
+    }
+
+    pub fn enable_performance_fx(&mut self, settings: PerformanceFxSettings) {
+        self.performance_fx = Some(settings.normalized());
+        self.performance_fx_source = None;
+    }
+
+    fn adjust_performance_fx(
+        &mut self,
+        adjust: impl FnOnce(&mut PerformanceFxSettings),
+    ) -> Result<AppCommandResult, AppCommandError> {
+        let mut settings = self.performance_fx.unwrap_or_default();
+        adjust(&mut settings);
+        self.dispatch(AppCommand::SetPerformanceFx(settings))
+    }
+
+    fn capture_published_audio(&self) -> Result<meldritch_audio::AudioBlock, AppCommandError> {
+        let snapshot = self.coordinator.audio_reader().snapshot();
+        let mut source =
+            meldritch_audio::AudioBlock::silent(snapshot.channels(), snapshot.frames());
+        for frame in 0..snapshot.frames() {
+            let values = snapshot
+                .frame(frame)
+                .map_err(|_| AppCommandError::TransformSourceUnavailable)?;
+            let channels = usize::from(snapshot.channels());
+            let start = frame as usize * channels;
+            source.samples_mut()[start..start + channels].copy_from_slice(values);
+        }
+        Ok(source)
     }
 
     fn adjust_bass_voice(
@@ -1654,6 +1748,40 @@ mod tests {
             controller.history().back().map(|record| &record.command),
             Some(AppCommand::SetBassVoice(_))
         ));
+    }
+
+    #[test]
+    fn performance_fx_controls_publish_bounded_audio_and_update_view() {
+        let (mut controller, _engine) = controller(16);
+        assert!(
+            controller
+                .coordinator()
+                .wait_for_ready_chunks(2, Duration::from_secs(1))
+        );
+        controller.enable_performance_fx(PerformanceFxSettings::default());
+        for input in [
+            AppInput::IncreaseDelayFeedback,
+            AppInput::IncreasePhaserMix,
+            AppInput::ToggleReverbFreeze,
+            AppInput::IncreaseModulationDepth,
+            AppInput::IncreaseMasterDrive,
+        ] {
+            assert!(matches!(
+                controller.handle_input(input).unwrap(),
+                AppCommandResult::PerformanceFxUpdated(_)
+            ));
+        }
+        let settings = controller.view_model().performance_fx.unwrap();
+        assert!(settings.delay_feedback > PerformanceFxSettings::default().delay_feedback);
+        assert!(settings.phaser_mix > PerformanceFxSettings::default().phaser_mix);
+        assert!(settings.reverb_freeze);
+        assert!(settings.modulation_depth > PerformanceFxSettings::default().modulation_depth);
+        assert!(settings.master_drive > PerformanceFxSettings::default().master_drive);
+        let snapshot = controller.coordinator().audio_reader().snapshot();
+        let peak = (0..snapshot.frames())
+            .flat_map(|frame| snapshot.frame(frame).unwrap().iter().copied())
+            .fold(0.0_f64, |peak, sample| peak.max(sample.abs()));
+        assert!(peak <= 0.95);
     }
 
     #[test]

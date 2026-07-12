@@ -71,6 +71,12 @@ phase while leaving any pending manual launch untouched. `F1`–`F4` queue a
 specific warehouse phrase directly, using the same bar quantization and future
 learning as `Q`.
 
+Warehouse DSP macros are also live and learnable: `{`/`}` adjusts delay
+feedback, `e`/`f` adjusts phaser mix, `V` toggles reverb freeze, `K`/`O`
+adjusts modulation depth, and `X`/`W` adjusts master drive. Manual macro moves
+temporarily suppress learned cues and are replayed near their learned phase in
+later sessions.
+
 It renders and normalizes the complete set before opening the audio device, so
 the callback only reads immutable prepared audio. Subsequent runs can skip the
 render with `meldritch warehouse-showcase --reuse`.
