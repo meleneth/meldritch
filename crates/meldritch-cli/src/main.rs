@@ -3409,6 +3409,13 @@ fn render_showcase(
     {
         *output += bass + chords;
     }
+    if warehouse {
+        mix = meldritch_render::mastering::master_bus(
+            &mix,
+            project.tempo().sample_rate(),
+            meldritch_render::mastering::MasteringSettings::default(),
+        );
+    }
     if normalize {
         mix = mix.normalized_to_peak(0.9);
     }
