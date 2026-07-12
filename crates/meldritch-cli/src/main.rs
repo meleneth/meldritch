@@ -529,6 +529,23 @@ enum Command {
         #[arg(long, default_value_t = 2)]
         workers: usize,
     },
+    /// Open the 142 BPM warehouse cockpit with quantized phrase launching.
+    WarehouseCockpit {
+        #[arg(value_name = "PROJECT", default_value = "fixtures/warehouse.toml")]
+        project: PathBuf,
+        #[arg(
+            long,
+            default_value = "artifacts/warehouse.futures.json",
+            value_name = "JSON"
+        )]
+        futures: PathBuf,
+        #[arg(long, default_value_t = 16_384)]
+        chunk_frames: u32,
+        #[arg(long, default_value_t = 16)]
+        warm_chunks: usize,
+        #[arg(long, default_value_t = 2)]
+        workers: usize,
+    },
     RenderControlledSamples {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -817,6 +834,7 @@ fn run(cli: Cli) -> Result<(), String> {
             false,
             false,
             None,
+            false,
         ),
         Command::TuiBassline {
             project,
@@ -839,6 +857,7 @@ fn run(cli: Cli) -> Result<(), String> {
             true,
             false,
             None,
+            false,
         ),
         Command::TuiPolyDemo {
             project,
@@ -857,6 +876,7 @@ fn run(cli: Cli) -> Result<(), String> {
             true,
             true,
             None,
+            false,
         ),
         Command::LiveShowcase {
             project,
@@ -876,6 +896,27 @@ fn run(cli: Cli) -> Result<(), String> {
             true,
             true,
             Some(futures),
+            false,
+        ),
+        Command::WarehouseCockpit {
+            project,
+            futures,
+            chunk_frames,
+            warm_chunks,
+            workers,
+        } => tui_samples(
+            project,
+            None,
+            Some(1_536_000),
+            2,
+            chunk_frames,
+            warm_chunks,
+            workers,
+            24,
+            true,
+            true,
+            Some(futures),
+            true,
         ),
         Command::RenderControlledSamples {
             project,
@@ -3673,6 +3714,7 @@ fn tui_samples(
     bassline: bool,
     chords: bool,
     future_log: Option<PathBuf>,
+    warehouse: bool,
 ) -> Result<(), String> {
     let input = std::fs::read_to_string(&path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
@@ -3760,6 +3802,22 @@ fn tui_samples(
         settings,
         Arc::clone(&samples_by_note),
     );
+    let bass_settings = if warehouse {
+        meldritch_render::dsp::BassVoiceSettings {
+            level: 0.42,
+            waveform: meldritch_render::dsp::Waveform::SyncFold,
+            cutoff_hz: 85.0,
+            resonance: 0.86,
+            filter_envelope_octaves: 4.5,
+            pre_filter_drive: 4.5,
+            drive: 3.2,
+            sub_level: 0.16,
+            glide_seconds: 0.055,
+            ..meldritch_render::dsp::BassVoiceSettings::default()
+        }
+    } else {
+        meldritch_render::dsp::BassVoiceSettings::default()
+    };
     let effect_rules = if chords {
         vec![
             meldritch_render::effects::EffectSendRule {
@@ -3780,10 +3838,7 @@ fn tui_samples(
         state = state.with_effect_rules(effect_rules.clone());
     }
     if bassline {
-        state = state.with_bass_layer(
-            TrackId::new(4),
-            meldritch_render::dsp::BassVoiceSettings::default(),
-        );
+        state = state.with_bass_layer(TrackId::new(4), bass_settings);
     }
     if chords {
         state = state
@@ -3835,10 +3890,21 @@ fn tui_samples(
     );
     if bassline {
         controller.enable_bass_synth(
-            meldritch_render::dsp::BassVoiceSettings::default(),
+            bass_settings,
             [22, 24, 27, 31, note].into_iter().collect(),
             12_000,
         );
+    }
+    if warehouse {
+        controller
+            .configure_phrase_scenes(
+                project
+                    .patterns()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, pattern)| (SceneId::new(index as u64 + 1), pattern.clone())),
+            )
+            .map_err(|err| format!("failed to configure warehouse phrases: {err}"))?;
     }
     if !automation_view.is_empty() {
         controller.show_automation(automation_view);
@@ -3914,6 +3980,16 @@ fn tui_samples(
         &mut controller,
         Step::new(note),
         move |controller| {
+            if let Some(launch) = controller
+                .tick_phrase_launch()
+                .map_err(|err| format!("phrase launch failed: {err:?}"))?
+                && warehouse
+            {
+                return Ok(Some(format!(
+                    "Warehouse phrase launched: {:?}",
+                    launch.gesture
+                )));
+            }
             let position = controller.view_model().transport.position;
             if position < previous_position {
                 fired.fill(false);

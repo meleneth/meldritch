@@ -738,6 +738,31 @@ impl PerformanceLauncher {
         Some(launch)
     }
 
+    /// Advances a due gesture through the live renderer without consulting a
+    /// speculative cache. Cockpits use this for phrase patterns that are
+    /// rebuilt by their render coordinator at the launch boundary.
+    pub fn advance_live(&mut self, playhead: Frame) -> Option<PerformanceLaunch> {
+        self.expire_fill(playhead);
+        let queued = self
+            .queued
+            .filter(|queued| playhead >= queued.launch_frame)?;
+        self.queued = None;
+        apply_gesture(&mut self.active, queued.gesture);
+        match queued.gesture {
+            PerformanceGesture::TriggerFill(_) => self.fill_end_frame = queued.fill_end_frame,
+            PerformanceGesture::QueueScene(_) => self.fill_end_frame = None,
+            PerformanceGesture::MuteTrack(_) | PerformanceGesture::UnmuteTrack(_) => {}
+        }
+        let launch = PerformanceLaunch {
+            gesture: queued.gesture,
+            frame: queued.launch_frame,
+            source: PerformanceLaunchSource::LiveFallback,
+        };
+        self.diagnostics.fallback_launches += 1;
+        self.diagnostics.last_launch = Some(launch);
+        Some(launch)
+    }
+
     /// Executes a due launch and atomically selects its audio source.
     ///
     /// Prepared futures replace the published immutable snapshot in one swap.

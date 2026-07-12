@@ -159,7 +159,7 @@ performer deviations can be learned, ranked, and reused in later sessions.
 - [x] Performance-safe self-playing `warehouse-showcase` command
 - [x] Deterministic phrase-choice evidence, ranking, and phase-aware replay selection
 - [x] Realtime layout-safe phrase replacement through the render coordinator
-- [ ] Interactive warehouse cockpit and phrase-future learning
+- [x] Interactive warehouse cockpit and phrase-future learning
 
 Done when an original high-tempo set cycles through recognizable phrases,
 evolves without intervention, and accepts safe learned performance variations.

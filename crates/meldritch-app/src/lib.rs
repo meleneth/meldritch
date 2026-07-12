@@ -25,8 +25,8 @@ use meldritch_render::transforms::{
     ChunkTransform, ChunkTransformError, TransformArtifactCache, TransformArtifactKey,
     TransformCacheStatus,
 };
-use std::collections::BTreeSet;
 use std::collections::VecDeque;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Selection {
@@ -325,6 +325,7 @@ pub struct AppController {
     future_cache_view: Option<FutureCacheView>,
     performance_launcher: PerformanceLauncher,
     performance_scenes: Vec<SceneId>,
+    phrase_patterns: BTreeMap<SceneId, Pattern>,
     fill_pattern: Option<PatternId>,
     transformed_audio: Option<meldritch_audio::AudioBlock>,
 }
@@ -356,6 +357,7 @@ impl AppController {
             future_cache_view: None,
             performance_launcher: PerformanceLauncher::new(LaunchQuantization::Bar { beats: 4 }),
             performance_scenes: Vec::new(),
+            phrase_patterns: BTreeMap::new(),
             fill_pattern: None,
             transformed_audio: None,
         }
@@ -406,6 +408,30 @@ impl AppController {
 
     pub fn set_fill_pattern(&mut self, pattern: PatternId) {
         self.fill_pattern = Some(pattern);
+    }
+
+    pub fn configure_phrase_scenes(
+        &mut self,
+        phrases: impl IntoIterator<Item = (SceneId, Pattern)>,
+    ) -> Result<(), &'static str> {
+        let phrases = phrases.into_iter().collect::<Vec<_>>();
+        if phrases.is_empty() {
+            return Err("phrase scene bank must not be empty");
+        }
+        let current = self.editor.state().pattern();
+        if phrases.iter().any(|(_, pattern)| {
+            pattern.length_steps() != current.length_steps()
+                || pattern.steps_per_beat() != current.steps_per_beat()
+        }) {
+            return Err("phrase scene layouts must match the live pattern");
+        }
+        let patterns = phrases.iter().cloned().collect::<BTreeMap<_, _>>();
+        if patterns.len() != phrases.len() {
+            return Err("phrase scene IDs must be unique");
+        }
+        self.performance_scenes = phrases.iter().map(|(scene, _)| *scene).collect();
+        self.phrase_patterns = patterns;
+        Ok(())
     }
 
     /// Launches a layout-compatible phrase pattern through the normal render
@@ -1063,6 +1089,24 @@ impl AppController {
             .map_err(AppCommandError::Publication)
     }
 
+    pub fn tick_phrase_launch(&mut self) -> Result<Option<PerformanceLaunch>, AppCommandError> {
+        let position = u64::from(self.playback.status_monitor().snapshot().position);
+        let Some(launch) = self.performance_launcher.advance_live(position) else {
+            return Ok(None);
+        };
+        if let PerformanceGesture::QueueScene(scene) = launch.gesture {
+            let pattern = self
+                .phrase_patterns
+                .get(&scene)
+                .cloned()
+                .ok_or(AppCommandError::NoPerformanceScenes)?;
+            self.editor
+                .replace_pattern(&self.coordinator, pattern)
+                .map_err(AppCommandError::LiveEdit)?;
+        }
+        Ok(Some(launch))
+    }
+
     pub fn enable_bass_synth(
         &mut self,
         settings: BassVoiceSettings,
@@ -1562,6 +1606,47 @@ mod tests {
             PerformanceGesture::TriggerFill(PatternId::new(9))
         );
         assert_eq!(controller.view_model().performance.queued, Some(fill));
+    }
+
+    #[test]
+    fn queued_phrase_scene_launches_into_the_live_render_state() {
+        let (mut controller, _engine) = controller(16);
+        let mut first = Pattern::new(PatternId::new(201), 4, 4).unwrap();
+        first
+            .set_step(TrackId::new(1), StepIndex::new(0), Step::new(36))
+            .unwrap();
+        let mut second = Pattern::new(PatternId::new(202), 4, 4).unwrap();
+        second
+            .set_step(TrackId::new(1), StepIndex::new(1), Step::new(36))
+            .unwrap();
+        controller
+            .configure_phrase_scenes([(SceneId::new(1), first), (SceneId::new(2), second)])
+            .unwrap();
+
+        controller.handle_input(AppInput::QueueNextScene).unwrap();
+        let launch = controller.tick_phrase_launch().unwrap().unwrap();
+        assert_eq!(
+            launch.gesture,
+            PerformanceGesture::QueueScene(SceneId::new(1))
+        );
+        assert_eq!(
+            launch.source,
+            meldritch_render::futures::PerformanceLaunchSource::LiveFallback
+        );
+        assert_eq!(controller.editor.state().pattern().id(), PatternId::new(1));
+        assert!(
+            controller
+                .editor
+                .state()
+                .pattern()
+                .get_step(TrackId::new(1), StepIndex::new(0))
+                .is_some()
+        );
+        assert!(controller.view_model().performance.queued.is_none());
+        assert_eq!(
+            controller.view_model().performance.active_scene,
+            Some(SceneId::new(1))
+        );
     }
 
     #[test]

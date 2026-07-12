@@ -62,6 +62,11 @@ Or prepare and play the complete set with one performance-safe command:
 meldritch warehouse-showcase --require-clean
 ```
 
+For the interactive version, run `meldritch warehouse-cockpit`. It starts the
+142 BPM SyncFold setup automatically; press `Q` to queue the next phrase at the
+next bar boundary and `C` to cancel a queued launch. Performer actions are
+saved to `artifacts/warehouse.futures.json` when the cockpit exits.
+
 It renders and normalizes the complete set before opening the audio device, so
 the callback only reads immutable prepared audio. Subsequent runs can skip the
 render with `meldritch warehouse-showcase --reuse`.
