@@ -4217,6 +4217,12 @@ fn tui_samples(
         &mut controller,
         Step::new(note),
         move |controller| {
+            if controller
+                .tick_performance_fx()
+                .map_err(|err| format!("FX publication failed: {err:?}"))?
+            {
+                return Ok(Some("Performance FX published".to_owned()));
+            }
             if let Some(launch) = controller
                 .tick_phrase_launch()
                 .map_err(|err| format!("phrase launch failed: {err:?}"))?

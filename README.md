@@ -80,6 +80,8 @@ later sessions.
 The realtime warehouse cockpit renders only its current phrase-length loop.
 During a scene change it keeps the previous immutable audio playing until the
 replacement loop is prepared, avoiding publication gaps during invalidation.
+DSP macro renders run on a latest-wins background worker, so rapid control
+changes replace obsolete pending work instead of blocking the TUI/audio path.
 
 It renders and normalizes the complete set before opening the audio device, so
 the callback only reads immutable prepared audio. Subsequent runs can skip the

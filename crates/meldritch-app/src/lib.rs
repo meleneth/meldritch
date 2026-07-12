@@ -28,6 +28,8 @@ use meldritch_render::transforms::{
 };
 use std::collections::VecDeque;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::thread::JoinHandle;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Selection {
@@ -331,6 +333,98 @@ struct BassSynthControl {
     sample_frames: u32,
 }
 
+struct FxWorkerState {
+    pending: Option<(
+        u64,
+        Arc<meldritch_audio::AudioBlock>,
+        Tempo,
+        PerformanceFxSettings,
+    )>,
+    shutdown: bool,
+}
+
+struct PerformanceFxWorker {
+    shared: Arc<(Mutex<FxWorkerState>, Condvar)>,
+    completed: mpsc::Receiver<(u64, meldritch_audio::AudioBlock, PerformanceFxSettings)>,
+    thread: Option<JoinHandle<()>>,
+    generation: u64,
+}
+
+impl PerformanceFxWorker {
+    fn new() -> Self {
+        let shared = Arc::new((
+            Mutex::new(FxWorkerState {
+                pending: None,
+                shutdown: false,
+            }),
+            Condvar::new(),
+        ));
+        let worker_shared = Arc::clone(&shared);
+        let (sender, completed) = mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            loop {
+                let job = {
+                    let (lock, changed) = &*worker_shared;
+                    let mut state = lock.lock().expect("FX worker lock poisoned");
+                    while state.pending.is_none() && !state.shutdown {
+                        state = changed.wait(state).expect("FX worker wait poisoned");
+                    }
+                    if state.shutdown {
+                        break;
+                    }
+                    state.pending.take()
+                };
+                if let Some((generation, source, tempo, settings)) = job {
+                    let block = apply_performance_fx(&source, tempo, settings);
+                    if sender.send((generation, block, settings)).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        Self {
+            shared,
+            completed,
+            thread: Some(thread),
+            generation: 0,
+        }
+    }
+
+    fn submit(
+        &mut self,
+        source: Arc<meldritch_audio::AudioBlock>,
+        tempo: Tempo,
+        settings: PerformanceFxSettings,
+    ) -> u64 {
+        self.generation = self.generation.wrapping_add(1);
+        let generation = self.generation;
+        let (lock, changed) = &*self.shared;
+        lock.lock().expect("FX worker lock poisoned").pending =
+            Some((generation, source, tempo, settings));
+        changed.notify_one();
+        generation
+    }
+
+    fn latest_completed(
+        &self,
+    ) -> Option<(u64, meldritch_audio::AudioBlock, PerformanceFxSettings)> {
+        self.completed
+            .try_iter()
+            .max_by_key(|(generation, _, _)| *generation)
+    }
+}
+
+impl Drop for PerformanceFxWorker {
+    fn drop(&mut self) {
+        let (lock, changed) = &*self.shared;
+        lock.lock().expect("FX worker lock poisoned").shutdown = true;
+        changed.notify_one();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
 pub struct AppController {
     playback: PlaybackControl,
     coordinator: RenderCoordinator,
@@ -355,7 +449,9 @@ pub struct AppController {
     fill_pattern: Option<PatternId>,
     transformed_audio: Option<meldritch_audio::AudioBlock>,
     performance_fx: Option<PerformanceFxSettings>,
-    performance_fx_source: Option<meldritch_audio::AudioBlock>,
+    performance_fx_source: Option<Arc<meldritch_audio::AudioBlock>>,
+    performance_fx_worker: PerformanceFxWorker,
+    performance_fx_generation: u64,
 }
 
 impl AppController {
@@ -392,6 +488,8 @@ impl AppController {
             transformed_audio: None,
             performance_fx: None,
             performance_fx_source: None,
+            performance_fx_worker: PerformanceFxWorker::new(),
+            performance_fx_generation: 0,
         }
     }
 
@@ -634,17 +732,17 @@ impl AppController {
             AppCommand::SetPerformanceFx(settings) => {
                 let settings = settings.normalized();
                 let source = if let Some(source) = &self.performance_fx_source {
-                    source.clone()
+                    Arc::clone(source)
                 } else {
-                    let source = self.capture_published_audio()?;
-                    self.performance_fx_source = Some(source.clone());
+                    let source = Arc::new(self.capture_published_audio()?);
+                    self.performance_fx_source = Some(Arc::clone(&source));
                     source
                 };
-                let processed =
-                    apply_performance_fx(&source, self.editor.state().tempo(), settings);
-                self.coordinator
-                    .audition_block(&processed)
-                    .map_err(AppCommandError::Publication)?;
+                self.performance_fx_generation = self.performance_fx_worker.submit(
+                    source,
+                    self.editor.state().tempo(),
+                    settings,
+                );
                 self.performance_fx = Some(settings);
                 AppCommandResult::PerformanceFxUpdated(settings)
             }
@@ -1326,6 +1424,20 @@ impl AppController {
         self.performance_fx_source = None;
     }
 
+    pub fn tick_performance_fx(&mut self) -> Result<bool, AppCommandError> {
+        let Some((generation, block, settings)) = self.performance_fx_worker.latest_completed()
+        else {
+            return Ok(false);
+        };
+        if generation != self.performance_fx_generation || Some(settings) != self.performance_fx {
+            return Ok(false);
+        }
+        self.coordinator
+            .audition_block(&block)
+            .map_err(AppCommandError::Publication)?;
+        Ok(true)
+    }
+
     fn adjust_performance_fx(
         &mut self,
         adjust: impl FnOnce(&mut PerformanceFxSettings),
@@ -1794,6 +1906,16 @@ mod tests {
         assert!(settings.reverb_freeze);
         assert!(settings.modulation_depth > PerformanceFxSettings::default().modulation_depth);
         assert!(settings.master_drive > PerformanceFxSettings::default().master_drive);
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut published = false;
+        while std::time::Instant::now() < deadline {
+            if controller.tick_performance_fx().unwrap() {
+                published = true;
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert!(published);
         let snapshot = controller.coordinator().audio_reader().snapshot();
         let peak = (0..snapshot.frames())
             .flat_map(|frame| snapshot.frame(frame).unwrap().iter().copied())
