@@ -273,6 +273,8 @@ pub struct RenderCoordinator {
     pattern_id: meldritch_core::PatternId,
     channels: u16,
     sample_rate: u32,
+    timeline_chunks: usize,
+    prepared_chunk_target: usize,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -337,6 +339,9 @@ impl RenderCoordinator {
             pattern_id,
             channels,
             sample_rate,
+            timeline_chunks: config.timeline_frames.div_ceil(config.chunk_frames) as usize,
+            prepared_chunk_target: (config.warm_chunks + 1)
+                .min(config.timeline_frames.div_ceil(config.chunk_frames) as usize),
             thread: Some(thread),
         })
     }
@@ -360,6 +365,16 @@ impl RenderCoordinator {
 
     pub fn restore_live_audio(&self) -> Result<(), ChunkPublicationError> {
         self.publication.restore_live_snapshot()
+    }
+
+    #[must_use]
+    pub const fn timeline_chunk_count(&self) -> usize {
+        self.timeline_chunks
+    }
+
+    #[must_use]
+    pub const fn prepared_chunk_target(&self) -> usize {
+        self.prepared_chunk_target
     }
 
     #[must_use]

@@ -1048,7 +1048,7 @@ fn run(cli: Cli) -> Result<(), String> {
         } => tui_samples(
             project,
             None,
-            Some(1_536_000),
+            None,
             2,
             chunk_frames,
             warm_chunks,

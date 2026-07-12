@@ -1283,9 +1283,26 @@ impl AppController {
                 .and_then(|patterns| patterns.get(variation))
                 .cloned()
                 .ok_or(AppCommandError::NoPerformanceScenes)?;
+            let held_audio = self.capture_published_audio()?;
+            self.coordinator
+                .audition_block(&held_audio)
+                .map_err(AppCommandError::Publication)?;
             self.editor
                 .replace_pattern(&self.coordinator, pattern)
                 .map_err(AppCommandError::LiveEdit)?;
+            if !self.coordinator.wait_for_ready_chunks(
+                self.coordinator.prepared_chunk_target(),
+                std::time::Duration::from_secs(2),
+            ) {
+                return Ok(Some(launch));
+            }
+            self.coordinator
+                .restore_live_audio()
+                .map_err(AppCommandError::Publication)?;
+            self.performance_fx_source = None;
+            if let Some(settings) = self.performance_fx {
+                let _ = self.dispatch(AppCommand::SetPerformanceFx(settings))?;
+            }
         }
         Ok(Some(launch))
     }
@@ -1323,9 +1340,9 @@ impl AppController {
         let mut source =
             meldritch_audio::AudioBlock::silent(snapshot.channels(), snapshot.frames());
         for frame in 0..snapshot.frames() {
-            let values = snapshot
-                .frame(frame)
-                .map_err(|_| AppCommandError::TransformSourceUnavailable)?;
+            let Ok(values) = snapshot.frame(frame) else {
+                continue;
+            };
             let channels = usize::from(snapshot.channels());
             let start = frame as usize * channels;
             source.samples_mut()[start..start + channels].copy_from_slice(values);

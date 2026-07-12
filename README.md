@@ -77,6 +77,10 @@ adjusts modulation depth, and `X`/`W` adjusts master drive. Manual macro moves
 temporarily suppress learned cues and are replayed near their learned phase in
 later sessions.
 
+The realtime warehouse cockpit renders only its current phrase-length loop.
+During a scene change it keeps the previous immutable audio playing until the
+replacement loop is prepared, avoiding publication gaps during invalidation.
+
 It renders and normalizes the complete set before opening the audio device, so
 the callback only reads immutable prepared audio. Subsequent runs can skip the
 render with `meldritch warehouse-showcase --reuse`.

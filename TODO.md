@@ -201,3 +201,13 @@ large controllable spaces, and a performance-safe master bus.
 
 Done when delay, phaser, reverb freeze, modulation, and master drive can be
 performed safely and reconstructed from saved performer sessions.
+
+## 18. Realtime performance hardening
+
+- [x] Bound warehouse cockpit rendering to one phrase-length loop
+- [x] Hold immutable audio during scene invalidation and preparation
+- [ ] Move DSP macro recomputation off the TUI input thread
+- [ ] Add host-side clean-playback soak diagnostics
+
+Done when rapid scene and DSP changes remain audible without underruns on a
+representative release build and expose enough diagnostics to catch regressions.
