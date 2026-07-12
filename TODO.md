@@ -177,7 +177,7 @@ choices at musically similar moments and makes those decisions visible.
 
 - [x] Direct `F1`–`F4` phrase pads with bar-quantized launching
 - [ ] Phrase-pad variation selection without changing the base scene
-- [ ] Performer override grace window for learned phrase cues
+- [x] Performer override grace window for learned phrase cues
 
 Done when specific phrases and their variations can be played deliberately
 without learned automation immediately fighting a live decision.

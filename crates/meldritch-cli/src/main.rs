@@ -179,6 +179,30 @@ fn learned_phrase_schedule(
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct PerformerOverrideGrace {
+    until_frame: Option<u32>,
+}
+
+impl PerformerOverrideGrace {
+    fn record(&mut self, frame: u32, grace_frames: u32, timeline_frames: u32) {
+        self.until_frame = Some(
+            frame
+                .saturating_add(grace_frames)
+                .min(timeline_frames.saturating_sub(1)),
+        );
+    }
+
+    #[must_use]
+    fn suppresses(self, frame: u32) -> bool {
+        self.until_frame.is_some_and(|until| frame <= until)
+    }
+
+    fn reset(&mut self) {
+        self.until_frame = None;
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "meldritch")]
 #[command(about = "Headless Meldritch project tooling")]
@@ -4084,6 +4108,10 @@ fn tui_samples(
         .map_err(|err| format!("failed to start showcase transport: {err:?}"))?;
     let captured = Arc::new(std::sync::Mutex::new(Vec::<CapturedFuture>::new()));
     let performer_capture = Arc::clone(&captured);
+    let override_grace = Arc::new(std::sync::Mutex::new(PerformerOverrideGrace::default()));
+    let tick_override_grace = Arc::clone(&override_grace);
+    let input_override_grace = Arc::clone(&override_grace);
+    let override_grace_frames = (project.tempo().frames_per_beat() * 4.0).round() as u32;
     let mut fired = vec![false; cue_frames.len()];
     let mut phrase_fired = vec![false; learned_phrase_cues.len()];
     let mut previous_position = 0;
@@ -4105,9 +4133,20 @@ fn tui_samples(
             if position < previous_position {
                 fired.fill(false);
                 phrase_fired.fill(false);
+                tick_override_grace
+                    .lock()
+                    .expect("performer override lock poisoned")
+                    .reset();
             }
             previous_position = position;
-            if warehouse && controller.view_model().performance.queued.is_none() {
+            let performer_override = tick_override_grace
+                .lock()
+                .expect("performer override lock poisoned")
+                .suppresses(position);
+            if warehouse
+                && !performer_override
+                && controller.view_model().performance.queued.is_none()
+            {
                 for (index, (frame, scene)) in learned_phrase_cues.iter().enumerate() {
                     if !phrase_fired[index] && position >= *frame {
                         controller
@@ -4130,6 +4169,22 @@ fn tui_samples(
             Ok(None)
         },
         move |controller, input| {
+            if warehouse
+                && matches!(
+                    input,
+                    meldritch_app::AppInput::QueueNextScene
+                        | meldritch_app::AppInput::QueuePhrase(_)
+                )
+            {
+                input_override_grace
+                    .lock()
+                    .expect("performer override lock poisoned")
+                    .record(
+                        controller.view_model().transport.position,
+                        override_grace_frames,
+                        frame_count,
+                    );
+            }
             let action = if warehouse && matches!(input, meldritch_app::AppInput::QueueNextScene) {
                 controller
                     .view_model()
@@ -4682,6 +4737,20 @@ mod tests {
         );
         assert!(learned_phrase_schedule(&library, 0, 8).is_empty());
         assert!(learned_phrase_schedule(&library, 1_001, 0).is_empty());
+    }
+
+    #[test]
+    fn performer_override_grace_suppresses_then_releases_learned_cues() {
+        let mut grace = PerformerOverrideGrace::default();
+        assert!(!grace.suppresses(100));
+        grace.record(100, 400, 1_000);
+        assert!(grace.suppresses(100));
+        assert!(grace.suppresses(500));
+        assert!(!grace.suppresses(501));
+        grace.record(900, 400, 1_000);
+        assert!(grace.suppresses(999));
+        grace.reset();
+        assert!(!grace.suppresses(0));
     }
 
     #[test]
