@@ -29,6 +29,7 @@ enum LearnedAction {
     InvertChordUp,
     InvertChordDown,
     QueueNextScene,
+    QueuePhrase(u64),
     ToggleTrackMute,
     TriggerFill,
 }
@@ -57,9 +58,9 @@ impl LearnedAction {
         })
     }
 
-    const fn input(self) -> meldritch_app::AppInput {
+    const fn input(self) -> Option<meldritch_app::AppInput> {
         use meldritch_app::AppInput;
-        match self {
+        Some(match self {
             Self::IncreaseCutoff => AppInput::IncreaseCutoff,
             Self::DecreaseCutoff => AppInput::DecreaseCutoff,
             Self::IncreaseResonance => AppInput::IncreaseResonance,
@@ -74,9 +75,10 @@ impl LearnedAction {
             Self::InvertChordUp => AppInput::InvertChordUp,
             Self::InvertChordDown => AppInput::InvertChordDown,
             Self::QueueNextScene => AppInput::QueueNextScene,
+            Self::QueuePhrase(_) => return None,
             Self::ToggleTrackMute => AppInput::ToggleTrackMute,
             Self::TriggerFill => AppInput::TriggerFill,
-        }
+        })
     }
 }
 
@@ -3957,10 +3959,24 @@ fn tui_samples(
             .then_with(|| right.last_session.cmp(&left.last_session))
             .then_with(|| left.action.cmp(&right.action))
     });
+    let mut phrase_prepared = false;
     for learned in ranked.into_iter().take(4) {
-        controller
-            .handle_input(learned.action.input())
-            .map_err(|err| format!("failed to prepare learned future: {err:?}"))?;
+        match learned.action {
+            LearnedAction::QueuePhrase(scene) => {
+                if phrase_prepared {
+                    continue;
+                }
+                controller
+                    .queue_phrase_scene(SceneId::new(scene))
+                    .map_err(|err| format!("failed to prepare learned phrase: {err:?}"))?;
+                phrase_prepared = true;
+            }
+            action => {
+                controller
+                    .handle_input(action.input().expect("non-phrase action has an input"))
+                    .map_err(|err| format!("failed to prepare learned future: {err:?}"))?;
+            }
+        }
     }
     let wanted_ready = warm_chunks.min(frame_count.div_ceil(chunk_frames) as usize);
     if !controller
@@ -4004,7 +4020,21 @@ fn tui_samples(
             Ok(None)
         },
         move |controller, input| {
-            if let Some(action) = LearnedAction::from_input(input) {
+            let action = if warehouse && matches!(input, meldritch_app::AppInput::QueueNextScene) {
+                controller
+                    .view_model()
+                    .performance
+                    .queued
+                    .and_then(|queued| match queued.gesture {
+                        meldritch_render::futures::PerformanceGesture::QueueScene(scene) => {
+                            Some(LearnedAction::QueuePhrase(scene.raw()))
+                        }
+                        _ => None,
+                    })
+            } else {
+                LearnedAction::from_input(input)
+            };
+            if let Some(action) = action {
                 let position = controller.view_model().transport.position;
                 performer_capture
                     .lock()
@@ -4462,6 +4492,44 @@ mod tests {
         let decoded: FutureLibrary = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.learned[0].action, LearnedAction::InvertChordUp);
         assert_eq!(decoded.learned[0].score, 2_003);
+    }
+
+    #[test]
+    fn warehouse_futures_preserve_exact_phrase_identity() {
+        let mut library = FutureLibrary::default();
+        merge_performer_futures(
+            &mut library,
+            vec![
+                CapturedFuture {
+                    origin: "performer".to_owned(),
+                    action: LearnedAction::QueuePhrase(3),
+                    frame: 100,
+                    phase: 0.7,
+                },
+                CapturedFuture {
+                    origin: "performer".to_owned(),
+                    action: LearnedAction::QueuePhrase(4),
+                    frame: 120,
+                    phase: 0.8,
+                },
+            ],
+            1,
+        );
+        let json = serde_json::to_string(&library).unwrap();
+        let decoded: FutureLibrary = serde_json::from_str(&json).unwrap();
+        assert!(
+            decoded
+                .learned
+                .iter()
+                .any(|future| future.action == LearnedAction::QueuePhrase(3))
+        );
+        assert!(
+            decoded
+                .learned
+                .iter()
+                .any(|future| future.action == LearnedAction::QueuePhrase(4))
+        );
+        assert_eq!(LearnedAction::QueuePhrase(3).input(), None);
     }
 
     #[test]

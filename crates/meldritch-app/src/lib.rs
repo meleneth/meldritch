@@ -434,6 +434,20 @@ impl AppController {
         Ok(())
     }
 
+    pub fn queue_phrase_scene(
+        &mut self,
+        scene: SceneId,
+    ) -> Result<QueuedPerformanceGesture, AppCommandError> {
+        if !self.performance_scenes.contains(&scene) || !self.phrase_patterns.contains_key(&scene) {
+            return Err(AppCommandError::NoPerformanceScenes);
+        }
+        Ok(self.performance_launcher.queue(
+            PerformanceGesture::QueueScene(scene),
+            u64::from(self.playback.status_monitor().snapshot().position),
+            self.editor.state().tempo(),
+        ))
+    }
+
     /// Launches a layout-compatible phrase pattern through the normal render
     /// coordinator, returning the number of invalidated horizon chunks.
     pub fn launch_pattern(&mut self, pattern: Pattern) -> Result<usize, AppCommandError> {
