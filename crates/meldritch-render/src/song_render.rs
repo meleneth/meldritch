@@ -69,6 +69,11 @@ impl CompiledDelayedNotePatch {
     }
 
     #[must_use]
+    pub fn cutoff_hz(&self) -> Option<f64> {
+        self.source.cutoff_hz()
+    }
+
+    #[must_use]
     pub fn feedback_at(&self, absolute_frame: u64) -> f64 {
         let Some(length) = self.feedback_pattern_length else {
             return self.feedback;
@@ -87,13 +92,22 @@ impl CompiledDelayedNotePatch {
     }
 
     pub fn render(&self, range: FrameRange) -> Result<AudioBlock, SongRenderError> {
-        self.render_with_feedback_override(range, None)
+        self.render_with_overrides(range, None, None)
     }
 
     pub fn render_with_feedback_override(
         &self,
         range: FrameRange,
         feedback_override: Option<f64>,
+    ) -> Result<AudioBlock, SongRenderError> {
+        self.render_with_overrides(range, feedback_override, None)
+    }
+
+    pub fn render_with_overrides(
+        &self,
+        range: FrameRange,
+        feedback_override: Option<f64>,
+        cutoff_override: Option<f64>,
     ) -> Result<AudioBlock, SongRenderError> {
         if feedback_override.is_some_and(|value| !value.is_finite() || !(0.0..1.0).contains(&value))
         {
@@ -103,9 +117,10 @@ impl CompiledDelayedNotePatch {
         let frames = u32::try_from(frame_count).map_err(|_| SongRenderError::RangeTooLong {
             frames: frame_count,
         })?;
-        let history = self
-            .source
-            .render(FrameRange::new(0, range.end()).expect("history range is ordered"))?;
+        let history = self.source.render_with_cutoff_override(
+            FrameRange::new(0, range.end()).expect("history range is ordered"),
+            cutoff_override,
+        )?;
         let channels = usize::from(self.source.channels);
         let delay_len = usize::try_from(self.delay_frames)
             .map_err(|_| SongRenderError::DelayTooLong(self.delay_frames))?
@@ -213,9 +228,17 @@ pub struct CompiledNotePatch {
     channels: u16,
     waveform: Waveform,
     envelope: AdsrSettings,
+    filter: Option<CompiledNoteFilter>,
     pattern_length: u64,
     looped: bool,
     events: Vec<CompiledNoteEvent>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CompiledNoteFilter {
+    module_id: String,
+    cutoff_hz: f64,
+    resonance: f64,
 }
 
 impl CompiledNotePatch {
@@ -224,7 +247,23 @@ impl CompiledNotePatch {
         self.pattern_length
     }
 
+    #[must_use]
+    pub fn cutoff_hz(&self) -> Option<f64> {
+        self.filter.as_ref().map(|filter| filter.cutoff_hz)
+    }
+
     pub fn render(&self, range: FrameRange) -> Result<AudioBlock, SongRenderError> {
+        self.render_with_cutoff_override(range, None)
+    }
+
+    pub fn render_with_cutoff_override(
+        &self,
+        range: FrameRange,
+        cutoff_override: Option<f64>,
+    ) -> Result<AudioBlock, SongRenderError> {
+        if cutoff_override.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+            return Err(SongRenderError::InvalidCutoffOverride);
+        }
         let frame_count = range.end() - range.start();
         let frames = u32::try_from(frame_count).map_err(|_| SongRenderError::RangeTooLong {
             frames: frame_count,
@@ -232,6 +271,7 @@ impl CompiledNotePatch {
         let mut block = AudioBlock::silent(self.channels, frames);
         let mut oscillator = Oscillator::new(self.waveform);
         let mut envelope = AdsrEnvelope::new(self.envelope, self.sample_rate);
+        let mut filter = StateVariableFilter::new();
         let mut frequency = 440.0;
         let mut velocity = 0.0;
         let mut active_end = None;
@@ -259,8 +299,17 @@ impl CompiledNotePatch {
                 envelope.note_on();
                 active_end = Some(absolute_frame + (event.end - event.start));
             }
-            let sample =
-                oscillator.next(frequency, self.sample_rate) * envelope.next_value() * velocity;
+            let mut sample = oscillator.next(frequency, self.sample_rate);
+            if let Some(filter_settings) = &self.filter {
+                sample = filter.process(
+                    sample,
+                    cutoff_override.unwrap_or(filter_settings.cutoff_hz),
+                    filter_settings.resonance,
+                    FilterMode::LowPass,
+                    self.sample_rate,
+                );
+            }
+            let sample = sample * envelope.next_value() * velocity;
             if absolute_frame < range.start() {
                 continue;
             }
@@ -336,6 +385,7 @@ pub enum SongRenderError {
     InvalidTempoDuration { value: String },
     DelayTooLong(u64),
     InvalidFeedbackOverride,
+    InvalidCutoffOverride,
     RangeTooLong { frames: u64 },
 }
 
@@ -409,6 +459,12 @@ impl fmt::Display for SongRenderError {
                 formatter,
                 "live delay feedback override must be finite and within 0.0..1.0"
             ),
+            Self::InvalidCutoffOverride => {
+                write!(
+                    formatter,
+                    "live cutoff override must be finite and positive"
+                )
+            }
             Self::RangeTooLong { frames } => write!(
                 formatter,
                 "render range of {frames} frames exceeds AudioBlock capacity"
@@ -433,6 +489,7 @@ pub fn compile_note_song(song: &ValidatedSong) -> Result<CompiledNotePatch, Song
     let envelope = exactly_one_module(synth.modules(), ModuleKind::Adsr)?;
     let amplifier = exactly_one_module(synth.modules(), ModuleKind::Vca)?;
     let output = exactly_one_module(synth.modules(), ModuleKind::AudioOutput)?;
+    let filter = optional_one_module(synth.modules(), ModuleKind::LowPass)?;
     for (from, to) in [
         (
             "input.pitch".to_owned(),
@@ -447,10 +504,6 @@ pub fn compile_note_song(song: &ValidatedSong) -> Result<CompiledNotePatch, Song
             format!("{}.control", envelope.id()),
             format!("{}.level", amplifier.id()),
         ),
-        (
-            format!("{}.audio", amplifier.id()),
-            format!("{}.audio", output.id()),
-        ),
     ] {
         if !synth
             .cables()
@@ -459,6 +512,26 @@ pub fn compile_note_song(song: &ValidatedSong) -> Result<CompiledNotePatch, Song
         {
             return Err(SongRenderError::MissingCable { from, to });
         }
+    }
+    if let Some(filter) = filter {
+        for (from, to) in [
+            (
+                format!("{}.audio", amplifier.id()),
+                format!("{}.audio", filter.id()),
+            ),
+            (
+                format!("{}.audio", filter.id()),
+                format!("{}.audio", output.id()),
+            ),
+        ] {
+            require_cable(synth, from, to)?;
+        }
+    } else {
+        require_cable(
+            synth,
+            format!("{}.audio", amplifier.id()),
+            format!("{}.audio", output.id()),
+        )?;
     }
     let pattern_id = track
         .initial_pattern()
@@ -482,6 +555,11 @@ pub fn compile_note_song(song: &ValidatedSong) -> Result<CompiledNotePatch, Song
             sustain_level: envelope.sustain().unwrap_or(1.0),
             release_seconds: envelope.release().unwrap_or(0.0),
         },
+        filter: filter.map(|filter| CompiledNoteFilter {
+            module_id: filter.id().to_owned(),
+            cutoff_hz: filter.cutoff_hz().unwrap_or(20_000.0),
+            resonance: filter.resonance().unwrap_or(0.0),
+        }),
         pattern_length: pattern.length_frames(),
         looped: pattern.is_looped(),
         events: pattern
@@ -809,6 +887,21 @@ fn exactly_one_module(
     match found.as_slice() {
         [] => Err(SongRenderError::MissingModule { kind }),
         [module] => Ok(*module),
+        _ => Err(SongRenderError::MultipleModules { kind }),
+    }
+}
+
+fn optional_one_module(
+    modules: &[meldritch_dsl::ModuleDefinition],
+    kind: ModuleKind,
+) -> Result<Option<&meldritch_dsl::ModuleDefinition>, SongRenderError> {
+    let found = modules
+        .iter()
+        .filter(|module| module.kind() == kind)
+        .collect::<Vec<_>>();
+    match found.as_slice() {
+        [] => Ok(None),
+        [module] => Ok(Some(*module)),
         _ => Err(SongRenderError::MultipleModules { kind }),
     }
 }

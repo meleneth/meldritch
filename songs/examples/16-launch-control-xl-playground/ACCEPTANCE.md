@@ -14,11 +14,14 @@ It must:
   - 16 launch buttons: CC 41-48 and 57-64
 - route all MIDI input through typed `AppInput` / `AppCommand` results so a
   captured performance can replay without the controller attached
+- rerender and publish audible delay-feedback and filter-cutoff changes from
+  supported curated controls
 - validate as a normal song directory
 - support `meldritch midi-controls-check` as the hardware smoke path for
   listing visible MIDI ports and printing script-mapped CC events
 
-Current implementation status: the format can declare every MIDI CC binding and
-the runtime derives MIDI routing from the script. The playground is intentionally
-limited to currently supported curated parameter controls; richer pattern and
-launch action controls are still future schema/runtime work.
+Current implementation status: the format can declare every MIDI CC binding, the
+runtime derives MIDI routing from the script, and supported feedback/cutoff
+parameter controls rerender audio. The playground is intentionally limited to
+currently supported curated parameter controls; richer pattern and launch action
+controls are still future schema/runtime work.

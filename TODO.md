@@ -136,6 +136,8 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Open script-declared MIDI devices through the host MIDI stack and feed
   decoded CC messages into the typed control-surface profile
 - [x] Add a script-aware hardware diagnostic path for MIDI control inputs
+- [x] Rerender supported playground parameter controls for delay feedback and
+  synth filter cutoff
 - [ ] Verify LaunchControl XL input with the diagnostic path on
   both Windows and Linux
 - [ ] Add script-declared pattern/launch/toggle controls beyond parameter

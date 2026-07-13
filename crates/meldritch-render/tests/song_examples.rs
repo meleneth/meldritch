@@ -244,6 +244,24 @@ fn curated_performance_control_song_compiles_renders_and_accepts_live_feedback()
 }
 
 #[test]
+fn launch_control_playground_compiles_and_accepts_live_feedback_and_cutoff() {
+    let song = load_song_directory(example("16-launch-control-xl-playground"))
+        .expect("LaunchControl XL playground song should load");
+    let patch = compile_delayed_note_song(&song).expect("playground DSP patch should compile");
+    let baseline = patch.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+    let adjusted = patch
+        .render_with_overrides(FrameRange::new(0, 96_000).unwrap(), Some(0.75), Some(500.0))
+        .unwrap();
+
+    assert_eq!(patch.feedback(), 0.35);
+    assert_eq!(patch.cutoff_hz(), Some(1200.0));
+    assert_eq!(baseline.frames(), 96_000);
+    assert!(baseline.peak_abs() > 0.01);
+    assert_ne!(baseline.samples(), adjusted.samples());
+    assert!(adjusted.samples().iter().all(|sample| sample.is_finite()));
+}
+
+#[test]
 fn session_capture_example_compiles_to_the_same_playable_song_shape() {
     let song = load_song_directory(example("11-session-capture"))
         .expect("session-capture song should load");

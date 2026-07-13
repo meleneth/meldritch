@@ -1701,12 +1701,18 @@ fn validate_song(path: PathBuf) -> Result<(), String> {
 
 struct SongRenderRequest {
     generation: u64,
-    feedback: f64,
+    overrides: SongLiveOverrides,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct SongLiveOverrides {
+    feedback: Option<f64>,
+    cutoff_hz: Option<f64>,
 }
 
 struct SongRerenderWorker {
     shared: Arc<(Mutex<SongRerenderState>, Condvar)>,
-    completed: mpsc::Receiver<(u64, meldritch_audio::AudioBlock, f64)>,
+    completed: mpsc::Receiver<(u64, meldritch_audio::AudioBlock, SongLiveOverrides)>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -1740,12 +1746,15 @@ impl SongRerenderWorker {
                         .take()
                         .expect("latest request exists after wait")
                 };
-                let Ok(block) = patch.render_with_feedback_override(range, Some(request.feedback))
-                else {
+                let Ok(block) = patch.render_with_overrides(
+                    range,
+                    request.overrides.feedback,
+                    request.overrides.cutoff_hz,
+                ) else {
                     continue;
                 };
                 if completed_tx
-                    .send((request.generation, block, request.feedback))
+                    .send((request.generation, block, request.overrides))
                     .is_err()
                 {
                     break;
@@ -1759,18 +1768,18 @@ impl SongRerenderWorker {
         }
     }
 
-    fn submit(&mut self, generation: u64, feedback: f64) {
+    fn submit(&mut self, generation: u64, overrides: SongLiveOverrides) {
         let (lock, changed) = &*self.shared;
         lock.lock()
             .expect("song render worker lock poisoned")
             .latest = Some(SongRenderRequest {
             generation,
-            feedback,
+            overrides,
         });
         changed.notify_one();
     }
 
-    fn latest_completed(&self) -> Option<(u64, meldritch_audio::AudioBlock, f64)> {
+    fn latest_completed(&self) -> Option<(u64, meldritch_audio::AudioBlock, SongLiveOverrides)> {
         self.completed
             .try_iter()
             .max_by_key(|(generation, _, _)| *generation)
@@ -2524,6 +2533,32 @@ fn decode_midi_cc_message(message: &[u8]) -> Option<(u8, u8, u8)> {
     Some(((status & 0x0F) + 1, cc, value.min(127)))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LiveSongControlTarget {
+    DelayFeedback,
+    FilterCutoff,
+}
+
+fn live_song_control_targets(
+    song: &meldritch_dsl::ValidatedSong,
+) -> BTreeMap<String, LiveSongControlTarget> {
+    song.performance()
+        .controls()
+        .iter()
+        .filter_map(|control| {
+            let target = parameter_target_label(control.target());
+            let target = match target.as_str() {
+                "dsp:echo/delay.feedback" => LiveSongControlTarget::DelayFeedback,
+                value if value.ends_with("/filter.cutoff_hz") => {
+                    LiveSongControlTarget::FilterCutoff
+                }
+                _ => return None,
+            };
+            Some((control.id().to_owned(), target))
+        })
+        .collect()
+}
+
 fn tui_song(
     path: PathBuf,
     frames: Option<u64>,
@@ -2593,7 +2628,8 @@ fn tui_song(
         },
         256,
     );
-    let controls = song_controls_for_view(&song, patch.feedback());
+    let controls = song_controls_for_view(&song, patch.feedback(), patch.cutoff_hz());
+    let live_control_targets = live_song_control_targets(&song);
     controller.set_curated_controls(controls);
     let (external_input_sender, external_input_receiver) = mpsc::channel();
     let midi_control_bindings = midi_control_bindings_for_song(&song);
@@ -2629,11 +2665,11 @@ fn tui_song(
     let input_worker = Arc::clone(&worker);
     let submitted_generation = Arc::new(Mutex::new(0_u64));
     let input_generation = Arc::clone(&submitted_generation);
+    let live_overrides = Arc::new(Mutex::new(SongLiveOverrides::default()));
+    let input_live_overrides = Arc::clone(&live_overrides);
     let published_generation = Arc::new(Mutex::new(0_u64));
     let tick_published_generation = Arc::clone(&published_generation);
     let tick_submitted_generation = Arc::clone(&submitted_generation);
-    let feedback_control_id = "echo-feedback".to_owned();
-    let input_feedback_control_id = feedback_control_id.clone();
     let capture = Arc::new(Mutex::new(PerformanceSessionCapture::create(
         &song,
         frame_count,
@@ -2647,7 +2683,7 @@ fn tui_song(
                 .lock()
                 .expect("song render worker lock poisoned")
                 .latest_completed();
-            if let Some((generation, block, feedback)) = completed {
+            if let Some((generation, block, overrides)) = completed {
                 let submitted = *tick_submitted_generation
                     .lock()
                     .expect("song render generation lock poisoned");
@@ -2665,9 +2701,7 @@ fn tui_song(
                     .audition_block(&block)
                     .map_err(|error| format!("song publication failed: {error:?}"))?;
                 *published = generation;
-                return Ok(Some(format!(
-                    "Song rerender published: feedback {feedback:.2}"
-                )));
+                return Ok(Some(format!("Song rerender published: {overrides:?}")));
             }
             Ok(None)
         },
@@ -2680,24 +2714,32 @@ fn tui_song(
             {
                 eprintln!("session capture failed: {error}");
             }
-            if !matches!(
-                input,
+            let control_id = match input {
                 meldritch_app::AppInput::AdjustCuratedControl { id, .. }
-                    | meldritch_app::AppInput::SetCuratedControlNormalized { id, .. }
-                    if id == &input_feedback_control_id
-            ) {
+                | meldritch_app::AppInput::SetCuratedControlNormalized { id, .. } => id,
+                _ => return,
+            };
+            let Some(target) = live_control_targets.get(control_id) else {
                 return;
-            }
-            let Some(control) = controller
+            };
+            let Some(value) = controller
                 .view_model()
                 .curated_controls
                 .into_iter()
-                .find(|control| control.id == input_feedback_control_id)
+                .find(|control| control.id == *control_id)
+                .and_then(|control| control.value)
             else {
                 return;
             };
-            let Some(value) = control.value else {
-                return;
+            let overrides = {
+                let mut overrides = input_live_overrides
+                    .lock()
+                    .expect("song live override lock poisoned");
+                match target {
+                    LiveSongControlTarget::DelayFeedback => overrides.feedback = Some(value),
+                    LiveSongControlTarget::FilterCutoff => overrides.cutoff_hz = Some(value),
+                }
+                *overrides
             };
             let mut generation = input_generation
                 .lock()
@@ -2706,7 +2748,7 @@ fn tui_song(
             input_worker
                 .lock()
                 .expect("song render worker lock poisoned")
-                .submit(*generation, value);
+                .submit(*generation, overrides);
         },
     );
     if let Err(error) = run_result {
@@ -2726,6 +2768,7 @@ fn tui_song(
 fn song_controls_for_view(
     song: &meldritch_dsl::ValidatedSong,
     default_feedback: f64,
+    default_cutoff_hz: Option<f64>,
 ) -> Vec<meldritch_app::CuratedControlView> {
     song.performance()
         .controls()
@@ -2733,8 +2776,13 @@ fn song_controls_for_view(
         .map(|control| {
             let (minimum, maximum) = control.range();
             let target = parameter_target_label(control.target());
-            let value = (target == "dsp:echo/delay.feedback")
-                .then_some(default_feedback.clamp(minimum, maximum));
+            let value = match target.as_str() {
+                "dsp:echo/delay.feedback" => Some(default_feedback.clamp(minimum, maximum)),
+                value if value.ends_with("/filter.cutoff_hz") => {
+                    default_cutoff_hz.map(|cutoff| cutoff.clamp(minimum, maximum))
+                }
+                _ => None,
+            };
             meldritch_app::CuratedControlView {
                 id: control.id().to_owned(),
                 label: control.label().to_owned(),
