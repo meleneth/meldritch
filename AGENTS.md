@@ -102,6 +102,7 @@ Implemented foundations include:
 - a focused curated-control rendering layout that hides dense editor panels
 - `meldritch tui-song SONG_DIRECTORY` for delayed-note `.ml*` songs
 - loaded `.mlperformance` controls routed to typed curated-control commands
+- LaunchControl XL app-level control-surface mapping for faders and buttons
 - latest-wins background rerender for live delay-feedback overrides
 - completed song rerenders published through the existing atomic audio snapshot
 - `tui-song` timestamped `.mlperformance` session files under `performances/`
@@ -121,11 +122,15 @@ this guide was written:
   remains unfinished
 - example `11` is `compile` because session files are produced and tested
   headlessly, but exhaustive action coverage and replay remain unfinished
+- example `15` is `compile` because LaunchControl XL fader/button mapping is
+  tested at the app boundary, but physical Windows/Linux MIDI device input is
+  not wired yet
 
-The next implementation slice is to keep broadening session capture coverage
-with scripted accepted-action tests that exercise the real controller path,
-then move into exact replay. Full all-parameters inspection remains open after
-that.
+The next implementation slice is to wire physical MIDI input for LaunchControl
+XL on Windows and Linux, feeding decoded device events through the tested
+app-level profile. After that, keep broadening session capture coverage with
+scripted accepted-action tests that exercise the real controller path, then move
+into exact replay. Full all-parameters inspection remains open after that.
 
 ## Important files
 

@@ -2378,6 +2378,7 @@ fn tui_song(
             if !matches!(
                 input,
                 meldritch_app::AppInput::AdjustCuratedControl { id, .. }
+                    | meldritch_app::AppInput::SetCuratedControlNormalized { id, .. }
                     if id == &input_feedback_control_id
             ) {
                 return;

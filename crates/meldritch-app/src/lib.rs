@@ -73,6 +73,7 @@ pub enum AppCommand {
     CancelPerformance,
     SetCockpitMode(CockpitMode),
     AdjustCuratedControl { id: String, steps: i32 },
+    SetCuratedControlNormalized { id: String, value: f64 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -296,6 +297,7 @@ pub struct AppViewModel {
 pub enum AppInput {
     ToggleCockpitMode,
     AdjustCuratedControl { id: String, steps: i32 },
+    SetCuratedControlNormalized { id: String, value: f64 },
     MoveLeft,
     MoveRight,
     MoveUp,
@@ -368,6 +370,54 @@ pub enum AppInput {
     DecreaseModulationDepth,
     IncreaseMasterDrive,
     DecreaseMasterDrive,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LaunchControlXlBinding {
+    pub control_id: String,
+    pub fader: Option<u8>,
+    pub decrement_button: Option<u8>,
+    pub increment_button: Option<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LaunchControlXlInput {
+    Fader { index: u8, value: u8 },
+    Button { index: u8, pressed: bool },
+}
+
+pub fn map_launch_control_xl_input(
+    bindings: &[LaunchControlXlBinding],
+    input: LaunchControlXlInput,
+) -> Option<AppInput> {
+    match input {
+        LaunchControlXlInput::Fader { index, value } => bindings
+            .iter()
+            .find(|binding| binding.fader == Some(index))
+            .map(|binding| AppInput::SetCuratedControlNormalized {
+                id: binding.control_id.clone(),
+                value: f64::from(value.min(127)) / 127.0,
+            }),
+        LaunchControlXlInput::Button {
+            index,
+            pressed: true,
+        } => bindings.iter().find_map(|binding| {
+            if binding.decrement_button == Some(index) {
+                Some(AppInput::AdjustCuratedControl {
+                    id: binding.control_id.clone(),
+                    steps: -1,
+                })
+            } else if binding.increment_button == Some(index) {
+                Some(AppInput::AdjustCuratedControl {
+                    id: binding.control_id.clone(),
+                    steps: 1,
+                })
+            } else {
+                None
+            }
+        }),
+        LaunchControlXlInput::Button { pressed: false, .. } => None,
+    }
 }
 
 struct BassSynthControl {
@@ -955,6 +1005,25 @@ impl AppController {
                     current,
                 }
             }
+            AppCommand::SetCuratedControlNormalized { id, value } => {
+                let control = self
+                    .curated_controls
+                    .iter_mut()
+                    .find(|control| control.id == *id)
+                    .ok_or_else(|| AppCommandError::UnknownCuratedControl(id.clone()))?;
+                let previous = control.value.unwrap_or(control.minimum);
+                let normalized = value.clamp(0.0, 1.0);
+                let raw = control.minimum + normalized * (control.maximum - control.minimum);
+                let current_index = ((raw - control.minimum) / control.step).round();
+                let current = (control.minimum + control.step * current_index)
+                    .clamp(control.minimum, control.maximum);
+                control.value = Some(current);
+                AppCommandResult::CuratedControlAdjusted {
+                    id: id.clone(),
+                    previous,
+                    current,
+                }
+            }
         };
         let (changed, dirty_ranges) = match &result {
             AppCommandResult::TransportQueued => (true, Vec::new()),
@@ -1169,6 +1238,9 @@ impl AppController {
             AppInput::ToggleCockpitMode => AppCommand::SetCockpitMode(self.cockpit_mode.toggled()),
             AppInput::AdjustCuratedControl { id, steps } => {
                 AppCommand::AdjustCuratedControl { id, steps }
+            }
+            AppInput::SetCuratedControlNormalized { id, value } => {
+                AppCommand::SetCuratedControlNormalized { id, value }
             }
             AppInput::MoveLeft => AppCommand::Select(Selection {
                 track: self.selection.track,
@@ -1913,6 +1985,121 @@ mod tests {
         assert_eq!(view.transport.state, transport.state);
         assert_eq!(controller.history().len(), 3);
         assert!(!controller.history()[1].changed);
+    }
+
+    #[test]
+    fn curated_control_normalized_inputs_set_absolute_values_for_faders() {
+        let (mut controller, _engine) = controller(8);
+        controller.set_curated_controls(vec![CuratedControlView {
+            id: "echo-feedback".to_owned(),
+            label: "Echo Feedback".to_owned(),
+            target: "dsp:echo/delay.feedback".to_owned(),
+            minimum: 0.0,
+            maximum: 0.4,
+            step: 0.05,
+            binding: "f".to_owned(),
+            value: Some(0.1),
+        }]);
+
+        assert_eq!(
+            controller
+                .handle_input(AppInput::SetCuratedControlNormalized {
+                    id: "echo-feedback".to_owned(),
+                    value: 64.0 / 127.0,
+                })
+                .unwrap(),
+            AppCommandResult::CuratedControlAdjusted {
+                id: "echo-feedback".to_owned(),
+                previous: 0.1,
+                current: 0.2,
+            }
+        );
+        assert_eq!(
+            controller
+                .handle_input(AppInput::SetCuratedControlNormalized {
+                    id: "echo-feedback".to_owned(),
+                    value: 2.0,
+                })
+                .unwrap(),
+            AppCommandResult::CuratedControlAdjusted {
+                id: "echo-feedback".to_owned(),
+                previous: 0.2,
+                current: 0.4,
+            }
+        );
+        assert_eq!(
+            controller
+                .handle_input(AppInput::SetCuratedControlNormalized {
+                    id: "echo-feedback".to_owned(),
+                    value: -1.0,
+                })
+                .unwrap(),
+            AppCommandResult::CuratedControlAdjusted {
+                id: "echo-feedback".to_owned(),
+                previous: 0.4,
+                current: 0.0,
+            }
+        );
+    }
+
+    #[test]
+    fn launch_control_xl_faders_and_buttons_map_to_curated_control_inputs() {
+        let bindings = vec![LaunchControlXlBinding {
+            control_id: "echo-feedback".to_owned(),
+            fader: Some(1),
+            decrement_button: Some(1),
+            increment_button: Some(9),
+        }];
+
+        assert_eq!(
+            map_launch_control_xl_input(
+                &bindings,
+                LaunchControlXlInput::Fader {
+                    index: 1,
+                    value: 64,
+                },
+            ),
+            Some(AppInput::SetCuratedControlNormalized {
+                id: "echo-feedback".to_owned(),
+                value: 64.0 / 127.0,
+            })
+        );
+        assert_eq!(
+            map_launch_control_xl_input(
+                &bindings,
+                LaunchControlXlInput::Button {
+                    index: 1,
+                    pressed: true,
+                },
+            ),
+            Some(AppInput::AdjustCuratedControl {
+                id: "echo-feedback".to_owned(),
+                steps: -1,
+            })
+        );
+        assert_eq!(
+            map_launch_control_xl_input(
+                &bindings,
+                LaunchControlXlInput::Button {
+                    index: 9,
+                    pressed: true,
+                },
+            ),
+            Some(AppInput::AdjustCuratedControl {
+                id: "echo-feedback".to_owned(),
+                steps: 1,
+            })
+        );
+        assert_eq!(
+            map_launch_control_xl_input(
+                &bindings,
+                LaunchControlXlInput::Button {
+                    index: 9,
+                    pressed: false,
+                },
+            ),
+            None
+        );
     }
 
     #[test]

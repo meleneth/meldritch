@@ -1,0 +1,24 @@
+[meldritch]
+kind = "performance"
+version = 1
+
+[performance]
+id = "launch-control-xl-input"
+title = "LaunchControl XL Input"
+bpm = 120.0
+sample_rate = 48000
+
+[[tracks]]
+id = "bass"
+synth = "synths/bass.mlsynth"
+dsp = ["dsp/echo.mldsp"]
+patterns = ["patterns/bass-line.mlpattern"]
+initial_pattern = "bass-line"
+
+[[controls]]
+id = "echo-feedback"
+label = "Echo Feedback"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+binding = "f"

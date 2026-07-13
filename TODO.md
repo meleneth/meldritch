@@ -45,6 +45,7 @@ songs/examples/
   12-exact-session-replay/
   13-quantized-session-replay/
   14-harvested-performance-cues/
+  15-launch-control-xl-input/
   composed-warehouse/
   invalid/
 ```
@@ -127,6 +128,10 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Generate the default cockpit view from the declared controls
 - [x] Route every interaction through typed commands rather than direct state
   mutation
+- [x] Add a LaunchControl XL app-level input profile that maps faders to
+  absolute normalized curated-control values and buttons to typed step nudges
+- [ ] Open physical LaunchControl XL MIDI devices on Windows and Linux and feed
+  decoded MIDI messages into the typed control-surface profile
 
 Done when loading a song produces a small usable performance surface entirely
 from its `.mlperformance` declaration.

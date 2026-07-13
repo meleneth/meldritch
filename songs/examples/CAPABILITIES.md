@@ -17,6 +17,7 @@ Status values:
 | `04-dsp-parameter-pattern` | Pattern drives a DSP parameter port | compile |
 | `09-curated-performance-controls` | Default curated mode and Ctrl-Tab all-parameters mode | play |
 | `11-session-capture` | Timestamped `.mlperformance` session capture | compile |
+| `15-launch-control-xl-input` | LaunchControl XL faders/buttons drive curated controls | compile |
 
 An implementation may advance a row only when all earlier statuses for that row
 are satisfied. New schema or runtime behavior requires a new row or an explicit
