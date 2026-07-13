@@ -984,6 +984,7 @@ dependencies = [
  "arc-swap",
  "meldritch-audio",
  "meldritch-core",
+ "meldritch-dsl",
 ]
 
 [[package]]

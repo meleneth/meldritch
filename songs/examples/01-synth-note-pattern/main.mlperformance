@@ -1,0 +1,15 @@
+[meldritch]
+kind = "performance"
+version = 1
+
+[performance]
+id = "synth-note-pattern"
+title = "Synth Note Pattern"
+bpm = 120.0
+sample_rate = 48000
+
+[[tracks]]
+id = "bass"
+synth = "synths/bass.mlsynth"
+patterns = ["patterns/bass-line.mlpattern"]
+initial_pattern = "bass-line"

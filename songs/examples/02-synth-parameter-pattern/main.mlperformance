@@ -1,0 +1,19 @@
+[meldritch]
+kind = "performance"
+version = 1
+
+[performance]
+id = "synth-parameter-pattern"
+title = "Synth Parameter Pattern"
+bpm = 120.0
+sample_rate = 48000
+
+[[tracks]]
+id = "bass"
+synth = "synths/swept-bass.mlsynth"
+patterns = [
+  "patterns/bass-line.mlpattern",
+  "patterns/filter-sweep.mlpattern",
+]
+initial_pattern = "bass-line"
+parameter_patterns = ["filter-sweep"]

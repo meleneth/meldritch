@@ -1,0 +1,16 @@
+[meldritch]
+kind = "performance"
+version = 1
+
+[performance]
+id = "dsp-chain"
+title = "DSP Chain"
+bpm = 120.0
+sample_rate = 48000
+
+[[tracks]]
+id = "lead"
+synth = "synths/lead.mlsynth"
+patterns = ["patterns/lead.mlpattern"]
+initial_pattern = "lead"
+dsp = ["dsp/echo.mldsp"]

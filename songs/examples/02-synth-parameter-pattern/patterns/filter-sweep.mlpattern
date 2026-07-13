@@ -1,0 +1,21 @@
+[meldritch]
+kind = "pattern"
+version = 1
+
+[pattern]
+id = "filter-sweep"
+type = "parameters"
+length = "1 bar"
+loop = true
+
+[[lanes]]
+target = "synth:swept-bass/filter.cutoff_hz"
+interpolation = "linear"
+
+[[lanes.points]]
+at = "1:1:0"
+value = 180.0
+
+[[lanes.points]]
+at = "2:1:0"
+value = 2400.0

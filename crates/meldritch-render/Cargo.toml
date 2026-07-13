@@ -9,3 +9,4 @@ rust-version.workspace = true
 arc-swap.workspace = true
 meldritch-audio = { path = "../meldritch-audio" }
 meldritch-core = { path = "../meldritch-core" }
+meldritch-dsl = { path = "../meldritch-dsl" }

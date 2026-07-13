@@ -1,0 +1,22 @@
+[meldritch]
+kind = "synth"
+version = 1
+
+[synth]
+id = "drone"
+polyphony = 1
+
+[[modules]]
+id = "osc"
+type = "oscillator"
+waveform = "saw"
+frequency_hz = 220.0
+
+[[modules]]
+id = "out"
+type = "audio_output"
+channels = 1
+
+[[cables]]
+from = "osc.audio"
+to = "out.audio"

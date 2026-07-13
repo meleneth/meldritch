@@ -1,7 +1,207 @@
 # Active TODO
 
-This is the implementation queue for the long-form polyphonic demo. The broader
-project phases remain in [`ROADMAP.md`](ROADMAP.md).
+The showcase milestones below are complete. The active work is to replace the
+fixture-oriented, monolithic project input with a composable song-directory
+format and a curated, recordable performance runtime.
+
+## 19. Song directories and `.ml*` formats
+
+### 19.0 Example-first specification
+
+The checked-in example corpus is the primary format specification and the
+acceptance suite. Do not add schema fields, abstractions, loaders, or runtime
+features merely because they may be useful later. Every implemented capability
+must be justified by at least one concrete example that we expect a person to
+author, perform, capture, or replay.
+
+- [ ] Create a tree of minimal examples, with one focused capability per song
+- [ ] Create composed examples that combine previously proven capabilities
+- [ ] Give every example a short statement of intent and observable acceptance
+  criteria: what must validate, compile, sound, expose, record, or replay
+- [ ] Keep example files small enough to understand without reading Rust code
+- [ ] Add invalid examples for each important diagnostic and boundary rule
+- [ ] Turn each accepted example into an automated fixture or end-to-end test
+- [ ] Maintain an example-to-capability matrix so unsupported and untested
+  behavior is visible
+- [ ] Require a new or changed example before expanding a `.ml*` schema
+- [ ] Avoid speculative fields and abstractions not exercised by the corpus
+
+Initial example tree:
+
+```text
+songs/examples/
+  00-minimal-synth/
+  01-synth-note-pattern/
+  02-synth-parameter-pattern/
+  03-dsp-chain/
+  04-dsp-parameter-pattern/
+  05-multiple-tracks/
+  06-pattern-switching/
+  07-pattern-duration-and-repeat/
+  08-arrangement-and-scenes/
+  09-curated-performance-controls/
+  10-performance-and-all-params-modes/
+  11-session-capture/
+  12-exact-session-replay/
+  13-quantized-session-replay/
+  14-harvested-performance-cues/
+  composed-warehouse/
+  invalid/
+```
+
+Done when the desired product behavior can be reviewed by reading example song
+trees, and every supported format/runtime feature points back to an executable
+example.
+
+### 19.1 Format contract derived from examples
+
+Synth and DSP definitions are Eurorack-inspired typed patch graphs. Files
+declare modules, typed ports, normalized connections, and explicit cables.
+Convenience integrations may be expressed as recipes only when their expansion
+remains inspectable and compiles to the same patch model; opaque integrated
+instruments, effects, and hidden modulation systems are not the foundation.
+
+- [ ] Define versioned TOML schemas and reference rules for:
+  - `.mlsynth`: synth modules, voice configuration, parameters, modulation
+    targets, defaults, and stable parameter IDs
+  - `.mldsp`: DSP modules/chains, routing, parameters, macros, modulation
+    targets, latency/lookahead/tail declarations, and stable parameter IDs
+  - `.mlpattern`: note/event patterns and DSP/control parameter patterns
+  - `.mlperformance`: song assembly, synth/DSP/pattern assignments,
+    arrangement, curated controls, bindings, and replayable interaction events
+- [ ] Define a song as a directory of text files with one unambiguous entry
+  `.mlperformance` file and relative references contained within the song root
+- [ ] Specify reference syntax, namespaces, stable IDs, format versions,
+  extension policy, path normalization, and cycle policy
+- [ ] Derive the initial schema from the smallest examples instead of designing
+  a comprehensive schema in advance
+- [ ] Document which data is authored source truth and which data is generated
+  session history
+
+Done when the formats can describe a complete interactive song without relying
+on hard-coded showcase construction.
+
+### 19.2 Directory loading, validation, and compilation
+
+- [ ] Add a song-directory loader outside realtime code
+- [ ] Parse each file independently and retain file/path context for diagnostics
+- [ ] Resolve relative references only within the song root by default
+- [ ] Convert parsed names/references to typed IDs and typed parameter values
+- [ ] Reject missing/duplicate IDs, missing files, incompatible parameter or
+  port types, invalid ranges, illegal reference cycles, and ambiguous entry files
+- [ ] Produce deterministic diagnostics with file and logical field context
+- [ ] Fingerprint individual definitions and the fully resolved song model
+- [ ] Compile the resolved song through the existing source, relation, render,
+  automation, and realtime-publication boundaries
+- [ ] Keep compatibility loading for existing `.toml` fixtures until their
+  tests and demos have migrated
+
+Done when a CLI validation command can load an example song directory, resolve
+all cross-file references, print useful failures, and produce a deterministic
+compiled fingerprint.
+
+### 19.3 Pattern and parameter-pattern model
+
+- [ ] Separate reusable pattern identity from a pattern's placement in a song
+- [ ] Support note/event patterns targeting synth or sample tracks
+- [ ] Support DSP and synth parameter patterns with typed targets, values,
+  interpolation, duration, looping, phase, and launch quantization
+- [ ] Define track selection, pattern selection/replacement, repeat count,
+  duration, and arrangement/section semantics
+- [ ] Preserve exact dirty-range invalidation for edited or switched patterns
+- [ ] Include every referenced definition and placement in artifact fingerprints
+
+Done when musical patterns and parameter patterns can be independently reused,
+assigned, switched, and rendered deterministically from text definitions.
+
+### 19.4 Curated performance controls
+
+- [ ] Let `.mlperformance` declare the controls intentionally exposed to the
+  performer: parameters, macros, toggles, choices, track/pattern launches, and
+  quantized actions
+- [ ] Define control labels, groups, value ranges/steps, defaults, bindings, and
+  target mappings without duplicating underlying synth/DSP parameter semantics
+- [ ] Validate duplicate or unreachable bindings and unsafe target mappings
+- [ ] Generate the default cockpit view from the declared controls
+- [ ] Route every interaction through typed commands rather than direct state
+  mutation
+
+Done when loading a song produces a small usable performance surface entirely
+from its `.mlperformance` declaration.
+
+### 19.5 Performance mode and all-parameters mode
+
+- [ ] Add `Performance` and `AllParameters` cockpit modes
+- [ ] Make `Performance` the default
+- [ ] Bind `Ctrl-Tab` to switch modes
+- [ ] In performance mode, show only controls curated by `.mlperformance`
+- [ ] In all-parameters mode, expose the complete resolved synth/DSP/track/
+  pattern parameter tree for inspection and editing
+- [ ] Preserve transport, playhead, selected track/pattern, queued launches,
+  parameter state, and audio publication while switching modes
+- [ ] Refine track, pattern, arrangement, duration, and parameter navigation so
+  all-parameters mode remains deterministic even before it is polished
+
+Done when `Ctrl-Tab` safely switches between a focused playable interface and
+the complete parameter surface without disturbing playback.
+
+### 19.6 Timestamped performance capture
+
+- [ ] Create a new datetime-stamped `.mlperformance` session file when an
+  interactive song starts, using a collision-safe filename
+- [ ] Record song identity/version/fingerprint and the starting runtime state
+- [ ] Record every accepted typed performer interaction with monotonic sequence,
+  wall-clock offset, absolute frame, musical position, requested quantization,
+  actual execution frame, previous value, resulting value, and provenance
+- [ ] Record mode changes, track/pattern selection, launches, parameter edits,
+  transport actions, cancellations, and fallback/cache decisions where relevant
+- [ ] Append or checkpoint outside the realtime callback with explicit bounded
+  buffering and crash-tolerant writes
+- [ ] Write a final state and clean/unclean termination marker
+- [ ] Never overwrite an authored performance definition or an earlier session
+
+Done when every interactive run leaves a human-readable session artifact that
+is sufficient to reconstruct what the performer did and when it took effect.
+
+### 19.7 Replay and harvesting
+
+- [ ] Load a captured session against the exact song fingerprint, with an
+  explicit diagnostic or migration path when definitions differ
+- [ ] Replay accepted actions deterministically at recorded execution frames
+- [ ] Offer musical-phase/quantized replay as an explicit alternative to exact
+  frame replay
+- [ ] Distinguish authored automation, live performer input, learned/harvested
+  cues, and replay provenance
+- [ ] Extract recurring gestures into proposed macros, parameter patterns,
+  pattern launches, or revised performance controls
+- [ ] Keep harvesting non-destructive: write new proposed text files and retain
+  the original session journal
+
+Done when a saved performance can be replayed repeatably and mined into reusable
+song material without opaque JSON-only state or mutation of the source session.
+
+### 19.8 Verification and migration
+
+- [ ] Schema/round-trip tests for every `.ml*` format
+- [ ] Cross-file reference, path-boundary, duplicate-ID, cycle, and diagnostic tests
+- [ ] Deterministic resolved-song and artifact fingerprint tests
+- [ ] Full-buffer versus chunked rendering tests for parameter patterns
+- [ ] TUI tests for default performance mode and `Ctrl-Tab` switching
+- [ ] Session capture tests covering every accepted interaction category
+- [ ] Exact replay and quantized replay tests
+- [ ] End-to-end headless test: load song directory, compile, perform scripted
+  interactions, save session, reload, and replay sample-identically
+- [ ] Migrate at least one existing showcase to the new song directory format
+- [ ] Update README commands and format documentation
+
+Done when one existing showcase is driven by `.ml*` files, plays interactively,
+records a session, and replays it deterministically under the standard checks.
+
+## Completed showcase milestones
+
+The following work formed the previous implementation queue for the long-form
+polyphonic demos. It remains here as completion history; broader phases live in
+[`ROADMAP.md`](ROADMAP.md).
 
 ## 1. Deterministic polyphonic voice bank
 

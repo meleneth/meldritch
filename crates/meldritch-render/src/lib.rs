@@ -14,6 +14,7 @@ pub mod mastering;
 pub mod modulation;
 pub mod performance_fx;
 pub mod phrases;
+pub mod song_render;
 pub mod stereo_fx;
 pub mod transforms;
 

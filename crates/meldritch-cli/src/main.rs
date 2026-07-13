@@ -305,6 +305,11 @@ enum Command {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
     },
+    /// Validate a directory-based `.ml*` song and print its resolved identity.
+    ValidateSong {
+        #[arg(value_name = "SONG_DIRECTORY")]
+        song: PathBuf,
+    },
     /// Capture and transform a range from a WAV into a derived artifact.
     TransformChunk {
         #[arg(value_name = "WAV")]
@@ -762,6 +767,7 @@ fn main() {
 fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::Validate { project } => validate_project(project),
+        Command::ValidateSong { song } => validate_song(song),
         Command::TransformChunk {
             input,
             kind,
@@ -1641,6 +1647,21 @@ fn summarize_project_json(path: PathBuf) -> Result<(), String> {
         .map_err(|err| format!("failed to encode project summary: {err}"))?;
     println!("{output}");
 
+    Ok(())
+}
+
+fn validate_song(path: PathBuf) -> Result<(), String> {
+    let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
+    println!(
+        "valid song '{}' · {} track(s) · {} synth(s) · {} DSP graph(s) · {} note pattern(s) · {} parameter pattern(s) · fingerprint {:016x}",
+        song.performance().title(),
+        song.performance().tracks().len(),
+        song.synths().len(),
+        song.dsps().len(),
+        song.note_patterns().len(),
+        song.parameter_patterns().len(),
+        song.fingerprint()
+    );
     Ok(())
 }
 

@@ -27,6 +27,9 @@ pub fn map_key(key: KeyEvent, default_step: &Step) -> Option<TuiAction> {
         return None;
     }
     let action = match key.code {
+        KeyCode::Tab if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            TuiAction::Input(AppInput::ToggleCockpitMode)
+        }
         KeyCode::Char('q') => TuiAction::Quit,
         KeyCode::Left | KeyCode::Char('h') => TuiAction::Input(AppInput::MoveLeft),
         KeyCode::Right | KeyCode::Char('l') => TuiAction::Input(AppInput::MoveRight),
@@ -273,6 +276,10 @@ pub fn draw_with_status(
     view: &AppViewModel,
     status: &StatusMessage,
 ) {
+    if view.cockpit_mode == meldritch_app::CockpitMode::Performance {
+        draw_curated_performance_mode(frame, view, status);
+        return;
+    }
     let performance_visible = view.performance.queued.is_some()
         || view.performance.active_scene.is_some()
         || !view.performance.muted_tracks.is_empty()
@@ -337,6 +344,60 @@ pub fn draw_with_status(
     draw_history(frame, bottom[1], view);
     draw_status(frame, rows[9], status);
     draw_key_legend(frame, rows[10]);
+}
+
+fn draw_curated_performance_mode(
+    frame: &mut ratatui::Frame<'_>,
+    view: &AppViewModel,
+    status: &StatusMessage,
+) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(5),
+            Constraint::Length(3),
+            Constraint::Length(4),
+        ])
+        .split(frame.area());
+    draw_transport(frame, rows[0], view);
+    let lines = if view.curated_controls.is_empty() {
+        vec![Line::from("No controls exposed by this performance")]
+    } else {
+        view.curated_controls
+            .iter()
+            .map(|control| {
+                let value = control
+                    .value
+                    .map_or_else(|| "—".to_owned(), |value| format!("{value:.3}"));
+                Line::from(format!(
+                    "[{}] {}  {}  range {:.3}..{:.3} step {:.3}  → {}",
+                    control.binding,
+                    control.label,
+                    value,
+                    control.minimum,
+                    control.maximum,
+                    control.step,
+                    control.target
+                ))
+            })
+            .collect()
+    };
+    frame.render_widget(
+        panel(
+            "Performance Controls · Ctrl-Tab for all parameters",
+            Paragraph::new(lines).wrap(Wrap { trim: false }),
+        ),
+        rows[1],
+    );
+    draw_status(frame, rows[2], status);
+    frame.render_widget(
+        panel(
+            "Performance Keys",
+            Paragraph::new("Ctrl-Tab all parameters · p play/pause · r rewind · q quit"),
+        ),
+        rows[3],
+    );
 }
 
 fn draw_transport(frame: &mut ratatui::Frame<'_>, area: Rect, view: &AppViewModel) {
@@ -916,6 +977,9 @@ fn command_result_text(result: &AppCommandResult) -> String {
             format!("Cancelled {:?}", queued.gesture)
         }
         AppCommandResult::PerformanceCancelled(None) => "No performance gesture queued".to_owned(),
+        AppCommandResult::CockpitModeChanged { previous, current } => {
+            format!("Cockpit mode: {previous:?} → {current:?}")
+        }
     }
 }
 
@@ -968,6 +1032,8 @@ mod tests {
             missed_artifacts: 1,
         };
         AppViewModel {
+            cockpit_mode: meldritch_app::CockpitMode::AllParameters,
+            curated_controls: Vec::new(),
             transport: TransportView {
                 state: playback.state,
                 position: playback.position,
@@ -1046,6 +1112,20 @@ mod tests {
                 &Step::new(36)
             ),
             Some(TuiAction::Quit)
+        );
+        assert_eq!(
+            map_key(
+                KeyEvent::new(KeyCode::Tab, KeyModifiers::CONTROL),
+                &Step::new(36)
+            ),
+            Some(TuiAction::Input(AppInput::ToggleCockpitMode))
+        );
+        assert_eq!(
+            map_key(
+                KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+                &Step::new(36)
+            ),
+            None
         );
         for (key, input) in [
             ('+', AppInput::IncreaseVelocity),
@@ -1144,9 +1224,11 @@ mod tests {
 
     #[test]
     fn test_backend_renders_all_primary_panels() {
+        let mut view = view();
+        view.cockpit_mode = meldritch_app::CockpitMode::AllParameters;
         let backend = TestBackend::new(100, 24);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| draw(frame, &view())).unwrap();
+        terminal.draw(|frame| draw(frame, &view)).unwrap();
 
         let content = terminal
             .backend()
@@ -1178,6 +1260,38 @@ mod tests {
             assert!(content.contains(label), "missing key legend label {label}");
         }
         assert!(content.contains("Ready"));
+    }
+
+    #[test]
+    fn performance_mode_renders_only_curated_controls_and_hides_dense_editor() {
+        let mut view = view();
+        view.cockpit_mode = meldritch_app::CockpitMode::Performance;
+        view.curated_controls = vec![meldritch_app::CuratedControlView {
+            id: "echo-feedback".to_owned(),
+            label: "Echo Feedback".to_owned(),
+            target: "dsp:echo/delay.feedback".to_owned(),
+            minimum: 0.0,
+            maximum: 0.85,
+            step: 0.05,
+            binding: "f".to_owned(),
+            value: Some(0.35),
+        }];
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, &view)).unwrap();
+        let content = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(content.contains("Performance Controls"));
+        assert!(content.contains("Echo Feedback"));
+        assert!(content.contains("dsp:echo/delay.feedback"));
+        assert!(!content.contains("Pattern 1"));
+        assert!(!content.contains("Diagnostics"));
     }
 
     #[test]

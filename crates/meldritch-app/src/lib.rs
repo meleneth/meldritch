@@ -37,6 +37,22 @@ pub struct Selection {
     pub step: StepIndex,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CockpitMode {
+    Performance,
+    AllParameters,
+}
+
+impl CockpitMode {
+    #[must_use]
+    pub const fn toggled(self) -> Self {
+        match self {
+            Self::Performance => Self::AllParameters,
+            Self::AllParameters => Self::Performance,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommand {
     Play,
@@ -55,6 +71,7 @@ pub enum AppCommand {
     ToggleTrackMute(TrackId),
     TriggerFill(PatternId),
     CancelPerformance,
+    SetCockpitMode(CockpitMode),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -86,6 +103,10 @@ pub enum AppCommandResult {
     },
     PerformanceQueued(QueuedPerformanceGesture),
     PerformanceCancelled(Option<QueuedPerformanceGesture>),
+    CockpitModeChanged {
+        previous: CockpitMode,
+        current: CockpitMode,
+    },
 }
 
 #[derive(Debug)]
@@ -232,8 +253,22 @@ pub struct StepInspectorView {
     pub value: Option<Step>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct CuratedControlView {
+    pub id: String,
+    pub label: String,
+    pub target: String,
+    pub minimum: f64,
+    pub maximum: f64,
+    pub step: f64,
+    pub binding: String,
+    pub value: Option<f64>,
+}
+
 #[derive(Clone, Debug)]
 pub struct AppViewModel {
+    pub cockpit_mode: CockpitMode,
+    pub curated_controls: Vec<CuratedControlView>,
     pub transport: TransportView,
     pub arrangement: Option<ArrangementView>,
     pub automation: Option<AutomationView>,
@@ -252,6 +287,7 @@ pub struct AppViewModel {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppInput {
+    ToggleCockpitMode,
     MoveLeft,
     MoveRight,
     MoveUp,
@@ -426,6 +462,8 @@ impl Drop for PerformanceFxWorker {
 }
 
 pub struct AppController {
+    cockpit_mode: CockpitMode,
+    curated_controls: Vec<CuratedControlView>,
     playback: PlaybackControl,
     coordinator: RenderCoordinator,
     editor: LivePatternEditor,
@@ -464,6 +502,8 @@ impl AppController {
         history_capacity: usize,
     ) -> Self {
         Self {
+            cockpit_mode: CockpitMode::Performance,
+            curated_controls: Vec::new(),
             playback,
             coordinator,
             editor,
@@ -522,6 +562,10 @@ impl AppController {
 
     pub fn show_automation(&mut self, lanes: Vec<AutomationLane>) {
         self.automation = lanes;
+    }
+
+    pub fn set_curated_controls(&mut self, controls: Vec<CuratedControlView>) {
+        self.curated_controls = controls;
     }
 
     pub fn show_effect_sends(&mut self, rules: Vec<EffectSendRule>) {
@@ -877,6 +921,14 @@ impl AppController {
             AppCommand::CancelPerformance => {
                 AppCommandResult::PerformanceCancelled(self.performance_launcher.cancel())
             }
+            AppCommand::SetCockpitMode(mode) => {
+                let previous = self.cockpit_mode;
+                self.cockpit_mode = *mode;
+                AppCommandResult::CockpitModeChanged {
+                    previous,
+                    current: *mode,
+                }
+            }
         };
         let (changed, dirty_ranges) = match &result {
             AppCommandResult::TransportQueued => (true, Vec::new()),
@@ -892,6 +944,9 @@ impl AppController {
             AppCommandResult::AudioSourceSwitched { .. } => (true, Vec::new()),
             AppCommandResult::PerformanceQueued(_) => (true, Vec::new()),
             AppCommandResult::PerformanceCancelled(queued) => (queued.is_some(), Vec::new()),
+            AppCommandResult::CockpitModeChanged { previous, current } => {
+                (previous != current, Vec::new())
+            }
         };
         self.record(command, changed, dirty_ranges);
         Ok(result)
@@ -935,6 +990,8 @@ impl AppController {
             })
             .collect();
         AppViewModel {
+            cockpit_mode: self.cockpit_mode,
+            curated_controls: self.curated_controls.clone(),
             transport: TransportView {
                 state: diagnostics.playback.state,
                 position: diagnostics.playback.position,
@@ -1080,6 +1137,7 @@ impl AppController {
     pub fn handle_input(&mut self, input: AppInput) -> Result<AppCommandResult, AppCommandError> {
         let pattern_length = self.editor.state().pattern().length_steps();
         let command = match input {
+            AppInput::ToggleCockpitMode => AppCommand::SetCockpitMode(self.cockpit_mode.toggled()),
             AppInput::MoveLeft => AppCommand::Select(Selection {
                 track: self.selection.track,
                 step: StepIndex::new(self.selection.step.raw().saturating_sub(1)),
@@ -1740,6 +1798,41 @@ mod tests {
         assert_eq!(controller.history().len(), 2);
         assert_eq!(controller.history()[0].sequence, 1);
         assert_eq!(controller.history()[1].sequence, 2);
+    }
+
+    #[test]
+    fn performance_mode_is_default_and_mode_switch_preserves_runtime_state() {
+        let (mut controller, _engine) = controller(8);
+        let before = controller.view_model();
+        assert_eq!(before.cockpit_mode, CockpitMode::Performance);
+
+        let result = controller
+            .handle_input(AppInput::ToggleCockpitMode)
+            .unwrap();
+        assert_eq!(
+            result,
+            AppCommandResult::CockpitModeChanged {
+                previous: CockpitMode::Performance,
+                current: CockpitMode::AllParameters,
+            }
+        );
+        let after = controller.view_model();
+        assert_eq!(after.cockpit_mode, CockpitMode::AllParameters);
+        assert_eq!(after.transport.position, before.transport.position);
+        assert_eq!(after.transport.state, before.transport.state);
+        assert_eq!(after.inspector.selection, before.inspector.selection);
+        assert_eq!(
+            controller.history().back().unwrap().command,
+            AppCommand::SetCockpitMode(CockpitMode::AllParameters)
+        );
+
+        controller
+            .handle_input(AppInput::ToggleCockpitMode)
+            .unwrap();
+        assert_eq!(
+            controller.view_model().cockpit_mode,
+            CockpitMode::Performance
+        );
     }
 
     #[test]

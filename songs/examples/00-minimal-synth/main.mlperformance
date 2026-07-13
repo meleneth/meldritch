@@ -1,0 +1,13 @@
+[meldritch]
+kind = "performance"
+version = 1
+
+[performance]
+id = "minimal-synth"
+title = "Minimal Synth"
+bpm = 120.0
+sample_rate = 48000
+
+[[tracks]]
+id = "drone"
+synth = "synths/drone.mlsynth"
