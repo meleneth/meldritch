@@ -135,7 +135,8 @@ assigned, switched, and rendered deterministically from text definitions.
   bindings for absolute faders/knobs and step buttons
 - [x] Open script-declared MIDI devices through the host MIDI stack and feed
   decoded CC messages into the typed control-surface profile
-- [ ] Add a hardware smoke/diagnostic path and verify LaunchControl XL input on
+- [x] Add a script-aware hardware diagnostic path for MIDI control inputs
+- [ ] Verify LaunchControl XL input with the diagnostic path on
   both Windows and Linux
 - [ ] Add script-declared pattern/launch/toggle controls beyond parameter
   controls

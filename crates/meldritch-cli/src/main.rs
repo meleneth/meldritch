@@ -313,6 +313,14 @@ enum Command {
         #[arg(value_name = "SONG_DIRECTORY")]
         song: PathBuf,
     },
+    /// List MIDI ports and monitor script-defined MIDI control bindings.
+    MidiControlsCheck {
+        #[arg(value_name = "SONG_DIRECTORY")]
+        song: PathBuf,
+        /// Seconds to listen for incoming control messages.
+        #[arg(long, default_value_t = 10)]
+        seconds: u64,
+    },
     /// Capture and transform a range from a WAV into a derived artifact.
     TransformChunk {
         #[arg(value_name = "WAV")]
@@ -786,6 +794,7 @@ fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::Validate { project } => validate_project(project),
         Command::ValidateSong { song } => validate_song(song),
+        Command::MidiControlsCheck { song, seconds } => midi_controls_check(song, seconds),
         Command::TransformChunk {
             input,
             kind,
@@ -2252,13 +2261,94 @@ struct MidiControlInputConnection {
     _connection: midir::MidiInputConnection<()>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct MidiControlDiagnosticEvent {
+    device: String,
+    port: String,
+    channel: u8,
+    cc: u8,
+    value: u8,
+    input: Option<meldritch_app::AppInput>,
+}
+
+fn midi_controls_check(path: PathBuf, seconds: u64) -> Result<(), String> {
+    let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
+    let midi_input = midir::MidiInput::new("meldritch-midi-port-list")
+        .map_err(|error| midi_input_client_error("failed to create MIDI input client", &error))?;
+    let ports = midi_input.ports();
+    println!("visible MIDI input ports:");
+    if ports.is_empty() {
+        println!("  <none>");
+    } else {
+        for (index, port) in ports.iter().enumerate() {
+            let name = midi_input
+                .port_name(port)
+                .unwrap_or_else(|_| "<unreadable port name>".to_owned());
+            println!("  {index}: {name}");
+        }
+    }
+    drop(midi_input);
+
+    let bindings = midi_control_bindings_for_song(&song);
+    let (sender, receiver) = mpsc::channel();
+    let mut connections = Vec::new();
+    for device in song.performance().midi_devices() {
+        let device_bindings = midi_control_bindings_for_device(&bindings, device.id());
+        println!(
+            "script device '{}' matches ports containing '{}' with {} binding(s)",
+            device.id(),
+            device.name_contains(),
+            device_bindings.len()
+        );
+        if device_bindings.is_empty() {
+            continue;
+        }
+        match connect_midi_control_diagnostic(device, sender.clone(), device_bindings)? {
+            Some(connection) => connections.push(connection),
+            None => println!("  no matching port opened for '{}'", device.id()),
+        }
+    }
+    if connections.is_empty() {
+        println!("no script-declared MIDI devices were opened");
+        return Ok(());
+    }
+
+    println!("listening for MIDI controls for {seconds}s; move knobs/faders or press buttons");
+    let deadline = Instant::now() + Duration::from_secs(seconds);
+    let mut events = 0_u64;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        let timeout = remaining.min(Duration::from_millis(250));
+        match receiver.recv_timeout(timeout) {
+            Ok(event) => {
+                events = events.saturating_add(1);
+                let mapped = event
+                    .input
+                    .as_ref()
+                    .map_or_else(|| "unmapped".to_owned(), |input| format!("{input:?}"));
+                println!(
+                    "{} · {} · ch {} cc {} value {} -> {}",
+                    event.device, event.port, event.channel, event.cc, event.value, mapped
+                );
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    println!("observed {events} MIDI control event(s)");
+    Ok(())
+}
+
 fn connect_midi_control_input(
     device: &meldritch_dsl::MidiDeviceDefinition,
     sender: mpsc::Sender<meldritch_app::AppInput>,
     bindings: Vec<meldritch_app::MidiControlBinding>,
 ) -> Result<Option<MidiControlInputConnection>, String> {
     let mut midi_input = midir::MidiInput::new(&format!("meldritch-midi-{}", device.id()))
-        .map_err(|error| format!("failed to create MIDI input client: {error}"))?;
+        .map_err(|error| midi_input_client_error("failed to create MIDI input client", &error))?;
     midi_input.ignore(midir::Ignore::None);
     let Some((port, name)) = midi_input
         .ports()
@@ -2300,6 +2390,69 @@ fn connect_midi_control_input(
     Ok(Some(MidiControlInputConnection {
         _connection: connection,
     }))
+}
+
+fn connect_midi_control_diagnostic(
+    device: &meldritch_dsl::MidiDeviceDefinition,
+    sender: mpsc::Sender<MidiControlDiagnosticEvent>,
+    bindings: Vec<meldritch_app::MidiControlBinding>,
+) -> Result<Option<MidiControlInputConnection>, String> {
+    let mut midi_input = midir::MidiInput::new(&format!("meldritch-midi-check-{}", device.id()))
+        .map_err(|error| midi_input_client_error("failed to create MIDI input client", &error))?;
+    midi_input.ignore(midir::Ignore::None);
+    let Some((port, port_name)) = midi_input
+        .ports()
+        .into_iter()
+        .filter_map(|port| {
+            let name = midi_input.port_name(&port).ok()?;
+            midi_port_name_matches(&name, device.name_contains()).then_some((port, name))
+        })
+        .next()
+    else {
+        return Ok(None);
+    };
+    let device_id = device.id().to_owned();
+    let callback_device_id = device_id.clone();
+    let callback_port_name = port_name.clone();
+    let connection = midi_input
+        .connect(
+            &port,
+            &format!("meldritch-midi-check-{}-input", device.id()),
+            move |_timestamp, message, _state| {
+                let Some((channel, cc, value)) = decode_midi_cc_message(message) else {
+                    return;
+                };
+                let input = meldritch_app::map_midi_control_input(
+                    &bindings,
+                    meldritch_app::MidiControlInput {
+                        device: callback_device_id.clone(),
+                        channel,
+                        cc,
+                        value,
+                    },
+                );
+                let _ = sender.send(MidiControlDiagnosticEvent {
+                    device: callback_device_id.clone(),
+                    port: callback_port_name.clone(),
+                    channel,
+                    cc,
+                    value,
+                    input,
+                });
+            },
+            (),
+        )
+        .map_err(|error| format!("failed to open MIDI input '{port_name}': {error}"))?;
+    println!("  opened '{}' on port '{port_name}'", device_id);
+    Ok(Some(MidiControlInputConnection {
+        _connection: connection,
+    }))
+}
+
+fn midi_input_client_error(context: &str, error: &midir::InitError) -> String {
+    format!(
+        "{context}: {error}. On Linux, ensure the ALSA sequencer device is available (usually /dev/snd/seq) and the user can access it. On Windows, ensure the controller is visible as a MIDI input device."
+    )
 }
 
 fn midi_port_name_matches(name: &str, contains: &str) -> bool {

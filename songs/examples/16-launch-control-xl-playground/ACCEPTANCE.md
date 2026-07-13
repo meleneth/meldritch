@@ -15,6 +15,8 @@ It must:
 - route all MIDI input through typed `AppInput` / `AppCommand` results so a
   captured performance can replay without the controller attached
 - validate as a normal song directory
+- support `meldritch midi-controls-check` as the hardware smoke path for
+  listing visible MIDI ports and printing script-mapped CC events
 
 Current implementation status: the format can declare every MIDI CC binding and
 the runtime derives MIDI routing from the script. The playground is intentionally

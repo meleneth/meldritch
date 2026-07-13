@@ -106,6 +106,8 @@ Implemented foundations include:
   faders/knobs and step buttons
 - `tui-song` script-declared MIDI input via the host MIDI stack (`midir`), with
   generic CC decoding routed through typed app inputs
+- `meldritch midi-controls-check SONG_DIRECTORY` for listing MIDI ports and
+  printing script-mapped CC events without starting audio/TUI playback
 - latest-wins background rerender for live delay-feedback overrides
 - completed song rerenders published through the existing atomic audio snapshot
 - `tui-song` timestamped `.mlperformance` session files under `performances/`
@@ -133,13 +135,13 @@ this guide was written:
   surface is declared in `.mlperformance`, but richer pattern/launch/toggle
   control actions remain future schema work
 
-The next implementation slice is to add a hardware smoke/diagnostic path for
-LaunchControl XL input and use it to verify the Windows and Linux device path.
-In parallel, add script-declared pattern/launch/toggle control actions so the
-full controller playground can do more than parameter nudges. After that, keep
-broadening session capture coverage with scripted accepted-action tests that
-exercise the real controller path, then move into exact replay. Full
-all-parameters inspection remains open after that.
+The next implementation slice is to use `midi-controls-check` to verify the
+Windows and Linux LaunchControl XL device path. In parallel, add
+script-declared pattern/launch/toggle control actions so the full controller
+playground can do more than parameter nudges. After that, keep broadening
+session capture coverage with scripted accepted-action tests that exercise the
+real controller path, then move into exact replay. Full all-parameters
+inspection remains open after that.
 
 ## Important files
 
