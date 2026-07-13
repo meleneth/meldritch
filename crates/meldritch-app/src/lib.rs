@@ -372,19 +372,23 @@ pub enum AppInput {
     DecreaseMasterDrive,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MidiControlAction {
     Absolute,
+    Centered { center: f64 },
+    Overdrive { normal: f64, normal_midi: u8 },
     Decrement,
     Increment,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MidiControlBinding {
     pub control_id: String,
     pub device: String,
     pub channel: Option<u8>,
     pub cc: u8,
+    pub minimum: f64,
+    pub maximum: f64,
     pub action: MidiControlAction,
 }
 
@@ -414,6 +418,28 @@ pub fn map_midi_control_input(
                 id: binding.control_id.clone(),
                 value: f64::from(input.value.min(127)) / 127.0,
             }),
+            MidiControlAction::Centered { center } => Some(AppInput::SetCuratedControlNormalized {
+                id: binding.control_id.clone(),
+                value: normalized_from_centered_midi(
+                    input.value,
+                    binding.minimum,
+                    binding.maximum,
+                    center,
+                ),
+            }),
+            MidiControlAction::Overdrive {
+                normal,
+                normal_midi,
+            } => Some(AppInput::SetCuratedControlNormalized {
+                id: binding.control_id.clone(),
+                value: normalized_from_overdrive_midi(
+                    input.value,
+                    binding.minimum,
+                    binding.maximum,
+                    normal,
+                    normal_midi,
+                ),
+            }),
             MidiControlAction::Decrement if input.value != 0 => {
                 Some(AppInput::AdjustCuratedControl {
                     id: binding.control_id.clone(),
@@ -428,6 +454,46 @@ pub fn map_midi_control_input(
             }
             MidiControlAction::Decrement | MidiControlAction::Increment => None,
         })
+}
+
+fn normalized_from_centered_midi(value: u8, minimum: f64, maximum: f64, center: f64) -> f64 {
+    let value = value.min(127);
+    let center = center.clamp(minimum, maximum);
+    let actual = if value <= 64 {
+        let phase = f64::from(value) / 64.0;
+        minimum + phase * (center - minimum)
+    } else {
+        let phase = f64::from(value - 64) / 63.0;
+        center + phase * (maximum - center)
+    };
+    normalized_from_actual(actual, minimum, maximum)
+}
+
+fn normalized_from_overdrive_midi(
+    value: u8,
+    minimum: f64,
+    maximum: f64,
+    normal: f64,
+    normal_midi: u8,
+) -> f64 {
+    let value = value.min(127);
+    let normal = normal.clamp(minimum, maximum);
+    let normal_midi = normal_midi.clamp(1, 126);
+    let actual = if value <= normal_midi {
+        let phase = f64::from(value) / f64::from(normal_midi);
+        minimum + phase * (normal - minimum)
+    } else {
+        let phase = f64::from(value - normal_midi) / f64::from(127 - normal_midi);
+        normal + phase * (maximum - normal)
+    };
+    normalized_from_actual(actual, minimum, maximum)
+}
+
+fn normalized_from_actual(actual: f64, minimum: f64, maximum: f64) -> f64 {
+    if maximum <= minimum {
+        return 0.0;
+    }
+    ((actual.clamp(minimum, maximum) - minimum) / (maximum - minimum)).clamp(0.0, 1.0)
 }
 
 struct BassSynthControl {
@@ -2060,6 +2126,8 @@ mod tests {
                 device: "launch-control-xl".to_owned(),
                 channel: Some(1),
                 cc: 77,
+                minimum: 0.0,
+                maximum: 1.0,
                 action: MidiControlAction::Absolute,
             },
             MidiControlBinding {
@@ -2067,6 +2135,8 @@ mod tests {
                 device: "launch-control-xl".to_owned(),
                 channel: Some(1),
                 cc: 41,
+                minimum: 0.0,
+                maximum: 1.0,
                 action: MidiControlAction::Decrement,
             },
             MidiControlBinding {
@@ -2074,6 +2144,8 @@ mod tests {
                 device: "launch-control-xl".to_owned(),
                 channel: Some(1),
                 cc: 57,
+                minimum: 0.0,
+                maximum: 1.0,
                 action: MidiControlAction::Increment,
             },
         ];
@@ -2142,6 +2214,8 @@ mod tests {
                     device: "launch-control-xl".to_owned(),
                     channel: None,
                     cc: 57,
+                    minimum: 0.0,
+                    maximum: 1.0,
                     action: MidiControlAction::Increment,
                 }],
                 MidiControlInput {
@@ -2154,6 +2228,55 @@ mod tests {
             Some(AppInput::AdjustCuratedControl {
                 id: "echo-feedback".to_owned(),
                 steps: 1,
+            })
+        );
+        assert_eq!(
+            map_midi_control_input(
+                &[MidiControlBinding {
+                    control_id: "cutoff".to_owned(),
+                    device: "launch-control-xl".to_owned(),
+                    channel: Some(9),
+                    cc: 13,
+                    minimum: 100.0,
+                    maximum: 5000.0,
+                    action: MidiControlAction::Centered { center: 4350.0 },
+                }],
+                MidiControlInput {
+                    device: "launch-control-xl".to_owned(),
+                    channel: 9,
+                    cc: 13,
+                    value: 64,
+                },
+            ),
+            Some(AppInput::SetCuratedControlNormalized {
+                id: "cutoff".to_owned(),
+                value: (4350.0 - 100.0) / (5000.0 - 100.0),
+            })
+        );
+        assert_eq!(
+            map_midi_control_input(
+                &[MidiControlBinding {
+                    control_id: "cutoff".to_owned(),
+                    device: "launch-control-xl".to_owned(),
+                    channel: Some(9),
+                    cc: 77,
+                    minimum: 100.0,
+                    maximum: 5000.0,
+                    action: MidiControlAction::Overdrive {
+                        normal: 4350.0,
+                        normal_midi: 108,
+                    },
+                }],
+                MidiControlInput {
+                    device: "launch-control-xl".to_owned(),
+                    channel: 9,
+                    cc: 77,
+                    value: 108,
+                },
+            ),
+            Some(AppInput::SetCuratedControlNormalized {
+                id: "cutoff".to_owned(),
+                value: (4350.0 - 100.0) / (5000.0 - 100.0),
             })
         );
     }

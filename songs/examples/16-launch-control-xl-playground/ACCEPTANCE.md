@@ -25,6 +25,9 @@ It must:
   script-declared typed performance actions, not hard-coded Rust behavior
 - provide four authored groove scenes and one authored variation/fill per scene;
   the B row selects scenes 1-4 and variation 1 for scenes 1-4
+- normalize the physical surface so centered knobs are neutral and faders use
+  the authored cutoff curve: MIDI 0 -> 100 Hz, MIDI 108 -> 4350 Hz “full open”,
+  MIDI 127 -> 5000 Hz “overdrive full open”
 - route all MIDI input through typed `AppInput` / `AppCommand` results so a
   captured performance can replay without the controller attached
 - rerender and publish selected groove scenes from authored `.mlpattern` files

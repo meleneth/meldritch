@@ -139,9 +139,11 @@ this guide was written:
   is declared in `.mlperformance` and supported feedback/cutoff controls rerender
   audio; launch buttons and the discovered side-column note/CC buttons can
   trigger typed transport/performance actions; the B row selects authored
-  groove scenes/variations that rerender through the song synth and delay.
-  Quantized launch timing, exact replay, and MIDI output/LED feedback are not
-  yet implemented.
+  groove scenes/variations that rerender through the song synth and delay; and
+  the physical strip controls use script-declared centered/overdrive curves so
+  centered knobs are neutral and faders reach normal full-open before the
+  physical maximum. Quantized launch timing, exact replay, and MIDI output/LED
+  feedback are not yet implemented.
 
 The next implementation slice is to use `midi-controls-check` to verify the
 Windows and Linux LaunchControl XL device path and confirm any MIDI output

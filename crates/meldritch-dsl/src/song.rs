@@ -563,14 +563,16 @@ impl CuratedControlDefinition {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ControlBindingAction {
     Absolute,
+    Centered { center: f64 },
+    Overdrive { normal: f64, normal_midi: u8 },
     Decrement,
     Increment,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ControlBindingDefinition {
     Key {
         key: String,
@@ -588,7 +590,7 @@ pub enum ControlBindingDefinition {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ActionControlDefinition {
     id: String,
     label: String,
@@ -814,6 +816,12 @@ enum RawControlBinding {
         channel: Option<u8>,
         cc: u8,
         action: RawControlBindingAction,
+        #[serde(default)]
+        center: Option<f64>,
+        #[serde(default)]
+        normal: Option<f64>,
+        #[serde(default)]
+        normal_midi: Option<u8>,
     },
 }
 
@@ -821,6 +829,8 @@ enum RawControlBinding {
 #[serde(rename_all = "snake_case")]
 enum RawControlBindingAction {
     Absolute,
+    Centered,
+    Overdrive,
     Decrement,
     Increment,
 }
@@ -1192,7 +1202,6 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
     let mut key_bindings = BTreeSet::new();
     let mut midi_cc_claims = BTreeSet::new();
     let mut midi_note_claims = BTreeSet::new();
-    let mut midi_bindings = BTreeSet::new();
     let mut controls = Vec::with_capacity(raw_performance.controls.len());
     for raw in raw_performance.controls {
         if !control_ids.insert(raw.id.clone()) {
@@ -1242,6 +1251,9 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                     channel,
                     cc,
                     action,
+                    center,
+                    normal,
+                    normal_midi,
                 } => {
                     if !midi_device_ids.contains(&device) {
                         return Err(SongLoadError::one(
@@ -1273,17 +1285,68 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                     }
                     let action = match action {
                         RawControlBindingAction::Absolute => ControlBindingAction::Absolute,
+                        RawControlBindingAction::Centered => {
+                            let center = center.ok_or_else(|| {
+                                SongLoadError::one(
+                                    &entry,
+                                    format!(
+                                        "control '{}' centered MIDI binding requires center",
+                                        raw.id
+                                    ),
+                                )
+                            })?;
+                            if !center.is_finite() || center < raw.range[0] || center > raw.range[1]
+                            {
+                                return Err(SongLoadError::one(
+                                    &entry,
+                                    format!(
+                                        "control '{}' centered MIDI binding has invalid center",
+                                        raw.id
+                                    ),
+                                ));
+                            }
+                            ControlBindingAction::Centered { center }
+                        }
+                        RawControlBindingAction::Overdrive => {
+                            let normal = normal.ok_or_else(|| {
+                                SongLoadError::one(
+                                    &entry,
+                                    format!(
+                                        "control '{}' overdrive MIDI binding requires normal",
+                                        raw.id
+                                    ),
+                                )
+                            })?;
+                            let normal_midi = normal_midi.ok_or_else(|| {
+                                SongLoadError::one(
+                                    &entry,
+                                    format!(
+                                        "control '{}' overdrive MIDI binding requires normal_midi",
+                                        raw.id
+                                    ),
+                                )
+                            })?;
+                            if !normal.is_finite()
+                                || normal < raw.range[0]
+                                || normal > raw.range[1]
+                                || !(1..=126).contains(&normal_midi)
+                            {
+                                return Err(SongLoadError::one(
+                                    &entry,
+                                    format!(
+                                        "control '{}' overdrive MIDI binding has invalid normal or normal_midi",
+                                        raw.id
+                                    ),
+                                ));
+                            }
+                            ControlBindingAction::Overdrive {
+                                normal,
+                                normal_midi,
+                            }
+                        }
                         RawControlBindingAction::Decrement => ControlBindingAction::Decrement,
                         RawControlBindingAction::Increment => ControlBindingAction::Increment,
                     };
-                    if !midi_bindings.insert((device.clone(), channel, cc, action)) {
-                        return Err(SongLoadError::one(
-                            &entry,
-                            format!(
-                                "control MIDI binding device='{device}' channel='{channel:?}' cc={cc} action='{action:?}' is declared more than once"
-                            ),
-                        ));
-                    }
                     bindings.push(ControlBindingDefinition::MidiCc {
                         device,
                         channel,
@@ -2468,7 +2531,7 @@ fn fingerprint_song(
                     fingerprint.string(device);
                     fingerprint.u64(channel.map_or(0, u64::from));
                     fingerprint.u64(u64::from(*cc));
-                    fingerprint.u64(*action as u64);
+                    fingerprint_control_binding_action(&mut fingerprint, *action);
                 }
                 ControlBindingDefinition::MidiNote {
                     device,
@@ -2525,7 +2588,7 @@ fn fingerprint_song(
                     fingerprint.string(device);
                     fingerprint.u64(channel.map_or(0, u64::from));
                     fingerprint.u64(u64::from(*cc));
-                    fingerprint.u64(*action as u64);
+                    fingerprint_control_binding_action(&mut fingerprint, *action);
                 }
                 ControlBindingDefinition::MidiNote {
                     device,
@@ -2617,6 +2680,26 @@ fn fingerprint_song(
         }
     }
     fingerprint.finish()
+}
+
+fn fingerprint_control_binding_action(fingerprint: &mut Fnv64, action: ControlBindingAction) {
+    match action {
+        ControlBindingAction::Absolute => fingerprint.string("absolute"),
+        ControlBindingAction::Centered { center } => {
+            fingerprint.string("centered");
+            fingerprint.u64(center.to_bits());
+        }
+        ControlBindingAction::Overdrive {
+            normal,
+            normal_midi,
+        } => {
+            fingerprint.string("overdrive");
+            fingerprint.u64(normal.to_bits());
+            fingerprint.u64(u64::from(normal_midi));
+        }
+        ControlBindingAction::Decrement => fingerprint.string("decrement"),
+        ControlBindingAction::Increment => fingerprint.string("increment"),
+    }
 }
 
 struct Fnv64(u64);

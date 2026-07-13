@@ -2626,6 +2626,16 @@ fn midi_control_bindings_for_song(
                     meldritch_dsl::ControlBindingAction::Absolute => {
                         meldritch_app::MidiControlAction::Absolute
                     }
+                    meldritch_dsl::ControlBindingAction::Centered { center } => {
+                        meldritch_app::MidiControlAction::Centered { center: *center }
+                    }
+                    meldritch_dsl::ControlBindingAction::Overdrive {
+                        normal,
+                        normal_midi,
+                    } => meldritch_app::MidiControlAction::Overdrive {
+                        normal: *normal,
+                        normal_midi: *normal_midi,
+                    },
                     meldritch_dsl::ControlBindingAction::Decrement => {
                         meldritch_app::MidiControlAction::Decrement
                     }
@@ -2638,6 +2648,8 @@ fn midi_control_bindings_for_song(
                     device: device.clone(),
                     channel: *channel,
                     cc: *cc,
+                    minimum: control.range().0,
+                    maximum: control.range().1,
                     action,
                 })
             })
@@ -6983,7 +6995,7 @@ mod tests {
             .map(|mapped| mapped.input),
             Some(meldritch_app::AppInput::SetCuratedControlNormalized {
                 id: "knob-01".to_owned(),
-                value: 64.0 / 127.0,
+                value: (4350.0 - 100.0) / (5000.0 - 100.0),
             })
         );
         let launch_note = map_script_midi_note(&action_bindings, "launch-control-xl", 9, 41, true)

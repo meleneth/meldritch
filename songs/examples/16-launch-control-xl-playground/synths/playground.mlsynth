@@ -34,7 +34,7 @@ type = "vca"
 [[modules]]
 id = "filter"
 type = "low_pass"
-cutoff_hz = 1200.0
+cutoff_hz = 4350.0
 resonance = 0.2
 
 [[modules]]
