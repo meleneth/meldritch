@@ -666,6 +666,9 @@ enum Command {
         /// Show raw/unmapped MIDI input in the TUI status line while testing hardware.
         #[arg(long)]
         midi_debug: bool,
+        /// Show live song-publication/device read diagnostics in the TUI status line.
+        #[arg(long)]
+        audio_debug: bool,
     },
     /// Open the realtime cockpit with a native synthesized bassline track.
     TuiBassline {
@@ -1043,6 +1046,7 @@ fn run(cli: Cli) -> Result<(), String> {
             autoplay,
             no_autoplay,
             midi_debug,
+            audio_debug,
         } => tui_song(
             song,
             frames,
@@ -1051,6 +1055,7 @@ fn run(cli: Cli) -> Result<(), String> {
             midi_controls || !no_midi_controls,
             autoplay || !no_autoplay,
             midi_debug,
+            audio_debug,
         ),
         Command::TuiBassline {
             project,
@@ -2919,6 +2924,7 @@ fn tui_song(
     midi_controls: bool,
     autoplay: bool,
     midi_debug: bool,
+    audio_debug: bool,
 ) -> Result<(), String> {
     let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
     let patch = meldritch_render::song_render::compile_delayed_note_song(&song)
@@ -2946,6 +2952,7 @@ fn tui_song(
         .map_err(|error| format!("failed to prepare initial song audio: {error:?}"))?;
     let (song_audio_publisher, song_audio_reader) =
         meldritch_audio::audio_publication::audio_publication(initial_song_audio);
+    let debug_song_audio_reader = song_audio_reader.clone();
     let worker_count = if workers == 0 {
         std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
     } else {
@@ -3053,6 +3060,7 @@ fn tui_song(
     let tick_published_generation = Arc::clone(&published_generation);
     let tick_submitted_generation = Arc::clone(&submitted_generation);
     let tick_song_audio_publisher = song_audio_publisher.clone();
+    let mut last_audio_debug = Instant::now();
     let capture = Arc::new(Mutex::new(PerformanceSessionCapture::create(
         &song,
         frame_count,
@@ -3061,7 +3069,7 @@ fn tui_song(
     let run_result = meldritch_tui::run_with_hooks_and_external_inputs(
         &mut controller,
         Step::new(36),
-        move |_controller| {
+        move |controller| {
             let completed = worker
                 .lock()
                 .expect("song render worker lock poisoned")
@@ -3083,6 +3091,13 @@ fn tui_song(
                     .map_err(|error| format!("song publication failed: {error}"))?;
                 *published = generation;
                 return Ok(Some(format!("Song rerender published: {overrides:?}")));
+            }
+            if audio_debug && last_audio_debug.elapsed() >= Duration::from_millis(500) {
+                last_audio_debug = Instant::now();
+                return Ok(Some(song_audio_debug_line(
+                    &debug_song_audio_reader,
+                    controller.playback_control().status_monitor().snapshot(),
+                )));
             }
             Ok(None)
         },
@@ -3211,6 +3226,34 @@ fn publish_song_audio(
     publisher
         .publish(snapshot)
         .map_err(|error| format!("incompatible song audio publication: {error:?}"))
+}
+
+fn song_audio_debug_line(
+    reader: &meldritch_audio::audio_publication::AudioSnapshotReader,
+    status: meldritch_audio::realtime_status::RealtimeStatusSnapshot,
+) -> String {
+    let snapshot = reader.snapshot();
+    let frames = snapshot.frames().max(1);
+    let position = status.position % frames;
+    let current = snapshot.frame(position).map_or(0.0, |frame| {
+        frame
+            .iter()
+            .fold(0.0_f64, |peak, sample| peak.max(sample.abs()))
+    });
+    let mut window_peak = 0.0_f64;
+    let window = 2048_u32.min(frames);
+    for offset in 0..window {
+        let frame_index = (position + offset) % frames;
+        if let Ok(frame) = snapshot.frame(frame_index) {
+            for sample in frame {
+                window_peak = window_peak.max(sample.abs());
+            }
+        }
+    }
+    format!(
+        "Audio debug: {:?} pos {} callbacks {} frames {} current {:.4} next_peak {:.4}",
+        status.state, status.position, status.callbacks, frames, current, window_peak
+    )
 }
 
 struct SongSceneBank {
@@ -7194,6 +7237,30 @@ mod tests {
         publish_song_audio(&song_publisher, &rerender, 2).unwrap();
         assert_eq!(song_reader.snapshot().frame(0).unwrap()[0], 0.75);
         assert_eq!(song_reader.snapshot().frame(1).unwrap()[0], 0.25);
+    }
+
+    #[test]
+    fn song_audio_debug_line_reports_publication_peak_near_playhead() {
+        let mut block = meldritch_audio::AudioBlock::silent(1, 4);
+        block.samples_mut().copy_from_slice(&[0.0, 0.0, 0.5, -0.25]);
+        let (_, reader) = meldritch_audio::audio_publication::audio_publication(
+            PublishedAudio::from_block(&block, 2).unwrap(),
+        );
+        let status = meldritch_audio::realtime_status::RealtimeStatusSnapshot {
+            state: meldritch_audio::transport::TransportState::Playing,
+            position: 0,
+            callbacks: 7,
+            stream_errors: 0,
+            underruns: 0,
+            missed_artifacts: 0,
+        };
+
+        let line = song_audio_debug_line(&reader, status);
+
+        assert!(line.contains("Playing"));
+        assert!(line.contains("callbacks 7"));
+        assert!(line.contains("current 0.0000"));
+        assert!(line.contains("next_peak 0.5000"));
     }
 
     fn assert_session_kind(

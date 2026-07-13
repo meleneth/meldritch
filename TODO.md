@@ -162,6 +162,9 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Route live `tui-song` output through a dedicated song-audio publication so
   the generic backing TUI coordinator cannot overwrite the initial rendered song
   with silence before the first controller movement
+- [x] Add `tui-song --audio-debug` status telemetry for live output diagnosis:
+  transport callbacks, playhead position, current sample peak, and upcoming
+  song-publication peak
 - [ ] Verify LaunchControl XL input with the diagnostic path on
   both Windows and Linux
 - [ ] Add MIDI output/LED feedback support after confirming the LaunchControl XL

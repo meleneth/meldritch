@@ -51,6 +51,9 @@ It must:
 - support `tui-song --midi-debug` as the live playground smoke path so mapped
   button/control labels and unmapped raw MIDI events are visible in the status
   line while testing the controller
+- support `tui-song --audio-debug` as the live audio smoke path so the status
+  line reports transport callbacks, playhead position, current sample peak, and
+  upcoming song-publication peak while debugging device/output silence
 - show the authored groovebox surface in default performance mode: B-row scene
   and fill mapping, queued/active state, the actual authored note pattern grid,
   and compact LaunchControl value telemetry
