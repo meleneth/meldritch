@@ -146,10 +146,10 @@ this guide was written:
   per beat, and default performance mode shows the scene/fill map, actual
   authored note grid, and compact LaunchControl value telemetry so the playable
   surface is visible without opening all-parameters mode. `tui-song` autoplays
-  by default for this hardware playground, and the realtime output loop is
-  tested to keep sounding across live parameter rerender publications. Quantized
-  launch timing, exact replay, and MIDI output/LED feedback are not yet
-  implemented.
+  by default for this hardware playground, and the live device output uses a
+  dedicated song-audio publication so the generic backing TUI coordinator cannot
+  overwrite the song with silence. Quantized launch timing, exact replay, and
+  MIDI output/LED feedback are not yet implemented.
 
 The next implementation slice is to use `midi-controls-check` to verify the
 Windows and Linux LaunchControl XL device path and confirm any MIDI output

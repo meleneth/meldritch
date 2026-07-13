@@ -159,6 +159,9 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Fix the LaunchControl playground note positions to use the loader's 960
   PPQ ticks per beat and build the default TUI grid from the authored initial
   `.mlpattern` instead of a dummy empty pattern
+- [x] Route live `tui-song` output through a dedicated song-audio publication so
+  the generic backing TUI coordinator cannot overwrite the initial rendered song
+  with silence before the first controller movement
 - [ ] Verify LaunchControl XL input with the diagnostic path on
   both Windows and Linux
 - [ ] Add MIDI output/LED feedback support after confirming the LaunchControl XL

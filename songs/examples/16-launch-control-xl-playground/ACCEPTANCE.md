@@ -39,6 +39,10 @@ It must:
 - autoplay in `tui-song` by default so the authored pattern keeps sounding while
   LaunchControl inputs only change scene selection, transport, and parameters;
   `--no-autoplay` is the explicit stopped-start smoke-test mode
+- keep the live `tui-song` audio device connected to a dedicated song-audio
+  publication seeded from the initial rendered pattern, so the generic backing
+  TUI coordinator cannot overwrite the song with silence before the first
+  controller movement
 - validate as a normal song directory
 - support `meldritch midi-controls-check` as the hardware smoke path for
   listing visible MIDI ports and printing raw MIDI event details plus authored
@@ -59,7 +63,8 @@ actions. The LaunchControl B row now selects authored groove scenes/variations
 that rerender through the song synth and delay. Pattern positions use real 960
 PPQ ticks, so the default TUI performance mode can expose the authored note grid
 instead of a dummy or collapsed pattern. `tui-song` autoplays by default and the
-realtime output loop keeps playing across parameter rerender publications.
-Quantized launch timing and exact replay remain future schema/runtime work. The
-two observed SysEx messages are intentionally left as diagnostic output until an
-example needs raw/SysEx output or binding support.
+realtime output loop is fed from a dedicated song-audio publication that keeps
+playing across parameter rerender publications. Quantized launch timing and
+exact replay remain future schema/runtime work. The two observed SysEx messages
+are intentionally left as diagnostic output until an example needs raw/SysEx
+output or binding support.

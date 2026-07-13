@@ -1,4 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
+use meldritch_audio::audio_publication::AudioSnapshotPublisher;
+use meldritch_audio::published_audio::PublishedAudio;
 use meldritch_core::{
     Arrangement, ArrangementSection, AutomationInterpolation, AutomationLane, AutomationPoint,
     AutomationTarget, AutomationValue, DirtyRange, EntityId, Event, EventTag, FrameRange, Pattern,
@@ -2940,6 +2942,10 @@ fn tui_song(
         initial.channels(),
         initial.peak_abs()
     );
+    let initial_song_audio = PublishedAudio::from_block(&initial, chunk_frames)
+        .map_err(|error| format!("failed to prepare initial song audio: {error:?}"))?;
+    let (song_audio_publisher, song_audio_reader) =
+        meldritch_audio::audio_publication::audio_publication(initial_song_audio);
     let worker_count = if workers == 0 {
         std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
     } else {
@@ -2971,9 +2977,6 @@ fn tui_song(
         RenderCoordinator::new_from_state(config, state.clone(), playback.status_monitor())
             .map_err(|error| format!("failed to start song render coordinator: {error:?}"))?;
     let _ = coordinator.wait_for_ready_chunks(timeline_chunks, Duration::from_secs(2));
-    coordinator
-        .audition_block(&initial)
-        .map_err(|error| format!("failed to publish initial song audio: {error:?}"))?;
     let editor = meldritch_render::live_edit::LivePatternEditor::new(state, frame_count);
     let mut controller = meldritch_app::AppController::new(
         playback,
@@ -3026,7 +3029,7 @@ fn tui_song(
         Vec::new()
     };
     let _session = meldritch_audio::device_output::RealtimePlaybackSession::open_default(
-        controller.coordinator().audio_reader(),
+        song_audio_reader,
         song.performance().sample_rate(),
         u32::MAX,
         controller.playback_control(),
@@ -3049,6 +3052,7 @@ fn tui_song(
     let published_generation = Arc::new(Mutex::new(0_u64));
     let tick_published_generation = Arc::clone(&published_generation);
     let tick_submitted_generation = Arc::clone(&submitted_generation);
+    let tick_song_audio_publisher = song_audio_publisher.clone();
     let capture = Arc::new(Mutex::new(PerformanceSessionCapture::create(
         &song,
         frame_count,
@@ -3057,7 +3061,7 @@ fn tui_song(
     let run_result = meldritch_tui::run_with_hooks_and_external_inputs(
         &mut controller,
         Step::new(36),
-        move |controller| {
+        move |_controller| {
             let completed = worker
                 .lock()
                 .expect("song render worker lock poisoned")
@@ -3075,10 +3079,8 @@ fn tui_song(
                 if generation <= *published {
                     return Ok(None);
                 }
-                controller
-                    .coordinator()
-                    .audition_block(&block)
-                    .map_err(|error| format!("song publication failed: {error:?}"))?;
+                publish_song_audio(&tick_song_audio_publisher, &block, chunk_frames)
+                    .map_err(|error| format!("song publication failed: {error}"))?;
                 *published = generation;
                 return Ok(Some(format!("Song rerender published: {overrides:?}")));
             }
@@ -3197,6 +3199,18 @@ fn song_controls_for_view(
             }
         })
         .collect()
+}
+
+fn publish_song_audio(
+    publisher: &AudioSnapshotPublisher,
+    block: &meldritch_audio::AudioBlock,
+    chunk_frames: u32,
+) -> Result<(), String> {
+    let snapshot = PublishedAudio::from_block(block, chunk_frames)
+        .map_err(|error| format!("invalid song audio snapshot: {error:?}"))?;
+    publisher
+        .publish(snapshot)
+        .map_err(|error| format!("incompatible song audio publication: {error:?}"))
 }
 
 struct SongSceneBank {
@@ -7138,6 +7152,48 @@ mod tests {
                 .map(|step| step.note()),
             Some(51)
         );
+    }
+
+    #[test]
+    fn song_audio_publication_is_independent_from_backing_coordinator() {
+        let mut initial = meldritch_audio::AudioBlock::silent(1, 4);
+        initial
+            .samples_mut()
+            .copy_from_slice(&[0.25, 0.5, 0.25, 0.5]);
+        let (song_publisher, song_reader) = meldritch_audio::audio_publication::audio_publication(
+            PublishedAudio::from_block(&initial, 2).unwrap(),
+        );
+
+        let (playback, _engine) =
+            meldritch_audio::device_output::playback_session_parts(4).unwrap();
+        let config = RenderCoordinatorConfig::new(1, 4, 2, 2, Duration::from_millis(1)).unwrap();
+        let dummy_pattern = Pattern::new(PatternId::new(1), 4, 4).unwrap();
+        let dummy_state = meldritch_render::coordinator::SampleRenderState::new(
+            dummy_pattern,
+            Tempo::new(120.0, 48_000).unwrap(),
+            ProbabilitySeed::new(0),
+            RenderSettings::new(1).unwrap(),
+            Arc::new(BTreeMap::new()),
+        );
+        let coordinator =
+            RenderCoordinator::new_from_state(config, dummy_state, playback.status_monitor())
+                .unwrap();
+        let _ = coordinator.wait_for_ready_chunks(2, Duration::from_millis(250));
+
+        assert_eq!(song_reader.snapshot().frame(0).unwrap()[0], 0.25);
+        assert_eq!(song_reader.snapshot().frame(1).unwrap()[0], 0.5);
+        assert_ne!(
+            coordinator.audio_reader().snapshot().frame(0).unwrap()[0],
+            0.25
+        );
+
+        let mut rerender = meldritch_audio::AudioBlock::silent(1, 4);
+        rerender
+            .samples_mut()
+            .copy_from_slice(&[0.75, 0.25, 0.75, 0.25]);
+        publish_song_audio(&song_publisher, &rerender, 2).unwrap();
+        assert_eq!(song_reader.snapshot().frame(0).unwrap()[0], 0.75);
+        assert_eq!(song_reader.snapshot().frame(1).unwrap()[0], 0.25);
     }
 
     fn assert_session_kind(
