@@ -310,7 +310,7 @@ fn launch_control_xl_playground_declares_full_midi_surface_in_scripts() {
             )
         })
         .count();
-    assert_eq!(midi_cc_bindings, 52);
+    assert_eq!(midi_cc_bindings, 36);
     let midi_note_bindings = actions
         .iter()
         .flat_map(|action| action.bindings())
@@ -321,5 +321,5 @@ fn launch_control_xl_playground_declares_full_midi_surface_in_scripts() {
             )
         })
         .count();
-    assert_eq!(midi_note_bindings, 4);
+    assert_eq!(midi_note_bindings, 20);
 }

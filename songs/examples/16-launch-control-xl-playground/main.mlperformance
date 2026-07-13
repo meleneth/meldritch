@@ -37,7 +37,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 13
 action = "absolute"
 
@@ -50,7 +50,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 14
 action = "absolute"
 
@@ -63,7 +63,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 15
 action = "absolute"
 
@@ -76,7 +76,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 16
 action = "absolute"
 
@@ -89,7 +89,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 17
 action = "absolute"
 
@@ -102,7 +102,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 18
 action = "absolute"
 
@@ -115,7 +115,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 19
 action = "absolute"
 
@@ -128,7 +128,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 20
 action = "absolute"
 
@@ -141,7 +141,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 29
 action = "absolute"
 
@@ -154,7 +154,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 30
 action = "absolute"
 
@@ -167,7 +167,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 31
 action = "absolute"
 
@@ -180,7 +180,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 32
 action = "absolute"
 
@@ -193,7 +193,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 33
 action = "absolute"
 
@@ -206,7 +206,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 34
 action = "absolute"
 
@@ -219,7 +219,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 35
 action = "absolute"
 
@@ -232,7 +232,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 36
 action = "absolute"
 
@@ -245,7 +245,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 49
 action = "absolute"
 
@@ -258,7 +258,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 50
 action = "absolute"
 
@@ -271,7 +271,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 51
 action = "absolute"
 
@@ -284,7 +284,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 52
 action = "absolute"
 
@@ -297,7 +297,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 53
 action = "absolute"
 
@@ -310,7 +310,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 54
 action = "absolute"
 
@@ -323,7 +323,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 55
 action = "absolute"
 
@@ -336,7 +336,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 56
 action = "absolute"
 
@@ -349,7 +349,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 77
 action = "absolute"
 
@@ -362,7 +362,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 78
 action = "absolute"
 
@@ -375,7 +375,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 79
 action = "absolute"
 
@@ -388,7 +388,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 80
 action = "absolute"
 
@@ -401,7 +401,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 81
 action = "absolute"
 
@@ -414,7 +414,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 82
 action = "absolute"
 
@@ -427,7 +427,7 @@ step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 83
 action = "absolute"
 
@@ -440,7 +440,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
-channel = 1
+channel = 9
 cc = 84
 action = "absolute"
 
@@ -449,80 +449,80 @@ id = "button-a-01"
 label = "Button A01 Toggle Playback"
 action = "toggle_playback"
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 41
+channel = 9
+note = 41
 
 [[actions]]
 id = "button-a-02"
 label = "Button A02 Stop"
 action = "stop"
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 42
+channel = 9
+note = 42
 
 [[actions]]
 id = "button-a-03"
 label = "Button A03 Rewind"
 action = "rewind"
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 43
+channel = 9
+note = 43
 
 [[actions]]
 id = "button-a-04"
 label = "Button A04 Toggle Mode"
 action = "toggle_cockpit_mode"
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 44
+channel = 9
+note = 44
 
 [[actions]]
 id = "button-a-05"
 label = "Button A05 Next Scene"
 action = "queue_next_scene"
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 45
+channel = 9
+note = 45
 
 [[actions]]
 id = "button-a-06"
 label = "Button A06 Toggle Mute"
 action = "toggle_track_mute"
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 46
+channel = 9
+note = 46
 
 [[actions]]
 id = "button-a-07"
 label = "Button A07 Trigger Fill"
 action = "trigger_fill"
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 47
+channel = 9
+note = 47
 
 [[actions]]
 id = "button-a-08"
 label = "Button A08 Cancel"
 action = "cancel_performance"
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 48
+channel = 9
+note = 48
 
 [[actions]]
 id = "button-b-01"
@@ -530,10 +530,10 @@ label = "Button B01 Queue Scene 1"
 action = "queue_phrase"
 scene = 1
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 57
+channel = 9
+note = 57
 
 [[actions]]
 id = "button-b-02"
@@ -541,10 +541,10 @@ label = "Button B02 Queue Scene 2"
 action = "queue_phrase"
 scene = 2
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 58
+channel = 9
+note = 58
 
 [[actions]]
 id = "button-b-03"
@@ -552,10 +552,10 @@ label = "Button B03 Queue Scene 3"
 action = "queue_phrase"
 scene = 3
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 59
+channel = 9
+note = 59
 
 [[actions]]
 id = "button-b-04"
@@ -563,10 +563,10 @@ label = "Button B04 Queue Scene 4"
 action = "queue_phrase"
 scene = 4
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 60
+channel = 9
+note = 60
 
 [[actions]]
 id = "button-b-05"
@@ -575,10 +575,10 @@ action = "queue_phrase_variation"
 scene = 1
 variation = 1
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 61
+channel = 9
+note = 61
 
 [[actions]]
 id = "button-b-06"
@@ -587,10 +587,10 @@ action = "queue_phrase_variation"
 scene = 2
 variation = 1
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 62
+channel = 9
+note = 62
 
 [[actions]]
 id = "button-b-07"
@@ -599,10 +599,10 @@ action = "queue_phrase_variation"
 scene = 3
 variation = 1
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 63
+channel = 9
+note = 63
 
 [[actions]]
 id = "button-b-08"
@@ -611,10 +611,10 @@ action = "queue_phrase_variation"
 scene = 4
 variation = 1
 [[actions.bindings]]
-type = "midi_cc"
+type = "midi_note"
 device = "launch-control-xl"
-channel = 1
-cc = 64
+channel = 9
+note = 64
 
 [[actions]]
 id = "side-right-01"

@@ -10,9 +10,9 @@ It must:
 - avoid Rust-defined control order, CC maps, or “fader 1 means X” policy
 - expose authored controls/actions for all default LaunchControl XL performance
   inputs:
-  - 24 rotary knobs: CC 13-20, 29-36, and 49-56
-  - 8 faders: CC 77-84
-  - 16 launch buttons: CC 41-48 and 57-64
+  - 24 rotary knobs: ch 9 CC 13-20, 29-36, and 49-56
+  - 8 faders: ch 9 CC 77-84
+  - 16 launch buttons: ch 9 notes 41-48 and 57-64
   - right-side specialized buttons discovered bottom-up, right-to-left with the
     raw MIDI diagnostic path:
     - Record Arm, Solo, Mute, Device: ch 9 notes 108, 107, 106, 105

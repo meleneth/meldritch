@@ -6975,25 +6975,26 @@ mod tests {
                 &action_bindings,
                 meldritch_app::MidiControlInput {
                     device: "launch-control-xl".to_owned(),
-                    channel: 1,
-                    cc: 41,
-                    value: 127,
+                    channel: 9,
+                    cc: 13,
+                    value: 64,
                 },
             )
             .map(|mapped| mapped.input),
-            Some(meldritch_app::AppInput::TogglePlayback)
+            Some(meldritch_app::AppInput::SetCuratedControlNormalized {
+                id: "knob-01".to_owned(),
+                value: 64.0 / 127.0,
+            })
+        );
+        let launch_note = map_script_midi_note(&action_bindings, "launch-control-xl", 9, 41, true)
+            .expect("launch button should map");
+        assert_eq!(launch_note.input, meldritch_app::AppInput::TogglePlayback);
+        assert_eq!(
+            launch_note.label.as_deref(),
+            Some("Button A01 Toggle Playback")
         );
         assert_eq!(
-            map_script_midi_control_change(
-                &control_bindings,
-                &action_bindings,
-                meldritch_app::MidiControlInput {
-                    device: "launch-control-xl".to_owned(),
-                    channel: 1,
-                    cc: 41,
-                    value: 0,
-                },
-            ),
+            map_script_midi_note(&action_bindings, "launch-control-xl", 9, 41, false),
             None
         );
         let side_note = map_script_midi_note(&action_bindings, "launch-control-xl", 9, 108, true)
