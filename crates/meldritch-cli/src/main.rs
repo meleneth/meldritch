@@ -2282,10 +2282,45 @@ struct MidiActionBinding {
 struct MidiControlDiagnosticEvent {
     device: String,
     port: String,
-    channel: u8,
-    cc: u8,
-    value: u8,
+    message: MidiDiagnosticMessage,
     input: Option<meldritch_app::AppInput>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum MidiDiagnosticMessage {
+    ControlChange {
+        channel: u8,
+        cc: u8,
+        value: u8,
+    },
+    Note {
+        channel: u8,
+        note: u8,
+        velocity: u8,
+        on: bool,
+    },
+    Raw(Vec<u8>),
+}
+
+impl std::fmt::Display for MidiDiagnosticMessage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ControlChange { channel, cc, value } => {
+                write!(formatter, "cc ch {channel} cc {cc} value {value}")
+            }
+            Self::Note {
+                channel,
+                note,
+                velocity,
+                on,
+            } => write!(
+                formatter,
+                "note {} ch {channel} note {note} velocity {velocity}",
+                if *on { "on" } else { "off" }
+            ),
+            Self::Raw(bytes) => write!(formatter, "raw {bytes:?}"),
+        }
+    }
 }
 
 fn midi_controls_check(path: PathBuf, seconds: u64) -> Result<(), String> {
@@ -2355,8 +2390,8 @@ fn midi_controls_check(path: PathBuf, seconds: u64) -> Result<(), String> {
                     .as_ref()
                     .map_or_else(|| "unmapped".to_owned(), |input| format!("{input:?}"));
                 println!(
-                    "{} · {} · ch {} cc {} value {} -> {}",
-                    event.device, event.port, event.channel, event.cc, event.value, mapped
+                    "{} · {} · {} -> {}",
+                    event.device, event.port, event.message, mapped
                 );
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -2448,25 +2483,41 @@ fn connect_midi_control_diagnostic(
             &port,
             &format!("meldritch-midi-check-{}-input", device.id()),
             move |_timestamp, message, _state| {
-                let Some((channel, cc, value)) = decode_midi_cc_message(message) else {
-                    return;
-                };
-                let input = map_script_midi_input(
-                    &bindings,
-                    &action_bindings,
-                    meldritch_app::MidiControlInput {
-                        device: callback_device_id.clone(),
-                        channel,
-                        cc,
-                        value,
-                    },
-                );
+                let (diagnostic, input) =
+                    if let Some((channel, cc, value)) = decode_midi_cc_message(message) {
+                        let input = map_script_midi_input(
+                            &bindings,
+                            &action_bindings,
+                            meldritch_app::MidiControlInput {
+                                device: callback_device_id.clone(),
+                                channel,
+                                cc,
+                                value,
+                            },
+                        );
+                        (
+                            MidiDiagnosticMessage::ControlChange { channel, cc, value },
+                            input,
+                        )
+                    } else if let Some((channel, note, velocity, on)) =
+                        decode_midi_note_message(message)
+                    {
+                        (
+                            MidiDiagnosticMessage::Note {
+                                channel,
+                                note,
+                                velocity,
+                                on,
+                            },
+                            None,
+                        )
+                    } else {
+                        (MidiDiagnosticMessage::Raw(message.to_vec()), None)
+                    };
                 let _ = sender.send(MidiControlDiagnosticEvent {
                     device: callback_device_id.clone(),
                     port: callback_port_name.clone(),
-                    channel,
-                    cc,
-                    value,
+                    message: diagnostic,
                     input,
                 });
             },
@@ -2651,6 +2702,22 @@ fn decode_midi_cc_message(message: &[u8]) -> Option<(u8, u8, u8)> {
         return None;
     }
     Some(((status & 0x0F) + 1, cc, value.min(127)))
+}
+
+fn decode_midi_note_message(message: &[u8]) -> Option<(u8, u8, u8, bool)> {
+    let [status, note, velocity, ..] = *message else {
+        return None;
+    };
+    match status & 0xF0 {
+        0x80 => Some(((status & 0x0F) + 1, note.min(127), velocity.min(127), false)),
+        0x90 => Some((
+            (status & 0x0F) + 1,
+            note.min(127),
+            velocity.min(127),
+            velocity != 0,
+        )),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -6538,6 +6605,23 @@ mod tests {
         assert_eq!(decode_midi_cc_message(&[0xB0, 77, 64]), Some((1, 77, 64)));
         assert_eq!(decode_midi_cc_message(&[0xB3, 84, 127]), Some((4, 84, 127)));
         assert_eq!(decode_midi_cc_message(&[0x90, 77, 127]), None);
+    }
+
+    #[test]
+    fn midi_note_messages_decode_for_hardware_discovery() {
+        assert_eq!(
+            decode_midi_note_message(&[0x90, 60, 100]),
+            Some((1, 60, 100, true))
+        );
+        assert_eq!(
+            decode_midi_note_message(&[0x90, 60, 0]),
+            Some((1, 60, 0, false))
+        );
+        assert_eq!(
+            decode_midi_note_message(&[0x82, 61, 64]),
+            Some((3, 61, 64, false))
+        );
+        assert_eq!(decode_midi_note_message(&[0xB0, 77, 64]), None);
     }
 
     #[test]

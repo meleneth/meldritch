@@ -107,7 +107,8 @@ Implemented foundations include:
 - `tui-song` script-declared MIDI input via the host MIDI stack (`midir`), with
   generic CC decoding routed through typed app inputs
 - `meldritch midi-controls-check SONG_DIRECTORY` for listing MIDI ports and
-  printing script-mapped CC events without starting audio/TUI playback
+  printing script-mapped CC events plus raw note/unknown MIDI messages without
+  starting audio/TUI playback
 - live `tui-song` rerendering for script-authored curated delay-feedback and
   synth low-pass cutoff controls
 - script-declared MIDI action bindings for transport and performance buttons
@@ -137,7 +138,9 @@ this guide was written:
 - example `16` is `play` because the full LaunchControl XL default MIDI surface
   is declared in `.mlperformance` and supported feedback/cutoff controls rerender
   audio; launch buttons can trigger typed transport/performance actions, while
-  richer pattern-switching semantics remain future schema work
+  richer pattern-switching semantics remain future schema work. The right-side
+  specialized button column still needs hardware-message confirmation before
+  script bindings are added.
 
 The next implementation slice is to use `midi-controls-check` to verify the
 Windows and Linux LaunchControl XL device path. In parallel, add

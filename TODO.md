@@ -140,8 +140,12 @@ assigned, switched, and rendered deterministically from text definitions.
   synth filter cutoff
 - [x] Add script-declared MIDI action bindings for transport and performance
   buttons
+- [x] Print raw note/unknown MIDI messages in the diagnostic path so specialized
+  hardware buttons can be discovered
 - [ ] Verify LaunchControl XL input with the diagnostic path on
   both Windows and Linux
+- [ ] Add script bindings for the LaunchControl XL right-side specialized
+  button column after its actual MIDI messages are confirmed
 - [ ] Add richer script-declared pattern-switching semantics beyond the current
   queue/transport/toggle action set
 
