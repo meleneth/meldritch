@@ -225,3 +225,20 @@ fn live_curated_feedback_override_wins_over_authored_automation_deterministicall
             .is_err()
     );
 }
+
+#[test]
+fn curated_performance_control_song_compiles_renders_and_accepts_live_feedback() {
+    let song = load_song_directory(example("09-curated-performance-controls"))
+        .expect("curated-control song should load");
+    let patch = compile_delayed_note_song(&song).expect("curated song DSP patch should compile");
+    let baseline = patch.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+    let adjusted = patch
+        .render_with_feedback_override(FrameRange::new(0, 96_000).unwrap(), Some(0.75))
+        .unwrap();
+
+    assert_eq!(patch.feedback(), 0.35);
+    assert_eq!(baseline.frames(), 96_000);
+    assert!(baseline.peak_abs() > 0.01);
+    assert_ne!(baseline.samples(), adjusted.samples());
+    assert!(adjusted.samples().iter().all(|sample| sample.is_finite()));
+}

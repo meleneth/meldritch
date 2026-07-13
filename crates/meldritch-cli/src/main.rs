@@ -2,14 +2,16 @@ use clap::{Parser, Subcommand, ValueEnum};
 use meldritch_core::{
     Arrangement, ArrangementSection, AutomationInterpolation, AutomationLane, AutomationPoint,
     AutomationTarget, AutomationValue, DirtyRange, EntityId, Event, EventTag, FrameRange, Pattern,
-    SceneId, SourceId, Step, StepIndex, TrackId,
+    PatternId, ProbabilitySeed, SceneId, SourceId, Step, StepIndex, Tempo, TrackId,
 };
+use meldritch_dsl::{ParameterOwner, ParameterTargetDefinition};
 use meldritch_render::coordinator::{RenderCoordinator, RenderCoordinatorConfig};
 use meldritch_render::{ArtifactCache, CacheStatus, RenderSettings};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -627,6 +629,18 @@ enum Command {
         #[arg(long, default_value_t = 36)]
         note: u8,
     },
+    /// Open the interactive cockpit for a directory-based `.ml*` song.
+    TuiSong {
+        #[arg(value_name = "SONG_DIRECTORY")]
+        song: PathBuf,
+        #[arg(long)]
+        frames: Option<u64>,
+        #[arg(long, default_value_t = 4096)]
+        chunk_frames: u32,
+        /// Render workers for the backing coordinator; zero selects available parallelism.
+        #[arg(long, default_value_t = 0)]
+        workers: usize,
+    },
     /// Open the realtime cockpit with a native synthesized bassline track.
     TuiBassline {
         #[arg(value_name = "PROJECT")]
@@ -992,6 +1006,12 @@ fn run(cli: Cli) -> Result<(), String> {
             None,
             false,
         ),
+        Command::TuiSong {
+            song,
+            frames,
+            chunk_frames,
+            workers,
+        } => tui_song(song, frames, chunk_frames, workers),
         Command::TuiBassline {
             project,
             pattern_id,
@@ -1663,6 +1683,287 @@ fn validate_song(path: PathBuf) -> Result<(), String> {
         song.fingerprint()
     );
     Ok(())
+}
+
+struct SongRenderRequest {
+    generation: u64,
+    feedback: f64,
+}
+
+struct SongRerenderWorker {
+    shared: Arc<(Mutex<SongRerenderState>, Condvar)>,
+    completed: mpsc::Receiver<(u64, meldritch_audio::AudioBlock, f64)>,
+    thread: Option<JoinHandle<()>>,
+}
+
+#[derive(Default)]
+struct SongRerenderState {
+    latest: Option<SongRenderRequest>,
+    shutdown: bool,
+}
+
+impl SongRerenderWorker {
+    fn new(patch: meldritch_render::song_render::CompiledDelayedNotePatch, frames: u32) -> Self {
+        let shared = Arc::new((Mutex::new(SongRerenderState::default()), Condvar::new()));
+        let thread_shared = Arc::clone(&shared);
+        let (completed_tx, completed) = mpsc::channel();
+        let thread = thread::spawn(move || {
+            let range = FrameRange::new(0, u64::from(frames)).expect("song range is ordered");
+            loop {
+                let request = {
+                    let (lock, changed) = &*thread_shared;
+                    let mut state = lock.lock().expect("song render worker lock poisoned");
+                    while state.latest.is_none() && !state.shutdown {
+                        state = changed
+                            .wait(state)
+                            .expect("song render worker condvar poisoned");
+                    }
+                    if state.shutdown {
+                        break;
+                    }
+                    state
+                        .latest
+                        .take()
+                        .expect("latest request exists after wait")
+                };
+                let Ok(block) = patch.render_with_feedback_override(range, Some(request.feedback))
+                else {
+                    continue;
+                };
+                if completed_tx
+                    .send((request.generation, block, request.feedback))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        Self {
+            shared,
+            completed,
+            thread: Some(thread),
+        }
+    }
+
+    fn submit(&mut self, generation: u64, feedback: f64) {
+        let (lock, changed) = &*self.shared;
+        lock.lock()
+            .expect("song render worker lock poisoned")
+            .latest = Some(SongRenderRequest {
+            generation,
+            feedback,
+        });
+        changed.notify_one();
+    }
+
+    fn latest_completed(&self) -> Option<(u64, meldritch_audio::AudioBlock, f64)> {
+        self.completed
+            .try_iter()
+            .max_by_key(|(generation, _, _)| *generation)
+    }
+}
+
+impl Drop for SongRerenderWorker {
+    fn drop(&mut self) {
+        let (lock, changed) = &*self.shared;
+        lock.lock()
+            .expect("song render worker lock poisoned")
+            .shutdown = true;
+        changed.notify_one();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn tui_song(
+    path: PathBuf,
+    frames: Option<u64>,
+    chunk_frames: u32,
+    workers: usize,
+) -> Result<(), String> {
+    let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
+    let patch = meldritch_render::song_render::compile_delayed_note_song(&song)
+        .map_err(|error| format!("failed to compile song for TUI playback: {error:?}"))?;
+    let frame_count = frames.unwrap_or_else(|| {
+        song.note_patterns()
+            .values()
+            .map(|pattern| pattern.length_frames())
+            .max()
+            .unwrap_or(96_000)
+    });
+    let frame_count = u32::try_from(frame_count)
+        .map_err(|_| "TUI song frame count exceeds u32::MAX".to_owned())?;
+    let initial = patch
+        .render(FrameRange::new(0, u64::from(frame_count)).expect("song range is ordered"))
+        .map_err(|error| format!("failed to render initial song audio: {error:?}"))?;
+    let worker_count = if workers == 0 {
+        std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
+    } else {
+        workers
+    };
+    let (playback, engine) = meldritch_audio::device_output::playback_session_parts(32)?;
+    let settings = RenderSettings::new(initial.channels())
+        .map_err(|error| format!("invalid render settings: {error:?}"))?;
+    let tempo = Tempo::new(song.performance().bpm(), song.performance().sample_rate())
+        .map_err(|error| format!("invalid song tempo: {error}"))?;
+    let pattern = Pattern::new(PatternId::new(1), 16, 4)
+        .map_err(|error| format!("failed to create TUI backing pattern: {error:?}"))?;
+    let timeline_chunks = frame_count.div_ceil(chunk_frames).max(1) as usize;
+    let config = RenderCoordinatorConfig::new(
+        worker_count,
+        frame_count,
+        chunk_frames,
+        timeline_chunks,
+        Duration::from_millis(10),
+    )
+    .map_err(|error| format!("invalid TUI song render configuration: {error:?}"))?;
+    let samples_by_note = Arc::new(BTreeMap::new());
+    let state = meldritch_render::coordinator::SampleRenderState::new(
+        pattern.clone(),
+        tempo,
+        ProbabilitySeed::new(song.fingerprint()),
+        settings,
+        samples_by_note,
+    );
+    let coordinator =
+        RenderCoordinator::new_from_state(config, state.clone(), playback.status_monitor())
+            .map_err(|error| format!("failed to start song render coordinator: {error:?}"))?;
+    let _ = coordinator.wait_for_ready_chunks(timeline_chunks, Duration::from_secs(2));
+    coordinator
+        .audition_block(&initial)
+        .map_err(|error| format!("failed to publish initial song audio: {error:?}"))?;
+    let editor = meldritch_render::live_edit::LivePatternEditor::new(state, frame_count);
+    let mut controller = meldritch_app::AppController::new(
+        playback,
+        coordinator,
+        editor,
+        meldritch_app::Selection {
+            track: TrackId::new(1),
+            step: StepIndex::new(0),
+        },
+        256,
+    );
+    let controls = song_controls_for_view(&song, patch.feedback());
+    controller.set_curated_controls(controls);
+    let _session = meldritch_audio::device_output::RealtimePlaybackSession::open_default(
+        controller.coordinator().audio_reader(),
+        song.performance().sample_rate(),
+        u32::MAX,
+        controller.playback_control(),
+        engine,
+    )?;
+    let worker = Arc::new(Mutex::new(SongRerenderWorker::new(patch, frame_count)));
+    let input_worker = Arc::clone(&worker);
+    let submitted_generation = Arc::new(Mutex::new(0_u64));
+    let input_generation = Arc::clone(&submitted_generation);
+    let published_generation = Arc::new(Mutex::new(0_u64));
+    let tick_published_generation = Arc::clone(&published_generation);
+    let tick_submitted_generation = Arc::clone(&submitted_generation);
+    let feedback_control_id = "echo-feedback".to_owned();
+    let input_feedback_control_id = feedback_control_id.clone();
+    meldritch_tui::run_with_hooks(
+        &mut controller,
+        Step::new(36),
+        move |controller| {
+            let completed = worker
+                .lock()
+                .expect("song render worker lock poisoned")
+                .latest_completed();
+            if let Some((generation, block, feedback)) = completed {
+                let submitted = *tick_submitted_generation
+                    .lock()
+                    .expect("song render generation lock poisoned");
+                if generation < submitted {
+                    return Ok(None);
+                }
+                let mut published = tick_published_generation
+                    .lock()
+                    .expect("song render generation lock poisoned");
+                if generation <= *published {
+                    return Ok(None);
+                }
+                controller
+                    .coordinator()
+                    .audition_block(&block)
+                    .map_err(|error| format!("song publication failed: {error:?}"))?;
+                *published = generation;
+                return Ok(Some(format!(
+                    "Song rerender published: feedback {feedback:.2}"
+                )));
+            }
+            Ok(None)
+        },
+        move |controller, input| {
+            if !matches!(
+                input,
+                meldritch_app::AppInput::AdjustCuratedControl { id, .. }
+                    if id == &input_feedback_control_id
+            ) {
+                return;
+            }
+            let Some(control) = controller
+                .view_model()
+                .curated_controls
+                .into_iter()
+                .find(|control| control.id == input_feedback_control_id)
+            else {
+                return;
+            };
+            let Some(value) = control.value else {
+                return;
+            };
+            let mut generation = input_generation
+                .lock()
+                .expect("song render generation lock poisoned");
+            *generation = generation.saturating_add(1);
+            input_worker
+                .lock()
+                .expect("song render worker lock poisoned")
+                .submit(*generation, value);
+        },
+    )
+    .map_err(|error| format!("TUI song failed: {error}"))
+}
+
+fn song_controls_for_view(
+    song: &meldritch_dsl::ValidatedSong,
+    default_feedback: f64,
+) -> Vec<meldritch_app::CuratedControlView> {
+    song.performance()
+        .controls()
+        .iter()
+        .map(|control| {
+            let (minimum, maximum) = control.range();
+            let target = parameter_target_label(control.target());
+            let value = (target == "dsp:echo/delay.feedback")
+                .then_some(default_feedback.clamp(minimum, maximum));
+            meldritch_app::CuratedControlView {
+                id: control.id().to_owned(),
+                label: control.label().to_owned(),
+                target,
+                minimum,
+                maximum,
+                step: control.step(),
+                binding: control.binding().to_owned(),
+                value,
+            }
+        })
+        .collect()
+}
+
+fn parameter_target_label(target: &ParameterTargetDefinition) -> String {
+    let owner = match target.owner() {
+        ParameterOwner::Synth => "synth",
+        ParameterOwner::Dsp => "dsp",
+    };
+    format!(
+        "{}:{}/{}.{}",
+        owner,
+        target.definition_id(),
+        target.module_id(),
+        target.parameter()
+    )
 }
 
 fn validate_project(path: PathBuf) -> Result<(), String> {

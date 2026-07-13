@@ -119,11 +119,13 @@ assigned, switched, and rendered deterministically from text definitions.
 - [ ] Let `.mlperformance` declare the controls intentionally exposed to the
   performer: parameters, macros, toggles, choices, track/pattern launches, and
   quantized actions
-- [ ] Define control labels, groups, value ranges/steps, defaults, bindings, and
-  target mappings without duplicating underlying synth/DSP parameter semantics
+- [x] Define control labels, value ranges/steps, bindings, and target mappings
+  without duplicating underlying synth/DSP parameter semantics
+- [ ] Add explicit control groups and defaults to the declared performance
+  surface
 - [ ] Validate duplicate or unreachable bindings and unsafe target mappings
-- [ ] Generate the default cockpit view from the declared controls
-- [ ] Route every interaction through typed commands rather than direct state
+- [x] Generate the default cockpit view from the declared controls
+- [x] Route every interaction through typed commands rather than direct state
   mutation
 
 Done when loading a song produces a small usable performance surface entirely
@@ -131,13 +133,13 @@ from its `.mlperformance` declaration.
 
 ### 19.5 Performance mode and all-parameters mode
 
-- [ ] Add `Performance` and `AllParameters` cockpit modes
-- [ ] Make `Performance` the default
-- [ ] Bind `Ctrl-Tab` to switch modes
-- [ ] In performance mode, show only controls curated by `.mlperformance`
+- [x] Add `Performance` and `AllParameters` cockpit modes
+- [x] Make `Performance` the default
+- [x] Bind `Ctrl-Tab` to switch modes
+- [x] In performance mode, show only controls curated by `.mlperformance`
 - [ ] In all-parameters mode, expose the complete resolved synth/DSP/track/
   pattern parameter tree for inspection and editing
-- [ ] Preserve transport, playhead, selected track/pattern, queued launches,
+- [x] Preserve transport, playhead, selected track/pattern, queued launches,
   parameter state, and audio publication while switching modes
 - [ ] Refine track, pattern, arrangement, duration, and parameter navigation so
   all-parameters mode remains deterministic even before it is polished

@@ -9,9 +9,11 @@ bpm = 120.0
 sample_rate = 48000
 
 [[tracks]]
-id = "drone"
-synth = "synths/drone.mlsynth"
+id = "bass"
+synth = "synths/bass.mlsynth"
 dsp = ["dsp/echo.mldsp"]
+patterns = ["patterns/bass-line.mlpattern"]
+initial_pattern = "bass-line"
 
 [[controls]]
 id = "echo-feedback"
