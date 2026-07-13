@@ -157,6 +157,9 @@ the complete parameter surface without disturbing playback.
   actual execution frame, previous value, resulting value, and provenance
 - [ ] Record mode changes, track/pattern selection, launches, parameter edits,
   transport actions, cancellations, and fallback/cache decisions where relevant
+  - [x] Classify mode, selection, transport, queue/cancel, transform,
+    audio-source, synth-control, performance-FX, and parameter-edit events
+    distinctly in captured sessions
 - [x] Checkpoint session files outside the realtime callback with
   crash-tolerant writes
 - [x] Add explicit bounded buffering for session event writes

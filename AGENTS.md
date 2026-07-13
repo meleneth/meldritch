@@ -108,6 +108,8 @@ Implemented foundations include:
 - session checkpoints for accepted typed inputs, source fingerprints, and clean
   termination markers
 - bounded session event checkpoint buffers and final runtime state snapshots
+- structured session categories for mode, selection, transport, queue/cancel,
+  transform, audio-source, synth-control, performance-FX, and parameter edits
 
 Check `songs/examples/CAPABILITIES.md` for the exact current status. At the time
 this guide was written:
@@ -118,11 +120,12 @@ this guide was written:
   runtime and atomically published rerenders, but all-parameters inspection
   remains unfinished
 - example `11` is `compile` because session files are produced and tested
-  headlessly, but full category coverage and replay remain unfinished
+  headlessly, but exhaustive action coverage and replay remain unfinished
 
-The next implementation slice is to broaden session capture coverage with
-scripted tests for mode changes plus additional accepted command categories.
-Full all-parameters inspection remains open after that.
+The next implementation slice is to keep broadening session capture coverage
+with scripted accepted-action tests that exercise the real controller path,
+then move into exact replay. Full all-parameters inspection remains open after
+that.
 
 ## Important files
 

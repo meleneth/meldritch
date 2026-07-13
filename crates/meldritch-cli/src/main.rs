@@ -1916,7 +1916,7 @@ impl PerformanceSessionCapture {
         let changed = latest.is_none_or(|record| record.changed);
         let absolute_frame = view.transport.position;
         let musical_beat = f64::from(absolute_frame) / tempo.frames_per_beat().max(f64::EPSILON);
-        let (kind, target_id, previous, current) = session_result_fields(result);
+        let (kind, target_id, previous, current) = session_result_fields(input, result);
         self.push_event(CapturedSessionEvent {
             sequence,
             wall_offset_ms: self.started.elapsed().as_millis(),
@@ -2078,6 +2078,7 @@ impl FinalSessionState {
 }
 
 fn session_result_fields(
+    input: &meldritch_app::AppInput,
     result: &meldritch_app::AppCommandResult,
 ) -> (String, Option<String>, Option<String>, Option<String>) {
     match result {
@@ -2103,7 +2104,62 @@ fn session_result_fields(
             Some(format!("{previous:?}")),
             Some(format!("{current:?}")),
         ),
-        _ => ("command".to_owned(), None, None, None),
+        meldritch_app::AppCommandResult::TransportQueued => (
+            "transport".to_owned(),
+            Some(
+                match input {
+                    meldritch_app::AppInput::TogglePlayback => "toggle_playback",
+                    meldritch_app::AppInput::Stop => "stop",
+                    meldritch_app::AppInput::Rewind => "rewind",
+                    _ => "transport",
+                }
+                .to_owned(),
+            ),
+            None,
+            None,
+        ),
+        meldritch_app::AppCommandResult::Edit(_) => (
+            "parameter_edit".to_owned(),
+            Some(format!("{input:?}")),
+            None,
+            Some(format!("{result:?}")),
+        ),
+        meldritch_app::AppCommandResult::SynthUpdated { .. } => (
+            "synth_control".to_owned(),
+            Some(format!("{input:?}")),
+            None,
+            Some(format!("{result:?}")),
+        ),
+        meldritch_app::AppCommandResult::PerformanceFxUpdated(_) => (
+            "performance_fx".to_owned(),
+            Some(format!("{input:?}")),
+            None,
+            Some(format!("{result:?}")),
+        ),
+        meldritch_app::AppCommandResult::TransformCreated { .. } => (
+            "transform".to_owned(),
+            Some(format!("{input:?}")),
+            None,
+            Some(format!("{result:?}")),
+        ),
+        meldritch_app::AppCommandResult::AudioSourceSwitched { transformed } => (
+            "audio_source".to_owned(),
+            None,
+            None,
+            Some(if *transformed { "transformed" } else { "live" }.to_owned()),
+        ),
+        meldritch_app::AppCommandResult::PerformanceQueued(_) => (
+            "performance_queue".to_owned(),
+            Some(format!("{input:?}")),
+            None,
+            Some(format!("{result:?}")),
+        ),
+        meldritch_app::AppCommandResult::PerformanceCancelled(_) => (
+            "performance_cancel".to_owned(),
+            Some(format!("{input:?}")),
+            None,
+            Some(format!("{result:?}")),
+        ),
     }
 }
 
@@ -5864,6 +5920,146 @@ mod tests {
         assert_eq!(capture.uncheckpointed_events, 0);
 
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn session_capture_classifies_accepted_command_categories() {
+        assert_session_kind(
+            &meldritch_app::AppInput::TogglePlayback,
+            &meldritch_app::AppCommandResult::TransportQueued,
+            "transport",
+            Some("toggle_playback"),
+        );
+        assert_session_kind(
+            &meldritch_app::AppInput::Stop,
+            &meldritch_app::AppCommandResult::TransportQueued,
+            "transport",
+            Some("stop"),
+        );
+        assert_session_kind(
+            &meldritch_app::AppInput::Rewind,
+            &meldritch_app::AppCommandResult::TransportQueued,
+            "transport",
+            Some("rewind"),
+        );
+        assert_session_kind(
+            &meldritch_app::AppInput::ToggleCockpitMode,
+            &meldritch_app::AppCommandResult::CockpitModeChanged {
+                previous: meldritch_app::CockpitMode::Performance,
+                current: meldritch_app::CockpitMode::AllParameters,
+            },
+            "cockpit_mode",
+            None,
+        );
+        assert_session_kind(
+            &meldritch_app::AppInput::MoveRight,
+            &meldritch_app::AppCommandResult::SelectionChanged {
+                previous: meldritch_app::Selection {
+                    track: TrackId::new(1),
+                    step: StepIndex::new(0),
+                },
+                current: meldritch_app::Selection {
+                    track: TrackId::new(1),
+                    step: StepIndex::new(1),
+                },
+            },
+            "selection",
+            None,
+        );
+        assert_session_kind(
+            &meldritch_app::AppInput::AdjustCuratedControl {
+                id: "echo-feedback".to_owned(),
+                steps: 1,
+            },
+            &meldritch_app::AppCommandResult::CuratedControlAdjusted {
+                id: "echo-feedback".to_owned(),
+                previous: 0.35,
+                current: 0.4,
+            },
+            "curated_control",
+            Some("echo-feedback"),
+        );
+        assert_session_kind(
+            &meldritch_app::AppInput::ReturnToLive,
+            &meldritch_app::AppCommandResult::AudioSourceSwitched { transformed: false },
+            "audio_source",
+            None,
+        );
+        assert_session_kind(
+            &meldritch_app::AppInput::ToggleSelected(Step::new(36)),
+            &meldritch_app::AppCommandResult::Edit(meldritch_render::live_edit::LiveEditResult {
+                command: meldritch_render::live_edit::LiveEditCommand::ToggleStep {
+                    track: TrackId::new(1),
+                    step: StepIndex::new(0),
+                    value: Step::new(36),
+                },
+                changed: true,
+                dirty_ranges: Vec::new(),
+                invalidated_chunks: 0,
+            }),
+            "parameter_edit",
+            Some(
+                "ToggleSelected(Step { note: 36, velocity: 1.0, gate: 1.0, probability: Probability(1.0), tags: {} })",
+            ),
+        );
+        assert_session_kind(
+            &meldritch_app::AppInput::IncreaseCutoff,
+            &meldritch_app::AppCommandResult::SynthUpdated {
+                invalidated_chunks: 1,
+            },
+            "synth_control",
+            Some("IncreaseCutoff"),
+        );
+        assert_session_kind(
+            &meldritch_app::AppInput::IncreaseDelayFeedback,
+            &meldritch_app::AppCommandResult::PerformanceFxUpdated(
+                meldritch_render::performance_fx::PerformanceFxSettings::default(),
+            ),
+            "performance_fx",
+            Some("IncreaseDelayFeedback"),
+        );
+        assert_session_kind(
+            &meldritch_app::AppInput::CreateReverse,
+            &meldritch_app::AppCommandResult::TransformCreated {
+                key: meldritch_render::transforms::TransformArtifactKey {
+                    fingerprint: meldritch_render::Fingerprint::new(1),
+                    channels: 1,
+                    frames: 1,
+                },
+                status: meldritch_render::transforms::TransformCacheStatus::Miss,
+            },
+            "transform",
+            Some("CreateReverse"),
+        );
+        assert_session_kind(
+            &meldritch_app::AppInput::QueuePhrase(SceneId::new(2)),
+            &meldritch_app::AppCommandResult::PerformanceQueued(
+                meldritch_render::futures::QueuedPerformanceGesture {
+                    gesture: meldritch_app::PerformanceGesture::QueueScene(SceneId::new(2)),
+                    launch_frame: 0,
+                    fill_end_frame: None,
+                },
+            ),
+            "performance_queue",
+            Some("QueuePhrase(SceneId(2))"),
+        );
+        assert_session_kind(
+            &meldritch_app::AppInput::CancelPerformance,
+            &meldritch_app::AppCommandResult::PerformanceCancelled(None),
+            "performance_cancel",
+            Some("CancelPerformance"),
+        );
+    }
+
+    fn assert_session_kind(
+        input: &meldritch_app::AppInput,
+        result: &meldritch_app::AppCommandResult,
+        expected_kind: &str,
+        expected_target: Option<&str>,
+    ) {
+        let (kind, target, _, _) = session_result_fields(input, result);
+        assert_eq!(kind, expected_kind);
+        assert_eq!(target.as_deref(), expected_target);
     }
 
     fn test_session_event(sequence: u64) -> CapturedSessionEvent {

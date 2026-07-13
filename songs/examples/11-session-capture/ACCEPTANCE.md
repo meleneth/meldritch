@@ -15,7 +15,11 @@ It should:
 - record accepted typed inputs with sequence, wall offset, absolute frame,
   musical beat, quantization, execution frame, command/result text, and
   performer provenance
-- record structured previous/current values for curated controls and mode changes
+- record structured previous/current values for curated controls, mode changes,
+  and selection changes
+- classify transport, performance queue/cancel, transforms, audio-source
+  switches, synth controls, performance FX, and parameter edits distinctly from
+  generic commands
 - write a final runtime state including cockpit mode, transport, selection,
   history length, and curated control values
 - mark clean termination when the TUI exits normally
