@@ -581,6 +581,11 @@ pub enum ControlBindingDefinition {
         cc: u8,
         action: ControlBindingAction,
     },
+    MidiNote {
+        device: String,
+        channel: Option<u8>,
+        note: u8,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -856,6 +861,12 @@ enum RawActionBinding {
         #[serde(default)]
         channel: Option<u8>,
         cc: u8,
+    },
+    MidiNote {
+        device: String,
+        #[serde(default)]
+        channel: Option<u8>,
+        note: u8,
     },
 }
 
@@ -1180,6 +1191,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
     let mut control_ids = BTreeSet::new();
     let mut key_bindings = BTreeSet::new();
     let mut midi_cc_claims = BTreeSet::new();
+    let mut midi_note_claims = BTreeSet::new();
     let mut midi_bindings = BTreeSet::new();
     let mut controls = Vec::with_capacity(raw_performance.controls.len());
     for raw in raw_performance.controls {
@@ -1365,12 +1377,15 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         };
         let mut bindings = Vec::with_capacity(raw.bindings.len());
         for binding in raw.bindings {
-            let RawActionBinding::MidiCc {
-                device,
-                channel,
-                cc,
-            } = binding;
-            if !midi_device_ids.contains(&device) {
+            let (device, channel) = match &binding {
+                RawActionBinding::MidiCc {
+                    device, channel, ..
+                }
+                | RawActionBinding::MidiNote {
+                    device, channel, ..
+                } => (device, channel),
+            };
+            if !midi_device_ids.contains(device.as_str()) {
                 return Err(SongLoadError::one(
                     &entry,
                     format!(
@@ -1380,7 +1395,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                 ));
             }
             if let Some(channel) = channel {
-                if !(1..=16).contains(&channel) {
+                if !(1..=16).contains(channel) {
                     return Err(SongLoadError::one(
                         &entry,
                         format!(
@@ -1390,20 +1405,47 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                     ));
                 }
             }
-            if !midi_cc_claims.insert((device.clone(), channel, cc)) {
-                return Err(SongLoadError::one(
-                    &entry,
-                    format!(
-                        "MIDI CC binding device='{device}' channel='{channel:?}' cc={cc} is declared more than once"
-                    ),
-                ));
+            match binding {
+                RawActionBinding::MidiCc {
+                    device,
+                    channel,
+                    cc,
+                } => {
+                    if !midi_cc_claims.insert((device.clone(), channel, cc)) {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!(
+                                "MIDI CC binding device='{device}' channel='{channel:?}' cc={cc} is declared more than once"
+                            ),
+                        ));
+                    }
+                    bindings.push(ControlBindingDefinition::MidiCc {
+                        device,
+                        channel,
+                        cc,
+                        action: ControlBindingAction::Increment,
+                    });
+                }
+                RawActionBinding::MidiNote {
+                    device,
+                    channel,
+                    note,
+                } => {
+                    if !midi_note_claims.insert((device.clone(), channel, note)) {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!(
+                                "MIDI note binding device='{device}' channel='{channel:?}' note={note} is declared more than once"
+                            ),
+                        ));
+                    }
+                    bindings.push(ControlBindingDefinition::MidiNote {
+                        device,
+                        channel,
+                        note,
+                    });
+                }
             }
-            bindings.push(ControlBindingDefinition::MidiCc {
-                device,
-                channel,
-                cc,
-                action: ControlBindingAction::Increment,
-            });
         }
         if bindings.is_empty() {
             return Err(SongLoadError::one(
@@ -2428,6 +2470,16 @@ fn fingerprint_song(
                     fingerprint.u64(u64::from(*cc));
                     fingerprint.u64(*action as u64);
                 }
+                ControlBindingDefinition::MidiNote {
+                    device,
+                    channel,
+                    note,
+                } => {
+                    fingerprint.string("midi_note");
+                    fingerprint.string(device);
+                    fingerprint.u64(channel.map_or(0, u64::from));
+                    fingerprint.u64(u64::from(*note));
+                }
             }
         }
     }
@@ -2474,6 +2526,16 @@ fn fingerprint_song(
                     fingerprint.u64(channel.map_or(0, u64::from));
                     fingerprint.u64(u64::from(*cc));
                     fingerprint.u64(*action as u64);
+                }
+                ControlBindingDefinition::MidiNote {
+                    device,
+                    channel,
+                    note,
+                } => {
+                    fingerprint.string("midi_note");
+                    fingerprint.string(device);
+                    fingerprint.u64(channel.map_or(0, u64::from));
+                    fingerprint.u64(u64::from(*note));
                 }
             }
         }

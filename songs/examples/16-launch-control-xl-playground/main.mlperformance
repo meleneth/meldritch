@@ -606,3 +606,83 @@ type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 64
+
+[[actions]]
+id = "side-right-01"
+label = "Side Right 01 Bottom Toggle Mode"
+action = "toggle_cockpit_mode"
+[[actions.bindings]]
+type = "midi_note"
+device = "launch-control-xl"
+channel = 9
+note = 108
+
+[[actions]]
+id = "side-right-02"
+label = "Side Right 02 Next Scene"
+action = "queue_next_scene"
+[[actions.bindings]]
+type = "midi_note"
+device = "launch-control-xl"
+channel = 9
+note = 107
+
+[[actions]]
+id = "side-right-03"
+label = "Side Right 03 Trigger Fill"
+action = "trigger_fill"
+[[actions.bindings]]
+type = "midi_note"
+device = "launch-control-xl"
+channel = 9
+note = 106
+
+[[actions]]
+id = "side-right-04"
+label = "Side Right 04 Top Cancel"
+action = "cancel_performance"
+[[actions.bindings]]
+type = "midi_note"
+device = "launch-control-xl"
+channel = 9
+note = 105
+
+[[actions]]
+id = "side-left-01"
+label = "Side Left 01 Bottom Play"
+action = "toggle_playback"
+[[actions.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 9
+cc = 107
+
+[[actions]]
+id = "side-left-02"
+label = "Side Left 02 Stop"
+action = "stop"
+[[actions.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 9
+cc = 106
+
+[[actions]]
+id = "side-left-03"
+label = "Side Left 03 Rewind"
+action = "rewind"
+[[actions.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 9
+cc = 104
+
+[[actions]]
+id = "side-left-04"
+label = "Side Left 04 Top Toggle Mute"
+action = "toggle_track_mute"
+[[actions.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 9
+cc = 105

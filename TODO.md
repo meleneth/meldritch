@@ -142,10 +142,12 @@ assigned, switched, and rendered deterministically from text definitions.
   buttons
 - [x] Print raw note/unknown MIDI messages in the diagnostic path so specialized
   hardware buttons can be discovered
+- [x] Add script-declared MIDI note action bindings and bind the discovered
+  LaunchControl XL side-column note/CC buttons in the playground example
 - [ ] Verify LaunchControl XL input with the diagnostic path on
   both Windows and Linux
-- [ ] Add script bindings for the LaunchControl XL right-side specialized
-  button column after its actual MIDI messages are confirmed
+- [ ] Add MIDI output/LED feedback support after confirming the LaunchControl XL
+  output protocol for script-addressed LEDs
 - [ ] Add richer script-declared pattern-switching semantics beyond the current
   queue/transport/toggle action set
 

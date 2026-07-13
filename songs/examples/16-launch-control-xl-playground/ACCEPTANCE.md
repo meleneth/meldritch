@@ -13,10 +13,11 @@ It must:
   - 24 rotary knobs: CC 13-20, 29-36, and 49-56
   - 8 faders: CC 77-84
   - 16 launch buttons: CC 41-48 and 57-64
-  - right-side specialized buttons, discovered with the raw MIDI diagnostic
-    path before they are assigned in the script
-- map the 16 launch buttons to script-declared typed performance actions, not
-  hard-coded Rust behavior
+  - right-side specialized buttons discovered bottom-up, right-to-left with the
+    raw MIDI diagnostic path: ch 9 notes 108, 107, 106, 105 and ch 9 CCs 107,
+    106, 104, 105
+- map the 16 launch buttons and the 8 discovered side-column buttons to
+  script-declared typed performance actions, not hard-coded Rust behavior
 - route all MIDI input through typed `AppInput` / `AppCommand` results so a
   captured performance can replay without the controller attached
 - rerender and publish audible delay-feedback and filter-cutoff changes from
@@ -26,10 +27,10 @@ It must:
   listing visible MIDI ports and printing script-mapped CC events plus raw note
   or other MIDI messages from controls that are not yet mapped
 
-Current implementation status: the format can declare every MIDI CC binding, the
-runtime derives MIDI routing from the script, supported feedback/cutoff
-parameter controls rerender audio, and launch buttons can trigger typed
-transport/performance actions. Richer pattern-switching semantics remain future
-schema/runtime work. The right-side specialized button column is explicitly
-tracked as a hardware-discovery target because its messages may differ by device
-mode/template.
+Current implementation status: the format can declare every MIDI CC binding and
+script action bindings for MIDI CCs or MIDI notes. The runtime derives MIDI
+routing from the script, supported feedback/cutoff parameter controls rerender
+audio, and launch/side-column buttons can trigger typed transport/performance
+actions. Richer pattern-switching semantics remain future schema/runtime work.
+The two observed SysEx messages are intentionally left as diagnostic output
+until an example needs raw/SysEx output or binding support.

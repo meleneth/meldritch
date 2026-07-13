@@ -298,8 +298,8 @@ fn launch_control_xl_playground_declares_full_midi_surface_in_scripts() {
     let controls = song.performance().controls();
     assert_eq!(controls.len(), 32);
     let actions = song.performance().actions();
-    assert_eq!(actions.len(), 16);
-    let midi_bindings = controls
+    assert_eq!(actions.len(), 24);
+    let midi_cc_bindings = controls
         .iter()
         .flat_map(|control| control.bindings())
         .chain(actions.iter().flat_map(|action| action.bindings()))
@@ -310,5 +310,16 @@ fn launch_control_xl_playground_declares_full_midi_surface_in_scripts() {
             )
         })
         .count();
-    assert_eq!(midi_bindings, 48);
+    assert_eq!(midi_cc_bindings, 52);
+    let midi_note_bindings = actions
+        .iter()
+        .flat_map(|action| action.bindings())
+        .filter(|binding| {
+            matches!(
+                binding,
+                meldritch_dsl::ControlBindingDefinition::MidiNote { .. }
+            )
+        })
+        .count();
+    assert_eq!(midi_note_bindings, 4);
 }
