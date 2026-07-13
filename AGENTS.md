@@ -144,8 +144,10 @@ this guide was written:
   centered knobs are neutral and faders reach normal full-open before the
   physical maximum. Default performance mode also shows the scene/fill map and
   the physical 8-strip control layout so the playable surface is visible without
-  opening all-parameters mode. Quantized launch timing, exact replay, and MIDI
-  output/LED feedback are not yet implemented.
+  opening all-parameters mode. `tui-song` autoplays by default for this
+  hardware playground, and the realtime output loop is tested to keep sounding
+  across live parameter rerender publications. Quantized launch timing, exact
+  replay, and MIDI output/LED feedback are not yet implemented.
 
 The next implementation slice is to use `midi-controls-check` to verify the
 Windows and Linux LaunchControl XL device path and confirm any MIDI output

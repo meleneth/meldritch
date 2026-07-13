@@ -656,8 +656,11 @@ enum Command {
         #[arg(long = "no-midi-controls", action = clap::ArgAction::SetTrue)]
         no_midi_controls: bool,
         /// Start playback immediately after opening the TUI.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "no_autoplay")]
         autoplay: bool,
+        /// Open the TUI with playback stopped until `p` is pressed.
+        #[arg(long, conflicts_with = "autoplay")]
+        no_autoplay: bool,
         /// Show raw/unmapped MIDI input in the TUI status line while testing hardware.
         #[arg(long)]
         midi_debug: bool,
@@ -1036,6 +1039,7 @@ fn run(cli: Cli) -> Result<(), String> {
             midi_controls,
             no_midi_controls,
             autoplay,
+            no_autoplay,
             midi_debug,
         } => tui_song(
             song,
@@ -1043,7 +1047,7 @@ fn run(cli: Cli) -> Result<(), String> {
             chunk_frames,
             workers,
             midi_controls || !no_midi_controls,
-            autoplay,
+            autoplay || !no_autoplay,
             midi_debug,
         ),
         Command::TuiBassline {
@@ -6924,6 +6928,57 @@ mod tests {
             &meldritch_app::AppCommandResult::PerformanceCancelled(None),
             "performance_cancel",
             Some("CancelPerformance"),
+        );
+    }
+
+    #[test]
+    fn tui_song_autoplays_by_default_and_can_opt_out() {
+        let default = Cli::try_parse_from([
+            "meldritch",
+            "tui-song",
+            "songs/examples/16-launch-control-xl-playground",
+        ])
+        .unwrap();
+        let Command::TuiSong {
+            autoplay,
+            no_autoplay,
+            ..
+        } = default.command
+        else {
+            panic!("expected tui-song command");
+        };
+        assert!(!autoplay);
+        assert!(!no_autoplay);
+        assert!(autoplay || !no_autoplay);
+
+        let stopped = Cli::try_parse_from([
+            "meldritch",
+            "tui-song",
+            "songs/examples/16-launch-control-xl-playground",
+            "--no-autoplay",
+        ])
+        .unwrap();
+        let Command::TuiSong {
+            autoplay,
+            no_autoplay,
+            ..
+        } = stopped.command
+        else {
+            panic!("expected tui-song command");
+        };
+        assert!(!autoplay);
+        assert!(no_autoplay);
+        assert!(!(autoplay || !no_autoplay));
+
+        assert!(
+            Cli::try_parse_from([
+                "meldritch",
+                "tui-song",
+                "songs/examples/16-launch-control-xl-playground",
+                "--autoplay",
+                "--no-autoplay",
+            ])
+            .is_err()
         );
     }
 

@@ -34,6 +34,9 @@ It must:
   during `tui-song` playback
 - rerender and publish audible delay-feedback and filter-cutoff changes from
   supported curated controls
+- autoplay in `tui-song` by default so the authored pattern keeps sounding while
+  LaunchControl inputs only change scene selection, transport, and parameters;
+  `--no-autoplay` is the explicit stopped-start smoke-test mode
 - validate as a normal song directory
 - support `meldritch midi-controls-check` as the hardware smoke path for
   listing visible MIDI ports and printing raw MIDI event details plus authored
@@ -53,7 +56,8 @@ routing from the script, supported feedback/cutoff parameter controls rerender
 audio, and launch/side-column buttons can trigger typed transport/performance
 actions. The LaunchControl B row now selects authored groove scenes/variations
 that rerender through the song synth and delay, and the default TUI performance
-mode now exposes the scene/fill map plus the physical strip layout. Quantized
-launch timing and exact replay remain future schema/runtime work. The two
-observed SysEx messages are intentionally left as diagnostic output until an
-example needs raw/SysEx output or binding support.
+mode now exposes the scene/fill map plus the physical strip layout. `tui-song`
+autoplays by default and the realtime output loop keeps playing across parameter
+rerender publications. Quantized launch timing and exact replay remain future
+schema/runtime work. The two observed SysEx messages are intentionally left as
+diagnostic output until an example needs raw/SysEx output or binding support.

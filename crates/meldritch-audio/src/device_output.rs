@@ -563,6 +563,36 @@ mod tests {
     }
 
     #[test]
+    fn max_loop_playback_continues_across_publications() {
+        let mut first = AudioBlock::silent(1, 2);
+        first.samples_mut().copy_from_slice(&[0.25, 0.5]);
+        let initial = PublishedAudio::from_block(&first, 1).unwrap();
+        let (publisher, reader) = audio_publication(initial);
+        let (control, engine) = playback_session_parts(4).unwrap();
+        let status = control.status_monitor();
+        let mut state = LoopingAudio::from_engine(reader, 1, u32::MAX, engine).unwrap();
+        control.play().unwrap();
+
+        let mut first_output = [0.0_f64; 5];
+        assert!(!state.fill(&mut first_output));
+        assert_eq!(first_output, [0.25, 0.5, 0.25, 0.5, 0.25]);
+
+        let mut second = AudioBlock::silent(1, 2);
+        second.samples_mut().copy_from_slice(&[0.75, -0.25]);
+        publisher
+            .publish(PublishedAudio::from_block(&second, 1).unwrap())
+            .unwrap();
+
+        let mut second_output = [0.0_f64; 5];
+        assert!(!state.fill(&mut second_output));
+        assert_eq!(second_output, [-0.25, 0.75, -0.25, 0.75, -0.25]);
+        let snapshot = status.snapshot();
+        assert_eq!(snapshot.state, crate::transport::TransportState::Playing);
+        assert_eq!(snapshot.underruns, 0);
+        assert_eq!(snapshot.missed_artifacts, 0);
+    }
+
+    #[test]
     fn split_control_drives_engine_without_treating_stop_as_completion() {
         let block = AudioBlock::silent(1, 2);
         let audio = PublishedAudio::from_block(&block, 1).unwrap();
