@@ -658,6 +658,9 @@ enum Command {
         /// Start playback immediately after opening the TUI.
         #[arg(long)]
         autoplay: bool,
+        /// Show raw/unmapped MIDI input in the TUI status line while testing hardware.
+        #[arg(long)]
+        midi_debug: bool,
     },
     /// Open the realtime cockpit with a native synthesized bassline track.
     TuiBassline {
@@ -1033,6 +1036,7 @@ fn run(cli: Cli) -> Result<(), String> {
             midi_controls,
             no_midi_controls,
             autoplay,
+            midi_debug,
         } => tui_song(
             song,
             frames,
@@ -1040,6 +1044,7 @@ fn run(cli: Cli) -> Result<(), String> {
             workers,
             midi_controls || !no_midi_controls,
             autoplay,
+            midi_debug,
         ),
         Command::TuiBassline {
             project,
@@ -2447,9 +2452,10 @@ fn midi_controls_check(path: PathBuf, seconds: u64) -> Result<(), String> {
 
 fn connect_midi_control_input(
     device: &meldritch_dsl::MidiDeviceDefinition,
-    sender: mpsc::Sender<meldritch_app::AppInput>,
+    sender: mpsc::Sender<meldritch_tui::ExternalInputEvent>,
     bindings: Vec<meldritch_app::MidiControlBinding>,
     action_bindings: Vec<MidiActionBinding>,
+    debug: bool,
 ) -> Result<Option<MidiControlInputConnection>, String> {
     let mut midi_input = midir::MidiInput::new(&format!("meldritch-midi-{}", device.id()))
         .map_err(|error| midi_input_client_error("failed to create MIDI input client", &error))?;
@@ -2474,9 +2480,25 @@ fn connect_midi_control_input(
                 let input =
                     decode_script_midi_input(message, &device_id, &bindings, &action_bindings);
                 let Some(input) = input else {
+                    if debug {
+                        let diagnostic = decode_midi_diagnostic_message(message).map_or_else(
+                            || format!("raw {message:?}"),
+                            |message| message.to_string(),
+                        );
+                        let _ = sender.send(meldritch_tui::ExternalInputEvent::status(format!(
+                            "{diagnostic} -> unmapped"
+                        )));
+                    }
                     return;
                 };
-                let _ = sender.send(input.input);
+                let label = input
+                    .label
+                    .clone()
+                    .unwrap_or_else(|| format!("{:?}", input.input));
+                let _ = sender.send(meldritch_tui::ExternalInputEvent::new(
+                    input.input,
+                    Some(label),
+                ));
             },
             (),
         )
@@ -2830,6 +2852,21 @@ fn decode_midi_note_message(message: &[u8]) -> Option<(u8, u8, u8, bool)> {
     }
 }
 
+fn decode_midi_diagnostic_message(message: &[u8]) -> Option<MidiDiagnosticMessage> {
+    if let Some((channel, cc, value)) = decode_midi_cc_message(message) {
+        return Some(MidiDiagnosticMessage::ControlChange { channel, cc, value });
+    }
+    if let Some((channel, note, velocity, on)) = decode_midi_note_message(message) {
+        return Some(MidiDiagnosticMessage::Note {
+            channel,
+            note,
+            velocity,
+            on,
+        });
+    }
+    Some(MidiDiagnosticMessage::Raw(message.to_vec()))
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LiveSongControlTarget {
     DelayFeedback,
@@ -2863,6 +2900,7 @@ fn tui_song(
     workers: usize,
     midi_controls: bool,
     autoplay: bool,
+    midi_debug: bool,
 ) -> Result<(), String> {
     let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
     let patch = meldritch_render::song_render::compile_delayed_note_song(&song)
@@ -2957,6 +2995,7 @@ fn tui_song(
                 external_input_sender.clone(),
                 bindings,
                 action_bindings,
+                midi_debug,
             )? {
                 Some(connection) => connections.push(connection),
                 None => {

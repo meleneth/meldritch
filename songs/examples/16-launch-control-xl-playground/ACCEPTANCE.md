@@ -36,6 +36,9 @@ It must:
   listing visible MIDI ports and printing raw MIDI event details plus authored
   labels for mapped action buttons; unmapped controls still print raw note or
   other MIDI messages for discovery
+- support `tui-song --midi-debug` as the live playground smoke path so mapped
+  button/control labels and unmapped raw MIDI events are visible in the status
+  line while testing the controller
 
 Current implementation status: the format can declare every MIDI CC binding and
 script action bindings for MIDI CCs or MIDI notes. The runtime derives MIDI

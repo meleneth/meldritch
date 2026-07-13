@@ -173,6 +173,30 @@ where
     run_with_hooks_and_external_inputs(controller, default_step, tick, || None, on_input)
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExternalInputEvent {
+    pub input: Option<AppInput>,
+    pub label: Option<String>,
+}
+
+impl ExternalInputEvent {
+    #[must_use]
+    pub fn new(input: AppInput, label: Option<String>) -> Self {
+        Self {
+            input: Some(input),
+            label,
+        }
+    }
+
+    #[must_use]
+    pub fn status(label: String) -> Self {
+        Self {
+            input: None,
+            label: Some(label),
+        }
+    }
+}
+
 pub fn run_with_hooks_and_external_inputs<F, E, I>(
     controller: &mut AppController,
     default_step: Step,
@@ -182,7 +206,7 @@ pub fn run_with_hooks_and_external_inputs<F, E, I>(
 ) -> io::Result<()>
 where
     F: FnMut(&mut AppController) -> Result<Option<String>, String>,
-    E: FnMut() -> Option<AppInput>,
+    E: FnMut() -> Option<ExternalInputEvent>,
     I: FnMut(&AppController, &AppInput, &AppCommandResult),
 {
     let mut terminal = TerminalGuard::enter()?;
@@ -208,7 +232,7 @@ fn run_loop<F, E, I>(
 ) -> io::Result<()>
 where
     F: FnMut(&mut AppController) -> Result<Option<String>, String>,
-    E: FnMut() -> Option<AppInput>,
+    E: FnMut() -> Option<ExternalInputEvent>,
     I: FnMut(&AppController, &AppInput, &AppCommandResult),
 {
     let mut status = StatusMessage::info("Ready");
@@ -219,10 +243,10 @@ where
             Ok(None) => {}
         }
         for _ in 0..16 {
-            let Some(input) = external_input() else {
+            let Some(event) = external_input() else {
                 break;
             };
-            status = handle_app_input(controller, input, &mut on_input);
+            status = handle_external_input(controller, event, &mut on_input);
         }
         let view = controller.view_model();
         terminal.draw(|frame| draw_with_status(frame, &view, &status))?;
@@ -240,6 +264,27 @@ where
             None => {}
         }
     }
+}
+
+fn handle_external_input<I>(
+    controller: &mut AppController,
+    event: ExternalInputEvent,
+    on_input: &mut I,
+) -> StatusMessage
+where
+    I: FnMut(&AppController, &AppInput, &AppCommandResult),
+{
+    let Some(input) = event.input else {
+        return StatusMessage::info(event.label.map_or_else(
+            || "External input".to_owned(),
+            |label| format!("MIDI: {label}"),
+        ));
+    };
+    let mut status = handle_app_input(controller, input, on_input);
+    if let Some(label) = event.label {
+        status.text = format!("MIDI: {label} · {}", status.text);
+    }
+    status
 }
 
 fn handle_app_input<I>(
