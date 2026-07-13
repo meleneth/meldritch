@@ -669,7 +669,7 @@ cc = 106
 
 [[actions]]
 id = "side-left-03"
-label = "Send Select Down Rewind"
+label = "Send Select Up Rewind"
 action = "rewind"
 [[actions.bindings]]
 type = "midi_cc"
@@ -679,7 +679,7 @@ cc = 104
 
 [[actions]]
 id = "side-left-04"
-label = "Send Select Up Toggle Mute"
+label = "Send Select Down Toggle Mute"
 action = "toggle_track_mute"
 [[actions.bindings]]
 type = "midi_cc"

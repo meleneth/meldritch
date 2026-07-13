@@ -16,10 +16,11 @@ It must:
   - right-side specialized buttons discovered bottom-up, right-to-left with the
     raw MIDI diagnostic path:
     - Record Arm, Solo, Mute, Device: ch 9 notes 108, 107, 106, 105
-    - Track Select Next, Track Select Prev, Send Select Down, Send Select Up:
+    - Track Select Next, Track Select Prev, Send Select Up, Send Select Down:
       ch 9 CCs 107, 106, 104, 105
-    - Factory Template and User Template currently emit observed SysEx messages
-      and are left diagnostic-only until an example needs raw/SysEx bindings
+    - Template User and Template Factory currently emit observed SysEx messages
+      `F0 00 20 29 02 11 77 00 F7` and `F0 00 20 29 02 11 77 08 F7`;
+      they are left diagnostic-only until an example needs raw/SysEx bindings
 - map the 16 launch buttons and the 8 discovered side-column buttons to
   script-declared typed performance actions, not hard-coded Rust behavior
 - route all MIDI input through typed `AppInput` / `AppCommand` results so a
