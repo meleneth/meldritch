@@ -14,8 +14,12 @@ It must:
   - 8 faders: CC 77-84
   - 16 launch buttons: CC 41-48 and 57-64
   - right-side specialized buttons discovered bottom-up, right-to-left with the
-    raw MIDI diagnostic path: ch 9 notes 108, 107, 106, 105 and ch 9 CCs 107,
-    106, 104, 105
+    raw MIDI diagnostic path:
+    - Record Arm, Solo, Mute, Device: ch 9 notes 108, 107, 106, 105
+    - Track Select Next, Track Select Prev, Send Select Down, Send Select Up:
+      ch 9 CCs 107, 106, 104, 105
+    - Factory Template and User Template currently emit observed SysEx messages
+      and are left diagnostic-only until an example needs raw/SysEx bindings
 - map the 16 launch buttons and the 8 discovered side-column buttons to
   script-declared typed performance actions, not hard-coded Rust behavior
 - route all MIDI input through typed `AppInput` / `AppCommand` results so a
