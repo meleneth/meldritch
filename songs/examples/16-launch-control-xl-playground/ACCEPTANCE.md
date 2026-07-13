@@ -28,8 +28,9 @@ It must:
   supported curated controls
 - validate as a normal song directory
 - support `meldritch midi-controls-check` as the hardware smoke path for
-  listing visible MIDI ports and printing script-mapped CC events plus raw note
-  or other MIDI messages from controls that are not yet mapped
+  listing visible MIDI ports and printing raw MIDI event details plus authored
+  labels for mapped action buttons; unmapped controls still print raw note or
+  other MIDI messages for discovery
 
 Current implementation status: the format can declare every MIDI CC binding and
 script action bindings for MIDI CCs or MIDI notes. The runtime derives MIDI

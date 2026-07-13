@@ -2275,6 +2275,7 @@ struct MidiActionBinding {
     device: String,
     message: MidiActionMessage,
     input: meldritch_app::AppInput,
+    label: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2288,7 +2289,13 @@ struct MidiControlDiagnosticEvent {
     device: String,
     port: String,
     message: MidiDiagnosticMessage,
-    input: Option<meldritch_app::AppInput>,
+    mapped: Option<MappedMidiInput>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct MappedMidiInput {
+    input: meldritch_app::AppInput,
+    label: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2324,6 +2331,15 @@ impl std::fmt::Display for MidiDiagnosticMessage {
                 if *on { "on" } else { "off" }
             ),
             Self::Raw(bytes) => write!(formatter, "raw {bytes:?}"),
+        }
+    }
+}
+
+impl MappedMidiInput {
+    fn display_text(&self) -> String {
+        match &self.label {
+            Some(label) => format!("{label} ({:?})", self.input),
+            None => format!("{:?}", self.input),
         }
     }
 }
@@ -2391,9 +2407,9 @@ fn midi_controls_check(path: PathBuf, seconds: u64) -> Result<(), String> {
             Ok(event) => {
                 events = events.saturating_add(1);
                 let mapped = event
-                    .input
+                    .mapped
                     .as_ref()
-                    .map_or_else(|| "unmapped".to_owned(), |input| format!("{input:?}"));
+                    .map_or_else(|| "unmapped".to_owned(), MappedMidiInput::display_text);
                 println!(
                     "{} · {} · {} -> {}",
                     event.device, event.port, event.message, mapped
@@ -2438,7 +2454,7 @@ fn connect_midi_control_input(
                 let Some(input) = input else {
                     return;
                 };
-                let _ = sender.send(input);
+                let _ = sender.send(input.input);
             },
             (),
         )
@@ -2519,7 +2535,7 @@ fn connect_midi_control_diagnostic(
                     device: callback_device_id.clone(),
                     port: callback_port_name.clone(),
                     message: diagnostic,
-                    input,
+                    mapped: input,
                 });
             },
             (),
@@ -2620,6 +2636,7 @@ fn midi_action_bindings_for_song(song: &meldritch_dsl::ValidatedSong) -> Vec<Mid
                             cc: *cc,
                         },
                         input: input.clone(),
+                        label: action.label().to_owned(),
                     }),
                     meldritch_dsl::ControlBindingDefinition::MidiNote {
                         device,
@@ -2632,6 +2649,7 @@ fn midi_action_bindings_for_song(song: &meldritch_dsl::ValidatedSong) -> Vec<Mid
                             note: *note,
                         },
                         input: input.clone(),
+                        label: action.label().to_owned(),
                     }),
                     meldritch_dsl::ControlBindingDefinition::Key { .. } => None,
                 })
@@ -2689,7 +2707,7 @@ fn decode_script_midi_input(
     device: &str,
     control_bindings: &[meldritch_app::MidiControlBinding],
     action_bindings: &[MidiActionBinding],
-) -> Option<meldritch_app::AppInput> {
+) -> Option<MappedMidiInput> {
     if let Some((channel, cc, value)) = decode_midi_cc_message(message) {
         return map_script_midi_control_change(
             control_bindings,
@@ -2710,24 +2728,29 @@ fn map_script_midi_control_change(
     control_bindings: &[meldritch_app::MidiControlBinding],
     action_bindings: &[MidiActionBinding],
     input: meldritch_app::MidiControlInput,
-) -> Option<meldritch_app::AppInput> {
-    meldritch_app::map_midi_control_input(control_bindings, input.clone()).or_else(|| {
-        if input.value == 0 {
-            return None;
-        }
-        action_bindings
-            .iter()
-            .find(|binding| {
-                binding.device == input.device
-                    && matches!(
-                        binding.message,
-                        MidiActionMessage::ControlChange { channel, cc }
-                            if cc == input.cc
-                                && channel.is_none_or(|channel| channel == input.channel)
-                    )
-            })
-            .map(|binding| binding.input.clone())
-    })
+) -> Option<MappedMidiInput> {
+    meldritch_app::map_midi_control_input(control_bindings, input.clone())
+        .map(|input| MappedMidiInput { input, label: None })
+        .or_else(|| {
+            if input.value == 0 {
+                return None;
+            }
+            action_bindings
+                .iter()
+                .find(|binding| {
+                    binding.device == input.device
+                        && matches!(
+                            binding.message,
+                            MidiActionMessage::ControlChange { channel, cc }
+                                if cc == input.cc
+                                    && channel.is_none_or(|channel| channel == input.channel)
+                        )
+                })
+                .map(|binding| MappedMidiInput {
+                    input: binding.input.clone(),
+                    label: Some(binding.label.clone()),
+                })
+        })
 }
 
 fn map_script_midi_note(
@@ -2736,7 +2759,7 @@ fn map_script_midi_note(
     channel: u8,
     note: u8,
     on: bool,
-) -> Option<meldritch_app::AppInput> {
+) -> Option<MappedMidiInput> {
     if !on {
         return None;
     }
@@ -2753,7 +2776,10 @@ fn map_script_midi_note(
                         && binding_channel.is_none_or(|binding_channel| binding_channel == channel)
                 )
         })
-        .map(|binding| binding.input.clone())
+        .map(|binding| MappedMidiInput {
+            input: binding.input.clone(),
+            label: Some(binding.label.clone()),
+        })
 }
 
 fn decode_midi_cc_message(message: &[u8]) -> Option<(u8, u8, u8)> {
@@ -6726,7 +6752,8 @@ mod tests {
                     cc: 41,
                     value: 127,
                 },
-            ),
+            )
+            .map(|mapped| mapped.input),
             Some(meldritch_app::AppInput::TogglePlayback)
         );
         assert_eq!(
@@ -6742,10 +6769,10 @@ mod tests {
             ),
             None
         );
-        assert_eq!(
-            map_script_midi_note(&action_bindings, "launch-control-xl", 9, 108, true),
-            Some(meldritch_app::AppInput::ToggleCockpitMode)
-        );
+        let side_note = map_script_midi_note(&action_bindings, "launch-control-xl", 9, 108, true)
+            .expect("side button should map");
+        assert_eq!(side_note.input, meldritch_app::AppInput::ToggleCockpitMode);
+        assert_eq!(side_note.label.as_deref(), Some("Record Arm Toggle Mode"));
         assert_eq!(
             map_script_midi_note(&action_bindings, "launch-control-xl", 9, 108, false),
             None
