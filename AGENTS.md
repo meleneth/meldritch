@@ -104,6 +104,9 @@ Implemented foundations include:
 - loaded `.mlperformance` controls routed to typed curated-control commands
 - latest-wins background rerender for live delay-feedback overrides
 - completed song rerenders published through the existing atomic audio snapshot
+- `tui-song` timestamped `.mlperformance` session files under `performances/`
+- session checkpoints for accepted typed inputs, source fingerprints, and clean
+  termination markers
 
 Check `songs/examples/CAPABILITIES.md` for the exact current status. At the time
 this guide was written:
@@ -111,13 +114,16 @@ this guide was written:
 - examples `00` through `03` are `accept`
 - example `04` is `compile` because live curated-control override is unfinished
 - example `09` is `play` because loaded controls now connect to a `tui-song`
-  runtime and atomically published rerenders, but all-parameters inspection and
-  timestamped capture remain unfinished
+  runtime and atomically published rerenders, but all-parameters inspection
+  remains unfinished
+- example `11` is `compile` because session files are produced and tested
+  headlessly, but full category coverage, bounded buffering, final-state
+  capture, and replay remain unfinished
 
-The next implementation slice is to persist interactive `tui-song` actions into
-datetime-stamped `.mlperformance` session files under `performances/`, without
-weakening realtime safety. Full all-parameters inspection is still open after
-that.
+The next implementation slice is to broaden session capture coverage: add
+bounded buffering, complete final runtime state, and tests for mode changes plus
+additional accepted command categories. Full all-parameters inspection remains
+open after that.
 
 ## Important files
 

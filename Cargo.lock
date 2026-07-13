@@ -928,6 +928,7 @@ dependencies = [
  "meldritch-tui",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]
@@ -962,6 +963,7 @@ dependencies = [
  "meldritch-tui",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

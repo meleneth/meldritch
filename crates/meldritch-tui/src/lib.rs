@@ -157,7 +157,7 @@ pub fn run_with_tick<F>(
 where
     F: FnMut(&mut AppController) -> Result<Option<String>, String>,
 {
-    run_with_hooks(controller, default_step, tick, |_, _| {})
+    run_with_hooks(controller, default_step, tick, |_, _, _| {})
 }
 
 pub fn run_with_hooks<F, I>(
@@ -168,7 +168,7 @@ pub fn run_with_hooks<F, I>(
 ) -> io::Result<()>
 where
     F: FnMut(&mut AppController) -> Result<Option<String>, String>,
-    I: FnMut(&AppController, &AppInput),
+    I: FnMut(&AppController, &AppInput, &AppCommandResult),
 {
     let mut terminal = TerminalGuard::enter()?;
     let result = run_loop(
@@ -191,7 +191,7 @@ fn run_loop<F, I>(
 ) -> io::Result<()>
 where
     F: FnMut(&mut AppController) -> Result<Option<String>, String>,
-    I: FnMut(&AppController, &AppInput),
+    I: FnMut(&AppController, &AppInput, &AppCommandResult),
 {
     let mut status = StatusMessage::info("Ready");
     loop {
@@ -213,7 +213,7 @@ where
             Some(TuiAction::Input(input)) => {
                 status = match controller.handle_input(input.clone()) {
                     Ok(result) => {
-                        on_input(controller, &input);
+                        on_input(controller, &input, &result);
                         StatusMessage::info(command_result_text(&result))
                     }
                     Err(error) => StatusMessage::error(format!("{error:?}")),

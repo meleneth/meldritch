@@ -242,3 +242,15 @@ fn curated_performance_control_song_compiles_renders_and_accepts_live_feedback()
     assert_ne!(baseline.samples(), adjusted.samples());
     assert!(adjusted.samples().iter().all(|sample| sample.is_finite()));
 }
+
+#[test]
+fn session_capture_example_compiles_to_the_same_playable_song_shape() {
+    let song = load_song_directory(example("11-session-capture"))
+        .expect("session-capture song should load");
+    let patch = compile_delayed_note_song(&song).expect("session song DSP patch should compile");
+    let block = patch.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+
+    assert_eq!(patch.feedback(), 0.35);
+    assert!(block.peak_abs() > 0.01);
+    assert!(block.samples().iter().all(|sample| sample.is_finite()));
+}

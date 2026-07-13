@@ -149,18 +149,20 @@ the complete parameter surface without disturbing playback.
 
 ### 19.6 Timestamped performance capture
 
-- [ ] Create a new datetime-stamped `.mlperformance` session file when an
+- [x] Create a new datetime-stamped `.mlperformance` session file when an
   interactive song starts, using a collision-safe filename
-- [ ] Record song identity/version/fingerprint and the starting runtime state
+- [x] Record song identity/version/fingerprint and the starting runtime state
 - [ ] Record every accepted typed performer interaction with monotonic sequence,
   wall-clock offset, absolute frame, musical position, requested quantization,
   actual execution frame, previous value, resulting value, and provenance
 - [ ] Record mode changes, track/pattern selection, launches, parameter edits,
   transport actions, cancellations, and fallback/cache decisions where relevant
-- [ ] Append or checkpoint outside the realtime callback with explicit bounded
-  buffering and crash-tolerant writes
-- [ ] Write a final state and clean/unclean termination marker
-- [ ] Never overwrite an authored performance definition or an earlier session
+- [x] Checkpoint session files outside the realtime callback with
+  crash-tolerant writes
+- [ ] Add explicit bounded buffering for session event writes
+- [x] Write a clean/unclean termination marker
+- [ ] Write the complete final runtime state
+- [x] Never overwrite an authored performance definition or an earlier session
 
 Done when every interactive run leaves a human-readable session artifact that
 is sufficient to reconstruct what the performer did and when it took effect.

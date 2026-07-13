@@ -31,6 +31,7 @@ meldritch-render = { path = "crates/meldritch-render" }
 meldritch-tui = { path = "crates/meldritch-tui" }
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 
 [workspace.package]
 edition = "2024"

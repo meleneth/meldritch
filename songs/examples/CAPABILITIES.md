@@ -16,6 +16,7 @@ Status values:
 | `03-dsp-chain` | Performance patches a synth through a DSP graph | accept |
 | `04-dsp-parameter-pattern` | Pattern drives a DSP parameter port | compile |
 | `09-curated-performance-controls` | Default curated mode and Ctrl-Tab all-parameters mode | play |
+| `11-session-capture` | Timestamped `.mlperformance` session capture | compile |
 
 An implementation may advance a row only when all earlier statuses for that row
 are satisfied. New schema or runtime behavior requires a new row or an explicit
