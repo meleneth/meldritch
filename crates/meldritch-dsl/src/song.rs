@@ -448,6 +448,7 @@ pub struct PerformanceDefinition {
     title: String,
     bpm: f64,
     sample_rate: u32,
+    midi_devices: Vec<MidiDeviceDefinition>,
     tracks: Vec<TrackDefinition>,
     controls: Vec<CuratedControlDefinition>,
 }
@@ -474,6 +475,11 @@ impl PerformanceDefinition {
     }
 
     #[must_use]
+    pub fn midi_devices(&self) -> &[MidiDeviceDefinition] {
+        &self.midi_devices
+    }
+
+    #[must_use]
     pub fn tracks(&self) -> &[TrackDefinition] {
         &self.tracks
     }
@@ -481,6 +487,24 @@ impl PerformanceDefinition {
     #[must_use]
     pub fn controls(&self) -> &[CuratedControlDefinition] {
         &self.controls
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MidiDeviceDefinition {
+    id: String,
+    name_contains: String,
+}
+
+impl MidiDeviceDefinition {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn name_contains(&self) -> &str {
+        &self.name_contains
     }
 }
 
@@ -493,6 +517,7 @@ pub struct CuratedControlDefinition {
     maximum: f64,
     step: f64,
     binding: String,
+    bindings: Vec<ControlBindingDefinition>,
 }
 
 impl CuratedControlDefinition {
@@ -525,6 +550,31 @@ impl CuratedControlDefinition {
     pub fn binding(&self) -> &str {
         &self.binding
     }
+
+    #[must_use]
+    pub fn bindings(&self) -> &[ControlBindingDefinition] {
+        &self.bindings
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum ControlBindingAction {
+    Absolute,
+    Decrement,
+    Increment,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ControlBindingDefinition {
+    Key {
+        key: String,
+    },
+    MidiCc {
+        device: String,
+        channel: Option<u8>,
+        cc: u8,
+        action: ControlBindingAction,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -648,6 +698,8 @@ struct RawPerformanceFile {
     meldritch: RawHeader,
     performance: RawPerformance,
     #[serde(default)]
+    midi_devices: Vec<RawMidiDevice>,
+    #[serde(default)]
     tracks: Vec<RawTrack>,
     #[serde(default)]
     controls: Vec<RawControl>,
@@ -675,13 +727,45 @@ struct RawTrack {
 }
 
 #[derive(Debug, Deserialize)]
+struct RawMidiDevice {
+    id: String,
+    name_contains: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct RawControl {
     id: String,
     label: String,
     target: String,
     range: [f64; 2],
     step: f64,
+    #[serde(default)]
     binding: String,
+    #[serde(default)]
+    bindings: Vec<RawControlBinding>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum RawControlBinding {
+    Key {
+        key: String,
+    },
+    MidiCc {
+        device: String,
+        #[serde(default)]
+        channel: Option<u8>,
+        cc: u8,
+        action: RawControlBindingAction,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RawControlBindingAction {
+    Absolute,
+    Decrement,
+    Increment,
 }
 
 #[derive(Debug, Deserialize)]
@@ -981,8 +1065,30 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         });
     }
 
+    let mut midi_device_ids = BTreeSet::new();
+    let mut midi_devices = Vec::with_capacity(raw_performance.midi_devices.len());
+    for raw in raw_performance.midi_devices {
+        if !midi_device_ids.insert(raw.id.clone()) {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("MIDI device id '{}' is declared more than once", raw.id),
+            ));
+        }
+        if raw.name_contains.trim().is_empty() {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("MIDI device '{}' has an empty name_contains", raw.id),
+            ));
+        }
+        midi_devices.push(MidiDeviceDefinition {
+            id: raw.id,
+            name_contains: raw.name_contains,
+        });
+    }
+
     let mut control_ids = BTreeSet::new();
-    let mut bindings = BTreeSet::new();
+    let mut key_bindings = BTreeSet::new();
+    let mut midi_bindings = BTreeSet::new();
     let mut controls = Vec::with_capacity(raw_performance.controls.len());
     for raw in raw_performance.controls {
         if !control_ids.insert(raw.id.clone()) {
@@ -991,13 +1097,94 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                 format!("control id '{}' is declared more than once", raw.id),
             ));
         }
-        if !bindings.insert(raw.binding.clone()) {
+        let mut bindings = Vec::new();
+        if !raw.binding.is_empty() {
+            if !key_bindings.insert(raw.binding.clone()) {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!(
+                        "control key binding '{}' is declared more than once",
+                        raw.binding
+                    ),
+                ));
+            }
+            bindings.push(ControlBindingDefinition::Key {
+                key: raw.binding.clone(),
+            });
+        }
+        for binding in raw.bindings {
+            match binding {
+                RawControlBinding::Key { key } => {
+                    if key.trim().is_empty() {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!("control '{}' has an empty key binding", raw.id),
+                        ));
+                    }
+                    if !key_bindings.insert(key.clone()) {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!("control key binding '{key}' is declared more than once"),
+                        ));
+                    }
+                    if raw.binding.is_empty() {
+                        bindings.push(ControlBindingDefinition::Key { key });
+                    } else {
+                        bindings.push(ControlBindingDefinition::Key { key });
+                    }
+                }
+                RawControlBinding::MidiCc {
+                    device,
+                    channel,
+                    cc,
+                    action,
+                } => {
+                    if !midi_device_ids.contains(&device) {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!(
+                                "control '{}' references unknown MIDI device '{}'",
+                                raw.id, device
+                            ),
+                        ));
+                    }
+                    if let Some(channel) = channel {
+                        if !(1..=16).contains(&channel) {
+                            return Err(SongLoadError::one(
+                                &entry,
+                                format!(
+                                    "control '{}' has MIDI channel {} outside 1..=16",
+                                    raw.id, channel
+                                ),
+                            ));
+                        }
+                    }
+                    let action = match action {
+                        RawControlBindingAction::Absolute => ControlBindingAction::Absolute,
+                        RawControlBindingAction::Decrement => ControlBindingAction::Decrement,
+                        RawControlBindingAction::Increment => ControlBindingAction::Increment,
+                    };
+                    if !midi_bindings.insert((device.clone(), channel, cc, action)) {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!(
+                                "control MIDI binding device='{device}' channel='{channel:?}' cc={cc} action='{action:?}' is declared more than once"
+                            ),
+                        ));
+                    }
+                    bindings.push(ControlBindingDefinition::MidiCc {
+                        device,
+                        channel,
+                        cc,
+                        action,
+                    });
+                }
+            }
+        }
+        if bindings.is_empty() {
             return Err(SongLoadError::one(
                 &entry,
-                format!(
-                    "control binding '{}' is declared more than once",
-                    raw.binding
-                ),
+                format!("control '{}' has no input bindings", raw.id),
             ));
         }
         if !raw.range[0].is_finite()
@@ -1022,6 +1209,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
             maximum: raw.range[1],
             step: raw.step,
             binding: raw.binding,
+            bindings,
         });
     }
 
@@ -1030,6 +1218,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         title: raw_performance.performance.title,
         bpm: raw_performance.performance.bpm,
         sample_rate: raw_performance.performance.sample_rate,
+        midi_devices,
         tracks,
         controls,
     };
@@ -1984,6 +2173,10 @@ fn fingerprint_song(
     fingerprint.string(&performance.title);
     fingerprint.u64(performance.bpm.to_bits());
     fingerprint.u64(u64::from(performance.sample_rate));
+    for device in &performance.midi_devices {
+        fingerprint.string(&device.id);
+        fingerprint.string(&device.name_contains);
+    }
     for track in &performance.tracks {
         fingerprint.string(&track.id);
         fingerprint.string(&track.synth_path.to_string_lossy());
@@ -2010,6 +2203,26 @@ fn fingerprint_song(
         fingerprint.u64(control.maximum.to_bits());
         fingerprint.u64(control.step.to_bits());
         fingerprint.string(&control.binding);
+        for binding in &control.bindings {
+            match binding {
+                ControlBindingDefinition::Key { key } => {
+                    fingerprint.string("key");
+                    fingerprint.string(key);
+                }
+                ControlBindingDefinition::MidiCc {
+                    device,
+                    channel,
+                    cc,
+                    action,
+                } => {
+                    fingerprint.string("midi_cc");
+                    fingerprint.string(device);
+                    fingerprint.u64(channel.map_or(0, u64::from));
+                    fingerprint.u64(u64::from(*cc));
+                    fingerprint.u64(*action as u64);
+                }
+            }
+        }
     }
     for synth in synths.values() {
         fingerprint.string(&synth.id);

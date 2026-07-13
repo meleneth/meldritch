@@ -46,6 +46,7 @@ songs/examples/
   13-quantized-session-replay/
   14-harvested-performance-cues/
   15-launch-control-xl-input/
+  16-launch-control-xl-playground/
   composed-warehouse/
   invalid/
 ```
@@ -130,10 +131,14 @@ assigned, switched, and rendered deterministically from text definitions.
   mutation
 - [x] Add a LaunchControl XL app-level input profile that maps faders to
   absolute normalized curated-control values and buttons to typed step nudges
-- [x] Open physical LaunchControl XL MIDI devices through the host MIDI stack
-  and feed decoded CC messages into the typed control-surface profile
+- [x] Let `.mlperformance` declare MIDI devices and per-control MIDI CC
+  bindings for absolute faders/knobs and step buttons
+- [x] Open script-declared MIDI devices through the host MIDI stack and feed
+  decoded CC messages into the typed control-surface profile
 - [ ] Add a hardware smoke/diagnostic path and verify LaunchControl XL input on
   both Windows and Linux
+- [ ] Add script-declared pattern/launch/toggle controls beyond parameter
+  controls
 
 Done when loading a song produces a small usable performance surface entirely
 from its `.mlperformance` declaration.

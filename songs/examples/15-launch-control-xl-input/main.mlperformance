@@ -8,6 +8,10 @@ title = "LaunchControl XL Input"
 bpm = 120.0
 sample_rate = 48000
 
+[[midi_devices]]
+id = "launch-control-xl"
+name_contains = "Launch Control XL"
+
 [[tracks]]
 id = "bass"
 synth = "synths/bass.mlsynth"
@@ -22,3 +26,24 @@ target = "dsp:echo/delay.feedback"
 range = [0.0, 0.85]
 step = 0.05
 binding = "f"
+
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 77
+action = "absolute"
+
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 41
+action = "decrement"
+
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 57
+action = "increment"

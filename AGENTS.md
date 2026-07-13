@@ -102,9 +102,10 @@ Implemented foundations include:
 - a focused curated-control rendering layout that hides dense editor panels
 - `meldritch tui-song SONG_DIRECTORY` for delayed-note `.ml*` songs
 - loaded `.mlperformance` controls routed to typed curated-control commands
-- LaunchControl XL app-level control-surface mapping for faders and buttons
-- `tui-song` automatic LaunchControl XL MIDI input via the host MIDI stack
-  (`midir`), with fader/button CC decoding routed through typed app inputs
+- script-declared MIDI devices and per-control MIDI CC bindings for absolute
+  faders/knobs and step buttons
+- `tui-song` script-declared MIDI input via the host MIDI stack (`midir`), with
+  generic CC decoding routed through typed app inputs
 - latest-wins background rerender for live delay-feedback overrides
 - completed song rerenders published through the existing atomic audio snapshot
 - `tui-song` timestamped `.mlperformance` session files under `performances/`
@@ -125,14 +126,20 @@ this guide was written:
 - example `11` is `compile` because session files are produced and tested
   headlessly, but exhaustive action coverage and replay remain unfinished
 - example `15` is `compile` because LaunchControl XL fader/button mapping and
-  `tui-song` MIDI input wiring are tested headlessly, but real Windows/Linux
-  hardware smoke testing has not been performed yet
+  `tui-song` MIDI input wiring are tested headlessly from script-authored
+  bindings, but real Windows/Linux hardware smoke testing has not been
+  performed yet
+- example `16` is `compile` because the full LaunchControl XL default MIDI
+  surface is declared in `.mlperformance`, but richer pattern/launch/toggle
+  control actions remain future schema work
 
 The next implementation slice is to add a hardware smoke/diagnostic path for
 LaunchControl XL input and use it to verify the Windows and Linux device path.
-After that, keep broadening session capture coverage with scripted
-accepted-action tests that exercise the real controller path, then move into
-exact replay. Full all-parameters inspection remains open after that.
+In parallel, add script-declared pattern/launch/toggle control actions so the
+full controller playground can do more than parameter nudges. After that, keep
+broadening session capture coverage with scripted accepted-action tests that
+exercise the real controller path, then move into exact replay. Full
+all-parameters inspection remains open after that.
 
 ## Important files
 

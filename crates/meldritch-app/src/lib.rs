@@ -372,52 +372,62 @@ pub enum AppInput {
     DecreaseMasterDrive,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LaunchControlXlBinding {
-    pub control_id: String,
-    pub fader: Option<u8>,
-    pub decrement_button: Option<u8>,
-    pub increment_button: Option<u8>,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LaunchControlXlInput {
-    Fader { index: u8, value: u8 },
-    Button { index: u8, pressed: bool },
+pub enum MidiControlAction {
+    Absolute,
+    Decrement,
+    Increment,
 }
 
-pub fn map_launch_control_xl_input(
-    bindings: &[LaunchControlXlBinding],
-    input: LaunchControlXlInput,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MidiControlBinding {
+    pub control_id: String,
+    pub device: String,
+    pub channel: Option<u8>,
+    pub cc: u8,
+    pub action: MidiControlAction,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MidiControlInput {
+    pub device: String,
+    pub channel: u8,
+    pub cc: u8,
+    pub value: u8,
+}
+
+pub fn map_midi_control_input(
+    bindings: &[MidiControlBinding],
+    input: MidiControlInput,
 ) -> Option<AppInput> {
-    match input {
-        LaunchControlXlInput::Fader { index, value } => bindings
-            .iter()
-            .find(|binding| binding.fader == Some(index))
-            .map(|binding| AppInput::SetCuratedControlNormalized {
+    bindings
+        .iter()
+        .find(|binding| {
+            binding.device == input.device
+                && binding.cc == input.cc
+                && binding
+                    .channel
+                    .is_none_or(|channel| channel == input.channel)
+        })
+        .and_then(|binding| match binding.action {
+            MidiControlAction::Absolute => Some(AppInput::SetCuratedControlNormalized {
                 id: binding.control_id.clone(),
-                value: f64::from(value.min(127)) / 127.0,
+                value: f64::from(input.value.min(127)) / 127.0,
             }),
-        LaunchControlXlInput::Button {
-            index,
-            pressed: true,
-        } => bindings.iter().find_map(|binding| {
-            if binding.decrement_button == Some(index) {
+            MidiControlAction::Decrement if input.value != 0 => {
                 Some(AppInput::AdjustCuratedControl {
                     id: binding.control_id.clone(),
                     steps: -1,
                 })
-            } else if binding.increment_button == Some(index) {
+            }
+            MidiControlAction::Increment if input.value != 0 => {
                 Some(AppInput::AdjustCuratedControl {
                     id: binding.control_id.clone(),
                     steps: 1,
                 })
-            } else {
-                None
             }
-        }),
-        LaunchControlXlInput::Button { pressed: false, .. } => None,
-    }
+            MidiControlAction::Decrement | MidiControlAction::Increment => None,
+        })
 }
 
 struct BassSynthControl {
@@ -2043,19 +2053,38 @@ mod tests {
     }
 
     #[test]
-    fn launch_control_xl_faders_and_buttons_map_to_curated_control_inputs() {
-        let bindings = vec![LaunchControlXlBinding {
-            control_id: "echo-feedback".to_owned(),
-            fader: Some(1),
-            decrement_button: Some(1),
-            increment_button: Some(9),
-        }];
+    fn midi_control_bindings_map_scripted_ccs_to_curated_control_inputs() {
+        let bindings = vec![
+            MidiControlBinding {
+                control_id: "echo-feedback".to_owned(),
+                device: "launch-control-xl".to_owned(),
+                channel: Some(1),
+                cc: 77,
+                action: MidiControlAction::Absolute,
+            },
+            MidiControlBinding {
+                control_id: "echo-feedback".to_owned(),
+                device: "launch-control-xl".to_owned(),
+                channel: Some(1),
+                cc: 41,
+                action: MidiControlAction::Decrement,
+            },
+            MidiControlBinding {
+                control_id: "echo-feedback".to_owned(),
+                device: "launch-control-xl".to_owned(),
+                channel: Some(1),
+                cc: 57,
+                action: MidiControlAction::Increment,
+            },
+        ];
 
         assert_eq!(
-            map_launch_control_xl_input(
+            map_midi_control_input(
                 &bindings,
-                LaunchControlXlInput::Fader {
-                    index: 1,
+                MidiControlInput {
+                    device: "launch-control-xl".to_owned(),
+                    channel: 1,
+                    cc: 77,
                     value: 64,
                 },
             ),
@@ -2065,11 +2094,13 @@ mod tests {
             })
         );
         assert_eq!(
-            map_launch_control_xl_input(
+            map_midi_control_input(
                 &bindings,
-                LaunchControlXlInput::Button {
-                    index: 1,
-                    pressed: true,
+                MidiControlInput {
+                    device: "launch-control-xl".to_owned(),
+                    channel: 1,
+                    cc: 41,
+                    value: 127,
                 },
             ),
             Some(AppInput::AdjustCuratedControl {
@@ -2078,11 +2109,13 @@ mod tests {
             })
         );
         assert_eq!(
-            map_launch_control_xl_input(
+            map_midi_control_input(
                 &bindings,
-                LaunchControlXlInput::Button {
-                    index: 9,
-                    pressed: true,
+                MidiControlInput {
+                    device: "launch-control-xl".to_owned(),
+                    channel: 1,
+                    cc: 57,
+                    value: 127,
                 },
             ),
             Some(AppInput::AdjustCuratedControl {
@@ -2091,14 +2124,37 @@ mod tests {
             })
         );
         assert_eq!(
-            map_launch_control_xl_input(
+            map_midi_control_input(
                 &bindings,
-                LaunchControlXlInput::Button {
-                    index: 9,
-                    pressed: false,
+                MidiControlInput {
+                    device: "launch-control-xl".to_owned(),
+                    channel: 1,
+                    cc: 57,
+                    value: 0,
                 },
             ),
             None
+        );
+        assert_eq!(
+            map_midi_control_input(
+                &[MidiControlBinding {
+                    control_id: "echo-feedback".to_owned(),
+                    device: "launch-control-xl".to_owned(),
+                    channel: None,
+                    cc: 57,
+                    action: MidiControlAction::Increment,
+                }],
+                MidiControlInput {
+                    device: "launch-control-xl".to_owned(),
+                    channel: 16,
+                    cc: 57,
+                    value: 127,
+                },
+            ),
+            Some(AppInput::AdjustCuratedControl {
+                id: "echo-feedback".to_owned(),
+                steps: 1,
+            })
         );
     }
 

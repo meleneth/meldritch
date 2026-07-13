@@ -1,0 +1,644 @@
+[meldritch]
+kind = "performance"
+version = 1
+
+[performance]
+id = "launch-control-xl-playground"
+title = "LaunchControl XL Playground"
+bpm = 118.0
+sample_rate = 48000
+
+[[midi_devices]]
+id = "launch-control-xl"
+name_contains = "Launch Control XL"
+
+[[tracks]]
+id = "playground"
+synth = "synths/playground.mlsynth"
+dsp = ["dsp/echo.mldsp"]
+patterns = ["patterns/playground-line.mlpattern"]
+initial_pattern = "playground-line"
+
+[[controls]]
+id = "knob-01"
+label = "Knob 01"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 13
+action = "absolute"
+
+[[controls]]
+id = "knob-02"
+label = "Knob 02"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 14
+action = "absolute"
+
+[[controls]]
+id = "knob-03"
+label = "Knob 03"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 15
+action = "absolute"
+
+[[controls]]
+id = "knob-04"
+label = "Knob 04"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 16
+action = "absolute"
+
+[[controls]]
+id = "knob-05"
+label = "Knob 05"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 17
+action = "absolute"
+
+[[controls]]
+id = "knob-06"
+label = "Knob 06"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 18
+action = "absolute"
+
+[[controls]]
+id = "knob-07"
+label = "Knob 07"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 19
+action = "absolute"
+
+[[controls]]
+id = "knob-08"
+label = "Knob 08"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 20
+action = "absolute"
+
+[[controls]]
+id = "knob-09"
+label = "Knob 09"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 29
+action = "absolute"
+
+[[controls]]
+id = "knob-10"
+label = "Knob 10"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 30
+action = "absolute"
+
+[[controls]]
+id = "knob-11"
+label = "Knob 11"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 31
+action = "absolute"
+
+[[controls]]
+id = "knob-12"
+label = "Knob 12"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 32
+action = "absolute"
+
+[[controls]]
+id = "knob-13"
+label = "Knob 13"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 33
+action = "absolute"
+
+[[controls]]
+id = "knob-14"
+label = "Knob 14"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 34
+action = "absolute"
+
+[[controls]]
+id = "knob-15"
+label = "Knob 15"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 35
+action = "absolute"
+
+[[controls]]
+id = "knob-16"
+label = "Knob 16"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 36
+action = "absolute"
+
+[[controls]]
+id = "knob-17"
+label = "Knob 17"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 49
+action = "absolute"
+
+[[controls]]
+id = "knob-18"
+label = "Knob 18"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 50
+action = "absolute"
+
+[[controls]]
+id = "knob-19"
+label = "Knob 19"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 51
+action = "absolute"
+
+[[controls]]
+id = "knob-20"
+label = "Knob 20"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 52
+action = "absolute"
+
+[[controls]]
+id = "knob-21"
+label = "Knob 21"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 53
+action = "absolute"
+
+[[controls]]
+id = "knob-22"
+label = "Knob 22"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 54
+action = "absolute"
+
+[[controls]]
+id = "knob-23"
+label = "Knob 23"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 55
+action = "absolute"
+
+[[controls]]
+id = "knob-24"
+label = "Knob 24"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 56
+action = "absolute"
+
+[[controls]]
+id = "fader-01"
+label = "Fader 01"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 77
+action = "absolute"
+
+[[controls]]
+id = "fader-02"
+label = "Fader 02"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 78
+action = "absolute"
+
+[[controls]]
+id = "fader-03"
+label = "Fader 03"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 79
+action = "absolute"
+
+[[controls]]
+id = "fader-04"
+label = "Fader 04"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 80
+action = "absolute"
+
+[[controls]]
+id = "fader-05"
+label = "Fader 05"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 81
+action = "absolute"
+
+[[controls]]
+id = "fader-06"
+label = "Fader 06"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 82
+action = "absolute"
+
+[[controls]]
+id = "fader-07"
+label = "Fader 07"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 83
+action = "absolute"
+
+[[controls]]
+id = "fader-08"
+label = "Fader 08"
+target = "synth:playground/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 84
+action = "absolute"
+
+[[controls]]
+id = "button-a-01"
+label = "Button A01"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 41
+action = "decrement"
+
+[[controls]]
+id = "button-a-02"
+label = "Button A02"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 42
+action = "decrement"
+
+[[controls]]
+id = "button-a-03"
+label = "Button A03"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 43
+action = "decrement"
+
+[[controls]]
+id = "button-a-04"
+label = "Button A04"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 44
+action = "decrement"
+
+[[controls]]
+id = "button-a-05"
+label = "Button A05"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 45
+action = "decrement"
+
+[[controls]]
+id = "button-a-06"
+label = "Button A06"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 46
+action = "decrement"
+
+[[controls]]
+id = "button-a-07"
+label = "Button A07"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 47
+action = "decrement"
+
+[[controls]]
+id = "button-a-08"
+label = "Button A08"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 48
+action = "decrement"
+
+[[controls]]
+id = "button-b-01"
+label = "Button B01"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 57
+action = "increment"
+
+[[controls]]
+id = "button-b-02"
+label = "Button B02"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 58
+action = "increment"
+
+[[controls]]
+id = "button-b-03"
+label = "Button B03"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 59
+action = "increment"
+
+[[controls]]
+id = "button-b-04"
+label = "Button B04"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 60
+action = "increment"
+
+[[controls]]
+id = "button-b-05"
+label = "Button B05"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 61
+action = "increment"
+
+[[controls]]
+id = "button-b-06"
+label = "Button B06"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 62
+action = "increment"
+
+[[controls]]
+id = "button-b-07"
+label = "Button B07"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 63
+action = "increment"
+
+[[controls]]
+id = "button-b-08"
+label = "Button B08"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 1
+cc = 64
+action = "increment"

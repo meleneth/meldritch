@@ -18,6 +18,7 @@ Status values:
 | `09-curated-performance-controls` | Default curated mode and Ctrl-Tab all-parameters mode | play |
 | `11-session-capture` | Timestamped `.mlperformance` session capture | compile |
 | `15-launch-control-xl-input` | LaunchControl XL faders/buttons drive curated controls | compile |
+| `16-launch-control-xl-playground` | Full LaunchControl XL MIDI surface declared in scripts | compile |
 
 An implementation may advance a row only when all earlier statuses for that row
 are satisfied. New schema or runtime behavior requires a new row or an explicit

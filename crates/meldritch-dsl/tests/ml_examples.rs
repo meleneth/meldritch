@@ -286,3 +286,26 @@ fn curated_control_example_resolves_its_small_performance_surface() {
     assert_eq!(control.target().module_id(), "delay");
     assert_eq!(control.target().parameter(), "feedback");
 }
+
+#[test]
+fn launch_control_xl_playground_declares_full_midi_surface_in_scripts() {
+    let song = load_song_directory(examples_root().join("16-launch-control-xl-playground"))
+        .expect("LaunchControl XL playground should validate");
+    let devices = song.performance().midi_devices();
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].id(), "launch-control-xl");
+    assert_eq!(devices[0].name_contains(), "Launch Control XL");
+    let controls = song.performance().controls();
+    assert_eq!(controls.len(), 48);
+    let midi_bindings = controls
+        .iter()
+        .flat_map(|control| control.bindings())
+        .filter(|binding| {
+            matches!(
+                binding,
+                meldritch_dsl::ControlBindingDefinition::MidiCc { .. }
+            )
+        })
+        .count();
+    assert_eq!(midi_bindings, 48);
+}
