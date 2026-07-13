@@ -296,10 +296,13 @@ fn launch_control_xl_playground_declares_full_midi_surface_in_scripts() {
     assert_eq!(devices[0].id(), "launch-control-xl");
     assert_eq!(devices[0].name_contains(), "Launch Control XL");
     let controls = song.performance().controls();
-    assert_eq!(controls.len(), 48);
+    assert_eq!(controls.len(), 32);
+    let actions = song.performance().actions();
+    assert_eq!(actions.len(), 16);
     let midi_bindings = controls
         .iter()
         .flat_map(|control| control.bindings())
+        .chain(actions.iter().flat_map(|action| action.bindings()))
         .filter(|binding| {
             matches!(
                 binding,

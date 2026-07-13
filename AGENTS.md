@@ -110,6 +110,7 @@ Implemented foundations include:
   printing script-mapped CC events without starting audio/TUI playback
 - live `tui-song` rerendering for script-authored curated delay-feedback and
   synth low-pass cutoff controls
+- script-declared MIDI action bindings for transport and performance buttons
 - latest-wins background rerender for live delay-feedback overrides
 - completed song rerenders published through the existing atomic audio snapshot
 - `tui-song` timestamped `.mlperformance` session files under `performances/`
@@ -135,7 +136,8 @@ this guide was written:
   performed yet
 - example `16` is `play` because the full LaunchControl XL default MIDI surface
   is declared in `.mlperformance` and supported feedback/cutoff controls rerender
-  audio; richer pattern/launch/toggle control actions remain future schema work
+  audio; launch buttons can trigger typed transport/performance actions, while
+  richer pattern-switching semantics remain future schema work
 
 The next implementation slice is to use `midi-controls-check` to verify the
 Windows and Linux LaunchControl XL device path. In parallel, add

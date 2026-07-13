@@ -435,210 +435,174 @@ channel = 1
 cc = 84
 action = "absolute"
 
-[[controls]]
+[[actions]]
 id = "button-a-01"
-label = "Button A01"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button A01 Toggle Playback"
+action = "toggle_playback"
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 41
-action = "decrement"
 
-[[controls]]
+[[actions]]
 id = "button-a-02"
-label = "Button A02"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button A02 Stop"
+action = "stop"
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 42
-action = "decrement"
 
-[[controls]]
+[[actions]]
 id = "button-a-03"
-label = "Button A03"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button A03 Rewind"
+action = "rewind"
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 43
-action = "decrement"
 
-[[controls]]
+[[actions]]
 id = "button-a-04"
-label = "Button A04"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button A04 Toggle Mode"
+action = "toggle_cockpit_mode"
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 44
-action = "decrement"
 
-[[controls]]
+[[actions]]
 id = "button-a-05"
-label = "Button A05"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button A05 Next Scene"
+action = "queue_next_scene"
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 45
-action = "decrement"
 
-[[controls]]
+[[actions]]
 id = "button-a-06"
-label = "Button A06"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button A06 Toggle Mute"
+action = "toggle_track_mute"
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 46
-action = "decrement"
 
-[[controls]]
+[[actions]]
 id = "button-a-07"
-label = "Button A07"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button A07 Trigger Fill"
+action = "trigger_fill"
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 47
-action = "decrement"
 
-[[controls]]
+[[actions]]
 id = "button-a-08"
-label = "Button A08"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button A08 Cancel"
+action = "cancel_performance"
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 48
-action = "decrement"
 
-[[controls]]
+[[actions]]
 id = "button-b-01"
-label = "Button B01"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button B01 Queue Scene 1"
+action = "queue_phrase"
+scene = 1
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 57
-action = "increment"
 
-[[controls]]
+[[actions]]
 id = "button-b-02"
-label = "Button B02"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button B02 Queue Scene 2"
+action = "queue_phrase"
+scene = 2
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 58
-action = "increment"
 
-[[controls]]
+[[actions]]
 id = "button-b-03"
-label = "Button B03"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button B03 Queue Scene 3"
+action = "queue_phrase"
+scene = 3
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 59
-action = "increment"
 
-[[controls]]
+[[actions]]
 id = "button-b-04"
-label = "Button B04"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button B04 Queue Scene 4"
+action = "queue_phrase"
+scene = 4
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 60
-action = "increment"
 
-[[controls]]
+[[actions]]
 id = "button-b-05"
-label = "Button B05"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button B05 Scene 1 Var 1"
+action = "queue_phrase_variation"
+scene = 1
+variation = 1
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 61
-action = "increment"
 
-[[controls]]
+[[actions]]
 id = "button-b-06"
-label = "Button B06"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button B06 Scene 2 Var 1"
+action = "queue_phrase_variation"
+scene = 2
+variation = 1
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 62
-action = "increment"
 
-[[controls]]
+[[actions]]
 id = "button-b-07"
-label = "Button B07"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button B07 Scene 3 Var 1"
+action = "queue_phrase_variation"
+scene = 3
+variation = 1
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 63
-action = "increment"
 
-[[controls]]
+[[actions]]
 id = "button-b-08"
-label = "Button B08"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
-step = 0.05
-[[controls.bindings]]
+label = "Button B08 Scene 4 Var 1"
+action = "queue_phrase_variation"
+scene = 4
+variation = 1
+[[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 1
 cc = 64
-action = "increment"

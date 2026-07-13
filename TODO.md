@@ -138,10 +138,12 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Add a script-aware hardware diagnostic path for MIDI control inputs
 - [x] Rerender supported playground parameter controls for delay feedback and
   synth filter cutoff
+- [x] Add script-declared MIDI action bindings for transport and performance
+  buttons
 - [ ] Verify LaunchControl XL input with the diagnostic path on
   both Windows and Linux
-- [ ] Add script-declared pattern/launch/toggle controls beyond parameter
-  controls
+- [ ] Add richer script-declared pattern-switching semantics beyond the current
+  queue/transport/toggle action set
 
 Done when loading a song produces a small usable performance surface entirely
 from its `.mlperformance` declaration.

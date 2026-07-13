@@ -15,12 +15,13 @@ use std::fmt;
 mod song;
 
 pub use song::{
-    CableDefinition, ControlBindingAction, ControlBindingDefinition, CuratedControlDefinition,
-    DspDefinition, MidiDeviceDefinition, ModuleDefinition, ModuleKind, NoteEventDefinition,
-    NotePatternDefinition, ParameterInterpolation, ParameterLaneDefinition, ParameterOwner,
-    ParameterPatternDefinition, ParameterPointDefinition, ParameterTargetDefinition, PatchInput,
-    PerformanceDefinition, SignalType, SongDiagnostic, SongLoadError, SynthDefinition,
-    TrackDefinition, ValidatedSong, load_song_directory,
+    ActionControlDefinition, CableDefinition, ControlBindingAction, ControlBindingDefinition,
+    CuratedControlDefinition, DspDefinition, MidiDeviceDefinition, ModuleDefinition, ModuleKind,
+    NoteEventDefinition, NotePatternDefinition, ParameterInterpolation, ParameterLaneDefinition,
+    ParameterOwner, ParameterPatternDefinition, ParameterPointDefinition,
+    ParameterTargetDefinition, PatchInput, PerformanceActionDefinition, PerformanceDefinition,
+    SignalType, SongDiagnostic, SongLoadError, SynthDefinition, TrackDefinition, ValidatedSong,
+    load_song_directory,
 };
 
 #[derive(Clone, Debug, PartialEq)]

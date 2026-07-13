@@ -451,6 +451,7 @@ pub struct PerformanceDefinition {
     midi_devices: Vec<MidiDeviceDefinition>,
     tracks: Vec<TrackDefinition>,
     controls: Vec<CuratedControlDefinition>,
+    actions: Vec<ActionControlDefinition>,
 }
 
 impl PerformanceDefinition {
@@ -487,6 +488,11 @@ impl PerformanceDefinition {
     #[must_use]
     pub fn controls(&self) -> &[CuratedControlDefinition] {
         &self.controls
+    }
+
+    #[must_use]
+    pub fn actions(&self) -> &[ActionControlDefinition] {
+        &self.actions
     }
 }
 
@@ -575,6 +581,50 @@ pub enum ControlBindingDefinition {
         cc: u8,
         action: ControlBindingAction,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActionControlDefinition {
+    id: String,
+    label: String,
+    action: PerformanceActionDefinition,
+    bindings: Vec<ControlBindingDefinition>,
+}
+
+impl ActionControlDefinition {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    #[must_use]
+    pub const fn action(&self) -> &PerformanceActionDefinition {
+        &self.action
+    }
+
+    #[must_use]
+    pub fn bindings(&self) -> &[ControlBindingDefinition] {
+        &self.bindings
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PerformanceActionDefinition {
+    TogglePlayback,
+    Stop,
+    Rewind,
+    ToggleCockpitMode,
+    QueueNextScene,
+    QueuePhrase { scene: u64 },
+    QueuePhraseVariation { scene: u64, variation: usize },
+    ToggleTrackMute,
+    TriggerFill,
+    CancelPerformance,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -703,6 +753,8 @@ struct RawPerformanceFile {
     tracks: Vec<RawTrack>,
     #[serde(default)]
     controls: Vec<RawControl>,
+    #[serde(default)]
+    actions: Vec<RawActionControl>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -766,6 +818,45 @@ enum RawControlBindingAction {
     Absolute,
     Decrement,
     Increment,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawActionControl {
+    id: String,
+    label: String,
+    action: RawPerformanceAction,
+    #[serde(default)]
+    scene: Option<u64>,
+    #[serde(default)]
+    variation: Option<usize>,
+    #[serde(default)]
+    bindings: Vec<RawActionBinding>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RawPerformanceAction {
+    TogglePlayback,
+    Stop,
+    Rewind,
+    ToggleCockpitMode,
+    QueueNextScene,
+    QueuePhrase,
+    QueuePhraseVariation,
+    ToggleTrackMute,
+    TriggerFill,
+    CancelPerformance,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum RawActionBinding {
+    MidiCc {
+        device: String,
+        #[serde(default)]
+        channel: Option<u8>,
+        cc: u8,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -1088,6 +1179,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
 
     let mut control_ids = BTreeSet::new();
     let mut key_bindings = BTreeSet::new();
+    let mut midi_cc_claims = BTreeSet::new();
     let mut midi_bindings = BTreeSet::new();
     let mut controls = Vec::with_capacity(raw_performance.controls.len());
     for raw in raw_performance.controls {
@@ -1159,6 +1251,14 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                             ));
                         }
                     }
+                    if !midi_cc_claims.insert((device.clone(), channel, cc)) {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!(
+                                "MIDI CC binding device='{device}' channel='{channel:?}' cc={cc} is declared more than once"
+                            ),
+                        ));
+                    }
                     let action = match action {
                         RawControlBindingAction::Absolute => ControlBindingAction::Absolute,
                         RawControlBindingAction::Decrement => ControlBindingAction::Decrement,
@@ -1213,6 +1313,112 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         });
     }
 
+    let mut action_ids = BTreeSet::new();
+    let mut actions = Vec::with_capacity(raw_performance.actions.len());
+    for raw in raw_performance.actions {
+        if !action_ids.insert(raw.id.clone()) {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("action id '{}' is declared more than once", raw.id),
+            ));
+        }
+        let action = match raw.action {
+            RawPerformanceAction::TogglePlayback => PerformanceActionDefinition::TogglePlayback,
+            RawPerformanceAction::Stop => PerformanceActionDefinition::Stop,
+            RawPerformanceAction::Rewind => PerformanceActionDefinition::Rewind,
+            RawPerformanceAction::ToggleCockpitMode => {
+                PerformanceActionDefinition::ToggleCockpitMode
+            }
+            RawPerformanceAction::QueueNextScene => PerformanceActionDefinition::QueueNextScene,
+            RawPerformanceAction::QueuePhrase => PerformanceActionDefinition::QueuePhrase {
+                scene: raw.scene.ok_or_else(|| {
+                    SongLoadError::one(
+                        &entry,
+                        format!("action '{}' queue_phrase requires scene", raw.id),
+                    )
+                })?,
+            },
+            RawPerformanceAction::QueuePhraseVariation => {
+                PerformanceActionDefinition::QueuePhraseVariation {
+                    scene: raw.scene.ok_or_else(|| {
+                        SongLoadError::one(
+                            &entry,
+                            format!("action '{}' queue_phrase_variation requires scene", raw.id),
+                        )
+                    })?,
+                    variation: raw.variation.ok_or_else(|| {
+                        SongLoadError::one(
+                            &entry,
+                            format!(
+                                "action '{}' queue_phrase_variation requires variation",
+                                raw.id
+                            ),
+                        )
+                    })?,
+                }
+            }
+            RawPerformanceAction::ToggleTrackMute => PerformanceActionDefinition::ToggleTrackMute,
+            RawPerformanceAction::TriggerFill => PerformanceActionDefinition::TriggerFill,
+            RawPerformanceAction::CancelPerformance => {
+                PerformanceActionDefinition::CancelPerformance
+            }
+        };
+        let mut bindings = Vec::with_capacity(raw.bindings.len());
+        for binding in raw.bindings {
+            let RawActionBinding::MidiCc {
+                device,
+                channel,
+                cc,
+            } = binding;
+            if !midi_device_ids.contains(&device) {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!(
+                        "action '{}' references unknown MIDI device '{}'",
+                        raw.id, device
+                    ),
+                ));
+            }
+            if let Some(channel) = channel {
+                if !(1..=16).contains(&channel) {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!(
+                            "action '{}' has MIDI channel {} outside 1..=16",
+                            raw.id, channel
+                        ),
+                    ));
+                }
+            }
+            if !midi_cc_claims.insert((device.clone(), channel, cc)) {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!(
+                        "MIDI CC binding device='{device}' channel='{channel:?}' cc={cc} is declared more than once"
+                    ),
+                ));
+            }
+            bindings.push(ControlBindingDefinition::MidiCc {
+                device,
+                channel,
+                cc,
+                action: ControlBindingAction::Increment,
+            });
+        }
+        if bindings.is_empty() {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("action '{}' has no input bindings", raw.id),
+            ));
+        }
+        actions.push(ActionControlDefinition {
+            id: raw.id,
+            label: raw.label,
+            action,
+            bindings,
+        });
+    }
+
     let performance = PerformanceDefinition {
         id: raw_performance.performance.id,
         title: raw_performance.performance.title,
@@ -1221,6 +1427,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         midi_devices,
         tracks,
         controls,
+        actions,
     };
     let fingerprint = fingerprint_song(
         &performance,
@@ -2204,6 +2411,53 @@ fn fingerprint_song(
         fingerprint.u64(control.step.to_bits());
         fingerprint.string(&control.binding);
         for binding in &control.bindings {
+            match binding {
+                ControlBindingDefinition::Key { key } => {
+                    fingerprint.string("key");
+                    fingerprint.string(key);
+                }
+                ControlBindingDefinition::MidiCc {
+                    device,
+                    channel,
+                    cc,
+                    action,
+                } => {
+                    fingerprint.string("midi_cc");
+                    fingerprint.string(device);
+                    fingerprint.u64(channel.map_or(0, u64::from));
+                    fingerprint.u64(u64::from(*cc));
+                    fingerprint.u64(*action as u64);
+                }
+            }
+        }
+    }
+    for action in &performance.actions {
+        fingerprint.string(&action.id);
+        fingerprint.string(&action.label);
+        match &action.action {
+            PerformanceActionDefinition::TogglePlayback => fingerprint.string("toggle_playback"),
+            PerformanceActionDefinition::Stop => fingerprint.string("stop"),
+            PerformanceActionDefinition::Rewind => fingerprint.string("rewind"),
+            PerformanceActionDefinition::ToggleCockpitMode => {
+                fingerprint.string("toggle_cockpit_mode");
+            }
+            PerformanceActionDefinition::QueueNextScene => fingerprint.string("queue_next_scene"),
+            PerformanceActionDefinition::QueuePhrase { scene } => {
+                fingerprint.string("queue_phrase");
+                fingerprint.u64(*scene);
+            }
+            PerformanceActionDefinition::QueuePhraseVariation { scene, variation } => {
+                fingerprint.string("queue_phrase_variation");
+                fingerprint.u64(*scene);
+                fingerprint.u64(*variation as u64);
+            }
+            PerformanceActionDefinition::ToggleTrackMute => fingerprint.string("toggle_track_mute"),
+            PerformanceActionDefinition::TriggerFill => fingerprint.string("trigger_fill"),
+            PerformanceActionDefinition::CancelPerformance => {
+                fingerprint.string("cancel_performance")
+            }
+        }
+        for binding in &action.bindings {
             match binding {
                 ControlBindingDefinition::Key { key } => {
                     fingerprint.string("key");

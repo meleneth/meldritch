@@ -2271,6 +2271,14 @@ struct MidiControlInputConnection {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+struct MidiActionBinding {
+    device: String,
+    channel: Option<u8>,
+    cc: u8,
+    input: meldritch_app::AppInput,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 struct MidiControlDiagnosticEvent {
     device: String,
     port: String,
@@ -2299,20 +2307,28 @@ fn midi_controls_check(path: PathBuf, seconds: u64) -> Result<(), String> {
     drop(midi_input);
 
     let bindings = midi_control_bindings_for_song(&song);
+    let action_bindings = midi_action_bindings_for_song(&song);
     let (sender, receiver) = mpsc::channel();
     let mut connections = Vec::new();
     for device in song.performance().midi_devices() {
         let device_bindings = midi_control_bindings_for_device(&bindings, device.id());
+        let device_action_bindings = midi_action_bindings_for_device(&action_bindings, device.id());
         println!(
-            "script device '{}' matches ports containing '{}' with {} binding(s)",
+            "script device '{}' matches ports containing '{}' with {} control binding(s), {} action binding(s)",
             device.id(),
             device.name_contains(),
-            device_bindings.len()
+            device_bindings.len(),
+            device_action_bindings.len()
         );
-        if device_bindings.is_empty() {
+        if device_bindings.is_empty() && device_action_bindings.is_empty() {
             continue;
         }
-        match connect_midi_control_diagnostic(device, sender.clone(), device_bindings)? {
+        match connect_midi_control_diagnostic(
+            device,
+            sender.clone(),
+            device_bindings,
+            device_action_bindings,
+        )? {
             Some(connection) => connections.push(connection),
             None => println!("  no matching port opened for '{}'", device.id()),
         }
@@ -2355,6 +2371,7 @@ fn connect_midi_control_input(
     device: &meldritch_dsl::MidiDeviceDefinition,
     sender: mpsc::Sender<meldritch_app::AppInput>,
     bindings: Vec<meldritch_app::MidiControlBinding>,
+    action_bindings: Vec<MidiActionBinding>,
 ) -> Result<Option<MidiControlInputConnection>, String> {
     let mut midi_input = midir::MidiInput::new(&format!("meldritch-midi-{}", device.id()))
         .map_err(|error| midi_input_client_error("failed to create MIDI input client", &error))?;
@@ -2379,15 +2396,17 @@ fn connect_midi_control_input(
                 let Some((channel, cc, value)) = decode_midi_cc_message(message) else {
                     return;
                 };
-                let Some(input) = meldritch_app::map_midi_control_input(
+                let input = map_script_midi_input(
                     &bindings,
+                    &action_bindings,
                     meldritch_app::MidiControlInput {
                         device: device_id.clone(),
                         channel,
                         cc,
                         value,
                     },
-                ) else {
+                );
+                let Some(input) = input else {
                     return;
                 };
                 let _ = sender.send(input);
@@ -2405,6 +2424,7 @@ fn connect_midi_control_diagnostic(
     device: &meldritch_dsl::MidiDeviceDefinition,
     sender: mpsc::Sender<MidiControlDiagnosticEvent>,
     bindings: Vec<meldritch_app::MidiControlBinding>,
+    action_bindings: Vec<MidiActionBinding>,
 ) -> Result<Option<MidiControlInputConnection>, String> {
     let mut midi_input = midir::MidiInput::new(&format!("meldritch-midi-check-{}", device.id()))
         .map_err(|error| midi_input_client_error("failed to create MIDI input client", &error))?;
@@ -2431,8 +2451,9 @@ fn connect_midi_control_diagnostic(
                 let Some((channel, cc, value)) = decode_midi_cc_message(message) else {
                     return;
                 };
-                let input = meldritch_app::map_midi_control_input(
+                let input = map_script_midi_input(
                     &bindings,
+                    &action_bindings,
                     meldritch_app::MidiControlInput {
                         device: callback_device_id.clone(),
                         channel,
@@ -2521,6 +2542,105 @@ fn midi_control_bindings_for_device(
         .filter(|binding| binding.device == device)
         .cloned()
         .collect()
+}
+
+fn midi_action_bindings_for_song(song: &meldritch_dsl::ValidatedSong) -> Vec<MidiActionBinding> {
+    song.performance()
+        .actions()
+        .iter()
+        .flat_map(|action| {
+            let Some(input) = app_input_for_performance_action(action.action()) else {
+                return Vec::new();
+            };
+            action
+                .bindings()
+                .iter()
+                .filter_map(move |binding| {
+                    let meldritch_dsl::ControlBindingDefinition::MidiCc {
+                        device,
+                        channel,
+                        cc,
+                        ..
+                    } = binding
+                    else {
+                        return None;
+                    };
+                    Some(MidiActionBinding {
+                        device: device.clone(),
+                        channel: *channel,
+                        cc: *cc,
+                        input: input.clone(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn midi_action_bindings_for_device(
+    bindings: &[MidiActionBinding],
+    device: &str,
+) -> Vec<MidiActionBinding> {
+    bindings
+        .iter()
+        .filter(|binding| binding.device == device)
+        .cloned()
+        .collect()
+}
+
+fn app_input_for_performance_action(
+    action: &meldritch_dsl::PerformanceActionDefinition,
+) -> Option<meldritch_app::AppInput> {
+    Some(match action {
+        meldritch_dsl::PerformanceActionDefinition::TogglePlayback => {
+            meldritch_app::AppInput::TogglePlayback
+        }
+        meldritch_dsl::PerformanceActionDefinition::Stop => meldritch_app::AppInput::Stop,
+        meldritch_dsl::PerformanceActionDefinition::Rewind => meldritch_app::AppInput::Rewind,
+        meldritch_dsl::PerformanceActionDefinition::ToggleCockpitMode => {
+            meldritch_app::AppInput::ToggleCockpitMode
+        }
+        meldritch_dsl::PerformanceActionDefinition::QueueNextScene => {
+            meldritch_app::AppInput::QueueNextScene
+        }
+        meldritch_dsl::PerformanceActionDefinition::QueuePhrase { scene } => {
+            meldritch_app::AppInput::QueuePhrase(SceneId::new(*scene))
+        }
+        meldritch_dsl::PerformanceActionDefinition::QueuePhraseVariation { scene, variation } => {
+            meldritch_app::AppInput::QueuePhraseVariation(SceneId::new(*scene), *variation)
+        }
+        meldritch_dsl::PerformanceActionDefinition::ToggleTrackMute => {
+            meldritch_app::AppInput::ToggleTrackMute
+        }
+        meldritch_dsl::PerformanceActionDefinition::TriggerFill => {
+            meldritch_app::AppInput::TriggerFill
+        }
+        meldritch_dsl::PerformanceActionDefinition::CancelPerformance => {
+            meldritch_app::AppInput::CancelPerformance
+        }
+    })
+}
+
+fn map_script_midi_input(
+    control_bindings: &[meldritch_app::MidiControlBinding],
+    action_bindings: &[MidiActionBinding],
+    input: meldritch_app::MidiControlInput,
+) -> Option<meldritch_app::AppInput> {
+    meldritch_app::map_midi_control_input(control_bindings, input.clone()).or_else(|| {
+        if input.value == 0 {
+            return None;
+        }
+        action_bindings
+            .iter()
+            .find(|binding| {
+                binding.device == input.device
+                    && binding.cc == input.cc
+                    && binding
+                        .channel
+                        .is_none_or(|channel| channel == input.channel)
+            })
+            .map(|binding| binding.input.clone())
+    })
 }
 
 fn decode_midi_cc_message(message: &[u8]) -> Option<(u8, u8, u8)> {
@@ -2633,14 +2753,22 @@ fn tui_song(
     controller.set_curated_controls(controls);
     let (external_input_sender, external_input_receiver) = mpsc::channel();
     let midi_control_bindings = midi_control_bindings_for_song(&song);
+    let midi_action_bindings = midi_action_bindings_for_song(&song);
     let _midi_inputs = if midi_controls {
         let mut connections = Vec::new();
         for device in song.performance().midi_devices() {
             let bindings = midi_control_bindings_for_device(&midi_control_bindings, device.id());
-            if bindings.is_empty() {
+            let action_bindings =
+                midi_action_bindings_for_device(&midi_action_bindings, device.id());
+            if bindings.is_empty() && action_bindings.is_empty() {
                 continue;
             }
-            match connect_midi_control_input(device, external_input_sender.clone(), bindings)? {
+            match connect_midi_control_input(
+                device,
+                external_input_sender.clone(),
+                bindings,
+                action_bindings,
+            )? {
                 Some(connection) => connections.push(connection),
                 None => {
                     eprintln!(
@@ -6429,6 +6557,45 @@ mod tests {
                 && binding.cc == 77
                 && binding.action == meldritch_app::MidiControlAction::Absolute
         }));
+    }
+
+    #[test]
+    fn midi_action_bindings_are_derived_from_song_scripts() {
+        let song = meldritch_dsl::load_song_directory(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join("songs/examples/16-launch-control-xl-playground"),
+        )
+        .expect("LaunchControl XL playground example should load");
+
+        let control_bindings = midi_control_bindings_for_song(&song);
+        let action_bindings = midi_action_bindings_for_song(&song);
+        assert_eq!(
+            map_script_midi_input(
+                &control_bindings,
+                &action_bindings,
+                meldritch_app::MidiControlInput {
+                    device: "launch-control-xl".to_owned(),
+                    channel: 1,
+                    cc: 41,
+                    value: 127,
+                },
+            ),
+            Some(meldritch_app::AppInput::TogglePlayback)
+        );
+        assert_eq!(
+            map_script_midi_input(
+                &control_bindings,
+                &action_bindings,
+                meldritch_app::MidiControlInput {
+                    device: "launch-control-xl".to_owned(),
+                    channel: 1,
+                    cc: 41,
+                    value: 0,
+                },
+            ),
+            None
+        );
     }
 
     fn assert_session_kind(
