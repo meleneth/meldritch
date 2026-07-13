@@ -14,9 +14,10 @@ It must:
 - ignore button releases so they do not create duplicate performer actions
 - route every resulting hardware interaction through `AppInput` /
   `AppCommand`, so session capture can record it like keyboard input
-- eventually open the physical LaunchControl XL through the host MIDI stack on
-  both Windows and Linux
+- open the physical LaunchControl XL through the host MIDI stack on Windows and
+  Linux using the same typed input path as keyboard actions
 
 Current implementation status: the app-level LaunchControl XL fader/button
-profile and absolute curated-control command are tested headlessly. Physical
-MIDI device discovery/opening is still pending.
+profile, MIDI CC decoding, and `tui-song` MIDI input wiring are tested
+headlessly. Actual hardware smoke testing on Windows and Linux is still
+pending.

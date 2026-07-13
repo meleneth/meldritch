@@ -170,27 +170,45 @@ where
     F: FnMut(&mut AppController) -> Result<Option<String>, String>,
     I: FnMut(&AppController, &AppInput, &AppCommandResult),
 {
+    run_with_hooks_and_external_inputs(controller, default_step, tick, || None, on_input)
+}
+
+pub fn run_with_hooks_and_external_inputs<F, E, I>(
+    controller: &mut AppController,
+    default_step: Step,
+    tick: F,
+    external_input: E,
+    on_input: I,
+) -> io::Result<()>
+where
+    F: FnMut(&mut AppController) -> Result<Option<String>, String>,
+    E: FnMut() -> Option<AppInput>,
+    I: FnMut(&AppController, &AppInput, &AppCommandResult),
+{
     let mut terminal = TerminalGuard::enter()?;
     let result = run_loop(
         &mut terminal.terminal,
         controller,
         &default_step,
         tick,
+        external_input,
         on_input,
     );
     terminal.restore()?;
     result
 }
 
-fn run_loop<F, I>(
+fn run_loop<F, E, I>(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     controller: &mut AppController,
     default_step: &Step,
     mut tick: F,
+    mut external_input: E,
     mut on_input: I,
 ) -> io::Result<()>
 where
     F: FnMut(&mut AppController) -> Result<Option<String>, String>,
+    E: FnMut() -> Option<AppInput>,
     I: FnMut(&AppController, &AppInput, &AppCommandResult),
 {
     let mut status = StatusMessage::info("Ready");
@@ -199,6 +217,12 @@ where
             Ok(Some(message)) => status = StatusMessage::info(message),
             Err(message) => status = StatusMessage::error(message),
             Ok(None) => {}
+        }
+        for _ in 0..16 {
+            let Some(input) = external_input() else {
+                break;
+            };
+            status = handle_app_input(controller, input, &mut on_input);
         }
         let view = controller.view_model();
         terminal.draw(|frame| draw_with_status(frame, &view, &status))?;
@@ -211,16 +235,27 @@ where
         match map_key_for_view(key, default_step, &view) {
             Some(TuiAction::Quit) => return Ok(()),
             Some(TuiAction::Input(input)) => {
-                status = match controller.handle_input(input.clone()) {
-                    Ok(result) => {
-                        on_input(controller, &input, &result);
-                        StatusMessage::info(command_result_text(&result))
-                    }
-                    Err(error) => StatusMessage::error(format!("{error:?}")),
-                };
+                status = handle_app_input(controller, input, &mut on_input);
             }
             None => {}
         }
+    }
+}
+
+fn handle_app_input<I>(
+    controller: &mut AppController,
+    input: AppInput,
+    on_input: &mut I,
+) -> StatusMessage
+where
+    I: FnMut(&AppController, &AppInput, &AppCommandResult),
+{
+    match controller.handle_input(input.clone()) {
+        Ok(result) => {
+            on_input(controller, &input, &result);
+            StatusMessage::info(command_result_text(&result))
+        }
+        Err(error) => StatusMessage::error(format!("{error:?}")),
     }
 }
 

@@ -130,8 +130,10 @@ assigned, switched, and rendered deterministically from text definitions.
   mutation
 - [x] Add a LaunchControl XL app-level input profile that maps faders to
   absolute normalized curated-control values and buttons to typed step nudges
-- [ ] Open physical LaunchControl XL MIDI devices on Windows and Linux and feed
-  decoded MIDI messages into the typed control-surface profile
+- [x] Open physical LaunchControl XL MIDI devices through the host MIDI stack
+  and feed decoded CC messages into the typed control-surface profile
+- [ ] Add a hardware smoke/diagnostic path and verify LaunchControl XL input on
+  both Windows and Linux
 
 Done when loading a song produces a small usable performance surface entirely
 from its `.mlperformance` declaration.

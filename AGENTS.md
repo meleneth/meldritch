@@ -103,6 +103,8 @@ Implemented foundations include:
 - `meldritch tui-song SONG_DIRECTORY` for delayed-note `.ml*` songs
 - loaded `.mlperformance` controls routed to typed curated-control commands
 - LaunchControl XL app-level control-surface mapping for faders and buttons
+- `tui-song` automatic LaunchControl XL MIDI input via the host MIDI stack
+  (`midir`), with fader/button CC decoding routed through typed app inputs
 - latest-wins background rerender for live delay-feedback overrides
 - completed song rerenders published through the existing atomic audio snapshot
 - `tui-song` timestamped `.mlperformance` session files under `performances/`
@@ -122,15 +124,15 @@ this guide was written:
   remains unfinished
 - example `11` is `compile` because session files are produced and tested
   headlessly, but exhaustive action coverage and replay remain unfinished
-- example `15` is `compile` because LaunchControl XL fader/button mapping is
-  tested at the app boundary, but physical Windows/Linux MIDI device input is
-  not wired yet
+- example `15` is `compile` because LaunchControl XL fader/button mapping and
+  `tui-song` MIDI input wiring are tested headlessly, but real Windows/Linux
+  hardware smoke testing has not been performed yet
 
-The next implementation slice is to wire physical MIDI input for LaunchControl
-XL on Windows and Linux, feeding decoded device events through the tested
-app-level profile. After that, keep broadening session capture coverage with
-scripted accepted-action tests that exercise the real controller path, then move
-into exact replay. Full all-parameters inspection remains open after that.
+The next implementation slice is to add a hardware smoke/diagnostic path for
+LaunchControl XL input and use it to verify the Windows and Linux device path.
+After that, keep broadening session capture coverage with scripted
+accepted-action tests that exercise the real controller path, then move into
+exact replay. Full all-parameters inspection remains open after that.
 
 ## Important files
 

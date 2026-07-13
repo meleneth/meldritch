@@ -641,6 +641,9 @@ enum Command {
         /// Render workers for the backing coordinator; zero selects available parallelism.
         #[arg(long, default_value_t = 0)]
         workers: usize,
+        /// Disable automatic Novation LaunchControl XL MIDI input.
+        #[arg(long = "no-launch-control-xl", action = clap::ArgAction::SetFalse, default_value_t = true)]
+        launch_control_xl: bool,
     },
     /// Open the realtime cockpit with a native synthesized bassline track.
     TuiBassline {
@@ -1012,7 +1015,8 @@ fn run(cli: Cli) -> Result<(), String> {
             frames,
             chunk_frames,
             workers,
-        } => tui_song(song, frames, chunk_frames, workers),
+            launch_control_xl,
+        } => tui_song(song, frames, chunk_frames, workers, launch_control_xl),
         Command::TuiBassline {
             project,
             pattern_id,
@@ -2244,11 +2248,106 @@ fn toml_string(value: &str) -> String {
     escaped
 }
 
+struct LaunchControlXlMidiInput {
+    _connection: midir::MidiInputConnection<()>,
+}
+
+fn connect_launch_control_xl(
+    sender: mpsc::Sender<meldritch_app::AppInput>,
+    bindings: Vec<meldritch_app::LaunchControlXlBinding>,
+) -> Result<Option<LaunchControlXlMidiInput>, String> {
+    let mut midi_input = midir::MidiInput::new("meldritch-launch-control-xl")
+        .map_err(|error| format!("failed to create MIDI input client: {error}"))?;
+    midi_input.ignore(midir::Ignore::None);
+    let Some((port, name)) = midi_input
+        .ports()
+        .into_iter()
+        .filter_map(|port| {
+            let name = midi_input.port_name(&port).ok()?;
+            is_launch_control_xl_port_name(&name).then_some((port, name))
+        })
+        .next()
+    else {
+        return Ok(None);
+    };
+    let connection = midi_input
+        .connect(
+            &port,
+            "meldritch-launch-control-xl-input",
+            move |_timestamp, message, _state| {
+                let Some(surface_input) = decode_launch_control_xl_message(message) else {
+                    return;
+                };
+                let Some(input) =
+                    meldritch_app::map_launch_control_xl_input(&bindings, surface_input)
+                else {
+                    return;
+                };
+                let _ = sender.send(input);
+            },
+            (),
+        )
+        .map_err(|error| format!("failed to open LaunchControl XL MIDI input '{name}': {error}"))?;
+    eprintln!("LaunchControl XL MIDI input connected: {name}");
+    Ok(Some(LaunchControlXlMidiInput {
+        _connection: connection,
+    }))
+}
+
+fn is_launch_control_xl_port_name(name: &str) -> bool {
+    let normalized = name.to_ascii_lowercase().replace([' ', '-', '_'], "");
+    normalized.contains("launchcontrolxl")
+}
+
+fn launch_control_xl_bindings_for_controls(
+    controls: &[meldritch_app::CuratedControlView],
+) -> Vec<meldritch_app::LaunchControlXlBinding> {
+    controls
+        .iter()
+        .take(8)
+        .enumerate()
+        .map(|(index, control)| {
+            let index = u8::try_from(index + 1).expect("LaunchControl XL control index fits u8");
+            meldritch_app::LaunchControlXlBinding {
+                control_id: control.id.clone(),
+                fader: Some(index),
+                decrement_button: Some(index),
+                increment_button: Some(index + 8),
+            }
+        })
+        .collect()
+}
+
+fn decode_launch_control_xl_message(message: &[u8]) -> Option<meldritch_app::LaunchControlXlInput> {
+    let [status, controller, value, ..] = *message else {
+        return None;
+    };
+    if status & 0xF0 != 0xB0 {
+        return None;
+    }
+    match controller {
+        77..=84 => Some(meldritch_app::LaunchControlXlInput::Fader {
+            index: controller - 76,
+            value: value.min(127),
+        }),
+        41..=48 => Some(meldritch_app::LaunchControlXlInput::Button {
+            index: controller - 40,
+            pressed: value != 0,
+        }),
+        57..=64 => Some(meldritch_app::LaunchControlXlInput::Button {
+            index: controller - 48,
+            pressed: value != 0,
+        }),
+        _ => None,
+    }
+}
+
 fn tui_song(
     path: PathBuf,
     frames: Option<u64>,
     chunk_frames: u32,
     workers: usize,
+    launch_control_xl: bool,
 ) -> Result<(), String> {
     let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
     let patch = meldritch_render::song_render::compile_delayed_note_song(&song)
@@ -2313,7 +2412,20 @@ fn tui_song(
         256,
     );
     let controls = song_controls_for_view(&song, patch.feedback());
+    let launch_control_xl_bindings = launch_control_xl_bindings_for_controls(&controls);
     controller.set_curated_controls(controls);
+    let (external_input_sender, external_input_receiver) = mpsc::channel();
+    let _launch_control_xl_midi = if launch_control_xl {
+        match connect_launch_control_xl(external_input_sender, launch_control_xl_bindings)? {
+            Some(connection) => Some(connection),
+            None => {
+                eprintln!("LaunchControl XL MIDI input not found; continuing with keyboard input");
+                None
+            }
+        }
+    } else {
+        None
+    };
     let _session = meldritch_audio::device_output::RealtimePlaybackSession::open_default(
         controller.coordinator().audio_reader(),
         song.performance().sample_rate(),
@@ -2335,7 +2447,7 @@ fn tui_song(
         frame_count,
     )?));
     let input_capture = Arc::clone(&capture);
-    let run_result = meldritch_tui::run_with_hooks(
+    let run_result = meldritch_tui::run_with_hooks_and_external_inputs(
         &mut controller,
         Step::new(36),
         move |controller| {
@@ -2367,6 +2479,7 @@ fn tui_song(
             }
             Ok(None)
         },
+        move || external_input_receiver.try_recv().ok(),
         move |controller, input, result| {
             if let Err(error) = input_capture
                 .lock()
@@ -6049,6 +6162,84 @@ mod tests {
             &meldritch_app::AppCommandResult::PerformanceCancelled(None),
             "performance_cancel",
             Some("CancelPerformance"),
+        );
+    }
+
+    #[test]
+    fn launch_control_xl_midi_messages_decode_factory_faders_and_buttons() {
+        assert_eq!(
+            decode_launch_control_xl_message(&[0xB0, 77, 64]),
+            Some(meldritch_app::LaunchControlXlInput::Fader {
+                index: 1,
+                value: 64,
+            })
+        );
+        assert_eq!(
+            decode_launch_control_xl_message(&[0xB3, 84, 127]),
+            Some(meldritch_app::LaunchControlXlInput::Fader {
+                index: 8,
+                value: 127,
+            })
+        );
+        assert_eq!(
+            decode_launch_control_xl_message(&[0xB0, 41, 127]),
+            Some(meldritch_app::LaunchControlXlInput::Button {
+                index: 1,
+                pressed: true,
+            })
+        );
+        assert_eq!(
+            decode_launch_control_xl_message(&[0xB0, 57, 0]),
+            Some(meldritch_app::LaunchControlXlInput::Button {
+                index: 9,
+                pressed: false,
+            })
+        );
+        assert_eq!(decode_launch_control_xl_message(&[0x90, 77, 127]), None);
+        assert_eq!(decode_launch_control_xl_message(&[0xB0, 13, 127]), None);
+    }
+
+    #[test]
+    fn launch_control_xl_bindings_follow_curated_control_order() {
+        let bindings = launch_control_xl_bindings_for_controls(&[
+            meldritch_app::CuratedControlView {
+                id: "echo-feedback".to_owned(),
+                label: "Echo Feedback".to_owned(),
+                target: "dsp:echo/delay.feedback".to_owned(),
+                minimum: 0.0,
+                maximum: 0.85,
+                step: 0.05,
+                binding: "f".to_owned(),
+                value: Some(0.35),
+            },
+            meldritch_app::CuratedControlView {
+                id: "delay-mix".to_owned(),
+                label: "Delay Mix".to_owned(),
+                target: "dsp:echo/delay.mix".to_owned(),
+                minimum: 0.0,
+                maximum: 1.0,
+                step: 0.05,
+                binding: "m".to_owned(),
+                value: Some(0.25),
+            },
+        ]);
+
+        assert_eq!(
+            bindings,
+            vec![
+                meldritch_app::LaunchControlXlBinding {
+                    control_id: "echo-feedback".to_owned(),
+                    fader: Some(1),
+                    decrement_button: Some(1),
+                    increment_button: Some(9),
+                },
+                meldritch_app::LaunchControlXlBinding {
+                    control_id: "delay-mix".to_owned(),
+                    fader: Some(2),
+                    decrement_button: Some(2),
+                    increment_button: Some(10),
+                },
+            ]
         );
     }
 

@@ -13,6 +13,7 @@ meldritch-core = { path = "../meldritch-core" }
 meldritch-dsl = { path = "../meldritch-dsl" }
 meldritch-render = { path = "../meldritch-render" }
 meldritch-tui = { path = "../meldritch-tui" }
+midir.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
