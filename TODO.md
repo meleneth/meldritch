@@ -144,12 +144,14 @@ assigned, switched, and rendered deterministically from text definitions.
   hardware buttons can be discovered
 - [x] Add script-declared MIDI note action bindings and bind the discovered
   LaunchControl XL side-column note/CC buttons in the playground example
+- [x] Add authored LaunchControl XL playground groove scenes/variations and
+  rerender selected song patterns during `tui-song` playback
 - [ ] Verify LaunchControl XL input with the diagnostic path on
   both Windows and Linux
 - [ ] Add MIDI output/LED feedback support after confirming the LaunchControl XL
   output protocol for script-addressed LEDs
-- [ ] Add richer script-declared pattern-switching semantics beyond the current
-  queue/transport/toggle action set
+- [ ] Add quantized script-declared pattern-switching semantics and exact replay
+  beyond the current immediate song-rerender scene path
 
 Done when loading a song produces a small usable performance surface entirely
 from its `.mlperformance` declaration.

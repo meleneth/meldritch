@@ -479,6 +479,21 @@ pub fn compile_note_song(song: &ValidatedSong) -> Result<CompiledNotePatch, Song
             found: song.performance().tracks().len(),
         });
     };
+    let pattern_id = track
+        .initial_pattern()
+        .ok_or_else(|| SongRenderError::MissingPattern { id: String::new() })?;
+    compile_note_song_for_pattern(song, pattern_id)
+}
+
+pub fn compile_note_song_for_pattern(
+    song: &ValidatedSong,
+    pattern_id: &str,
+) -> Result<CompiledNotePatch, SongRenderError> {
+    let [track] = song.performance().tracks() else {
+        return Err(SongRenderError::TrackCount {
+            found: song.performance().tracks().len(),
+        });
+    };
     let synth =
         song.synths()
             .get(track.synth_id())
@@ -533,9 +548,6 @@ pub fn compile_note_song(song: &ValidatedSong) -> Result<CompiledNotePatch, Song
             format!("{}.audio", output.id()),
         )?;
     }
-    let pattern_id = track
-        .initial_pattern()
-        .ok_or_else(|| SongRenderError::MissingPattern { id: String::new() })?;
     let pattern =
         song.note_patterns()
             .get(pattern_id)
@@ -694,6 +706,21 @@ pub fn compile_delayed_note_song(
     song: &ValidatedSong,
 ) -> Result<CompiledDelayedNotePatch, SongRenderError> {
     let source = compile_note_song(song)?;
+    compile_delayed_note_song_from_source(song, source)
+}
+
+pub fn compile_delayed_note_song_for_pattern(
+    song: &ValidatedSong,
+    pattern_id: &str,
+) -> Result<CompiledDelayedNotePatch, SongRenderError> {
+    let source = compile_note_song_for_pattern(song, pattern_id)?;
+    compile_delayed_note_song_from_source(song, source)
+}
+
+fn compile_delayed_note_song_from_source(
+    song: &ValidatedSong,
+    source: CompiledNotePatch,
+) -> Result<CompiledDelayedNotePatch, SongRenderError> {
     let [track] = song.performance().tracks() else {
         return Err(SongRenderError::TrackCount {
             found: song.performance().tracks().len(),

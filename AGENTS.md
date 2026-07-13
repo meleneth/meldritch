@@ -138,17 +138,18 @@ this guide was written:
 - example `16` is `play` because the full LaunchControl XL default MIDI surface
   is declared in `.mlperformance` and supported feedback/cutoff controls rerender
   audio; launch buttons and the discovered side-column note/CC buttons can
-  trigger typed transport/performance actions, while richer pattern-switching
-  semantics remain future schema work. MIDI output/LED feedback is not yet
-  implemented.
+  trigger typed transport/performance actions; the B row selects authored
+  groove scenes/variations that rerender through the song synth and delay.
+  Quantized launch timing, exact replay, and MIDI output/LED feedback are not
+  yet implemented.
 
 The next implementation slice is to use `midi-controls-check` to verify the
 Windows and Linux LaunchControl XL device path and confirm any MIDI output
-messages needed for script-addressed LED feedback. In parallel, add
-script-declared pattern/launch/toggle control actions so the full controller
-playground can do more than parameter nudges. After that, keep broadening
-session capture coverage with scripted accepted-action tests that exercise the
-real controller path, then move into exact replay. Full all-parameters
+messages needed for script-addressed LED feedback. In parallel, tighten
+script-declared pattern launch timing from immediate rerender to quantized
+execution. After that, keep broadening session capture coverage with scripted
+accepted-action tests that exercise the real controller path, then move into
+exact replay. Full all-parameters
 inspection remains open after that.
 
 ## Important files

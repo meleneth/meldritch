@@ -1701,6 +1701,7 @@ fn validate_song(path: PathBuf) -> Result<(), String> {
 
 struct SongRenderRequest {
     generation: u64,
+    patch: meldritch_render::song_render::CompiledDelayedNotePatch,
     overrides: SongLiveOverrides,
 }
 
@@ -1723,7 +1724,7 @@ struct SongRerenderState {
 }
 
 impl SongRerenderWorker {
-    fn new(patch: meldritch_render::song_render::CompiledDelayedNotePatch, frames: u32) -> Self {
+    fn new(frames: u32) -> Self {
         let shared = Arc::new((Mutex::new(SongRerenderState::default()), Condvar::new()));
         let thread_shared = Arc::clone(&shared);
         let (completed_tx, completed) = mpsc::channel();
@@ -1746,7 +1747,7 @@ impl SongRerenderWorker {
                         .take()
                         .expect("latest request exists after wait")
                 };
-                let Ok(block) = patch.render_with_overrides(
+                let Ok(block) = request.patch.render_with_overrides(
                     range,
                     request.overrides.feedback,
                     request.overrides.cutoff_hz,
@@ -1768,12 +1769,18 @@ impl SongRerenderWorker {
         }
     }
 
-    fn submit(&mut self, generation: u64, overrides: SongLiveOverrides) {
+    fn submit(
+        &mut self,
+        generation: u64,
+        patch: meldritch_render::song_render::CompiledDelayedNotePatch,
+        overrides: SongLiveOverrides,
+    ) {
         let (lock, changed) = &*self.shared;
         lock.lock()
             .expect("song render worker lock poisoned")
             .latest = Some(SongRenderRequest {
             generation,
+            patch,
             overrides,
         });
         changed.notify_one();
@@ -2844,6 +2851,7 @@ fn tui_song(
     let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
     let patch = meldritch_render::song_render::compile_delayed_note_song(&song)
         .map_err(|error| format!("failed to compile song for TUI playback: {error:?}"))?;
+    let scene_bank = song_scene_bank(&song, tempo_from_song(&song)?)?;
     let frame_count = frames.unwrap_or_else(|| {
         song.note_patterns()
             .values()
@@ -2864,8 +2872,7 @@ fn tui_song(
     let (playback, engine) = meldritch_audio::device_output::playback_session_parts(32)?;
     let settings = RenderSettings::new(initial.channels())
         .map_err(|error| format!("invalid render settings: {error:?}"))?;
-    let tempo = Tempo::new(song.performance().bpm(), song.performance().sample_rate())
-        .map_err(|error| format!("invalid song tempo: {error}"))?;
+    let tempo = tempo_from_song(&song)?;
     let pattern = Pattern::new(PatternId::new(1), 16, 4)
         .map_err(|error| format!("failed to create TUI backing pattern: {error:?}"))?;
     let timeline_chunks = frame_count.div_ceil(chunk_frames).max(1) as usize;
@@ -2906,6 +2913,11 @@ fn tui_song(
     let controls = song_controls_for_view(&song, patch.feedback(), patch.cutoff_hz());
     let live_control_targets = live_song_control_targets(&song);
     controller.set_curated_controls(controls);
+    if let Some(phrase_variations) = scene_bank.phrase_variations.clone() {
+        controller
+            .configure_phrase_variations(phrase_variations)
+            .map_err(|error| format!("failed to configure song phrase scenes: {error}"))?;
+    }
     let (external_input_sender, external_input_receiver) = mpsc::channel();
     let midi_control_bindings = midi_control_bindings_for_song(&song);
     let midi_action_bindings = midi_action_bindings_for_song(&song);
@@ -2944,12 +2956,15 @@ fn tui_song(
         controller.playback_control(),
         engine,
     )?;
-    let worker = Arc::new(Mutex::new(SongRerenderWorker::new(patch, frame_count)));
+    let active_patch = Arc::new(Mutex::new(patch));
+    let worker = Arc::new(Mutex::new(SongRerenderWorker::new(frame_count)));
     let input_worker = Arc::clone(&worker);
     let submitted_generation = Arc::new(Mutex::new(0_u64));
     let input_generation = Arc::clone(&submitted_generation);
     let live_overrides = Arc::new(Mutex::new(SongLiveOverrides::default()));
     let input_live_overrides = Arc::clone(&live_overrides);
+    let input_active_patch = Arc::clone(&active_patch);
+    let scene_patches = scene_bank.patches;
     let published_generation = Arc::new(Mutex::new(0_u64));
     let tick_published_generation = Arc::clone(&published_generation);
     let tick_submitted_generation = Arc::clone(&submitted_generation);
@@ -2997,6 +3012,25 @@ fn tui_song(
             {
                 eprintln!("session capture failed: {error}");
             }
+            if let Some((scene, variation)) = song_scene_selection(input, result)
+                && let Some(patch) = scene_patches.get(&(scene, variation)).cloned()
+            {
+                *input_active_patch
+                    .lock()
+                    .expect("song active patch lock poisoned") = patch.clone();
+                let overrides = *input_live_overrides
+                    .lock()
+                    .expect("song live override lock poisoned");
+                let mut generation = input_generation
+                    .lock()
+                    .expect("song render generation lock poisoned");
+                *generation = generation.saturating_add(1);
+                input_worker
+                    .lock()
+                    .expect("song render worker lock poisoned")
+                    .submit(*generation, patch, overrides);
+                return;
+            }
             let control_id = match input {
                 meldritch_app::AppInput::AdjustCuratedControl { id, .. }
                 | meldritch_app::AppInput::SetCuratedControlNormalized { id, .. } => id,
@@ -3028,10 +3062,14 @@ fn tui_song(
                 .lock()
                 .expect("song render generation lock poisoned");
             *generation = generation.saturating_add(1);
+            let patch = input_active_patch
+                .lock()
+                .expect("song active patch lock poisoned")
+                .clone();
             input_worker
                 .lock()
                 .expect("song render worker lock poisoned")
-                .submit(*generation, overrides);
+                .submit(*generation, patch, overrides);
         },
     );
     if let Err(error) = run_result {
@@ -3078,6 +3116,129 @@ fn song_controls_for_view(
             }
         })
         .collect()
+}
+
+struct SongSceneBank {
+    patches: BTreeMap<(SceneId, usize), meldritch_render::song_render::CompiledDelayedNotePatch>,
+    phrase_variations: Option<Vec<(SceneId, Vec<Pattern>)>>,
+}
+
+fn tempo_from_song(song: &meldritch_dsl::ValidatedSong) -> Result<Tempo, String> {
+    Tempo::new(song.performance().bpm(), song.performance().sample_rate())
+        .map_err(|error| format!("invalid song tempo: {error}"))
+}
+
+fn song_scene_bank(
+    song: &meldritch_dsl::ValidatedSong,
+    tempo: Tempo,
+) -> Result<SongSceneBank, String> {
+    let [track] = song.performance().tracks() else {
+        return Ok(SongSceneBank {
+            patches: BTreeMap::new(),
+            phrase_variations: None,
+        });
+    };
+    let pattern_ids = track.pattern_ids();
+    if pattern_ids.is_empty() {
+        return Ok(SongSceneBank {
+            patches: BTreeMap::new(),
+            phrase_variations: None,
+        });
+    }
+    let mut patches = BTreeMap::new();
+    let mut phrase_variations = Vec::new();
+    for (scene_index, scene_patterns) in pattern_ids.chunks(2).enumerate() {
+        let scene = SceneId::new(scene_index as u64 + 1);
+        let mut variations = Vec::new();
+        for (variation, pattern_id) in scene_patterns.iter().enumerate() {
+            let patch = meldritch_render::song_render::compile_delayed_note_song_for_pattern(
+                song, pattern_id,
+            )
+            .map_err(|error| {
+                format!(
+                    "failed to compile song scene {} variation {} pattern '{}': {error:?}",
+                    scene.raw(),
+                    variation,
+                    pattern_id
+                )
+            })?;
+            patches.insert((scene, variation), patch);
+            let note_pattern = song.note_patterns().get(pattern_id).ok_or_else(|| {
+                format!(
+                    "track '{}' references missing note pattern '{}'",
+                    track.id(),
+                    pattern_id
+                )
+            })?;
+            variations.push(song_note_pattern_to_grid(
+                note_pattern,
+                tempo,
+                PatternId::new(scene.raw().saturating_mul(10) + variation as u64),
+            )?);
+        }
+        phrase_variations.push((scene, variations));
+    }
+    Ok(SongSceneBank {
+        patches,
+        phrase_variations: Some(phrase_variations),
+    })
+}
+
+fn song_note_pattern_to_grid(
+    pattern: &meldritch_dsl::NotePatternDefinition,
+    tempo: Tempo,
+    id: PatternId,
+) -> Result<Pattern, String> {
+    let frames_per_step = tempo.step_start_frame(1, 4).max(1);
+    let length_steps =
+        ((pattern.length_frames() as f64 / frames_per_step as f64).round() as u32).max(1);
+    let mut grid = Pattern::new(id, length_steps, 4).map_err(|error| {
+        format!(
+            "failed to create phrase grid for '{}': {error:?}",
+            pattern.id()
+        )
+    })?;
+    for event in pattern.events() {
+        let step = ((event.start_frame() as f64 / frames_per_step as f64).round() as u32)
+            .min(length_steps.saturating_sub(1));
+        let gate = (event.duration_frames() as f64 / frames_per_step as f64).max(0.05);
+        grid.set_step(
+            TrackId::new(1),
+            StepIndex::new(step),
+            Step::new(event.note())
+                .with_velocity(event.velocity())
+                .with_gate(gate),
+        )
+        .map_err(|error| {
+            format!(
+                "failed to map event at frame {} in pattern '{}': {error:?}",
+                event.start_frame(),
+                pattern.id()
+            )
+        })?;
+    }
+    Ok(grid)
+}
+
+fn song_scene_selection(
+    input: &meldritch_app::AppInput,
+    result: &meldritch_app::AppCommandResult,
+) -> Option<(SceneId, usize)> {
+    let meldritch_app::AppCommandResult::PerformanceQueued(queued) = result else {
+        return None;
+    };
+    let meldritch_render::futures::PerformanceGesture::QueueScene(scene) = queued.gesture else {
+        return None;
+    };
+    let variation = match input {
+        meldritch_app::AppInput::QueuePhraseVariation(input_scene, variation)
+            if *input_scene == scene =>
+        {
+            *variation
+        }
+        _ => 0,
+    };
+    Some((scene, variation))
 }
 
 fn parameter_target_label(target: &ParameterTargetDefinition) -> String {
@@ -6777,6 +6938,32 @@ mod tests {
             map_script_midi_note(&action_bindings, "launch-control-xl", 9, 108, false),
             None
         );
+    }
+
+    #[test]
+    fn launch_control_playground_builds_song_scene_bank_from_patterns() {
+        let song = meldritch_dsl::load_song_directory(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join("songs/examples/16-launch-control-xl-playground"),
+        )
+        .expect("LaunchControl XL playground example should load");
+
+        let bank = song_scene_bank(&song, tempo_from_song(&song).unwrap())
+            .expect("LaunchControl XL playground scene bank should build");
+        assert_eq!(bank.patches.len(), 8);
+        for scene in 1..=4 {
+            assert!(bank.patches.contains_key(&(SceneId::new(scene), 0)));
+            assert!(bank.patches.contains_key(&(SceneId::new(scene), 1)));
+        }
+        let variations = bank.phrase_variations.expect("scene grid should exist");
+        assert_eq!(variations.len(), 4);
+        assert!(variations.iter().all(|(_, patterns)| {
+            patterns.len() == 2
+                && patterns
+                    .iter()
+                    .all(|pattern| pattern.length_steps() == 16 && pattern.steps_per_beat() == 4)
+        }));
     }
 
     fn assert_session_kind(

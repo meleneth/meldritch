@@ -5,7 +5,7 @@ script-authored performance playground.
 
 It must:
 
-- define the oscillator, filter, delay, note pattern, curated controls, MIDI
+- define the oscillator, filter, delay, note patterns, curated controls, MIDI
   device match, and every MIDI CC binding in `.ml*` files
 - avoid Rust-defined control order, CC maps, or “fader 1 means X” policy
 - expose authored controls/actions for all default LaunchControl XL performance
@@ -23,8 +23,12 @@ It must:
       they are left diagnostic-only until an example needs raw/SysEx bindings
 - map the 16 launch buttons and the 8 discovered side-column buttons to
   script-declared typed performance actions, not hard-coded Rust behavior
+- provide four authored groove scenes and one authored variation/fill per scene;
+  the B row selects scenes 1-4 and variation 1 for scenes 1-4
 - route all MIDI input through typed `AppInput` / `AppCommand` results so a
   captured performance can replay without the controller attached
+- rerender and publish selected groove scenes from authored `.mlpattern` files
+  during `tui-song` playback
 - rerender and publish audible delay-feedback and filter-cutoff changes from
   supported curated controls
 - validate as a normal song directory
@@ -37,6 +41,8 @@ Current implementation status: the format can declare every MIDI CC binding and
 script action bindings for MIDI CCs or MIDI notes. The runtime derives MIDI
 routing from the script, supported feedback/cutoff parameter controls rerender
 audio, and launch/side-column buttons can trigger typed transport/performance
-actions. Richer pattern-switching semantics remain future schema/runtime work.
-The two observed SysEx messages are intentionally left as diagnostic output
-until an example needs raw/SysEx output or binding support.
+actions. The LaunchControl B row now selects authored groove scenes/variations
+that rerender through the song synth and delay. Quantized launch timing and
+exact replay remain future schema/runtime work. The two observed SysEx messages
+are intentionally left as diagnostic output until an example needs raw/SysEx
+output or binding support.

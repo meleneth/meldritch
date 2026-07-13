@@ -16,7 +16,16 @@ name_contains = "Launch Control XL"
 id = "playground"
 synth = "synths/playground.mlsynth"
 dsp = ["dsp/echo.mldsp"]
-patterns = ["patterns/playground-line.mlpattern"]
+patterns = [
+  "patterns/playground-line.mlpattern",
+  "patterns/playground-line-fill.mlpattern",
+  "patterns/playground-stab.mlpattern",
+  "patterns/playground-stab-fill.mlpattern",
+  "patterns/playground-bounce.mlpattern",
+  "patterns/playground-bounce-fill.mlpattern",
+  "patterns/playground-climb.mlpattern",
+  "patterns/playground-climb-fill.mlpattern",
+]
 initial_pattern = "playground-line"
 
 [[controls]]
