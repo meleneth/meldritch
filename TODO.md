@@ -149,6 +149,9 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Add script-declared centered and overdrive MIDI curves so the LaunchControl
   playground has neutral center-detent knobs and faders with a normal/full-open
   value below the physical maximum
+- [x] Show the LaunchControl XL playground's authored groove scenes/fills and
+  physical 8-strip control layout in default performance mode so the playable
+  instrument/pattern surface is visible without switching to all-parameters mode
 - [ ] Verify LaunchControl XL input with the diagnostic path on
   both Windows and Linux
 - [ ] Add MIDI output/LED feedback support after confirming the LaunchControl XL

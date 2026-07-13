@@ -142,8 +142,10 @@ this guide was written:
   groove scenes/variations that rerender through the song synth and delay; and
   the physical strip controls use script-declared centered/overdrive curves so
   centered knobs are neutral and faders reach normal full-open before the
-  physical maximum. Quantized launch timing, exact replay, and MIDI output/LED
-  feedback are not yet implemented.
+  physical maximum. Default performance mode also shows the scene/fill map and
+  the physical 8-strip control layout so the playable surface is visible without
+  opening all-parameters mode. Quantized launch timing, exact replay, and MIDI
+  output/LED feedback are not yet implemented.
 
 The next implementation slice is to use `midi-controls-check` to verify the
 Windows and Linux LaunchControl XL device path and confirm any MIDI output

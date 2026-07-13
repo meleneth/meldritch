@@ -1,8 +1,9 @@
 use meldritch_core::FrameRange;
 use meldritch_dsl::load_song_directory;
 use meldritch_render::song_render::{
-    compile_automated_delayed_note_song, compile_delayed_note_song, compile_drone_song,
-    compile_filtered_note_song, compile_note_song,
+    compile_automated_delayed_note_song, compile_delayed_note_song,
+    compile_delayed_note_song_for_pattern, compile_drone_song, compile_filtered_note_song,
+    compile_note_song,
 };
 use std::path::{Path, PathBuf};
 
@@ -254,11 +255,21 @@ fn launch_control_playground_compiles_and_accepts_live_feedback_and_cutoff() {
         .unwrap();
 
     assert_eq!(patch.feedback(), 0.35);
-    assert_eq!(patch.cutoff_hz(), Some(1200.0));
+    assert_eq!(patch.cutoff_hz(), Some(4350.0));
     assert_eq!(baseline.frames(), 96_000);
     assert!(baseline.peak_abs() > 0.01);
     assert_ne!(baseline.samples(), adjusted.samples());
     assert!(adjusted.samples().iter().all(|sample| sample.is_finite()));
+
+    let [track] = song.performance().tracks() else {
+        panic!("playground should have one track");
+    };
+    for pattern in track.pattern_ids() {
+        let patch = compile_delayed_note_song_for_pattern(&song, pattern)
+            .expect("playground scene pattern should compile");
+        let block = patch.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+        assert!(block.peak_abs() > 0.01, "pattern {pattern} rendered silent");
+    }
 }
 
 #[test]

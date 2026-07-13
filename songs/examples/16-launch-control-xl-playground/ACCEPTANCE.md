@@ -42,13 +42,18 @@ It must:
 - support `tui-song --midi-debug` as the live playground smoke path so mapped
   button/control labels and unmapped raw MIDI events are visible in the status
   line while testing the controller
+- show the authored groovebox surface in default performance mode: B-row scene
+  and fill mapping, queued/active state, current pattern length, and the
+  physical 8-strip LaunchControl layout where each fader is shown with its
+  three knobs above it
 
 Current implementation status: the format can declare every MIDI CC binding and
 script action bindings for MIDI CCs or MIDI notes. The runtime derives MIDI
 routing from the script, supported feedback/cutoff parameter controls rerender
 audio, and launch/side-column buttons can trigger typed transport/performance
 actions. The LaunchControl B row now selects authored groove scenes/variations
-that rerender through the song synth and delay. Quantized launch timing and
-exact replay remain future schema/runtime work. The two observed SysEx messages
-are intentionally left as diagnostic output until an example needs raw/SysEx
-output or binding support.
+that rerender through the song synth and delay, and the default TUI performance
+mode now exposes the scene/fill map plus the physical strip layout. Quantized
+launch timing and exact replay remain future schema/runtime work. The two
+observed SysEx messages are intentionally left as diagnostic output until an
+example needs raw/SysEx output or binding support.

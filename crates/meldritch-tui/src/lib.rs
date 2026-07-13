@@ -13,6 +13,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use std::collections::BTreeSet;
 use std::io::{self, Stdout};
 use std::time::Duration;
 
@@ -465,49 +466,154 @@ fn draw_curated_performance_mode(
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
+            Constraint::Length(5),
             Constraint::Min(5),
             Constraint::Length(3),
             Constraint::Length(4),
         ])
         .split(frame.area());
     draw_transport(frame, rows[0], view);
-    let lines = if view.curated_controls.is_empty() {
-        vec![Line::from("No controls exposed by this performance")]
-    } else {
-        view.curated_controls
-            .iter()
-            .map(|control| {
-                let value = control
-                    .value
-                    .map_or_else(|| "—".to_owned(), |value| format!("{value:.3}"));
-                Line::from(format!(
-                    "[{}] {}  {}  range {:.3}..{:.3} step {:.3}  → {}",
-                    control.binding,
-                    control.label,
-                    value,
-                    control.minimum,
-                    control.maximum,
-                    control.step,
-                    control.target
-                ))
-            })
-            .collect()
-    };
+    draw_groovebox_surface(frame, rows[1], view);
     frame.render_widget(
         panel(
             "Performance Controls · Ctrl-Tab for all parameters",
-            Paragraph::new(lines).wrap(Wrap { trim: false }),
+            Paragraph::new(performance_control_lines(view)).wrap(Wrap { trim: false }),
         ),
-        rows[1],
+        rows[2],
     );
-    draw_status(frame, rows[2], status);
+    draw_status(frame, rows[3], status);
     frame.render_widget(
         panel(
             "Performance Keys",
             Paragraph::new("Ctrl-Tab all parameters · p play/pause · r rewind · q quit"),
         ),
-        rows[3],
+        rows[4],
     );
+}
+
+fn draw_groovebox_surface(frame: &mut ratatui::Frame<'_>, area: Rect, view: &AppViewModel) {
+    let active = view
+        .performance
+        .active_scene
+        .map_or_else(|| "—".to_owned(), |scene| scene.raw().to_string());
+    let queued = view.performance.queued.map_or_else(
+        || "—".to_owned(),
+        |queued| format!("{:?}@{}", queued.gesture, queued.launch_frame),
+    );
+    let lines = vec![
+        Line::from("Scenes: B01 Scene 1 · B02 Scene 2 · B03 Scene 3 · B04 Scene 4"),
+        Line::from(
+            "Fills:  B05 Scene 1 fill · B06 Scene 2 fill · B07 Scene 3 fill · B08 Scene 4 fill",
+        ),
+        Line::from(format!(
+            "State: active scene {active} · queued {queued} · Pattern {} · {} steps",
+            view.pattern_grid.pattern.raw(),
+            view.pattern_grid.length_steps
+        )),
+    ];
+    frame.render_widget(
+        panel(
+            "Groovebox Scenes",
+            Paragraph::new(lines).wrap(Wrap { trim: false }),
+        ),
+        area,
+    );
+}
+
+fn performance_control_lines(view: &AppViewModel) -> Vec<Line<'static>> {
+    if view.curated_controls.is_empty() {
+        return vec![Line::from("No controls exposed by this performance")];
+    }
+    if has_launch_control_strip_surface(view) {
+        return launch_control_strip_lines(view);
+    }
+    view.curated_controls
+        .iter()
+        .map(|control| {
+            let value = control
+                .value
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.3}"));
+            Line::from(format!(
+                "[{}] {}  {}  range {:.3}..{:.3} step {:.3}  → {}",
+                control.binding,
+                control.label,
+                value,
+                control.minimum,
+                control.maximum,
+                control.step,
+                control.target
+            ))
+        })
+        .collect()
+}
+
+fn has_launch_control_strip_surface(view: &AppViewModel) -> bool {
+    (1..=8).all(|strip| {
+        view.curated_controls
+            .iter()
+            .any(|control| control.id == format!("fader-{strip:02}"))
+            && [strip, strip + 8, strip + 16].iter().all(|knob| {
+                view.curated_controls
+                    .iter()
+                    .any(|control| control.id == format!("knob-{knob:02}"))
+            })
+    })
+}
+
+fn launch_control_strip_lines(view: &AppViewModel) -> Vec<Line<'static>> {
+    let mut lines = Vec::with_capacity(10);
+    lines.push(Line::from(format!(
+        "Instrument surface: {}",
+        control_source_summary(&view.curated_controls)
+    )));
+    for strip in 1..=8 {
+        lines.push(Line::from(format!(
+            "Strip {strip:02} │ K{top:02} {top_value} │ K{middle:02} {middle_value} │ K{bottom:02} {bottom_value} │ F{strip:02} {fader_value}",
+            top = strip,
+            middle = strip + 8,
+            bottom = strip + 16,
+            top_value = compact_control_value(view, &format!("knob-{strip:02}")),
+            middle_value = compact_control_value(view, &format!("knob-{:02}", strip + 8)),
+            bottom_value = compact_control_value(view, &format!("knob-{:02}", strip + 16)),
+            fader_value = compact_control_value(view, &format!("fader-{strip:02}")),
+        )));
+    }
+    lines.push(Line::from(
+        "Launch buttons: B01-B04 scenes · B05-B08 fills/variations; right column transport/performance actions",
+    ));
+    lines
+}
+
+fn compact_control_value(view: &AppViewModel, id: &str) -> String {
+    view.curated_controls
+        .iter()
+        .find(|control| control.id == id)
+        .map_or_else(
+            || "—".to_owned(),
+            |control| {
+                let value = control
+                    .value
+                    .map_or_else(|| "—".to_owned(), |value| format!("{value:.3}"));
+                let target = control
+                    .target
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(control.target.as_str());
+                format!("{value} {target}")
+            },
+        )
+}
+
+fn control_source_summary(controls: &[meldritch_app::CuratedControlView]) -> String {
+    let sources = controls
+        .iter()
+        .filter_map(|control| control.target.split('/').next())
+        .collect::<BTreeSet<_>>();
+    if sources.is_empty() {
+        "curated controls".to_owned()
+    } else {
+        sources.into_iter().collect::<Vec<_>>().join(" + ")
+    }
 }
 
 fn draw_transport(frame: &mut ratatui::Frame<'_>, area: Rect, view: &AppViewModel) {
@@ -1401,10 +1507,72 @@ mod tests {
             .collect::<String>();
 
         assert!(content.contains("Performance Controls"));
+        assert!(content.contains("Groovebox Scenes"));
         assert!(content.contains("Echo Feedback"));
         assert!(content.contains("dsp:echo/delay.feedback"));
-        assert!(!content.contains("Pattern 1"));
+        assert!(content.contains("Pattern 1"));
+        assert!(!content.contains("Inspector"));
         assert!(!content.contains("Diagnostics"));
+    }
+
+    #[test]
+    fn performance_mode_renders_launch_control_strip_and_scene_surface() {
+        let mut view = view();
+        view.cockpit_mode = meldritch_app::CockpitMode::Performance;
+        view.pattern_grid.length_steps = 16;
+        for strip in 1..=8 {
+            for knob in [strip, strip + 8, strip + 16] {
+                view.curated_controls
+                    .push(meldritch_app::CuratedControlView {
+                        id: format!("knob-{knob:02}"),
+                        label: format!("Knob {knob:02}"),
+                        target: if knob % 2 == 0 {
+                            "dsp:echo/delay.feedback".to_owned()
+                        } else {
+                            "synth:playground/filter.cutoff_hz".to_owned()
+                        },
+                        minimum: 0.0,
+                        maximum: 5000.0,
+                        step: 1.0,
+                        binding: format!("k{knob:02}"),
+                        value: Some(if knob % 2 == 0 { 0.35 } else { 4350.0 }),
+                    });
+            }
+            view.curated_controls
+                .push(meldritch_app::CuratedControlView {
+                    id: format!("fader-{strip:02}"),
+                    label: format!("Fader {strip:02} Cutoff"),
+                    target: "synth:playground/filter.cutoff_hz".to_owned(),
+                    minimum: 100.0,
+                    maximum: 5000.0,
+                    step: 50.0,
+                    binding: format!("f{strip:02}"),
+                    value: Some(4350.0),
+                });
+        }
+        let backend = TestBackend::new(140, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, &view)).unwrap();
+        let content = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(content.contains("Groovebox Scenes"));
+        assert!(content.contains("B01 Scene 1"));
+        assert!(content.contains("B05 Scene 1 fill"));
+        assert!(content.contains("Instrument surface"));
+        assert!(content.contains("synth:playground"));
+        assert!(content.contains("dsp:echo"));
+        assert!(content.contains("Strip 01"));
+        assert!(content.contains("K01"));
+        assert!(content.contains("K09"));
+        assert!(content.contains("K17"));
+        assert!(content.contains("F01"));
+        assert!(content.contains("4350.000 filter.cutoff_hz"));
     }
 
     #[test]
