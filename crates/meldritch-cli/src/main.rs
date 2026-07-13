@@ -649,9 +649,15 @@ enum Command {
         /// Render workers for the backing coordinator; zero selects available parallelism.
         #[arg(long, default_value_t = 0)]
         workers: usize,
-        /// Disable script-defined MIDI control input.
-        #[arg(long = "no-midi-controls", action = clap::ArgAction::SetFalse, default_value_t = true)]
+        /// Explicitly enable script-defined MIDI control input. This is the default.
+        #[arg(long = "midi-controls", action = clap::ArgAction::SetTrue)]
         midi_controls: bool,
+        /// Disable script-defined MIDI control input.
+        #[arg(long = "no-midi-controls", action = clap::ArgAction::SetTrue)]
+        no_midi_controls: bool,
+        /// Start playback immediately after opening the TUI.
+        #[arg(long)]
+        autoplay: bool,
     },
     /// Open the realtime cockpit with a native synthesized bassline track.
     TuiBassline {
@@ -1025,7 +1031,16 @@ fn run(cli: Cli) -> Result<(), String> {
             chunk_frames,
             workers,
             midi_controls,
-        } => tui_song(song, frames, chunk_frames, workers, midi_controls),
+            no_midi_controls,
+            autoplay,
+        } => tui_song(
+            song,
+            frames,
+            chunk_frames,
+            workers,
+            midi_controls || !no_midi_controls,
+            autoplay,
+        ),
         Command::TuiBassline {
             project,
             pattern_id,
@@ -2847,6 +2862,7 @@ fn tui_song(
     chunk_frames: u32,
     workers: usize,
     midi_controls: bool,
+    autoplay: bool,
 ) -> Result<(), String> {
     let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
     let patch = meldritch_render::song_render::compile_delayed_note_song(&song)
@@ -2864,6 +2880,12 @@ fn tui_song(
     let initial = patch
         .render(FrameRange::new(0, u64::from(frame_count)).expect("song range is ordered"))
         .map_err(|error| format!("failed to render initial song audio: {error:?}"))?;
+    eprintln!(
+        "initial song render: frames={}, channels={}, peak={:.3}",
+        initial.frames(),
+        initial.channels(),
+        initial.peak_abs()
+    );
     let worker_count = if workers == 0 {
         std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
     } else {
@@ -2956,6 +2978,11 @@ fn tui_song(
         controller.playback_control(),
         engine,
     )?;
+    if autoplay {
+        controller
+            .dispatch(meldritch_app::AppCommand::Play)
+            .map_err(|error| format!("failed to start autoplay: {error:?}"))?;
+    }
     let active_patch = Arc::new(Mutex::new(patch));
     let worker = Arc::new(Mutex::new(SongRerenderWorker::new(frame_count)));
     let input_worker = Arc::clone(&worker);
