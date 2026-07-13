@@ -87,6 +87,18 @@ impl CompiledDelayedNotePatch {
     }
 
     pub fn render(&self, range: FrameRange) -> Result<AudioBlock, SongRenderError> {
+        self.render_with_feedback_override(range, None)
+    }
+
+    pub fn render_with_feedback_override(
+        &self,
+        range: FrameRange,
+        feedback_override: Option<f64>,
+    ) -> Result<AudioBlock, SongRenderError> {
+        if feedback_override.is_some_and(|value| !value.is_finite() || !(0.0..1.0).contains(&value))
+        {
+            return Err(SongRenderError::InvalidFeedbackOverride);
+        }
         let frame_count = range.end() - range.start();
         let frames = u32::try_from(frame_count).map_err(|_| SongRenderError::RangeTooLong {
             frames: frame_count,
@@ -109,7 +121,9 @@ impl CompiledDelayedNotePatch {
                 let delay_index = delay_frame * channels + channel;
                 let dry = history.samples()[source_index];
                 let wet = delay[delay_index];
-                delay[delay_index] = dry + wet * self.feedback_at(absolute_frame);
+                let feedback =
+                    feedback_override.unwrap_or_else(|| self.feedback_at(absolute_frame));
+                delay[delay_index] = dry + wet * feedback;
                 if absolute_frame >= range.start() {
                     let relative = usize::try_from(absolute_frame - range.start())
                         .expect("u32 range fits usize");
@@ -321,6 +335,7 @@ pub enum SongRenderError {
     DspCount { found: usize },
     InvalidTempoDuration { value: String },
     DelayTooLong(u64),
+    InvalidFeedbackOverride,
     RangeTooLong { frames: u64 },
 }
 
@@ -390,6 +405,10 @@ impl fmt::Display for SongRenderError {
                     "delay length of {frames} frames exceeds host capacity"
                 )
             }
+            Self::InvalidFeedbackOverride => write!(
+                formatter,
+                "live delay feedback override must be finite and within 0.0..1.0"
+            ),
             Self::RangeTooLong { frames } => write!(
                 formatter,
                 "render range of {frames} frames exceeds AudioBlock capacity"

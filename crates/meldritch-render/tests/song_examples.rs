@@ -197,3 +197,31 @@ fn automated_dsp_feedback_is_sample_identical_across_chunks() {
 
     assert_eq!(joined, whole.samples());
 }
+
+#[test]
+fn live_curated_feedback_override_wins_over_authored_automation_deterministically() {
+    let song = load_song_directory(example("04-dsp-parameter-pattern")).expect("song should load");
+    let patch =
+        compile_automated_delayed_note_song(&song).expect("automated DSP patch should compile");
+    let authored = patch.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+    let overridden = patch
+        .render_with_feedback_override(FrameRange::new(0, 96_000).unwrap(), Some(0.8))
+        .unwrap();
+    let repeated = patch
+        .render_with_feedback_override(FrameRange::new(0, 96_000).unwrap(), Some(0.8))
+        .unwrap();
+
+    assert_ne!(overridden.samples(), authored.samples());
+    assert_eq!(overridden, repeated);
+    assert!(overridden.samples().iter().all(|sample| sample.is_finite()));
+    assert!(
+        patch
+            .render_with_feedback_override(FrameRange::new(0, 1).unwrap(), Some(f64::NAN))
+            .is_err()
+    );
+    assert!(
+        patch
+            .render_with_feedback_override(FrameRange::new(0, 1).unwrap(), Some(1.0))
+            .is_err()
+    );
+}
