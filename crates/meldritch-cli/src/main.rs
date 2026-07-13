@@ -1055,7 +1055,7 @@ fn run(cli: Cli) -> Result<(), String> {
             midi_controls || !no_midi_controls,
             autoplay || !no_autoplay,
             midi_debug,
-            audio_debug,
+            effective_song_audio_debug(midi_debug, audio_debug),
         ),
         Command::TuiBassline {
             project,
@@ -3060,7 +3060,9 @@ fn tui_song(
     let tick_published_generation = Arc::clone(&published_generation);
     let tick_submitted_generation = Arc::clone(&submitted_generation);
     let tick_song_audio_publisher = song_audio_publisher.clone();
-    let mut last_audio_debug = Instant::now();
+    let mut last_audio_debug = Instant::now()
+        .checked_sub(Duration::from_millis(500))
+        .unwrap_or_else(Instant::now);
     let capture = Arc::new(Mutex::new(PerformanceSessionCapture::create(
         &song,
         frame_count,
@@ -3182,6 +3184,10 @@ fn tui_song(
     };
     println!("saved performance session: {}", session_path.display());
     Ok(())
+}
+
+fn effective_song_audio_debug(midi_debug: bool, audio_debug: bool) -> bool {
+    midi_debug || audio_debug
 }
 
 fn song_controls_for_view(
@@ -7059,6 +7065,14 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn tui_song_midi_debug_enables_audio_debug_telemetry() {
+        assert!(!effective_song_audio_debug(false, false));
+        assert!(effective_song_audio_debug(true, false));
+        assert!(effective_song_audio_debug(false, true));
+        assert!(effective_song_audio_debug(true, true));
     }
 
     #[test]
