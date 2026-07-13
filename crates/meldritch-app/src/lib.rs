@@ -72,6 +72,7 @@ pub enum AppCommand {
     TriggerFill(PatternId),
     CancelPerformance,
     SetCockpitMode(CockpitMode),
+    AdjustCuratedControl { id: String, steps: i32 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -107,6 +108,11 @@ pub enum AppCommandResult {
         previous: CockpitMode,
         current: CockpitMode,
     },
+    CuratedControlAdjusted {
+        id: String,
+        previous: f64,
+        current: f64,
+    },
 }
 
 #[derive(Debug)]
@@ -122,6 +128,7 @@ pub enum AppCommandError {
     Publication(meldritch_render::ChunkPublicationError),
     NoPerformanceScenes,
     NoFillPattern,
+    UnknownCuratedControl(String),
 }
 
 #[derive(Clone, Debug)]
@@ -288,6 +295,7 @@ pub struct AppViewModel {
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppInput {
     ToggleCockpitMode,
+    AdjustCuratedControl { id: String, steps: i32 },
     MoveLeft,
     MoveRight,
     MoveUp,
@@ -929,6 +937,24 @@ impl AppController {
                     current: *mode,
                 }
             }
+            AppCommand::AdjustCuratedControl { id, steps } => {
+                let control = self
+                    .curated_controls
+                    .iter_mut()
+                    .find(|control| control.id == *id)
+                    .ok_or_else(|| AppCommandError::UnknownCuratedControl(id.clone()))?;
+                let previous = control.value.unwrap_or(control.minimum);
+                let previous_index = ((previous - control.minimum) / control.step).round();
+                let current_index = previous_index + f64::from(*steps);
+                let current = (control.minimum + control.step * current_index)
+                    .clamp(control.minimum, control.maximum);
+                control.value = Some(current);
+                AppCommandResult::CuratedControlAdjusted {
+                    id: id.clone(),
+                    previous,
+                    current,
+                }
+            }
         };
         let (changed, dirty_ranges) = match &result {
             AppCommandResult::TransportQueued => (true, Vec::new()),
@@ -947,6 +973,9 @@ impl AppController {
             AppCommandResult::CockpitModeChanged { previous, current } => {
                 (previous != current, Vec::new())
             }
+            AppCommandResult::CuratedControlAdjusted {
+                previous, current, ..
+            } => (previous != current, Vec::new()),
         };
         self.record(command, changed, dirty_ranges);
         Ok(result)
@@ -1138,6 +1167,9 @@ impl AppController {
         let pattern_length = self.editor.state().pattern().length_steps();
         let command = match input {
             AppInput::ToggleCockpitMode => AppCommand::SetCockpitMode(self.cockpit_mode.toggled()),
+            AppInput::AdjustCuratedControl { id, steps } => {
+                AppCommand::AdjustCuratedControl { id, steps }
+            }
             AppInput::MoveLeft => AppCommand::Select(Selection {
                 track: self.selection.track,
                 step: StepIndex::new(self.selection.step.raw().saturating_sub(1)),
@@ -1833,6 +1865,54 @@ mod tests {
             controller.view_model().cockpit_mode,
             CockpitMode::Performance
         );
+    }
+
+    #[test]
+    fn curated_control_commands_step_clamp_and_record_without_touching_transport() {
+        let (mut controller, _engine) = controller(8);
+        controller.set_curated_controls(vec![CuratedControlView {
+            id: "echo-feedback".to_owned(),
+            label: "Echo Feedback".to_owned(),
+            target: "dsp:echo/delay.feedback".to_owned(),
+            minimum: 0.0,
+            maximum: 0.4,
+            step: 0.05,
+            binding: "f".to_owned(),
+            value: Some(0.35),
+        }]);
+        let transport = controller.view_model().transport;
+
+        assert_eq!(
+            controller
+                .handle_input(AppInput::AdjustCuratedControl {
+                    id: "echo-feedback".to_owned(),
+                    steps: 1,
+                })
+                .unwrap(),
+            AppCommandResult::CuratedControlAdjusted {
+                id: "echo-feedback".to_owned(),
+                previous: 0.35,
+                current: 0.4,
+            }
+        );
+        controller
+            .handle_input(AppInput::AdjustCuratedControl {
+                id: "echo-feedback".to_owned(),
+                steps: 1,
+            })
+            .unwrap();
+        controller
+            .handle_input(AppInput::AdjustCuratedControl {
+                id: "echo-feedback".to_owned(),
+                steps: -2,
+            })
+            .unwrap();
+        let view = controller.view_model();
+        assert!((view.curated_controls[0].value.unwrap() - 0.3).abs() < f64::EPSILON);
+        assert_eq!(view.transport.position, transport.position);
+        assert_eq!(view.transport.state, transport.state);
+        assert_eq!(controller.history().len(), 3);
+        assert!(!controller.history()[1].changed);
     }
 
     #[test]

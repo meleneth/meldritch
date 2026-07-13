@@ -115,6 +115,36 @@ pub fn map_key(key: KeyEvent, default_step: &Step) -> Option<TuiAction> {
     Some(action)
 }
 
+pub fn map_key_for_view(
+    key: KeyEvent,
+    default_step: &Step,
+    view: &AppViewModel,
+) -> Option<TuiAction> {
+    if key.kind != KeyEventKind::Press {
+        return None;
+    }
+    if view.cockpit_mode == meldritch_app::CockpitMode::Performance {
+        if let KeyCode::Char(character) = key.code {
+            let normalized = character.to_ascii_lowercase().to_string();
+            if let Some(control) = view
+                .curated_controls
+                .iter()
+                .find(|control| control.binding.to_ascii_lowercase() == normalized)
+            {
+                return Some(TuiAction::Input(AppInput::AdjustCuratedControl {
+                    id: control.id.clone(),
+                    steps: if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        -1
+                    } else {
+                        1
+                    },
+                }));
+            }
+        }
+    }
+    map_key(key, default_step)
+}
+
 pub fn run(controller: &mut AppController, default_step: Step) -> io::Result<()> {
     run_with_tick(controller, default_step, |_| Ok(None))
 }
@@ -178,7 +208,7 @@ where
         let Event::Key(key) = event::read()? else {
             continue;
         };
-        match map_key(key, default_step) {
+        match map_key_for_view(key, default_step, &view) {
             Some(TuiAction::Quit) => return Ok(()),
             Some(TuiAction::Input(input)) => {
                 status = match controller.handle_input(input.clone()) {
@@ -980,6 +1010,9 @@ fn command_result_text(result: &AppCommandResult) -> String {
         AppCommandResult::CockpitModeChanged { previous, current } => {
             format!("Cockpit mode: {previous:?} → {current:?}")
         }
+        AppCommandResult::CuratedControlAdjusted { id, current, .. } => {
+            format!("Performance control {id}: {current:.3}")
+        }
     }
 }
 
@@ -1292,6 +1325,53 @@ mod tests {
         assert!(content.contains("dsp:echo/delay.feedback"));
         assert!(!content.contains("Pattern 1"));
         assert!(!content.contains("Diagnostics"));
+    }
+
+    #[test]
+    fn performance_bindings_override_legacy_keys_and_shift_reverses_direction() {
+        let mut view = view();
+        view.cockpit_mode = meldritch_app::CockpitMode::Performance;
+        view.curated_controls = vec![meldritch_app::CuratedControlView {
+            id: "echo-feedback".to_owned(),
+            label: "Echo Feedback".to_owned(),
+            target: "dsp:echo/delay.feedback".to_owned(),
+            minimum: 0.0,
+            maximum: 0.85,
+            step: 0.05,
+            binding: "f".to_owned(),
+            value: Some(0.35),
+        }];
+        assert_eq!(
+            map_key_for_view(
+                KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
+                &Step::new(36),
+                &view,
+            ),
+            Some(TuiAction::Input(AppInput::AdjustCuratedControl {
+                id: "echo-feedback".to_owned(),
+                steps: 1,
+            }))
+        );
+        assert_eq!(
+            map_key_for_view(
+                KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT),
+                &Step::new(36),
+                &view,
+            ),
+            Some(TuiAction::Input(AppInput::AdjustCuratedControl {
+                id: "echo-feedback".to_owned(),
+                steps: -1,
+            }))
+        );
+        view.cockpit_mode = meldritch_app::CockpitMode::AllParameters;
+        assert_eq!(
+            map_key_for_view(
+                KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
+                &Step::new(36),
+                &view,
+            ),
+            Some(TuiAction::Input(AppInput::IncreasePhaserMix))
+        );
     }
 
     #[test]
