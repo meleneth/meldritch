@@ -2177,7 +2177,10 @@ fn parse_parameter_target(
         })?;
     if !matches!(
         (module.kind, parameter),
-        (ModuleKind::LowPass, "cutoff_hz") | (ModuleKind::TempoDelay, "feedback")
+        (ModuleKind::LowPass, "cutoff_hz")
+            | (ModuleKind::LowPass, "resonance")
+            | (ModuleKind::TempoDelay, "feedback")
+            | (ModuleKind::TempoDelay, "mix")
     ) {
         return Err(SongLoadError::one(
             path,
@@ -2256,7 +2259,10 @@ fn parse_global_parameter_target(
         })?;
     if !matches!(
         (module.kind, parameter),
-        (ModuleKind::LowPass, "cutoff_hz") | (ModuleKind::TempoDelay, "feedback")
+        (ModuleKind::LowPass, "cutoff_hz")
+            | (ModuleKind::LowPass, "resonance")
+            | (ModuleKind::TempoDelay, "feedback")
+            | (ModuleKind::TempoDelay, "mix")
     ) {
         return Err(SongLoadError::one(
             path,
@@ -2289,6 +2295,15 @@ fn validate_parameter_value(
         return Err(SongLoadError::one(
             path,
             "delay feedback parameter values must be within 0.0..1.0",
+        ));
+    }
+    if matches!(target.parameter.as_str(), "resonance" | "mix") && !(0.0..=1.0).contains(&value) {
+        return Err(SongLoadError::one(
+            path,
+            format!(
+                "{} parameter values must be within 0.0..=1.0",
+                target.parameter
+            ),
         ));
     }
     Ok(())

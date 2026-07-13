@@ -74,6 +74,11 @@ impl CompiledDelayedNotePatch {
     }
 
     #[must_use]
+    pub fn resonance(&self) -> Option<f64> {
+        self.source.resonance()
+    }
+
+    #[must_use]
     pub fn feedback_at(&self, absolute_frame: u64) -> f64 {
         let Some(length) = self.feedback_pattern_length else {
             return self.feedback;
@@ -109,18 +114,34 @@ impl CompiledDelayedNotePatch {
         feedback_override: Option<f64>,
         cutoff_override: Option<f64>,
     ) -> Result<AudioBlock, SongRenderError> {
+        self.render_with_extended_overrides(range, feedback_override, cutoff_override, None, None)
+    }
+
+    pub fn render_with_extended_overrides(
+        &self,
+        range: FrameRange,
+        feedback_override: Option<f64>,
+        cutoff_override: Option<f64>,
+        resonance_override: Option<f64>,
+        mix_override: Option<f64>,
+    ) -> Result<AudioBlock, SongRenderError> {
         if feedback_override.is_some_and(|value| !value.is_finite() || !(0.0..1.0).contains(&value))
         {
             return Err(SongRenderError::InvalidFeedbackOverride);
         }
+        if mix_override.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
+            return Err(SongRenderError::InvalidMixOverride);
+        }
+        let history = self.source.render_with_filter_overrides(
+            FrameRange::new(0, range.end()).expect("history range is ordered"),
+            cutoff_override,
+            resonance_override,
+        )?;
+        let mix = mix_override.unwrap_or(self.mix);
         let frame_count = range.end() - range.start();
         let frames = u32::try_from(frame_count).map_err(|_| SongRenderError::RangeTooLong {
             frames: frame_count,
         })?;
-        let history = self.source.render_with_cutoff_override(
-            FrameRange::new(0, range.end()).expect("history range is ordered"),
-            cutoff_override,
-        )?;
         let channels = usize::from(self.source.channels);
         let delay_len = usize::try_from(self.delay_frames)
             .map_err(|_| SongRenderError::DelayTooLong(self.delay_frames))?
@@ -143,7 +164,7 @@ impl CompiledDelayedNotePatch {
                     let relative = usize::try_from(absolute_frame - range.start())
                         .expect("u32 range fits usize");
                     output.samples_mut()[relative * channels + channel] =
-                        dry * (1.0 - self.mix) + wet * self.mix;
+                        dry * (1.0 - mix) + wet * mix;
                 }
             }
         }
@@ -252,6 +273,11 @@ impl CompiledNotePatch {
         self.filter.as_ref().map(|filter| filter.cutoff_hz)
     }
 
+    #[must_use]
+    pub fn resonance(&self) -> Option<f64> {
+        self.filter.as_ref().map(|filter| filter.resonance)
+    }
+
     pub fn render(&self, range: FrameRange) -> Result<AudioBlock, SongRenderError> {
         self.render_with_cutoff_override(range, None)
     }
@@ -261,8 +287,22 @@ impl CompiledNotePatch {
         range: FrameRange,
         cutoff_override: Option<f64>,
     ) -> Result<AudioBlock, SongRenderError> {
+        self.render_with_filter_overrides(range, cutoff_override, None)
+    }
+
+    pub fn render_with_filter_overrides(
+        &self,
+        range: FrameRange,
+        cutoff_override: Option<f64>,
+        resonance_override: Option<f64>,
+    ) -> Result<AudioBlock, SongRenderError> {
         if cutoff_override.is_some_and(|value| !value.is_finite() || value <= 0.0) {
             return Err(SongRenderError::InvalidCutoffOverride);
+        }
+        if resonance_override
+            .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
+        {
+            return Err(SongRenderError::InvalidResonanceOverride);
         }
         let frame_count = range.end() - range.start();
         let frames = u32::try_from(frame_count).map_err(|_| SongRenderError::RangeTooLong {
@@ -304,7 +344,7 @@ impl CompiledNotePatch {
                 sample = filter.process(
                     sample,
                     cutoff_override.unwrap_or(filter_settings.cutoff_hz),
-                    filter_settings.resonance,
+                    resonance_override.unwrap_or(filter_settings.resonance),
                     FilterMode::LowPass,
                     self.sample_rate,
                 );
@@ -386,6 +426,8 @@ pub enum SongRenderError {
     DelayTooLong(u64),
     InvalidFeedbackOverride,
     InvalidCutoffOverride,
+    InvalidResonanceOverride,
+    InvalidMixOverride,
     RangeTooLong { frames: u64 },
 }
 
@@ -463,6 +505,16 @@ impl fmt::Display for SongRenderError {
                 write!(
                     formatter,
                     "live cutoff override must be finite and positive"
+                )
+            }
+            Self::InvalidResonanceOverride => write!(
+                formatter,
+                "live resonance override must be finite and within 0.0..=1.0"
+            ),
+            Self::InvalidMixOverride => {
+                write!(
+                    formatter,
+                    "live delay mix override must be finite and within 0.0..=1.0"
                 )
             }
             Self::RangeTooLong { frames } => write!(

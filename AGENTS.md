@@ -109,8 +109,8 @@ Implemented foundations include:
 - `meldritch midi-controls-check SONG_DIRECTORY` for listing MIDI ports and
   printing script-mapped CC events plus raw note/unknown MIDI messages without
   starting audio/TUI playback
-- live `tui-song` rerendering for script-authored curated delay-feedback and
-  synth low-pass cutoff controls
+- live `tui-song` rerendering for script-authored curated delay-feedback,
+  delay-mix, synth low-pass cutoff, and synth low-pass resonance controls
 - script-declared MIDI action bindings for transport and performance buttons
 - latest-wins background rerender for live delay-feedback overrides
 - completed song rerenders published through the existing atomic audio snapshot
@@ -136,20 +136,21 @@ this guide was written:
   bindings, but real Windows/Linux hardware smoke testing has not been
   performed yet
 - example `16` is `play` because the full LaunchControl XL default MIDI surface
-  is declared in `.mlperformance` and supported feedback/cutoff controls rerender
-  audio; launch buttons and the discovered side-column note/CC buttons can
-  trigger typed transport/performance actions; the B row selects authored
-  groove scenes/variations that rerender through the song synth and delay; and
-  the physical strip controls use script-declared centered/overdrive curves so
-  centered knobs are neutral and faders reach normal full-open before the
-  physical maximum. The authored note patterns use the loader's 960 PPQ ticks
-  per beat, and default performance mode shows the scene/fill map, actual
-  authored note grid, and compact LaunchControl value telemetry so the playable
-  surface is visible without opening all-parameters mode. `tui-song` autoplays
-  by default for this hardware playground, and the live device output uses a
-  dedicated song-audio publication so the generic backing TUI coordinator cannot
-  overwrite the song with silence. Quantized launch timing, exact replay, and
-  MIDI output/LED feedback are not yet implemented.
+  is declared in `.mlperformance`; supported feedback, mix, cutoff, and
+  resonance controls rerender audio; launch buttons and the discovered
+  side-column note/CC buttons can trigger typed transport/performance actions;
+  the B row selects authored groove scenes/variations that rerender through the
+  song synth and delay; and the physical strip controls use script-declared
+  centered/overdrive curves so centered knobs are neutral and faders reach
+  normal full-open before the physical maximum. The authored note patterns use
+  the loader's 960 PPQ ticks per beat, and default performance mode shows the
+  scene/fill map, actual authored note grid, and compact LaunchControl value
+  telemetry so the playable surface is visible without opening all-parameters
+  mode. `tui-song` autoplays by default for this hardware playground, and the
+  live device output uses a dedicated song-audio publication so the generic
+  backing TUI coordinator cannot overwrite the song with silence. Quantized
+  launch timing, exact replay, and MIDI output/LED feedback are not yet
+  implemented.
 
 The next implementation slice is to use `midi-controls-check` to verify the
 Windows and Linux LaunchControl XL device path and confirm any MIDI output

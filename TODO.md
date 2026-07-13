@@ -138,6 +138,9 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Add a script-aware hardware diagnostic path for MIDI control inputs
 - [x] Rerender supported playground parameter controls for delay feedback and
   synth filter cutoff
+- [x] Add live script-target support for filter resonance and delay mix so the
+  LaunchControl playground can expose distinct tone/space rows instead of 32
+  duplicate cutoff controls
 - [x] Add script-declared MIDI action bindings for transport and performance
   buttons
 - [x] Print raw note/unknown MIDI messages in the diagnostic path so specialized

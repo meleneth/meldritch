@@ -30,12 +30,18 @@ It must:
 - normalize the physical surface so centered knobs are neutral and faders use
   the authored cutoff curve: MIDI 0 -> 100 Hz, MIDI 108 -> 4350 Hz “full open”,
   MIDI 127 -> 5000 Hz “overdrive full open”
+- map the LaunchControl rows to distinct live musical targets instead of 32
+  duplicate cutoff controls:
+  - top knobs `K01-K08`: synth filter resonance, centered at `0.2`
+  - middle knobs `K09-K16`: delay feedback, centered at `0.35`
+  - bottom knobs `K17-K24`: delay mix, centered at `0.25`
+  - faders `F01-F08`: synth filter cutoff with the full-open/overdrive curve
 - route all MIDI input through typed `AppInput` / `AppCommand` results so a
   captured performance can replay without the controller attached
 - rerender and publish selected groove scenes from authored `.mlpattern` files
   during `tui-song` playback
-- rerender and publish audible delay-feedback and filter-cutoff changes from
-  supported curated controls
+- rerender and publish audible delay-feedback, delay-mix, filter-cutoff, and
+  filter-resonance changes from supported curated controls
 - autoplay in `tui-song` by default so the authored pattern keeps sounding while
   LaunchControl inputs only change scene selection, transport, and parameters;
   `--no-autoplay` is the explicit stopped-start smoke-test mode
@@ -60,14 +66,14 @@ It must:
 
 Current implementation status: the format can declare every MIDI CC binding and
 script action bindings for MIDI CCs or MIDI notes. The runtime derives MIDI
-routing from the script, supported feedback/cutoff parameter controls rerender
-audio, and launch/side-column buttons can trigger typed transport/performance
-actions. The LaunchControl B row now selects authored groove scenes/variations
-that rerender through the song synth and delay. Pattern positions use real 960
-PPQ ticks, so the default TUI performance mode can expose the authored note grid
-instead of a dummy or collapsed pattern. `tui-song` autoplays by default and the
-realtime output loop is fed from a dedicated song-audio publication that keeps
-playing across parameter rerender publications. Quantized launch timing and
-exact replay remain future schema/runtime work. The two observed SysEx messages
-are intentionally left as diagnostic output until an example needs raw/SysEx
-output or binding support.
+routing from the script; supported feedback, mix, cutoff, and resonance
+parameter controls rerender audio; and launch/side-column buttons can trigger
+typed transport/performance actions. The LaunchControl B row now selects
+authored groove scenes/variations that rerender through the song synth and
+delay. Pattern positions use real 960 PPQ ticks, so the default TUI performance
+mode can expose the authored note grid instead of a dummy or collapsed pattern.
+`tui-song` autoplays by default and the realtime output loop is fed from a
+dedicated song-audio publication that keeps playing across parameter rerender
+publications. Quantized launch timing and exact replay remain future
+schema/runtime work. The two observed SysEx messages are intentionally left as
+diagnostic output until an example needs raw/SysEx output or binding support.

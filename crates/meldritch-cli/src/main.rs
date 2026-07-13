@@ -1740,6 +1740,8 @@ struct SongRenderRequest {
 struct SongLiveOverrides {
     feedback: Option<f64>,
     cutoff_hz: Option<f64>,
+    resonance: Option<f64>,
+    mix: Option<f64>,
 }
 
 struct SongRerenderWorker {
@@ -1778,10 +1780,12 @@ impl SongRerenderWorker {
                         .take()
                         .expect("latest request exists after wait")
                 };
-                let Ok(block) = request.patch.render_with_overrides(
+                let Ok(block) = request.patch.render_with_extended_overrides(
                     range,
                     request.overrides.feedback,
                     request.overrides.cutoff_hz,
+                    request.overrides.resonance,
+                    request.overrides.mix,
                 ) else {
                     continue;
                 };
@@ -2893,7 +2897,9 @@ fn decode_midi_diagnostic_message(message: &[u8]) -> Option<MidiDiagnosticMessag
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LiveSongControlTarget {
     DelayFeedback,
+    DelayMix,
     FilterCutoff,
+    FilterResonance,
 }
 
 fn live_song_control_targets(
@@ -2906,8 +2912,12 @@ fn live_song_control_targets(
             let target = parameter_target_label(control.target());
             let target = match target.as_str() {
                 "dsp:echo/delay.feedback" => LiveSongControlTarget::DelayFeedback,
+                "dsp:echo/delay.mix" => LiveSongControlTarget::DelayMix,
                 value if value.ends_with("/filter.cutoff_hz") => {
                     LiveSongControlTarget::FilterCutoff
+                }
+                value if value.ends_with("/filter.resonance") => {
+                    LiveSongControlTarget::FilterResonance
                 }
                 _ => return None,
             };
@@ -2995,7 +3005,13 @@ fn tui_song(
         },
         256,
     );
-    let controls = song_controls_for_view(&song, patch.feedback(), patch.cutoff_hz());
+    let controls = song_controls_for_view(
+        &song,
+        patch.feedback(),
+        patch.mix(),
+        patch.cutoff_hz(),
+        patch.resonance(),
+    );
     let live_control_targets = live_song_control_targets(&song);
     controller.set_curated_controls(controls);
     if let Some(phrase_variations) = scene_bank.phrase_variations.clone() {
@@ -3154,7 +3170,9 @@ fn tui_song(
                     .expect("song live override lock poisoned");
                 match target {
                     LiveSongControlTarget::DelayFeedback => overrides.feedback = Some(value),
+                    LiveSongControlTarget::DelayMix => overrides.mix = Some(value),
                     LiveSongControlTarget::FilterCutoff => overrides.cutoff_hz = Some(value),
+                    LiveSongControlTarget::FilterResonance => overrides.resonance = Some(value),
                 }
                 *overrides
             };
@@ -3193,7 +3211,9 @@ fn effective_song_audio_debug(midi_debug: bool, audio_debug: bool) -> bool {
 fn song_controls_for_view(
     song: &meldritch_dsl::ValidatedSong,
     default_feedback: f64,
+    default_mix: f64,
     default_cutoff_hz: Option<f64>,
+    default_resonance: Option<f64>,
 ) -> Vec<meldritch_app::CuratedControlView> {
     song.performance()
         .controls()
@@ -3203,8 +3223,12 @@ fn song_controls_for_view(
             let target = parameter_target_label(control.target());
             let value = match target.as_str() {
                 "dsp:echo/delay.feedback" => Some(default_feedback.clamp(minimum, maximum)),
+                "dsp:echo/delay.mix" => Some(default_mix.clamp(minimum, maximum)),
                 value if value.ends_with("/filter.cutoff_hz") => {
                     default_cutoff_hz.map(|cutoff| cutoff.clamp(minimum, maximum))
+                }
+                value if value.ends_with("/filter.resonance") => {
+                    default_resonance.map(|resonance| resonance.clamp(minimum, maximum))
                 }
                 _ => None,
             };
@@ -7143,7 +7167,24 @@ mod tests {
             .map(|mapped| mapped.input),
             Some(meldritch_app::AppInput::SetCuratedControlNormalized {
                 id: "knob-01".to_owned(),
-                value: (4350.0 - 100.0) / (5000.0 - 100.0),
+                value: 0.2 / 0.95,
+            })
+        );
+        assert_eq!(
+            map_script_midi_control_change(
+                &control_bindings,
+                &action_bindings,
+                meldritch_app::MidiControlInput {
+                    device: "launch-control-xl".to_owned(),
+                    channel: 9,
+                    cc: 49,
+                    value: 64,
+                },
+            )
+            .map(|mapped| mapped.input),
+            Some(meldritch_app::AppInput::SetCuratedControlNormalized {
+                id: "knob-17".to_owned(),
+                value: 0.25,
             })
         );
         let launch_note = map_script_midi_note(&action_bindings, "launch-control-xl", 9, 41, true)

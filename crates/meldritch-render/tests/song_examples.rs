@@ -253,13 +253,31 @@ fn launch_control_playground_compiles_and_accepts_live_feedback_and_cutoff() {
     let adjusted = patch
         .render_with_overrides(FrameRange::new(0, 96_000).unwrap(), Some(0.75), Some(500.0))
         .unwrap();
+    let tone_adjusted = patch
+        .render_with_extended_overrides(
+            FrameRange::new(0, 96_000).unwrap(),
+            None,
+            None,
+            Some(0.85),
+            Some(0.75),
+        )
+        .unwrap();
 
     assert_eq!(patch.feedback(), 0.35);
+    assert_eq!(patch.mix(), 0.25);
     assert_eq!(patch.cutoff_hz(), Some(4350.0));
+    assert_eq!(patch.resonance(), Some(0.2));
     assert_eq!(baseline.frames(), 96_000);
     assert!(baseline.peak_abs() > 0.01);
     assert_ne!(baseline.samples(), adjusted.samples());
+    assert_ne!(baseline.samples(), tone_adjusted.samples());
     assert!(adjusted.samples().iter().all(|sample| sample.is_finite()));
+    assert!(
+        tone_adjusted
+            .samples()
+            .iter()
+            .all(|sample| sample.is_finite())
+    );
 
     let [track] = song.performance().tracks() else {
         panic!("playground should have one track");

@@ -30,23 +30,23 @@ initial_pattern = "playground-line"
 
 [[controls]]
 id = "knob-01"
-label = "Knob 01"
-target = "synth:playground/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Strip 01 Resonance"
+target = "synth:playground/filter.resonance"
+range = [0.0, 0.95]
+step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 9
 cc = 13
 action = "centered"
-center = 4350.0
+center = 0.2
 
 [[controls]]
 id = "knob-02"
-label = "Knob 02"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
+label = "Strip 02 Resonance"
+target = "synth:playground/filter.resonance"
+range = [0.0, 0.95]
 step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
@@ -54,27 +54,27 @@ device = "launch-control-xl"
 channel = 9
 cc = 14
 action = "centered"
-center = 0.35
+center = 0.2
 
 [[controls]]
 id = "knob-03"
-label = "Knob 03"
-target = "synth:playground/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Strip 03 Resonance"
+target = "synth:playground/filter.resonance"
+range = [0.0, 0.95]
+step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 9
 cc = 15
 action = "centered"
-center = 4350.0
+center = 0.2
 
 [[controls]]
 id = "knob-04"
-label = "Knob 04"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
+label = "Strip 04 Resonance"
+target = "synth:playground/filter.resonance"
+range = [0.0, 0.95]
 step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
@@ -82,27 +82,27 @@ device = "launch-control-xl"
 channel = 9
 cc = 16
 action = "centered"
-center = 0.35
+center = 0.2
 
 [[controls]]
 id = "knob-05"
-label = "Knob 05"
-target = "synth:playground/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Strip 05 Resonance"
+target = "synth:playground/filter.resonance"
+range = [0.0, 0.95]
+step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 9
 cc = 17
 action = "centered"
-center = 4350.0
+center = 0.2
 
 [[controls]]
 id = "knob-06"
-label = "Knob 06"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
+label = "Strip 06 Resonance"
+target = "synth:playground/filter.resonance"
+range = [0.0, 0.95]
 step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
@@ -110,27 +110,27 @@ device = "launch-control-xl"
 channel = 9
 cc = 18
 action = "centered"
-center = 0.35
+center = 0.2
 
 [[controls]]
 id = "knob-07"
-label = "Knob 07"
-target = "synth:playground/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Strip 07 Resonance"
+target = "synth:playground/filter.resonance"
+range = [0.0, 0.95]
+step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 9
 cc = 19
 action = "centered"
-center = 4350.0
+center = 0.2
 
 [[controls]]
 id = "knob-08"
-label = "Knob 08"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
+label = "Strip 08 Resonance"
+target = "synth:playground/filter.resonance"
+range = [0.0, 0.95]
 step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
@@ -138,25 +138,25 @@ device = "launch-control-xl"
 channel = 9
 cc = 20
 action = "centered"
-center = 0.35
+center = 0.2
 
 [[controls]]
 id = "knob-09"
-label = "Knob 09"
-target = "synth:playground/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Strip 01 Delay Feedback"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 9
 cc = 29
 action = "centered"
-center = 4350.0
+center = 0.35
 
 [[controls]]
 id = "knob-10"
-label = "Knob 10"
+label = "Strip 02 Delay Feedback"
 target = "dsp:echo/delay.feedback"
 range = [0.0, 0.85]
 step = 0.05
@@ -170,21 +170,21 @@ center = 0.35
 
 [[controls]]
 id = "knob-11"
-label = "Knob 11"
-target = "synth:playground/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Strip 03 Delay Feedback"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 9
 cc = 31
 action = "centered"
-center = 4350.0
+center = 0.35
 
 [[controls]]
 id = "knob-12"
-label = "Knob 12"
+label = "Strip 04 Delay Feedback"
 target = "dsp:echo/delay.feedback"
 range = [0.0, 0.85]
 step = 0.05
@@ -198,21 +198,21 @@ center = 0.35
 
 [[controls]]
 id = "knob-13"
-label = "Knob 13"
-target = "synth:playground/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Strip 05 Delay Feedback"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 9
 cc = 33
 action = "centered"
-center = 4350.0
+center = 0.35
 
 [[controls]]
 id = "knob-14"
-label = "Knob 14"
+label = "Strip 06 Delay Feedback"
 target = "dsp:echo/delay.feedback"
 range = [0.0, 0.85]
 step = 0.05
@@ -226,21 +226,21 @@ center = 0.35
 
 [[controls]]
 id = "knob-15"
-label = "Knob 15"
-target = "synth:playground/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Strip 07 Delay Feedback"
+target = "dsp:echo/delay.feedback"
+range = [0.0, 0.85]
+step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 9
 cc = 35
 action = "centered"
-center = 4350.0
+center = 0.35
 
 [[controls]]
 id = "knob-16"
-label = "Knob 16"
+label = "Strip 08 Delay Feedback"
 target = "dsp:echo/delay.feedback"
 range = [0.0, 0.85]
 step = 0.05
@@ -254,23 +254,23 @@ center = 0.35
 
 [[controls]]
 id = "knob-17"
-label = "Knob 17"
-target = "synth:playground/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Strip 01 Delay Mix"
+target = "dsp:echo/delay.mix"
+range = [0.0, 1.0]
+step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 9
 cc = 49
 action = "centered"
-center = 4350.0
+center = 0.25
 
 [[controls]]
 id = "knob-18"
-label = "Knob 18"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
+label = "Strip 02 Delay Mix"
+target = "dsp:echo/delay.mix"
+range = [0.0, 1.0]
 step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
@@ -278,27 +278,27 @@ device = "launch-control-xl"
 channel = 9
 cc = 50
 action = "centered"
-center = 0.35
+center = 0.25
 
 [[controls]]
 id = "knob-19"
-label = "Knob 19"
-target = "synth:playground/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Strip 03 Delay Mix"
+target = "dsp:echo/delay.mix"
+range = [0.0, 1.0]
+step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 9
 cc = 51
 action = "centered"
-center = 4350.0
+center = 0.25
 
 [[controls]]
 id = "knob-20"
-label = "Knob 20"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
+label = "Strip 04 Delay Mix"
+target = "dsp:echo/delay.mix"
+range = [0.0, 1.0]
 step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
@@ -306,27 +306,27 @@ device = "launch-control-xl"
 channel = 9
 cc = 52
 action = "centered"
-center = 0.35
+center = 0.25
 
 [[controls]]
 id = "knob-21"
-label = "Knob 21"
-target = "synth:playground/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Strip 05 Delay Mix"
+target = "dsp:echo/delay.mix"
+range = [0.0, 1.0]
+step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 9
 cc = 53
 action = "centered"
-center = 4350.0
+center = 0.25
 
 [[controls]]
 id = "knob-22"
-label = "Knob 22"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
+label = "Strip 06 Delay Mix"
+target = "dsp:echo/delay.mix"
+range = [0.0, 1.0]
 step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
@@ -334,27 +334,27 @@ device = "launch-control-xl"
 channel = 9
 cc = 54
 action = "centered"
-center = 0.35
+center = 0.25
 
 [[controls]]
 id = "knob-23"
-label = "Knob 23"
-target = "synth:playground/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Strip 07 Delay Mix"
+target = "dsp:echo/delay.mix"
+range = [0.0, 1.0]
+step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
 channel = 9
 cc = 55
 action = "centered"
-center = 4350.0
+center = 0.25
 
 [[controls]]
 id = "knob-24"
-label = "Knob 24"
-target = "dsp:echo/delay.feedback"
-range = [0.0, 0.85]
+label = "Strip 08 Delay Mix"
+target = "dsp:echo/delay.mix"
+range = [0.0, 1.0]
 step = 0.05
 [[controls.bindings]]
 type = "midi_cc"
@@ -362,7 +362,7 @@ device = "launch-control-xl"
 channel = 9
 cc = 56
 action = "centered"
-center = 0.35
+center = 0.25
 
 [[controls]]
 id = "fader-01"
