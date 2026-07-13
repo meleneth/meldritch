@@ -159,9 +159,9 @@ the complete parameter surface without disturbing playback.
   transport actions, cancellations, and fallback/cache decisions where relevant
 - [x] Checkpoint session files outside the realtime callback with
   crash-tolerant writes
-- [ ] Add explicit bounded buffering for session event writes
+- [x] Add explicit bounded buffering for session event writes
 - [x] Write a clean/unclean termination marker
-- [ ] Write the complete final runtime state
+- [x] Write the complete final runtime state
 - [x] Never overwrite an authored performance definition or an earlier session
 
 Done when every interactive run leaves a human-readable session artifact that

@@ -107,6 +107,7 @@ Implemented foundations include:
 - `tui-song` timestamped `.mlperformance` session files under `performances/`
 - session checkpoints for accepted typed inputs, source fingerprints, and clean
   termination markers
+- bounded session event checkpoint buffers and final runtime state snapshots
 
 Check `songs/examples/CAPABILITIES.md` for the exact current status. At the time
 this guide was written:
@@ -117,13 +118,11 @@ this guide was written:
   runtime and atomically published rerenders, but all-parameters inspection
   remains unfinished
 - example `11` is `compile` because session files are produced and tested
-  headlessly, but full category coverage, bounded buffering, final-state
-  capture, and replay remain unfinished
+  headlessly, but full category coverage and replay remain unfinished
 
-The next implementation slice is to broaden session capture coverage: add
-bounded buffering, complete final runtime state, and tests for mode changes plus
-additional accepted command categories. Full all-parameters inspection remains
-open after that.
+The next implementation slice is to broaden session capture coverage with
+scripted tests for mode changes plus additional accepted command categories.
+Full all-parameters inspection remains open after that.
 
 ## Important files
 

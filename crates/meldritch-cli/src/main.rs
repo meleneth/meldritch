@@ -1796,6 +1796,24 @@ struct CapturedSessionEvent {
     current: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct FinalSessionState {
+    cockpit_mode: String,
+    transport_state: String,
+    transport_position: u32,
+    selection_track: u64,
+    selection_step: u32,
+    history_len: usize,
+    curated_controls: Vec<FinalSessionControl>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct FinalSessionControl {
+    id: String,
+    target: String,
+    value: Option<f64>,
+}
+
 #[derive(Debug)]
 struct PerformanceSessionCapture {
     path: PathBuf,
@@ -1809,9 +1827,14 @@ struct PerformanceSessionCapture {
     timeline_frames: u32,
     started: Instant,
     events: Vec<CapturedSessionEvent>,
+    uncheckpointed_events: usize,
+    event_buffer_limit: usize,
+    final_state: Option<FinalSessionState>,
     clean_termination: bool,
     termination: String,
 }
+
+const SESSION_EVENT_BUFFER_LIMIT: usize = 8;
 
 impl PerformanceSessionCapture {
     fn create(song: &meldritch_dsl::ValidatedSong, timeline_frames: u32) -> Result<Self, String> {
@@ -1825,6 +1848,25 @@ impl PerformanceSessionCapture {
         timeline_frames: u32,
         timestamp: &str,
     ) -> Result<Self, String> {
+        Self::create_at_with_buffer_limit(
+            session_root,
+            song,
+            timeline_frames,
+            timestamp,
+            SESSION_EVENT_BUFFER_LIMIT,
+        )
+    }
+
+    fn create_at_with_buffer_limit(
+        session_root: &Path,
+        song: &meldritch_dsl::ValidatedSong,
+        timeline_frames: u32,
+        timestamp: &str,
+        event_buffer_limit: usize,
+    ) -> Result<Self, String> {
+        if event_buffer_limit == 0 {
+            return Err("session event buffer limit must be greater than zero".to_owned());
+        }
         let directory = session_root.join("performances");
         std::fs::create_dir_all(&directory)
             .map_err(|error| format!("failed to create {}: {error}", directory.display()))?;
@@ -1842,6 +1884,9 @@ impl PerformanceSessionCapture {
             timeline_frames,
             started: Instant::now(),
             events: Vec::new(),
+            uncheckpointed_events: 0,
+            event_buffer_limit,
+            final_state: None,
             clean_termination: false,
             termination: "running".to_owned(),
         };
@@ -1872,7 +1917,7 @@ impl PerformanceSessionCapture {
         let absolute_frame = view.transport.position;
         let musical_beat = f64::from(absolute_frame) / tempo.frames_per_beat().max(f64::EPSILON);
         let (kind, target_id, previous, current) = session_result_fields(result);
-        self.events.push(CapturedSessionEvent {
+        self.push_event(CapturedSessionEvent {
             sequence,
             wall_offset_ms: self.started.elapsed().as_millis(),
             absolute_frame,
@@ -1888,11 +1933,28 @@ impl PerformanceSessionCapture {
             target_id,
             previous,
             current,
-        });
-        self.checkpoint()
+        })
     }
 
-    fn finish_clean(&mut self) -> Result<(), String> {
+    fn push_event(&mut self, event: CapturedSessionEvent) -> Result<(), String> {
+        self.events.push(event);
+        self.uncheckpointed_events += 1;
+        if self.uncheckpointed_events >= self.event_buffer_limit {
+            self.checkpoint()?;
+        }
+        Ok(())
+    }
+
+    fn capture_final_state(&mut self, controller: &meldritch_app::AppController) {
+        self.final_state = Some(FinalSessionState::from_view(&controller.view_model()));
+    }
+
+    fn finish_clean(&mut self, controller: &meldritch_app::AppController) -> Result<(), String> {
+        self.capture_final_state(controller);
+        self.finish_clean_without_controller()
+    }
+
+    fn finish_clean_without_controller(&mut self) -> Result<(), String> {
         self.clean_termination = true;
         self.termination = "clean".to_owned();
         self.checkpoint()
@@ -1902,8 +1964,11 @@ impl PerformanceSessionCapture {
         let encoded = self.to_toml();
         std::fs::write(&self.temp_path, encoded)
             .map_err(|error| format!("failed to write {}: {error}", self.temp_path.display()))?;
-        std::fs::rename(&self.temp_path, &self.path)
-            .map_err(|error| format!("failed to publish session {}: {error}", self.path.display()))
+        std::fs::rename(&self.temp_path, &self.path).map_err(|error| {
+            format!("failed to publish session {}: {error}", self.path.display())
+        })?;
+        self.uncheckpointed_events = 0;
+        Ok(())
     }
 
     fn to_toml(&self) -> String {
@@ -1923,9 +1988,40 @@ impl PerformanceSessionCapture {
             &format!("{:016x}", self.source_fingerprint),
         );
         out.push_str(&format!("timeline_frames = {}\n", self.timeline_frames));
+        out.push_str(&format!(
+            "event_buffer_limit = {}\n",
+            self.event_buffer_limit
+        ));
         out.push_str(&format!("clean_termination = {}\n", self.clean_termination));
         push_string(&mut out, "termination", &self.termination);
         out.push('\n');
+        if let Some(final_state) = &self.final_state {
+            out.push_str("[final_state]\n");
+            push_string(&mut out, "cockpit_mode", &final_state.cockpit_mode);
+            push_string(&mut out, "transport_state", &final_state.transport_state);
+            out.push_str(&format!(
+                "transport_position = {}\n",
+                final_state.transport_position
+            ));
+            out.push_str(&format!(
+                "selection_track = {}\n",
+                final_state.selection_track
+            ));
+            out.push_str(&format!(
+                "selection_step = {}\n",
+                final_state.selection_step
+            ));
+            out.push_str(&format!("history_len = {}\n\n", final_state.history_len));
+            for control in &final_state.curated_controls {
+                out.push_str("[[final_controls]]\n");
+                push_string(&mut out, "id", &control.id);
+                push_string(&mut out, "target", &control.target);
+                if let Some(value) = control.value {
+                    out.push_str(&format!("value = {:.12}\n", value));
+                }
+                out.push('\n');
+            }
+        }
         for event in &self.events {
             out.push_str("[[events]]\n");
             out.push_str(&format!("sequence = {}\n", event.sequence));
@@ -1956,6 +2052,28 @@ impl PerformanceSessionCapture {
             out.push('\n');
         }
         out
+    }
+}
+
+impl FinalSessionState {
+    fn from_view(view: &meldritch_app::AppViewModel) -> Self {
+        Self {
+            cockpit_mode: format!("{:?}", view.cockpit_mode),
+            transport_state: format!("{:?}", view.transport.state),
+            transport_position: view.transport.position,
+            selection_track: view.diagnostics.selection.track.raw(),
+            selection_step: view.diagnostics.selection.step.raw(),
+            history_len: view.diagnostics.history_len,
+            curated_controls: view
+                .curated_controls
+                .iter()
+                .map(|control| FinalSessionControl {
+                    id: control.id.clone(),
+                    target: control.target.clone(),
+                    value: control.value,
+                })
+                .collect(),
+        }
     }
 }
 
@@ -2236,7 +2354,7 @@ fn tui_song(
         let mut capture = capture
             .lock()
             .expect("performance session capture lock poisoned");
-        capture.finish_clean()?;
+        capture.finish_clean(&controller)?;
         capture.path().to_owned()
     };
     println!("saved performance session: {}", session_path.display());
@@ -5649,24 +5767,21 @@ mod tests {
         let mut capture =
             PerformanceSessionCapture::create_at(&root, &song, 96_000, "20260712T123456Z")
                 .expect("session should be created");
-        capture.events.push(CapturedSessionEvent {
-            sequence: 7,
-            wall_offset_ms: 42,
-            absolute_frame: 12_000,
-            musical_beat: 0.5,
-            requested_quantization: "immediate".to_owned(),
-            actual_frame: 12_000,
-            provenance: "performer".to_owned(),
-            input: "AdjustCuratedControl { id: \"echo-feedback\", steps: 1 }".to_owned(),
-            command: "AdjustCuratedControl { id: \"echo-feedback\", steps: 1 }".to_owned(),
-            result: "CuratedControlAdjusted".to_owned(),
-            changed: true,
-            kind: "curated_control".to_owned(),
-            target_id: Some("echo-feedback".to_owned()),
-            previous: Some("0.350000000000".to_owned()),
-            current: Some("0.400000000000".to_owned()),
+        capture.push_event(test_session_event(7)).unwrap();
+        capture.final_state = Some(FinalSessionState {
+            cockpit_mode: "Performance".to_owned(),
+            transport_state: "Playing".to_owned(),
+            transport_position: 12_000,
+            selection_track: 1,
+            selection_step: 0,
+            history_len: 1,
+            curated_controls: vec![FinalSessionControl {
+                id: "echo-feedback".to_owned(),
+                target: "dsp:echo/delay.feedback".to_owned(),
+                value: Some(0.4),
+            }],
         });
-        capture.finish_clean().unwrap();
+        capture.finish_clean_without_controller().unwrap();
         let second = PerformanceSessionCapture::create_at(&root, &song, 96_000, "20260712T123456Z")
             .expect("second session should get a collision suffix");
 
@@ -5700,8 +5815,75 @@ mod tests {
         assert_eq!(events[0]["target_id"].as_str(), Some("echo-feedback"));
         assert_eq!(events[0]["previous"].as_str(), Some("0.350000000000"));
         assert_eq!(events[0]["current"].as_str(), Some("0.400000000000"));
+        assert_eq!(
+            value["final_state"]["cockpit_mode"].as_str(),
+            Some("Performance")
+        );
+        assert_eq!(
+            value["final_controls"][0]["id"].as_str(),
+            Some("echo-feedback")
+        );
+        assert_eq!(value["final_controls"][0]["value"].as_float(), Some(0.4));
 
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn session_capture_buffers_events_until_the_configured_checkpoint_limit() {
+        let song = meldritch_dsl::load_song_directory(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join("songs/examples/11-session-capture"),
+        )
+        .expect("session capture example should load");
+        let root = std::env::temp_dir().join(format!(
+            "meldritch-session-buffer-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut capture = PerformanceSessionCapture::create_at_with_buffer_limit(
+            &root,
+            &song,
+            96_000,
+            "20260712T223344Z",
+            2,
+        )
+        .expect("session should be created");
+
+        capture.push_event(test_session_event(1)).unwrap();
+        let raw = std::fs::read_to_string(capture.path()).unwrap();
+        let value: toml::Value = toml::from_str(&raw).unwrap();
+        assert!(value.get("events").is_none());
+        assert_eq!(capture.uncheckpointed_events, 1);
+
+        capture.push_event(test_session_event(2)).unwrap();
+        let raw = std::fs::read_to_string(capture.path()).unwrap();
+        let value: toml::Value = toml::from_str(&raw).unwrap();
+        assert_eq!(value["events"].as_array().unwrap().len(), 2);
+        assert_eq!(capture.uncheckpointed_events, 0);
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn test_session_event(sequence: u64) -> CapturedSessionEvent {
+        CapturedSessionEvent {
+            sequence,
+            wall_offset_ms: 42,
+            absolute_frame: 12_000,
+            musical_beat: 0.5,
+            requested_quantization: "immediate".to_owned(),
+            actual_frame: 12_000,
+            provenance: "performer".to_owned(),
+            input: "AdjustCuratedControl { id: \"echo-feedback\", steps: 1 }".to_owned(),
+            command: "AdjustCuratedControl { id: \"echo-feedback\", steps: 1 }".to_owned(),
+            result: "CuratedControlAdjusted".to_owned(),
+            changed: true,
+            kind: "curated_control".to_owned(),
+            target_id: Some("echo-feedback".to_owned()),
+            previous: Some("0.350000000000".to_owned()),
+            current: Some("0.400000000000".to_owned()),
+        }
     }
 
     #[test]
