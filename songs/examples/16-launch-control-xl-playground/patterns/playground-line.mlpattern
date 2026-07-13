@@ -16,7 +16,7 @@ duration = "1/8"
 velocity = 0.8
 
 [[events]]
-at = "1:1:2"
+at = "1:1:480"
 note = "Eb3"
 duration = "1/8"
 velocity = 0.7

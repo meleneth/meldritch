@@ -2949,8 +2949,7 @@ fn tui_song(
     let settings = RenderSettings::new(initial.channels())
         .map_err(|error| format!("invalid render settings: {error:?}"))?;
     let tempo = tempo_from_song(&song)?;
-    let pattern = Pattern::new(PatternId::new(1), 16, 4)
-        .map_err(|error| format!("failed to create TUI backing pattern: {error:?}"))?;
+    let pattern = initial_song_pattern_to_grid(&song, tempo, PatternId::new(1))?;
     let timeline_chunks = frame_count.div_ceil(chunk_frames).max(1) as usize;
     let config = RenderCoordinatorConfig::new(
         worker_count,
@@ -3300,6 +3299,29 @@ fn song_note_pattern_to_grid(
         })?;
     }
     Ok(grid)
+}
+
+fn initial_song_pattern_to_grid(
+    song: &meldritch_dsl::ValidatedSong,
+    tempo: Tempo,
+    id: PatternId,
+) -> Result<Pattern, String> {
+    let [track] = song.performance().tracks() else {
+        return Pattern::new(id, 16, 4)
+            .map_err(|error| format!("failed to create empty song grid: {error:?}"));
+    };
+    let Some(pattern_id) = track.initial_pattern() else {
+        return Pattern::new(id, 16, 4)
+            .map_err(|error| format!("failed to create empty song grid: {error:?}"));
+    };
+    let pattern = song.note_patterns().get(pattern_id).ok_or_else(|| {
+        format!(
+            "track '{}' references missing initial note pattern '{}'",
+            track.id(),
+            pattern_id
+        )
+    })?;
+    song_note_pattern_to_grid(pattern, tempo, id)
 }
 
 fn song_scene_selection(
@@ -7098,6 +7120,24 @@ mod tests {
                     .iter()
                     .all(|pattern| pattern.length_steps() == 16 && pattern.steps_per_beat() == 4)
         }));
+
+        let initial_grid =
+            initial_song_pattern_to_grid(&song, tempo_from_song(&song).unwrap(), PatternId::new(1))
+                .expect("initial playground grid should be built from the authored pattern");
+        assert_eq!(initial_grid.length_steps(), 16);
+        assert_eq!(initial_grid.active_step_count(), 4);
+        assert_eq!(
+            initial_grid
+                .get_step(TrackId::new(1), StepIndex::new(0))
+                .map(|step| step.note()),
+            Some(48)
+        );
+        assert_eq!(
+            initial_grid
+                .get_step(TrackId::new(1), StepIndex::new(2))
+                .map(|step| step.note()),
+            Some(51)
+        );
     }
 
     fn assert_session_kind(

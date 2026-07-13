@@ -16,7 +16,7 @@ duration = "1/16"
 velocity = 0.72
 
 [[events]]
-at = "1:1:2"
+at = "1:1:480"
 note = "Eb3"
 duration = "1/16"
 velocity = 0.76
@@ -28,7 +28,7 @@ duration = "1/16"
 velocity = 0.8
 
 [[events]]
-at = "1:2:2"
+at = "1:2:480"
 note = "Bb3"
 duration = "1/16"
 velocity = 0.84
@@ -40,13 +40,13 @@ duration = "1/8"
 velocity = 0.9
 
 [[events]]
-at = "1:4:1"
+at = "1:4:240"
 note = "Bb3"
 duration = "1/16"
 velocity = 0.82
 
 [[events]]
-at = "1:4:2"
+at = "1:4:480"
 note = "G3"
 duration = "1/16"
 velocity = 0.78

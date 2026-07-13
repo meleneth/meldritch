@@ -25,6 +25,8 @@ It must:
   script-declared typed performance actions, not hard-coded Rust behavior
 - provide four authored groove scenes and one authored variation/fill per scene;
   the B row selects scenes 1-4 and variation 1 for scenes 1-4
+- author pattern event positions with the loader's 960 PPQ ticks per beat
+  (`240` ticks per sixteenth), so the visible grid and rendered groove agree
 - normalize the physical surface so centered knobs are neutral and faders use
   the authored cutoff curve: MIDI 0 -> 100 Hz, MIDI 108 -> 4350 Hz “full open”,
   MIDI 127 -> 5000 Hz “overdrive full open”
@@ -46,18 +48,18 @@ It must:
   button/control labels and unmapped raw MIDI events are visible in the status
   line while testing the controller
 - show the authored groovebox surface in default performance mode: B-row scene
-  and fill mapping, queued/active state, current pattern length, and the
-  physical 8-strip LaunchControl layout where each fader is shown with its
-  three knobs above it
+  and fill mapping, queued/active state, the actual authored note pattern grid,
+  and compact LaunchControl value telemetry
 
 Current implementation status: the format can declare every MIDI CC binding and
 script action bindings for MIDI CCs or MIDI notes. The runtime derives MIDI
 routing from the script, supported feedback/cutoff parameter controls rerender
 audio, and launch/side-column buttons can trigger typed transport/performance
 actions. The LaunchControl B row now selects authored groove scenes/variations
-that rerender through the song synth and delay, and the default TUI performance
-mode now exposes the scene/fill map plus the physical strip layout. `tui-song`
-autoplays by default and the realtime output loop keeps playing across parameter
-rerender publications. Quantized launch timing and exact replay remain future
-schema/runtime work. The two observed SysEx messages are intentionally left as
-diagnostic output until an example needs raw/SysEx output or binding support.
+that rerender through the song synth and delay. Pattern positions use real 960
+PPQ ticks, so the default TUI performance mode can expose the authored note grid
+instead of a dummy or collapsed pattern. `tui-song` autoplays by default and the
+realtime output loop keeps playing across parameter rerender publications.
+Quantized launch timing and exact replay remain future schema/runtime work. The
+two observed SysEx messages are intentionally left as diagnostic output until an
+example needs raw/SysEx output or binding support.

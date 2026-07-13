@@ -466,28 +466,30 @@ fn draw_curated_performance_mode(
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
-            Constraint::Length(5),
-            Constraint::Min(5),
-            Constraint::Length(3),
             Constraint::Length(4),
+            Constraint::Min(6),
+            Constraint::Length(5),
+            Constraint::Length(3),
+            Constraint::Length(3),
         ])
         .split(frame.area());
     draw_transport(frame, rows[0], view);
     draw_groovebox_surface(frame, rows[1], view);
+    draw_grid(frame, rows[2], view);
     frame.render_widget(
         panel(
-            "Performance Controls · Ctrl-Tab for all parameters",
+            "Control Telemetry · last MIDI/action in status",
             Paragraph::new(performance_control_lines(view)).wrap(Wrap { trim: false }),
         ),
-        rows[2],
+        rows[3],
     );
-    draw_status(frame, rows[3], status);
+    draw_status(frame, rows[4], status);
     frame.render_widget(
         panel(
             "Performance Keys",
-            Paragraph::new("Ctrl-Tab all parameters · p play/pause · r rewind · q quit"),
+            Paragraph::new("Ctrl-Tab all parameters · p play/stop · r rewind · q quit"),
         ),
-        rows[4],
+        rows[5],
     );
 }
 
@@ -501,10 +503,7 @@ fn draw_groovebox_surface(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
         |queued| format!("{:?}@{}", queued.gesture, queued.launch_frame),
     );
     let lines = vec![
-        Line::from("Scenes: B01 Scene 1 · B02 Scene 2 · B03 Scene 3 · B04 Scene 4"),
-        Line::from(
-            "Fills:  B05 Scene 1 fill · B06 Scene 2 fill · B07 Scene 3 fill · B08 Scene 4 fill",
-        ),
+        Line::from("B01-B04 scenes 1-4 · B05-B08 fills/variations 1-4"),
         Line::from(format!(
             "State: active scene {active} · queued {queued} · Pattern {} · {} steps",
             view.pattern_grid.pattern.raw(),
@@ -561,27 +560,35 @@ fn has_launch_control_strip_surface(view: &AppViewModel) -> bool {
 }
 
 fn launch_control_strip_lines(view: &AppViewModel) -> Vec<Line<'static>> {
-    let mut lines = Vec::with_capacity(10);
-    lines.push(Line::from(format!(
-        "Instrument surface: {}",
-        control_source_summary(&view.curated_controls)
-    )));
-    for strip in 1..=8 {
-        lines.push(Line::from(format!(
-            "Strip {strip:02} │ K{top:02} {top_value} │ K{middle:02} {middle_value} │ K{bottom:02} {bottom_value} │ F{strip:02} {fader_value}",
-            top = strip,
-            middle = strip + 8,
-            bottom = strip + 16,
-            top_value = compact_control_value(view, &format!("knob-{strip:02}")),
-            middle_value = compact_control_value(view, &format!("knob-{:02}", strip + 8)),
-            bottom_value = compact_control_value(view, &format!("knob-{:02}", strip + 16)),
-            fader_value = compact_control_value(view, &format!("fader-{strip:02}")),
-        )));
-    }
-    lines.push(Line::from(
-        "Launch buttons: B01-B04 scenes · B05-B08 fills/variations; right column transport/performance actions",
-    ));
-    lines
+    vec![
+        Line::from(format!(
+            "Surface: {} · values here are telemetry, not the main performance UI",
+            control_source_summary(&view.curated_controls)
+        )),
+        Line::from(format!(
+            "Strip 01: K01 {} · K09 {} · K17 {} · F01 {}",
+            compact_control_value(view, "knob-01"),
+            compact_control_value(view, "knob-09"),
+            compact_control_value(view, "knob-17"),
+            compact_control_value(view, "fader-01"),
+        )),
+        Line::from(format!(
+            "Faders cutoff: {}",
+            compact_control_values(view, "F", (1..=8).map(|strip| format!("fader-{strip:02}")))
+        )),
+        Line::from(format!(
+            "Top knobs: {}",
+            compact_control_values(view, "K", (1..=8).map(|knob| format!("knob-{knob:02}")))
+        )),
+        Line::from(format!(
+            "Mid knobs: {}",
+            compact_control_values(view, "K", (9..=16).map(|knob| format!("knob-{knob:02}")))
+        )),
+        Line::from(format!(
+            "Bot knobs: {}",
+            compact_control_values(view, "K", (17..=24).map(|knob| format!("knob-{knob:02}")))
+        )),
+    ]
 }
 
 fn compact_control_value(view: &AppViewModel, id: &str) -> String {
@@ -602,6 +609,19 @@ fn compact_control_value(view: &AppViewModel, id: &str) -> String {
                 format!("{value} {target}")
             },
         )
+}
+
+fn compact_control_values<I>(view: &AppViewModel, prefix: &str, ids: I) -> String
+where
+    I: IntoIterator<Item = String>,
+{
+    ids.into_iter()
+        .map(|id| {
+            let number = id.rsplit('-').next().unwrap_or("??");
+            format!("{prefix}{number} {}", compact_control_value(view, &id))
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 fn control_source_summary(controls: &[meldritch_app::CuratedControlView]) -> String {
@@ -1495,7 +1515,7 @@ mod tests {
             binding: "f".to_owned(),
             value: Some(0.35),
         }];
-        let backend = TestBackend::new(100, 20);
+        let backend = TestBackend::new(100, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| draw(frame, &view)).unwrap();
         let content = terminal
@@ -1506,7 +1526,7 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
 
-        assert!(content.contains("Performance Controls"));
+        assert!(content.contains("Control Telemetry"));
         assert!(content.contains("Groovebox Scenes"));
         assert!(content.contains("Echo Feedback"));
         assert!(content.contains("dsp:echo/delay.feedback"));
@@ -1562,12 +1582,12 @@ mod tests {
             .collect::<String>();
 
         assert!(content.contains("Groovebox Scenes"));
-        assert!(content.contains("B01 Scene 1"));
-        assert!(content.contains("B05 Scene 1 fill"));
-        assert!(content.contains("Instrument surface"));
+        assert!(content.contains("B01-B04 scenes"));
+        assert!(content.contains("B05-B08 fills"));
+        assert!(content.contains("Control Telemetry"));
+        assert!(content.contains("Surface"));
         assert!(content.contains("synth:playground"));
         assert!(content.contains("dsp:echo"));
-        assert!(content.contains("Strip 01"));
         assert!(content.contains("K01"));
         assert!(content.contains("K09"));
         assert!(content.contains("K17"));

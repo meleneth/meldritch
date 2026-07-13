@@ -149,12 +149,16 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Add script-declared centered and overdrive MIDI curves so the LaunchControl
   playground has neutral center-detent knobs and faders with a normal/full-open
   value below the physical maximum
-- [x] Show the LaunchControl XL playground's authored groove scenes/fills and
-  physical 8-strip control layout in default performance mode so the playable
-  instrument/pattern surface is visible without switching to all-parameters mode
+- [x] Show the LaunchControl XL playground's authored groove scenes/fills,
+  actual note grid, and compact control telemetry in default performance mode so
+  the playable instrument/pattern surface is visible without switching to
+  all-parameters mode
 - [x] Make `tui-song` autoplay by default and keep the published song loop
   sounding across live parameter rerenders; `--no-autoplay` is now the explicit
   stopped-start mode
+- [x] Fix the LaunchControl playground note positions to use the loader's 960
+  PPQ ticks per beat and build the default TUI grid from the authored initial
+  `.mlpattern` instead of a dummy empty pattern
 - [ ] Verify LaunchControl XL input with the diagnostic path on
   both Windows and Linux
 - [ ] Add MIDI output/LED feedback support after confirming the LaunchControl XL

@@ -16,7 +16,7 @@ duration = "1/8"
 velocity = 0.9
 
 [[events]]
-at = "1:2:2"
+at = "1:2:480"
 note = "G2"
 duration = "1/16"
 velocity = 0.72
@@ -28,7 +28,7 @@ duration = "1/8"
 velocity = 0.86
 
 [[events]]
-at = "1:4:2"
+at = "1:4:480"
 note = "G2"
 duration = "1/16"
 velocity = 0.75

@@ -51,7 +51,8 @@ under `performances/` and are never considered entry-point candidates.
 Authored patterns use musical time. Initial examples use:
 
 - durations such as `1 bar`, `1/8`, and `1/16`
-- positions such as `1:1:0`, meaning bar, beat, and tick within the pattern
+- positions such as `1:1:0`, meaning bar, beat, and PPQ tick within the pattern;
+  the current parser uses 960 ticks per beat, so one sixteenth note is 240 ticks
 - explicit looping and launch quantization
 
 Generated sessions additionally record absolute `u64` frames and wall-clock
