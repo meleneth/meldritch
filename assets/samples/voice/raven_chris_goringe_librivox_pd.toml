@@ -1,0 +1,22 @@
+[sample]
+id = "raven_chris_goringe_librivox_pd"
+title = "The Raven"
+author = "Edgar Allan Poe"
+reader = "Chris Goringe"
+source_project = "LibriVox"
+source_catalog_url = "https://librivox.org/the-raven-by-edgar-allan-poe/"
+source_audio_url = "https://archive.org/download/raven/raven_poe.mp3"
+source_archive_url = "https://archive.org/details/raven"
+license = "Public Domain in the USA"
+license_notes = "LibriVox states that its recordings are public domain in the USA. Verify local copyright status outside the USA."
+
+[derived]
+file = "raven_chris_goringe_librivox_pd.wav"
+created_by = "tools/fetch-raven-voice-sample.sh"
+trim_start = "00:00:24.000"
+duration_seconds = 8.0
+channels = 1
+sample_rate = 48000
+sample_format = "s16"
+sha256 = "d456b0adadaaf4bb7ae56c3b2dfc0bf1eec3d958d4b1fecfe446c026e45eb912"
+intended_use = "Voice sample for MELDRITCH slicing, delay, freeze, and effects demos."
