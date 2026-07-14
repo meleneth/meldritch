@@ -1740,8 +1740,83 @@ fn validate_song(path: PathBuf) -> Result<(), String> {
 
 struct SongRenderRequest {
     generation: u64,
-    patch: meldritch_render::song_render::CompiledDelayedNotePatch,
+    patch: CompiledSongPatch,
     overrides: SongLiveOverrides,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum CompiledSongPatch {
+    Delayed(meldritch_render::song_render::CompiledDelayedNotePatch),
+    Mixed(meldritch_render::song_render::CompiledMixedNoteSong),
+}
+
+impl CompiledSongPatch {
+    fn compile_initial(song: &meldritch_dsl::ValidatedSong) -> Result<Self, String> {
+        match meldritch_render::song_render::compile_delayed_note_song(song) {
+            Ok(patch) => Ok(Self::Delayed(patch)),
+            Err(delayed_error) => {
+                let mixed = meldritch_render::song_render::compile_mixed_note_song(song)
+                    .map_err(|mixed_error| {
+                        format!(
+                            "failed to compile song for TUI playback: delayed={delayed_error:?}; mixed={mixed_error:?}"
+                        )
+                    })?;
+                Ok(Self::Mixed(mixed))
+            }
+        }
+    }
+
+    fn render(
+        &self,
+        range: FrameRange,
+        overrides: SongLiveOverrides,
+    ) -> Result<meldritch_audio::AudioBlock, meldritch_render::song_render::SongRenderError> {
+        match self {
+            Self::Delayed(patch) => patch.render_with_extended_overrides(
+                range,
+                overrides.feedback,
+                overrides.cutoff_hz,
+                overrides.resonance,
+                overrides.mix,
+            ),
+            Self::Mixed(patch) => patch.render(range),
+        }
+    }
+
+    fn render_default(
+        &self,
+        range: FrameRange,
+    ) -> Result<meldritch_audio::AudioBlock, meldritch_render::song_render::SongRenderError> {
+        self.render(range, SongLiveOverrides::default())
+    }
+
+    fn feedback(&self) -> Option<f64> {
+        match self {
+            Self::Delayed(patch) => Some(patch.feedback()),
+            Self::Mixed(_) => None,
+        }
+    }
+
+    fn mix(&self) -> Option<f64> {
+        match self {
+            Self::Delayed(patch) => Some(patch.mix()),
+            Self::Mixed(_) => None,
+        }
+    }
+
+    fn cutoff_hz(&self) -> Option<f64> {
+        match self {
+            Self::Delayed(patch) => patch.cutoff_hz(),
+            Self::Mixed(_) => None,
+        }
+    }
+
+    fn resonance(&self) -> Option<f64> {
+        match self {
+            Self::Delayed(patch) => patch.resonance(),
+            Self::Mixed(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -1788,13 +1863,7 @@ impl SongRerenderWorker {
                         .take()
                         .expect("latest request exists after wait")
                 };
-                let Ok(block) = request.patch.render_with_extended_overrides(
-                    range,
-                    request.overrides.feedback,
-                    request.overrides.cutoff_hz,
-                    request.overrides.resonance,
-                    request.overrides.mix,
-                ) else {
+                let Ok(block) = request.patch.render(range, request.overrides) else {
                     continue;
                 };
                 if completed_tx
@@ -1812,12 +1881,7 @@ impl SongRerenderWorker {
         }
     }
 
-    fn submit(
-        &mut self,
-        generation: u64,
-        patch: meldritch_render::song_render::CompiledDelayedNotePatch,
-        overrides: SongLiveOverrides,
-    ) {
+    fn submit(&mut self, generation: u64, patch: CompiledSongPatch, overrides: SongLiveOverrides) {
         let (lock, changed) = &*self.shared;
         lock.lock()
             .expect("song render worker lock poisoned")
@@ -3013,8 +3077,7 @@ fn tui_song(
     audio_debug: bool,
 ) -> Result<(), String> {
     let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
-    let patch = meldritch_render::song_render::compile_delayed_note_song(&song)
-        .map_err(|error| format!("failed to compile song for TUI playback: {error:?}"))?;
+    let patch = CompiledSongPatch::compile_initial(&song)?;
     let scene_bank = song_scene_bank(&song, tempo_from_song(&song)?)?;
     let frame_count = frames.unwrap_or_else(|| {
         song.note_patterns()
@@ -3026,7 +3089,7 @@ fn tui_song(
     let frame_count = u32::try_from(frame_count)
         .map_err(|_| "TUI song frame count exceeds u32::MAX".to_owned())?;
     let initial = patch
-        .render(FrameRange::new(0, u64::from(frame_count)).expect("song range is ordered"))
+        .render_default(FrameRange::new(0, u64::from(frame_count)).expect("song range is ordered"))
         .map_err(|error| format!("failed to render initial song audio: {error:?}"))?;
     eprintln!(
         "initial song render: frames={}, channels={}, peak={:.3}",
@@ -3318,8 +3381,8 @@ fn effective_song_audio_debug(midi_debug: bool, audio_debug: bool) -> bool {
 
 fn song_controls_for_view(
     song: &meldritch_dsl::ValidatedSong,
-    default_feedback: f64,
-    default_mix: f64,
+    default_feedback: Option<f64>,
+    default_mix: Option<f64>,
     default_cutoff_hz: Option<f64>,
     default_resonance: Option<f64>,
 ) -> Vec<meldritch_app::CuratedControlView> {
@@ -3330,8 +3393,10 @@ fn song_controls_for_view(
             let (minimum, maximum) = control.range();
             let target = parameter_target_label(control.target());
             let value = match target.as_str() {
-                "dsp:echo/delay.feedback" => Some(default_feedback.clamp(minimum, maximum)),
-                "dsp:echo/delay.mix" => Some(default_mix.clamp(minimum, maximum)),
+                "dsp:echo/delay.feedback" => {
+                    default_feedback.map(|feedback| feedback.clamp(minimum, maximum))
+                }
+                "dsp:echo/delay.mix" => default_mix.map(|mix| mix.clamp(minimum, maximum)),
                 value if value.ends_with("/filter.cutoff_hz") => {
                     default_cutoff_hz.map(|cutoff| cutoff.clamp(minimum, maximum))
                 }
@@ -3456,9 +3521,8 @@ fn song_audio_debug_line(
 }
 
 struct SongSceneBank {
-    patches: BTreeMap<(SceneId, usize), meldritch_render::song_render::CompiledDelayedNotePatch>,
-    lane_patches:
-        BTreeMap<(String, String), meldritch_render::song_render::CompiledDelayedNotePatch>,
+    patches: BTreeMap<(SceneId, usize), CompiledSongPatch>,
+    lane_patches: BTreeMap<(String, String), CompiledSongPatch>,
     phrase_variations: Option<Vec<(SceneId, Vec<Pattern>)>>,
 }
 
@@ -3471,13 +3535,15 @@ fn song_scene_bank(
     song: &meldritch_dsl::ValidatedSong,
     tempo: Tempo,
 ) -> Result<SongSceneBank, String> {
-    let [track] = song.performance().tracks() else {
+    if song.performance().tracks().is_empty() {
         return Ok(SongSceneBank {
             patches: BTreeMap::new(),
             lane_patches: BTreeMap::new(),
             phrase_variations: None,
         });
     };
+    let single_track = song.performance().tracks().len() == 1;
+    let track = &song.performance().tracks()[0];
     let pattern_ids = track.pattern_ids();
     if pattern_ids.is_empty() {
         return Ok(SongSceneBank {
@@ -3509,19 +3575,45 @@ fn song_scene_bank(
             {
                 continue;
             }
-            let patch = meldritch_render::song_render::compile_delayed_note_song_for_pattern(
-                song,
-                variation_id,
-            )
-            .map_err(|error| {
-                format!(
-                    "failed to compile lane '{}' variation '{}': {error:?}",
-                    lane.id(),
-                    variation_id
+            let patch = if single_track {
+                CompiledSongPatch::Delayed(
+                    meldritch_render::song_render::compile_delayed_note_song_for_pattern(
+                        song,
+                        variation_id,
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "failed to compile lane '{}' variation '{}': {error:?}",
+                            lane.id(),
+                            variation_id
+                        )
+                    })?,
                 )
-            })?;
+            } else {
+                CompiledSongPatch::Mixed(
+                    meldritch_render::song_render::compile_mixed_note_song_with_lane_variation(
+                        song,
+                        lane.id(),
+                        variation_id,
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "failed to compile lane '{}' variation '{}': {error:?}",
+                            lane.id(),
+                            variation_id
+                        )
+                    })?,
+                )
+            };
             lane_patches.insert((lane.id().to_owned(), variation_id.clone()), patch);
         }
+    }
+    if !single_track {
+        return Ok(SongSceneBank {
+            patches,
+            lane_patches,
+            phrase_variations: None,
+        });
     }
     for (scene_index, scene_patterns) in pattern_ids.chunks(2).enumerate() {
         let scene = SceneId::new(scene_index as u64 + 1);
@@ -3538,7 +3630,7 @@ fn song_scene_bank(
                     pattern_id
                 )
             })?;
-            patches.insert((scene, variation), patch);
+            patches.insert((scene, variation), CompiledSongPatch::Delayed(patch));
             let note_pattern = song.note_patterns().get(pattern_id).ok_or_else(|| {
                 format!(
                     "track '{}' references missing note pattern '{}'",
@@ -7634,6 +7726,31 @@ mod tests {
                 .map(|step| step.note()),
             Some(51)
         );
+    }
+
+    #[test]
+    fn launch_control_ensemble_builds_lane_scene_bank_for_mixed_rendering() {
+        let song = meldritch_dsl::load_song_directory(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join("songs/examples/17-launch-control-xl-ensemble"),
+        )
+        .expect("LaunchControl XL ensemble example should load");
+
+        let bank = song_scene_bank(&song, tempo_from_song(&song).unwrap())
+            .expect("LaunchControl XL ensemble scene bank should build");
+        assert_eq!(bank.patches.len(), 0);
+        assert_eq!(bank.lane_patches.len(), 36);
+        assert!(
+            bank.lane_patches
+                .contains_key(&("rhythm-drum-a".to_owned(), "ensemble-b".to_owned()))
+        );
+        assert!(
+            bank.lane_patches
+                .values()
+                .all(|patch| matches!(patch, CompiledSongPatch::Mixed(_)))
+        );
+        assert!(bank.phrase_variations.is_none());
     }
 
     #[test]

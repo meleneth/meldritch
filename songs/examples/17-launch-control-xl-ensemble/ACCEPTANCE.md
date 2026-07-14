@@ -58,7 +58,7 @@ Initial example scene page model:
 - The runtime must not special-case the beat drum, the page names, or which
   lanes appear together; those are scene-authored declarations.
 
-Current implementation status: parse. This directory now contains a validating
+Current implementation status: placeholder mixed playback. This directory now contains a validating
 song skeleton with nine declared tracks/lanes, two scene-authored pages, four
 placeholder note variations per lane, lane-authored launch quantization,
 default mute/solo state, per-lane control IDs, nested pattern banks,
@@ -71,16 +71,17 @@ select lane variations, select lane pattern banks, toggle lane mute, and toggle
 lane solo in that performance-page state, and the results are classified for
 session capture. `.mlperformance` actions can bind LaunchControl MIDI buttons
 and CCs to those lane commands without hard-coded controller policy. Lane
-variation and pattern-bank selection now rerender the currently supported
-single-song-pattern audio path through the song rerender worker. The existing
+variation and pattern-bank selection now rerender the current song audio
+through the song rerender worker. Single-track songs keep the legacy
+delayed-note patch path with live override support; this multi-track ensemble
+uses a compiled mixed-note patch, and lane variation selection changes one
+track's selected placeholder pattern inside that mixed audio. The existing
 LaunchControl XL playground proves script-authored LaunchControl input, typed
 actions, live rerendered parameters, authored groove variations, default
 performance mode, and continuous audio publication for a single-synth
 playground. This ensemble skeleton intentionally uses a placeholder synth and
 shared note patterns until this example gains real multi-lane songs, audio
-sample decoding/rendering, per-pattern sample triggering, true multi-track
-pattern-bank selection, audio-affecting mute/solo behavior, polyphonic pad
-rendering, momentary modifier layers, and replayable modifier gestures. The
-render crate can compile and mix the current placeholder note tracks into one
-deterministic multi-track audio block; `tui-song` still needs to use that mixed
-patch for live playback.
+sample decoding/rendering, per-pattern sample triggering, full pattern-bank
+runtime semantics, audio-affecting mute/solo behavior, live parameter routing
+into mixed multi-track patches, polyphonic pad rendering, momentary modifier
+layers, and replayable modifier gestures.

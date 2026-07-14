@@ -3,7 +3,7 @@ use meldritch_dsl::load_song_directory;
 use meldritch_render::song_render::{
     compile_automated_delayed_note_song, compile_delayed_note_song,
     compile_delayed_note_song_for_pattern, compile_drone_song, compile_filtered_note_song,
-    compile_mixed_note_song, compile_note_song,
+    compile_mixed_note_song, compile_mixed_note_song_with_lane_variation, compile_note_song,
 };
 use std::path::{Path, PathBuf};
 
@@ -324,6 +324,21 @@ fn launch_control_ensemble_mix_is_sample_identical_across_chunks() {
         .collect::<Vec<_>>();
 
     assert_eq!(joined, whole.samples());
+}
+
+#[test]
+fn launch_control_ensemble_lane_variation_changes_one_track_in_the_mix() {
+    let song = load_song_directory(example("17-launch-control-xl-ensemble"))
+        .expect("LaunchControl XL ensemble song should load");
+    let initial = compile_mixed_note_song(&song).expect("ensemble mix should compile");
+    let varied = compile_mixed_note_song_with_lane_variation(&song, "rhythm-drum-a", "ensemble-b")
+        .expect("ensemble lane variation should compile");
+    let initial_block = initial.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+    let varied_block = varied.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+
+    assert_eq!(varied.track_count(), 9);
+    assert_ne!(initial_block.samples(), varied_block.samples());
+    assert!(varied_block.peak_abs() > 0.01);
 }
 
 #[test]

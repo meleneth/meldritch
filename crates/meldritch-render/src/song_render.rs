@@ -460,6 +460,7 @@ impl CompiledDronePatch {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SongRenderError {
     TrackCount { found: usize },
+    MissingLane { id: String },
     MissingSynth { id: String },
     UnsupportedModule { id: String, kind: ModuleKind },
     MissingOutput,
@@ -493,6 +494,9 @@ impl fmt::Display for SongRenderError {
                 formatter,
                 "initial drone compiler requires exactly one track, found {found}"
             ),
+            Self::MissingLane { id } => {
+                write!(formatter, "performance references missing lane '{id}'")
+            }
             Self::MissingSynth { id } => write!(formatter, "track references missing synth '{id}'"),
             Self::UnsupportedModule { id, kind } => {
                 write!(
@@ -708,16 +712,59 @@ fn compile_note_track_for_pattern(
 pub fn compile_mixed_note_song(
     song: &ValidatedSong,
 ) -> Result<CompiledMixedNoteSong, SongRenderError> {
+    compile_mixed_note_song_with_track_patterns(song, |track| {
+        track.initial_pattern().map(ToOwned::to_owned)
+    })
+}
+
+pub fn compile_mixed_note_song_with_lane_variation(
+    song: &ValidatedSong,
+    lane_id: &str,
+    variation_id: &str,
+) -> Result<CompiledMixedNoteSong, SongRenderError> {
+    let lane = song
+        .performance()
+        .lanes()
+        .iter()
+        .find(|lane| lane.id() == lane_id)
+        .ok_or_else(|| SongRenderError::MissingLane {
+            id: lane_id.to_owned(),
+        })?;
+    if !lane
+        .variation_ids()
+        .iter()
+        .any(|available| available == variation_id)
+    {
+        return Err(SongRenderError::MissingPattern {
+            id: variation_id.to_owned(),
+        });
+    }
+    let track_id = lane
+        .track_id()
+        .ok_or_else(|| SongRenderError::MissingLane {
+            id: lane_id.to_owned(),
+        })?;
+    compile_mixed_note_song_with_track_patterns(song, |track| {
+        if track.id() == track_id {
+            Some(variation_id.to_owned())
+        } else {
+            track.initial_pattern().map(ToOwned::to_owned)
+        }
+    })
+}
+
+fn compile_mixed_note_song_with_track_patterns(
+    song: &ValidatedSong,
+    pattern_for_track: impl Fn(&TrackDefinition) -> Option<String>,
+) -> Result<CompiledMixedNoteSong, SongRenderError> {
     let mut tracks = Vec::with_capacity(song.performance().tracks().len());
     let mut channels = None;
     for track in song.performance().tracks() {
         let pattern_id =
-            track
-                .initial_pattern()
-                .ok_or_else(|| SongRenderError::MissingPattern {
-                    id: format!("initial pattern for track '{}'", track.id()),
-                })?;
-        let patch = compile_note_track_for_pattern(song, track, pattern_id)?;
+            pattern_for_track(track).ok_or_else(|| SongRenderError::MissingPattern {
+                id: format!("initial pattern for track '{}'", track.id()),
+            })?;
+        let patch = compile_note_track_for_pattern(song, track, &pattern_id)?;
         if let Some(channels) = channels {
             if patch.channels != channels {
                 return Err(SongRenderError::IncompatibleTrackRender);
