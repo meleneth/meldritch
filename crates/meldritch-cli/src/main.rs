@@ -3151,6 +3151,7 @@ fn tui_song(
     let input_live_overrides = Arc::clone(&live_overrides);
     let input_active_patch = Arc::clone(&active_patch);
     let scene_patches = scene_bank.patches;
+    let lane_patches = scene_bank.lane_patches;
     let published_generation = Arc::new(Mutex::new(0_u64));
     let tick_published_generation = Arc::clone(&published_generation);
     let tick_submitted_generation = Arc::clone(&submitted_generation);
@@ -3218,6 +3219,25 @@ fn tui_song(
             }
             if let Some((scene, variation)) = song_scene_selection(input, result)
                 && let Some(patch) = scene_patches.get(&(scene, variation)).cloned()
+            {
+                *input_active_patch
+                    .lock()
+                    .expect("song active patch lock poisoned") = patch.clone();
+                let overrides = *input_live_overrides
+                    .lock()
+                    .expect("song live override lock poisoned");
+                let mut generation = input_generation
+                    .lock()
+                    .expect("song render generation lock poisoned");
+                *generation = generation.saturating_add(1);
+                input_worker
+                    .lock()
+                    .expect("song render worker lock poisoned")
+                    .submit(*generation, patch, overrides);
+                return;
+            }
+            if let Some((lane, variation)) = song_lane_selection(result)
+                && let Some(patch) = lane_patches.get(&(lane, variation)).cloned()
             {
                 *input_active_patch
                     .lock()
@@ -3437,6 +3457,8 @@ fn song_audio_debug_line(
 
 struct SongSceneBank {
     patches: BTreeMap<(SceneId, usize), meldritch_render::song_render::CompiledDelayedNotePatch>,
+    lane_patches:
+        BTreeMap<(String, String), meldritch_render::song_render::CompiledDelayedNotePatch>,
     phrase_variations: Option<Vec<(SceneId, Vec<Pattern>)>>,
 }
 
@@ -3452,6 +3474,7 @@ fn song_scene_bank(
     let [track] = song.performance().tracks() else {
         return Ok(SongSceneBank {
             patches: BTreeMap::new(),
+            lane_patches: BTreeMap::new(),
             phrase_variations: None,
         });
     };
@@ -3459,11 +3482,47 @@ fn song_scene_bank(
     if pattern_ids.is_empty() {
         return Ok(SongSceneBank {
             patches: BTreeMap::new(),
+            lane_patches: BTreeMap::new(),
             phrase_variations: None,
         });
     }
     let mut patches = BTreeMap::new();
+    let mut lane_patches = BTreeMap::new();
     let mut phrase_variations = Vec::new();
+    for lane in song.performance().lanes() {
+        let Some(track_id) = lane.track_id() else {
+            continue;
+        };
+        let Some(track) = song
+            .performance()
+            .tracks()
+            .iter()
+            .find(|track| track.id() == track_id)
+        else {
+            continue;
+        };
+        for variation_id in lane.variation_ids() {
+            if !track
+                .pattern_ids()
+                .iter()
+                .any(|pattern| pattern == variation_id)
+            {
+                continue;
+            }
+            let patch = meldritch_render::song_render::compile_delayed_note_song_for_pattern(
+                song,
+                variation_id,
+            )
+            .map_err(|error| {
+                format!(
+                    "failed to compile lane '{}' variation '{}': {error:?}",
+                    lane.id(),
+                    variation_id
+                )
+            })?;
+            lane_patches.insert((lane.id().to_owned(), variation_id.clone()), patch);
+        }
+    }
     for (scene_index, scene_patterns) in pattern_ids.chunks(2).enumerate() {
         let scene = SceneId::new(scene_index as u64 + 1);
         let mut variations = Vec::new();
@@ -3497,6 +3556,7 @@ fn song_scene_bank(
     }
     Ok(SongSceneBank {
         patches,
+        lane_patches,
         phrase_variations: Some(phrase_variations),
     })
 }
@@ -3579,6 +3639,20 @@ fn song_scene_selection(
         _ => 0,
     };
     Some((scene, variation))
+}
+
+fn song_lane_selection(result: &meldritch_app::AppCommandResult) -> Option<(String, String)> {
+    match result {
+        meldritch_app::AppCommandResult::LaneVariationSelected {
+            lane_id, current, ..
+        } => Some((lane_id.clone(), current.clone())),
+        meldritch_app::AppCommandResult::LanePatternBankSelected {
+            lane_id,
+            current_variation,
+            ..
+        } => Some((lane_id.clone(), current_variation.clone())),
+        _ => None,
+    }
 }
 
 fn parameter_target_label(target: &ParameterTargetDefinition) -> String {
@@ -7525,6 +7599,11 @@ mod tests {
         let bank = song_scene_bank(&song, tempo_from_song(&song).unwrap())
             .expect("LaunchControl XL playground scene bank should build");
         assert_eq!(bank.patches.len(), 8);
+        assert_eq!(bank.lane_patches.len(), 8);
+        assert!(
+            bank.lane_patches
+                .contains_key(&("playground".to_owned(), "playground-bounce-fill".to_owned()))
+        );
         for scene in 1..=4 {
             assert!(bank.patches.contains_key(&(SceneId::new(scene), 0)));
             assert!(bank.patches.contains_key(&(SceneId::new(scene), 1)));
@@ -7554,6 +7633,35 @@ mod tests {
                 .get_step(TrackId::new(1), StepIndex::new(2))
                 .map(|step| step.note()),
             Some(51)
+        );
+    }
+
+    #[test]
+    fn lane_selection_results_identify_song_rerender_targets() {
+        assert_eq!(
+            song_lane_selection(&meldritch_app::AppCommandResult::LaneVariationSelected {
+                lane_id: "rhythm-drum-a".to_owned(),
+                previous: Some("ensemble-a".to_owned()),
+                current: "ensemble-b".to_owned(),
+            }),
+            Some(("rhythm-drum-a".to_owned(), "ensemble-b".to_owned()))
+        );
+        assert_eq!(
+            song_lane_selection(&meldritch_app::AppCommandResult::LanePatternBankSelected {
+                lane_id: "rhythm-drum-a".to_owned(),
+                previous_bank: Some("groove".to_owned()),
+                current_bank: "fill".to_owned(),
+                previous_variation: Some("ensemble-b".to_owned()),
+                current_variation: "ensemble-c".to_owned(),
+            }),
+            Some(("rhythm-drum-a".to_owned(), "ensemble-c".to_owned()))
+        );
+        assert_eq!(
+            song_lane_selection(&meldritch_app::AppCommandResult::LaneMuteToggled {
+                lane_id: "rhythm-drum-a".to_owned(),
+                muted: true,
+            }),
+            None
         );
     }
 

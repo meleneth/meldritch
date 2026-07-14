@@ -182,13 +182,16 @@ select a lane variation, select a lane pattern bank, toggle lane mute, and
 toggle lane solo against that performance-page state; those results are
 classified for session capture. `.mlperformance` actions can now bind
 LaunchControl MIDI buttons/CCs to those lane commands without hard-coded
-controller policy. It also parses `.mlsamples` sample-bank metadata and
-attaches the three sample lanes to a Raven voice placeholder bank. Audio sample
-decoding, sample triggering, sample rendering, audio-affecting pattern-bank
-selection, and audio-affecting mute/solo behavior are not implemented yet. The
-skeleton intentionally uses a placeholder synth and shared note patterns until
-sample-track playback, poly-synth, and multi-track audio support land. Build
-this from examples first, then implement only the required
+controller policy. Lane variation and pattern-bank selection now rerender the
+currently supported single-song-pattern audio path through the song rerender
+worker. True multi-track lane playback is still not implemented. It also parses
+`.mlsamples` sample-bank metadata and attaches the three sample lanes to a Raven
+voice placeholder bank. Audio sample decoding, sample triggering, sample
+rendering, true multi-track pattern-bank selection, and audio-affecting
+mute/solo behavior are not implemented yet. The skeleton intentionally uses a
+placeholder synth and shared note patterns until sample-track playback,
+poly-synth, and multi-track audio support land. Build this from examples first,
+then implement only the required
 multi-track, sample-track playback, poly-synth, pattern-bank runtime, and
 modifier control support.
 Modifier/layer behavior such as “hold button + fader becomes octave pusher”

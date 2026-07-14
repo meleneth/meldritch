@@ -212,9 +212,11 @@ assigned, switched, and rendered deterministically from text definitions.
 - [ ] Implement a first modifier example: while a declared modifier button is
   held, one or more faders send octave/transpose commands instead of their
   normal continuous parameter target
-- [ ] Make authored lane pattern-bank and variation selections affect playback
-  so the same controller can switch at least four variations per lane without
-  requiring 32 dedicated buttons
+- [x] Make authored lane pattern-bank and variation selections rerender the
+  currently supported single-song-pattern audio path
+- [ ] Extend authored lane pattern-bank and variation selections to true
+  multi-track playback so the same controller can switch at least four
+  variations per lane without requiring 32 dedicated buttons
 - [ ] Add multi-track song compilation/playback for the subset needed by the
   ensemble example: drums/percussion first, then basses, then poly pad, then
   samples

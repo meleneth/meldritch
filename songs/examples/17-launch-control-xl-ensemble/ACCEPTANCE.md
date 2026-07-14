@@ -70,12 +70,14 @@ quantization, and pattern-bank names/counts. Generic typed app commands can
 select lane variations, select lane pattern banks, toggle lane mute, and toggle
 lane solo in that performance-page state, and the results are classified for
 session capture. `.mlperformance` actions can bind LaunchControl MIDI buttons
-and CCs to those lane commands without hard-coded controller policy. The
-existing LaunchControl XL playground proves script-authored LaunchControl
-input, typed actions, live rerendered parameters, authored groove variations,
-default performance mode, and continuous audio publication for a single-synth
+and CCs to those lane commands without hard-coded controller policy. Lane
+variation and pattern-bank selection now rerender the currently supported
+single-song-pattern audio path through the song rerender worker. The existing
+LaunchControl XL playground proves script-authored LaunchControl input, typed
+actions, live rerendered parameters, authored groove variations, default
+performance mode, and continuous audio publication for a single-synth
 playground. This ensemble skeleton intentionally uses a placeholder synth and
 shared note patterns until this example gains real multi-lane songs, audio
-sample decoding/rendering, per-pattern sample triggering, audio-affecting
+sample decoding/rendering, per-pattern sample triggering, true multi-track
 pattern-bank selection, audio-affecting mute/solo behavior, polyphonic pad
 rendering, momentary modifier layers, and replayable modifier gestures.
