@@ -217,9 +217,12 @@ assigned, switched, and rendered deterministically from text definitions.
 - [ ] Extend authored lane pattern-bank and variation selections to true
   multi-track playback so the same controller can switch at least four
   variations per lane without requiring 32 dedicated buttons
-- [ ] Add multi-track song compilation/playback for the subset needed by the
-  ensemble example: drums/percussion first, then basses, then poly pad, then
-  samples
+- [x] Add render-layer multi-track note compilation/mixing for the current
+  ensemble placeholder synth tracks
+- [ ] Wire multi-track song compilation into `tui-song` playback and lane
+  variation changes
+- [ ] Extend multi-track song playback for the subset needed by the ensemble
+  example: drums/percussion first, then basses, then poly pad, then samples
 - [ ] Add sample-track playback support for text-authored sample references,
   sample slots, one-shots/loops, start/end slices, level, pitch, and per-pattern
   triggering

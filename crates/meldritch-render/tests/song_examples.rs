@@ -3,7 +3,7 @@ use meldritch_dsl::load_song_directory;
 use meldritch_render::song_render::{
     compile_automated_delayed_note_song, compile_delayed_note_song,
     compile_delayed_note_song_for_pattern, compile_drone_song, compile_filtered_note_song,
-    compile_note_song,
+    compile_mixed_note_song, compile_note_song,
 };
 use std::path::{Path, PathBuf};
 
@@ -288,6 +288,42 @@ fn launch_control_playground_compiles_and_accepts_live_feedback_and_cutoff() {
         let block = patch.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
         assert!(block.peak_abs() > 0.01, "pattern {pattern} rendered silent");
     }
+}
+
+#[test]
+fn launch_control_ensemble_compiles_multiple_tracks_into_one_mix() {
+    let song = load_song_directory(example("17-launch-control-xl-ensemble"))
+        .expect("LaunchControl XL ensemble song should load");
+    let patch = compile_mixed_note_song(&song).expect("ensemble mix should compile");
+    let block = patch.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+
+    assert_eq!(patch.song_fingerprint(), song.fingerprint());
+    assert_eq!(patch.track_count(), 9);
+    assert_eq!(patch.sample_rate(), 48_000);
+    assert_eq!(patch.channels(), 1);
+    assert_eq!(block.frames(), 96_000);
+    assert!(block.peak_abs() > 0.01);
+    assert!(block.samples().iter().all(|sample| sample.is_finite()));
+}
+
+#[test]
+fn launch_control_ensemble_mix_is_sample_identical_across_chunks() {
+    let song = load_song_directory(example("17-launch-control-xl-ensemble"))
+        .expect("LaunchControl XL ensemble song should load");
+    let patch = compile_mixed_note_song(&song).expect("ensemble mix should compile");
+    let whole = patch.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+    let first = patch.render(FrameRange::new(0, 37_111).unwrap()).unwrap();
+    let second = patch
+        .render(FrameRange::new(37_111, 96_000).unwrap())
+        .unwrap();
+    let joined = first
+        .samples()
+        .iter()
+        .chain(second.samples())
+        .copied()
+        .collect::<Vec<_>>();
+
+    assert_eq!(joined, whole.samples());
 }
 
 #[test]

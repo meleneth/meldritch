@@ -80,4 +80,7 @@ playground. This ensemble skeleton intentionally uses a placeholder synth and
 shared note patterns until this example gains real multi-lane songs, audio
 sample decoding/rendering, per-pattern sample triggering, true multi-track
 pattern-bank selection, audio-affecting mute/solo behavior, polyphonic pad
-rendering, momentary modifier layers, and replayable modifier gestures.
+rendering, momentary modifier layers, and replayable modifier gestures. The
+render crate can compile and mix the current placeholder note tracks into one
+deterministic multi-track audio block; `tui-song` still needs to use that mixed
+patch for live playback.

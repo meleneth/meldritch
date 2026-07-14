@@ -188,10 +188,13 @@ worker. True multi-track lane playback is still not implemented. It also parses
 `.mlsamples` sample-bank metadata and attaches the three sample lanes to a Raven
 voice placeholder bank. Audio sample decoding, sample triggering, sample
 rendering, true multi-track pattern-bank selection, and audio-affecting
-mute/solo behavior are not implemented yet. The skeleton intentionally uses a
-placeholder synth and shared note patterns until sample-track playback,
-poly-synth, and multi-track audio support land. Build this from examples first,
-then implement only the required
+mute/solo behavior are not implemented yet. The render crate can compile and
+mix the ensemble's current placeholder note tracks into one deterministic
+multi-track audio block, but `tui-song` is not wired to use that mixed patch for
+live playback yet. The skeleton intentionally uses a placeholder synth and
+shared note patterns until sample-track playback, poly-synth, and full
+multi-track audio support land. Build this from examples first, then implement
+only the required
 multi-track, sample-track playback, poly-synth, pattern-bank runtime, and
 modifier control support.
 Modifier/layer behavior such as “hold button + fader becomes octave pusher”

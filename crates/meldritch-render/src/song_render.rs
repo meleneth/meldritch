@@ -5,7 +5,9 @@ use crate::dsp::{
 };
 use meldritch_audio::AudioBlock;
 use meldritch_core::FrameRange;
-use meldritch_dsl::{ModuleKind, ParameterInterpolation, ParameterOwner, ValidatedSong};
+use meldritch_dsl::{
+    ModuleKind, ParameterInterpolation, ParameterOwner, TrackDefinition, ValidatedSong,
+};
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -256,6 +258,58 @@ pub struct CompiledNotePatch {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct CompiledMixedNoteSong {
+    song_fingerprint: u64,
+    sample_rate: u32,
+    channels: u16,
+    tracks: Vec<CompiledNotePatch>,
+}
+
+impl CompiledMixedNoteSong {
+    #[must_use]
+    pub const fn song_fingerprint(&self) -> u64 {
+        self.song_fingerprint
+    }
+
+    #[must_use]
+    pub const fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    #[must_use]
+    pub const fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    #[must_use]
+    pub fn track_count(&self) -> usize {
+        self.tracks.len()
+    }
+
+    pub fn render(&self, range: FrameRange) -> Result<AudioBlock, SongRenderError> {
+        let frame_count = range.end() - range.start();
+        let frames = u32::try_from(frame_count).map_err(|_| SongRenderError::RangeTooLong {
+            frames: frame_count,
+        })?;
+        let mut mix = AudioBlock::silent(self.channels, frames);
+        if self.tracks.is_empty() {
+            return Ok(mix);
+        }
+        let gain = 1.0 / (self.tracks.len() as f64).sqrt();
+        for track in &self.tracks {
+            let block = track.render(range)?;
+            if block.channels() != self.channels || block.frames() != frames {
+                return Err(SongRenderError::IncompatibleTrackRender);
+            }
+            for (output, input) in mix.samples_mut().iter_mut().zip(block.samples()) {
+                *output += input * gain;
+            }
+        }
+        Ok(mix)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 struct CompiledNoteFilter {
     module_id: String,
     cutoff_hz: f64,
@@ -428,6 +482,7 @@ pub enum SongRenderError {
     InvalidCutoffOverride,
     InvalidResonanceOverride,
     InvalidMixOverride,
+    IncompatibleTrackRender,
     RangeTooLong { frames: u64 },
 }
 
@@ -517,6 +572,9 @@ impl fmt::Display for SongRenderError {
                     "live delay mix override must be finite and within 0.0..=1.0"
                 )
             }
+            Self::IncompatibleTrackRender => {
+                write!(formatter, "compiled track rendered incompatible audio")
+            }
             Self::RangeTooLong { frames } => write!(
                 formatter,
                 "render range of {frames} frames exceeds AudioBlock capacity"
@@ -546,6 +604,14 @@ pub fn compile_note_song_for_pattern(
             found: song.performance().tracks().len(),
         });
     };
+    compile_note_track_for_pattern(song, track, pattern_id)
+}
+
+fn compile_note_track_for_pattern(
+    song: &ValidatedSong,
+    track: &TrackDefinition,
+    pattern_id: &str,
+) -> Result<CompiledNotePatch, SongRenderError> {
     let synth =
         song.synths()
             .get(track.synth_id())
@@ -636,6 +702,36 @@ pub fn compile_note_song_for_pattern(
                 velocity: event.velocity(),
             })
             .collect(),
+    })
+}
+
+pub fn compile_mixed_note_song(
+    song: &ValidatedSong,
+) -> Result<CompiledMixedNoteSong, SongRenderError> {
+    let mut tracks = Vec::with_capacity(song.performance().tracks().len());
+    let mut channels = None;
+    for track in song.performance().tracks() {
+        let pattern_id =
+            track
+                .initial_pattern()
+                .ok_or_else(|| SongRenderError::MissingPattern {
+                    id: format!("initial pattern for track '{}'", track.id()),
+                })?;
+        let patch = compile_note_track_for_pattern(song, track, pattern_id)?;
+        if let Some(channels) = channels {
+            if patch.channels != channels {
+                return Err(SongRenderError::IncompatibleTrackRender);
+            }
+        } else {
+            channels = Some(patch.channels);
+        }
+        tracks.push(patch);
+    }
+    Ok(CompiledMixedNoteSong {
+        song_fingerprint: song.fingerprint(),
+        sample_rate: song.performance().sample_rate(),
+        channels: channels.unwrap_or(1),
+        tracks,
     })
 }
 
