@@ -440,4 +440,27 @@ fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
         })
         .count();
     assert_eq!(page_scoped_controls, 13);
+
+    let actions = song.performance().actions();
+    assert!(actions.iter().any(|action| {
+        matches!(
+            action.action(),
+            meldritch_dsl::PerformanceActionDefinition::SelectLanePatternBank { lane, bank }
+                if lane == "rhythm-drum-a" && bank == "fill"
+        )
+    }));
+    assert!(actions.iter().any(|action| {
+        matches!(
+            action.action(),
+            meldritch_dsl::PerformanceActionDefinition::SelectLaneVariation { lane, variation }
+                if lane == "rhythm-drum-a" && variation == "ensemble-b"
+        )
+    }));
+    assert!(actions.iter().any(|action| {
+        matches!(
+            action.action(),
+            meldritch_dsl::PerformanceActionDefinition::ToggleLaneMute { lane }
+                if lane == "rhythm-drum-a"
+        )
+    }));
 }

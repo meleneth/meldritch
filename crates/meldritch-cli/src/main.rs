@@ -2816,6 +2816,24 @@ fn app_input_for_performance_action(
         meldritch_dsl::PerformanceActionDefinition::SelectPage { page } => {
             meldritch_app::AppInput::SelectPerformancePage(page.clone())
         }
+        meldritch_dsl::PerformanceActionDefinition::SelectLaneVariation { lane, variation } => {
+            meldritch_app::AppInput::SelectLaneVariation {
+                lane_id: lane.clone(),
+                variation_id: variation.clone(),
+            }
+        }
+        meldritch_dsl::PerformanceActionDefinition::SelectLanePatternBank { lane, bank } => {
+            meldritch_app::AppInput::SelectLanePatternBank {
+                lane_id: lane.clone(),
+                bank_id: bank.clone(),
+            }
+        }
+        meldritch_dsl::PerformanceActionDefinition::ToggleLaneMute { lane } => {
+            meldritch_app::AppInput::ToggleLaneMute(lane.clone())
+        }
+        meldritch_dsl::PerformanceActionDefinition::ToggleLaneSolo { lane } => {
+            meldritch_app::AppInput::ToggleLaneSolo(lane.clone())
+        }
         meldritch_dsl::PerformanceActionDefinition::ToggleTrackMute => {
             meldritch_app::AppInput::ToggleTrackMute
         }
@@ -7396,6 +7414,54 @@ mod tests {
                 value: (4350.0 - 100.0) / (5000.0 - 100.0),
             })
         );
+    }
+
+    #[test]
+    fn ensemble_lane_actions_are_derived_from_song_scripts() {
+        let song = meldritch_dsl::load_song_directory(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join("songs/examples/17-launch-control-xl-ensemble"),
+        )
+        .expect("LaunchControl XL ensemble example should load");
+
+        let control_bindings = midi_control_bindings_for_song(&song);
+        let action_bindings = midi_action_bindings_for_song(&song);
+        let fill_bank = map_script_midi_note(&action_bindings, "launch-control-xl", 9, 106, true)
+            .expect("fill bank note should map");
+        assert_eq!(
+            fill_bank.input,
+            meldritch_app::AppInput::SelectLanePatternBank {
+                lane_id: "rhythm-drum-a".to_owned(),
+                bank_id: "fill".to_owned(),
+            }
+        );
+        let variation_b = map_script_midi_note(&action_bindings, "launch-control-xl", 9, 107, true)
+            .expect("variation note should map");
+        assert_eq!(
+            variation_b.input,
+            meldritch_app::AppInput::SelectLaneVariation {
+                lane_id: "rhythm-drum-a".to_owned(),
+                variation_id: "ensemble-b".to_owned(),
+            }
+        );
+        let mute = map_script_midi_control_change(
+            &control_bindings,
+            &action_bindings,
+            meldritch_app::MidiControlInput {
+                device: "launch-control-xl".to_owned(),
+                channel: 9,
+                cc: 104,
+                value: 127,
+            },
+            None,
+        )
+        .expect("lane mute CC should map");
+        assert_eq!(
+            mute.input,
+            meldritch_app::AppInput::ToggleLaneMute("rhythm-drum-a".to_owned())
+        );
+        assert_eq!(mute.label.as_deref(), Some("Rhythm Drum A Mute"));
     }
 
     #[test]

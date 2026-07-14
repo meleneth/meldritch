@@ -180,14 +180,15 @@ mode renders visible strips with lane status, active variation, launch
 quantization, and pattern-bank names/counts. Generic typed app commands can now
 select a lane variation, select a lane pattern bank, toggle lane mute, and
 toggle lane solo against that performance-page state; those results are
-classified for session capture. Script-declared actions/MIDI bindings for those
-lane commands are not implemented yet. It also parses `.mlsamples` sample-bank
-metadata and attaches the three sample lanes to a Raven voice placeholder bank.
-Audio sample decoding, sample triggering, sample rendering, audio-affecting
-pattern-bank selection, and audio-affecting mute/solo behavior are not
-implemented yet. The skeleton intentionally uses a placeholder synth and shared
-note patterns until sample-track playback, poly-synth, and multi-track audio
-support land. Build this from examples first, then implement only the required
+classified for session capture. `.mlperformance` actions can now bind
+LaunchControl MIDI buttons/CCs to those lane commands without hard-coded
+controller policy. It also parses `.mlsamples` sample-bank metadata and
+attaches the three sample lanes to a Raven voice placeholder bank. Audio sample
+decoding, sample triggering, sample rendering, audio-affecting pattern-bank
+selection, and audio-affecting mute/solo behavior are not implemented yet. The
+skeleton intentionally uses a placeholder synth and shared note patterns until
+sample-track playback, poly-synth, and multi-track audio support land. Build
+this from examples first, then implement only the required
 multi-track, sample-track playback, poly-synth, pattern-bank runtime, and
 modifier control support.
 Modifier/layer behavior such as “hold button + fader becomes octave pusher”

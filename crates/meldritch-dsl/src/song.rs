@@ -793,6 +793,10 @@ pub enum PerformanceActionDefinition {
     QueuePhrase { scene: u64 },
     QueuePhraseVariation { scene: u64, variation: usize },
     SelectPage { page: String },
+    SelectLaneVariation { lane: String, variation: String },
+    SelectLanePatternBank { lane: String, bank: String },
+    ToggleLaneMute { lane: String },
+    ToggleLaneSolo { lane: String },
     ToggleTrackMute,
     TriggerFill,
     CancelPerformance,
@@ -1162,7 +1166,13 @@ struct RawActionControl {
     #[serde(default)]
     variation: Option<usize>,
     #[serde(default)]
+    variation_id: Option<String>,
+    #[serde(default)]
     page: Option<String>,
+    #[serde(default)]
+    lane: Option<String>,
+    #[serde(default)]
+    bank: Option<String>,
     #[serde(default)]
     bindings: Vec<RawActionBinding>,
 }
@@ -1178,6 +1188,10 @@ enum RawPerformanceAction {
     QueuePhrase,
     QueuePhraseVariation,
     SelectPage,
+    SelectLaneVariation,
+    SelectLanePatternBank,
+    ToggleLaneMute,
+    ToggleLaneSolo,
     ToggleTrackMute,
     TriggerFill,
     CancelPerformance,
@@ -2125,6 +2139,113 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                     ));
                 }
                 PerformanceActionDefinition::SelectPage { page }
+            }
+            RawPerformanceAction::SelectLaneVariation => {
+                let lane = raw.lane.ok_or_else(|| {
+                    SongLoadError::one(
+                        &entry,
+                        format!("action '{}' select_lane_variation requires lane", raw.id),
+                    )
+                })?;
+                let variation = raw.variation_id.ok_or_else(|| {
+                    SongLoadError::one(
+                        &entry,
+                        format!(
+                            "action '{}' select_lane_variation requires variation_id",
+                            raw.id
+                        ),
+                    )
+                })?;
+                let lane_definition = lanes
+                    .iter()
+                    .find(|candidate| candidate.id() == lane)
+                    .ok_or_else(|| {
+                        SongLoadError::one(
+                            &entry,
+                            format!("action '{}' references unknown lane '{}'", raw.id, lane),
+                        )
+                    })?;
+                if !lane_definition
+                    .variation_ids()
+                    .iter()
+                    .any(|candidate| candidate == &variation)
+                {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!(
+                            "action '{}' references unknown lane variation '{}:{}'",
+                            raw.id, lane, variation
+                        ),
+                    ));
+                }
+                PerformanceActionDefinition::SelectLaneVariation { lane, variation }
+            }
+            RawPerformanceAction::SelectLanePatternBank => {
+                let lane = raw.lane.ok_or_else(|| {
+                    SongLoadError::one(
+                        &entry,
+                        format!("action '{}' select_lane_pattern_bank requires lane", raw.id),
+                    )
+                })?;
+                let bank = raw.bank.ok_or_else(|| {
+                    SongLoadError::one(
+                        &entry,
+                        format!("action '{}' select_lane_pattern_bank requires bank", raw.id),
+                    )
+                })?;
+                let lane_definition = lanes
+                    .iter()
+                    .find(|candidate| candidate.id() == lane)
+                    .ok_or_else(|| {
+                        SongLoadError::one(
+                            &entry,
+                            format!("action '{}' references unknown lane '{}'", raw.id, lane),
+                        )
+                    })?;
+                if !lane_definition
+                    .pattern_banks()
+                    .iter()
+                    .any(|candidate| candidate.id() == bank)
+                {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!(
+                            "action '{}' references unknown lane pattern bank '{}:{}'",
+                            raw.id, lane, bank
+                        ),
+                    ));
+                }
+                PerformanceActionDefinition::SelectLanePatternBank { lane, bank }
+            }
+            RawPerformanceAction::ToggleLaneMute => {
+                let lane = raw.lane.ok_or_else(|| {
+                    SongLoadError::one(
+                        &entry,
+                        format!("action '{}' toggle_lane_mute requires lane", raw.id),
+                    )
+                })?;
+                if !lane_ids.contains(&lane) {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!("action '{}' references unknown lane '{}'", raw.id, lane),
+                    ));
+                }
+                PerformanceActionDefinition::ToggleLaneMute { lane }
+            }
+            RawPerformanceAction::ToggleLaneSolo => {
+                let lane = raw.lane.ok_or_else(|| {
+                    SongLoadError::one(
+                        &entry,
+                        format!("action '{}' toggle_lane_solo requires lane", raw.id),
+                    )
+                })?;
+                if !lane_ids.contains(&lane) {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!("action '{}' references unknown lane '{}'", raw.id, lane),
+                    ));
+                }
+                PerformanceActionDefinition::ToggleLaneSolo { lane }
             }
             RawPerformanceAction::ToggleTrackMute => PerformanceActionDefinition::ToggleTrackMute,
             RawPerformanceAction::TriggerFill => PerformanceActionDefinition::TriggerFill,
@@ -3470,6 +3591,24 @@ fn fingerprint_song(
             PerformanceActionDefinition::SelectPage { page } => {
                 fingerprint.string("select_page");
                 fingerprint.string(page);
+            }
+            PerformanceActionDefinition::SelectLaneVariation { lane, variation } => {
+                fingerprint.string("select_lane_variation");
+                fingerprint.string(lane);
+                fingerprint.string(variation);
+            }
+            PerformanceActionDefinition::SelectLanePatternBank { lane, bank } => {
+                fingerprint.string("select_lane_pattern_bank");
+                fingerprint.string(lane);
+                fingerprint.string(bank);
+            }
+            PerformanceActionDefinition::ToggleLaneMute { lane } => {
+                fingerprint.string("toggle_lane_mute");
+                fingerprint.string(lane);
+            }
+            PerformanceActionDefinition::ToggleLaneSolo { lane } => {
+                fingerprint.string("toggle_lane_solo");
+                fingerprint.string(lane);
             }
             PerformanceActionDefinition::ToggleTrackMute => fingerprint.string("toggle_track_mute"),
             PerformanceActionDefinition::TriggerFill => fingerprint.string("trigger_fill"),

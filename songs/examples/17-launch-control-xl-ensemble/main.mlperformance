@@ -542,3 +542,61 @@ type = "midi_cc"
 device = "launch-control-xl"
 channel = 9
 cc = 106
+
+[[actions]]
+id = "rhythm-drum-a-groove-bank"
+label = "Rhythm Drum A Groove Bank"
+action = "select_lane_pattern_bank"
+lane = "rhythm-drum-a"
+bank = "groove"
+[[actions.bindings]]
+type = "midi_note"
+device = "launch-control-xl"
+channel = 9
+note = 105
+
+[[actions]]
+id = "rhythm-drum-a-fill-bank"
+label = "Rhythm Drum A Fill Bank"
+action = "select_lane_pattern_bank"
+lane = "rhythm-drum-a"
+bank = "fill"
+[[actions.bindings]]
+type = "midi_note"
+device = "launch-control-xl"
+channel = 9
+note = 106
+
+[[actions]]
+id = "rhythm-drum-a-variation-b"
+label = "Rhythm Drum A Variation B"
+action = "select_lane_variation"
+lane = "rhythm-drum-a"
+variation_id = "ensemble-b"
+[[actions.bindings]]
+type = "midi_note"
+device = "launch-control-xl"
+channel = 9
+note = 107
+
+[[actions]]
+id = "rhythm-drum-a-mute"
+label = "Rhythm Drum A Mute"
+action = "toggle_lane_mute"
+lane = "rhythm-drum-a"
+[[actions.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 9
+cc = 104
+
+[[actions]]
+id = "rhythm-drum-a-solo"
+label = "Rhythm Drum A Solo"
+action = "toggle_lane_solo"
+lane = "rhythm-drum-a"
+[[actions.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 9
+cc = 105

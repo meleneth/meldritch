@@ -205,14 +205,14 @@ assigned, switched, and rendered deterministically from text definitions.
   and pattern banks into app/TUI performance-page view state
 - [x] Add typed runtime commands for lane variation selection, lane pattern-bank
   selection, lane mute, and lane solo against generic performance-page state
-- [ ] Add script-declared actions that bind LaunchControl buttons to the typed
+- [x] Add script-declared actions that bind LaunchControl buttons to the typed
   lane variation/bank/mute/solo commands without hard-coded controller policy
 - [ ] Extend `.mlperformance` controls to support momentary modifiers/layers
   such as “hold button + move fader” without hard-coded Rust policy
 - [ ] Implement a first modifier example: while a declared modifier button is
   held, one or more faders send octave/transpose commands instead of their
   normal continuous parameter target
-- [ ] Connect runtime pattern-bank selection to authored buttons for each lane
+- [ ] Make authored lane pattern-bank and variation selections affect playback
   so the same controller can switch at least four variations per lane without
   requiring 32 dedicated buttons
 - [ ] Add multi-track song compilation/playback for the subset needed by the
