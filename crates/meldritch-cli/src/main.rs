@@ -2232,6 +2232,30 @@ fn session_result_fields(
             None,
             Some(format!("{result:?}")),
         ),
+        meldritch_app::AppCommandResult::LaneVariationSelected { lane_id, .. } => (
+            "lane_variation".to_owned(),
+            Some(lane_id.clone()),
+            None,
+            Some(format!("{result:?}")),
+        ),
+        meldritch_app::AppCommandResult::LanePatternBankSelected { lane_id, .. } => (
+            "lane_pattern_bank".to_owned(),
+            Some(lane_id.clone()),
+            None,
+            Some(format!("{result:?}")),
+        ),
+        meldritch_app::AppCommandResult::LaneMuteToggled { lane_id, muted } => (
+            "lane_mute".to_owned(),
+            Some(lane_id.clone()),
+            None,
+            Some(muted.to_string()),
+        ),
+        meldritch_app::AppCommandResult::LaneSoloToggled { lane_id, soloed } => (
+            "lane_solo".to_owned(),
+            Some(lane_id.clone()),
+            None,
+            Some(soloed.to_string()),
+        ),
         meldritch_app::AppCommandResult::PerformanceCancelled(_) => (
             "performance_cancel".to_owned(),
             Some(format!("{input:?}")),
@@ -3321,6 +3345,10 @@ fn song_performance_pages_for_view(
                         launch_quantization: lane.launch_quantization().map(str::to_owned),
                         muted: lane.default_muted(),
                         soloed: lane.default_soloed(),
+                        active_pattern_bank_id: lane
+                            .pattern_banks()
+                            .first()
+                            .map(|bank| bank.id().to_owned()),
                         active_variation_id: lane.variation_ids().first().cloned(),
                         variation_ids: lane.variation_ids().to_vec(),
                         pattern_banks: lane

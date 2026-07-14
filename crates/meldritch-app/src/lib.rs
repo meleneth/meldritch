@@ -69,12 +69,28 @@ pub enum AppCommand {
     QueueScene(SceneId),
     QueueSceneVariation(SceneId, usize),
     SelectPerformancePage(String),
+    SelectLaneVariation {
+        lane_id: String,
+        variation_id: String,
+    },
+    SelectLanePatternBank {
+        lane_id: String,
+        bank_id: String,
+    },
+    ToggleLaneMute(String),
+    ToggleLaneSolo(String),
     ToggleTrackMute(TrackId),
     TriggerFill(PatternId),
     CancelPerformance,
     SetCockpitMode(CockpitMode),
-    AdjustCuratedControl { id: String, steps: i32 },
-    SetCuratedControlNormalized { id: String, value: f64 },
+    AdjustCuratedControl {
+        id: String,
+        steps: i32,
+    },
+    SetCuratedControlNormalized {
+        id: String,
+        value: f64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -109,6 +125,26 @@ pub enum AppCommandResult {
         previous: Option<usize>,
         current: usize,
     },
+    LaneVariationSelected {
+        lane_id: String,
+        previous: Option<String>,
+        current: String,
+    },
+    LanePatternBankSelected {
+        lane_id: String,
+        previous_bank: Option<String>,
+        current_bank: String,
+        previous_variation: Option<String>,
+        current_variation: String,
+    },
+    LaneMuteToggled {
+        lane_id: String,
+        muted: bool,
+    },
+    LaneSoloToggled {
+        lane_id: String,
+        soloed: bool,
+    },
     PerformanceCancelled(Option<QueuedPerformanceGesture>),
     CockpitModeChanged {
         previous: CockpitMode,
@@ -134,6 +170,19 @@ pub enum AppCommandError {
     Publication(meldritch_render::ChunkPublicationError),
     NoPerformanceScenes,
     UnknownPerformancePage(String),
+    UnknownPerformanceLane(String),
+    UnknownLaneVariation {
+        lane_id: String,
+        variation_id: String,
+    },
+    UnknownLanePatternBank {
+        lane_id: String,
+        bank_id: String,
+    },
+    EmptyLanePatternBank {
+        lane_id: String,
+        bank_id: String,
+    },
     NoFillPattern,
     UnknownCuratedControl(String),
 }
@@ -252,6 +301,7 @@ pub struct PerformanceStripView {
     pub launch_quantization: Option<String>,
     pub muted: bool,
     pub soloed: bool,
+    pub active_pattern_bank_id: Option<String>,
     pub active_variation_id: Option<String>,
     pub variation_ids: Vec<String>,
     pub pattern_banks: Vec<PerformancePatternBankView>,
@@ -334,8 +384,14 @@ pub struct AppViewModel {
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppInput {
     ToggleCockpitMode,
-    AdjustCuratedControl { id: String, steps: i32 },
-    SetCuratedControlNormalized { id: String, value: f64 },
+    AdjustCuratedControl {
+        id: String,
+        steps: i32,
+    },
+    SetCuratedControlNormalized {
+        id: String,
+        value: f64,
+    },
     MoveLeft,
     MoveRight,
     MoveUp,
@@ -397,6 +453,16 @@ pub enum AppInput {
     QueuePhrase(SceneId),
     QueuePhraseVariation(SceneId, usize),
     SelectPerformancePage(String),
+    SelectLaneVariation {
+        lane_id: String,
+        variation_id: String,
+    },
+    SelectLanePatternBank {
+        lane_id: String,
+        bank_id: String,
+    },
+    ToggleLaneMute(String),
+    ToggleLaneSolo(String),
     ToggleTrackMute,
     TriggerFill,
     CancelPerformance,
@@ -780,6 +846,125 @@ impl AppController {
         })
     }
 
+    pub fn select_lane_variation(
+        &mut self,
+        lane_id: &str,
+        variation_id: &str,
+    ) -> Result<AppCommandResult, AppCommandError> {
+        let matching = self.performance_strip_indices(lane_id)?;
+        let first = matching[0];
+        if !self.performance_pages[first.0].strips[first.1]
+            .variation_ids
+            .iter()
+            .any(|candidate| candidate == variation_id)
+        {
+            return Err(AppCommandError::UnknownLaneVariation {
+                lane_id: lane_id.to_owned(),
+                variation_id: variation_id.to_owned(),
+            });
+        }
+        let previous = self.performance_pages[first.0].strips[first.1]
+            .active_variation_id
+            .clone();
+        for (page, strip) in matching {
+            self.performance_pages[page].strips[strip].active_variation_id =
+                Some(variation_id.to_owned());
+        }
+        Ok(AppCommandResult::LaneVariationSelected {
+            lane_id: lane_id.to_owned(),
+            previous,
+            current: variation_id.to_owned(),
+        })
+    }
+
+    pub fn select_lane_pattern_bank(
+        &mut self,
+        lane_id: &str,
+        bank_id: &str,
+    ) -> Result<AppCommandResult, AppCommandError> {
+        let matching = self.performance_strip_indices(lane_id)?;
+        let first = matching[0];
+        let strip = &self.performance_pages[first.0].strips[first.1];
+        let bank = strip
+            .pattern_banks
+            .iter()
+            .find(|candidate| candidate.id == bank_id)
+            .ok_or_else(|| AppCommandError::UnknownLanePatternBank {
+                lane_id: lane_id.to_owned(),
+                bank_id: bank_id.to_owned(),
+            })?;
+        let variation = bank.variation_ids.first().cloned().ok_or_else(|| {
+            AppCommandError::EmptyLanePatternBank {
+                lane_id: lane_id.to_owned(),
+                bank_id: bank_id.to_owned(),
+            }
+        })?;
+        let previous_bank = strip.active_pattern_bank_id.clone();
+        let previous_variation = strip.active_variation_id.clone();
+        for (page, strip) in matching {
+            let strip = &mut self.performance_pages[page].strips[strip];
+            strip.active_pattern_bank_id = Some(bank_id.to_owned());
+            strip.active_variation_id = Some(variation.clone());
+        }
+        Ok(AppCommandResult::LanePatternBankSelected {
+            lane_id: lane_id.to_owned(),
+            previous_bank,
+            current_bank: bank_id.to_owned(),
+            previous_variation,
+            current_variation: variation,
+        })
+    }
+
+    pub fn toggle_lane_mute(&mut self, lane_id: &str) -> Result<AppCommandResult, AppCommandError> {
+        let matching = self.performance_strip_indices(lane_id)?;
+        let first = matching[0];
+        let muted = !self.performance_pages[first.0].strips[first.1].muted;
+        for (page, strip) in matching {
+            self.performance_pages[page].strips[strip].muted = muted;
+        }
+        Ok(AppCommandResult::LaneMuteToggled {
+            lane_id: lane_id.to_owned(),
+            muted,
+        })
+    }
+
+    pub fn toggle_lane_solo(&mut self, lane_id: &str) -> Result<AppCommandResult, AppCommandError> {
+        let matching = self.performance_strip_indices(lane_id)?;
+        let first = matching[0];
+        let soloed = !self.performance_pages[first.0].strips[first.1].soloed;
+        for (page, strip) in matching {
+            self.performance_pages[page].strips[strip].soloed = soloed;
+        }
+        Ok(AppCommandResult::LaneSoloToggled {
+            lane_id: lane_id.to_owned(),
+            soloed,
+        })
+    }
+
+    fn performance_strip_indices(
+        &self,
+        lane_id: &str,
+    ) -> Result<Vec<(usize, usize)>, AppCommandError> {
+        let indices = self
+            .performance_pages
+            .iter()
+            .enumerate()
+            .flat_map(|(page_index, page)| {
+                page.strips
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(strip_index, strip)| {
+                        (strip.lane_id == lane_id).then_some((page_index, strip_index))
+                    })
+            })
+            .collect::<Vec<_>>();
+        if indices.is_empty() {
+            Err(AppCommandError::UnknownPerformanceLane(lane_id.to_owned()))
+        } else {
+            Ok(indices)
+        }
+    }
+
     pub fn show_effect_sends(&mut self, rules: Vec<EffectSendRule>) {
         self.effect_rules = rules;
     }
@@ -1105,6 +1290,15 @@ impl AppController {
                     .map(AppCommandResult::PerformanceQueued);
             }
             AppCommand::SelectPerformancePage(page_id) => self.select_performance_page(page_id)?,
+            AppCommand::SelectLaneVariation {
+                lane_id,
+                variation_id,
+            } => self.select_lane_variation(lane_id, variation_id)?,
+            AppCommand::SelectLanePatternBank { lane_id, bank_id } => {
+                self.select_lane_pattern_bank(lane_id, bank_id)?
+            }
+            AppCommand::ToggleLaneMute(lane_id) => self.toggle_lane_mute(lane_id)?,
+            AppCommand::ToggleLaneSolo(lane_id) => self.toggle_lane_solo(lane_id)?,
             AppCommand::ToggleTrackMute(track) => {
                 let gesture = if self
                     .performance_launcher
@@ -1195,6 +1389,23 @@ impl AppController {
             AppCommandResult::PerformanceQueued(_) => (true, Vec::new()),
             AppCommandResult::PerformancePageSelected { previous, current } => {
                 (previous != &Some(*current), Vec::new())
+            }
+            AppCommandResult::LaneVariationSelected {
+                previous, current, ..
+            } => (previous.as_deref() != Some(current.as_str()), Vec::new()),
+            AppCommandResult::LanePatternBankSelected {
+                previous_bank,
+                current_bank,
+                previous_variation,
+                current_variation,
+                ..
+            } => (
+                previous_bank.as_deref() != Some(current_bank.as_str())
+                    || previous_variation.as_deref() != Some(current_variation.as_str()),
+                Vec::new(),
+            ),
+            AppCommandResult::LaneMuteToggled { .. } | AppCommandResult::LaneSoloToggled { .. } => {
+                (true, Vec::new())
             }
             AppCommandResult::PerformanceCancelled(queued) => (queued.is_some(), Vec::new()),
             AppCommandResult::CockpitModeChanged { previous, current } => {
@@ -1663,6 +1874,18 @@ impl AppController {
                 AppCommand::QueueSceneVariation(scene, variation)
             }
             AppInput::SelectPerformancePage(page_id) => AppCommand::SelectPerformancePage(page_id),
+            AppInput::SelectLaneVariation {
+                lane_id,
+                variation_id,
+            } => AppCommand::SelectLaneVariation {
+                lane_id,
+                variation_id,
+            },
+            AppInput::SelectLanePatternBank { lane_id, bank_id } => {
+                AppCommand::SelectLanePatternBank { lane_id, bank_id }
+            }
+            AppInput::ToggleLaneMute(lane_id) => AppCommand::ToggleLaneMute(lane_id),
+            AppInput::ToggleLaneSolo(lane_id) => AppCommand::ToggleLaneSolo(lane_id),
             AppInput::ToggleTrackMute => AppCommand::ToggleTrackMute(self.selection.track),
             AppInput::TriggerFill => {
                 AppCommand::TriggerFill(self.fill_pattern.ok_or(AppCommandError::NoFillPattern)?)
@@ -2164,6 +2387,7 @@ mod tests {
                     launch_quantization: Some("1 bar".to_owned()),
                     muted: false,
                     soloed: false,
+                    active_pattern_bank_id: Some("groove".to_owned()),
                     active_variation_id: Some("pad-a".to_owned()),
                     variation_ids: vec![
                         "pad-a".to_owned(),
@@ -2191,6 +2415,7 @@ mod tests {
                     launch_quantization: Some("1 bar".to_owned()),
                     muted: true,
                     soloed: false,
+                    active_pattern_bank_id: Some("drums".to_owned()),
                     active_variation_id: Some("kick-a".to_owned()),
                     variation_ids: vec!["kick-a".to_owned()],
                     pattern_banks: vec![PerformancePatternBankView {
@@ -2234,6 +2459,114 @@ mod tests {
         assert!(matches!(
             controller.handle_input(AppInput::SelectPerformancePage("missing".to_owned())),
             Err(AppCommandError::UnknownPerformancePage(page)) if page == "missing"
+        ));
+    }
+
+    #[test]
+    fn lane_commands_update_visible_performance_state() {
+        let (mut controller, _engine) = controller(8);
+        controller.set_performance_pages(vec![PerformancePageView {
+            id: "main".to_owned(),
+            label: "Main".to_owned(),
+            strips: vec![PerformanceStripView {
+                strip: 1,
+                lane_id: "pad".to_owned(),
+                lane_label: "Pad".to_owned(),
+                lane_role: "polyphonic_synth".to_owned(),
+                track_id: Some("pad-track".to_owned()),
+                launch_quantization: Some("1 bar".to_owned()),
+                muted: false,
+                soloed: false,
+                active_pattern_bank_id: Some("groove".to_owned()),
+                active_variation_id: Some("pad-a".to_owned()),
+                variation_ids: vec![
+                    "pad-a".to_owned(),
+                    "pad-b".to_owned(),
+                    "pad-c".to_owned(),
+                    "pad-d".to_owned(),
+                ],
+                pattern_banks: vec![
+                    PerformancePatternBankView {
+                        id: "groove".to_owned(),
+                        label: "Groove".to_owned(),
+                        variation_ids: vec!["pad-a".to_owned(), "pad-b".to_owned()],
+                    },
+                    PerformancePatternBankView {
+                        id: "fill".to_owned(),
+                        label: "Fills".to_owned(),
+                        variation_ids: vec!["pad-c".to_owned(), "pad-d".to_owned()],
+                    },
+                ],
+                control_ids: vec!["pad-cutoff".to_owned()],
+            }],
+        }]);
+
+        assert_eq!(
+            controller
+                .handle_input(AppInput::SelectLaneVariation {
+                    lane_id: "pad".to_owned(),
+                    variation_id: "pad-b".to_owned(),
+                })
+                .unwrap(),
+            AppCommandResult::LaneVariationSelected {
+                lane_id: "pad".to_owned(),
+                previous: Some("pad-a".to_owned()),
+                current: "pad-b".to_owned(),
+            }
+        );
+        assert_eq!(
+            controller.view_model().performance.pages[0].strips[0]
+                .active_variation_id
+                .as_deref(),
+            Some("pad-b")
+        );
+
+        assert_eq!(
+            controller
+                .handle_input(AppInput::SelectLanePatternBank {
+                    lane_id: "pad".to_owned(),
+                    bank_id: "fill".to_owned(),
+                })
+                .unwrap(),
+            AppCommandResult::LanePatternBankSelected {
+                lane_id: "pad".to_owned(),
+                previous_bank: Some("groove".to_owned()),
+                current_bank: "fill".to_owned(),
+                previous_variation: Some("pad-b".to_owned()),
+                current_variation: "pad-c".to_owned(),
+            }
+        );
+        let strip = &controller.view_model().performance.pages[0].strips[0];
+        assert_eq!(strip.active_pattern_bank_id.as_deref(), Some("fill"));
+        assert_eq!(strip.active_variation_id.as_deref(), Some("pad-c"));
+
+        assert_eq!(
+            controller
+                .handle_input(AppInput::ToggleLaneMute("pad".to_owned()))
+                .unwrap(),
+            AppCommandResult::LaneMuteToggled {
+                lane_id: "pad".to_owned(),
+                muted: true,
+            }
+        );
+        assert!(controller.view_model().performance.pages[0].strips[0].muted);
+        assert_eq!(
+            controller
+                .handle_input(AppInput::ToggleLaneSolo("pad".to_owned()))
+                .unwrap(),
+            AppCommandResult::LaneSoloToggled {
+                lane_id: "pad".to_owned(),
+                soloed: true,
+            }
+        );
+        assert!(controller.view_model().performance.pages[0].strips[0].soloed);
+        assert!(matches!(
+            controller.handle_input(AppInput::SelectLaneVariation {
+                lane_id: "pad".to_owned(),
+                variation_id: "missing".to_owned(),
+            }),
+            Err(AppCommandError::UnknownLaneVariation { lane_id, variation_id })
+                if lane_id == "pad" && variation_id == "missing"
         ));
     }
 

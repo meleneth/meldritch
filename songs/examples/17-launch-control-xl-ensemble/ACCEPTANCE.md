@@ -66,12 +66,15 @@ page-visible controls, page-scoped MIDI fader bindings, and a `.mlsamples`
 Raven voice sample-bank metadata file attached to the three sample lanes.
 `tui-song` now carries that lane metadata into app view state, and performance
 mode renders visible strips with lane status, active variation, launch
-quantization, and pattern-bank names/counts. The existing LaunchControl XL
-playground proves script-authored LaunchControl input, typed actions, live
-rerendered parameters, authored groove variations, default performance mode,
-and continuous audio publication for a single-synth playground. This ensemble
-skeleton intentionally uses a placeholder synth and shared note patterns until
-this example gains real multi-lane songs, audio sample decoding/rendering,
-per-pattern sample triggering, runtime pattern-bank selection, runtime
-mute/solo behavior, polyphonic pad rendering, momentary modifier layers, and
-replayable modifier gestures.
+quantization, and pattern-bank names/counts. Generic typed app commands can
+select lane variations, select lane pattern banks, toggle lane mute, and toggle
+lane solo in that performance-page state, and the results are classified for
+session capture. The existing LaunchControl XL playground proves
+script-authored LaunchControl input, typed actions, live rerendered parameters,
+authored groove variations, default performance mode, and continuous audio
+publication for a single-synth playground. This ensemble skeleton intentionally
+uses a placeholder synth and shared note patterns until this example gains real
+multi-lane songs, audio sample decoding/rendering, per-pattern sample
+triggering, script-bound lane actions, audio-affecting pattern-bank selection,
+audio-affecting mute/solo behavior, polyphonic pad rendering, momentary
+modifier layers, and replayable modifier gestures.

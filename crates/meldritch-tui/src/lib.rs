@@ -573,6 +573,10 @@ fn draw_performance_pages(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
             .active_variation_id
             .as_ref()
             .map_or_else(|| "—".to_owned(), String::clone);
+        let active_bank = strip
+            .active_pattern_bank_id
+            .as_ref()
+            .map_or_else(|| "—".to_owned(), String::clone);
         let status = match (strip.muted, strip.soloed) {
             (true, true) => "muted+solo",
             (true, false) => "muted",
@@ -593,7 +597,7 @@ fn draw_performance_pages(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
             )
         };
         Line::from(format!(
-            "F{:02}: {} ({}) · track {} · {status} · var {active_variation} · q {quantization} · {} variations · {banks}",
+            "F{:02}: {} ({}) · track {} · {status} · bank {active_bank} · var {active_variation} · q {quantization} · {} variations · {banks}",
             strip.strip,
             strip.lane_label,
             strip.lane_role,
@@ -1342,6 +1346,26 @@ fn command_result_text(result: &AppCommandResult) -> String {
         AppCommandResult::PerformancePageSelected { previous, current } => {
             format!("Performance page: {previous:?} → {current}")
         }
+        AppCommandResult::LaneVariationSelected {
+            lane_id,
+            previous,
+            current,
+        } => format!("Lane {lane_id} variation: {previous:?} → {current}"),
+        AppCommandResult::LanePatternBankSelected {
+            lane_id,
+            previous_bank,
+            current_bank,
+            previous_variation,
+            current_variation,
+        } => format!(
+            "Lane {lane_id} bank: {previous_bank:?} → {current_bank}; variation {previous_variation:?} → {current_variation}"
+        ),
+        AppCommandResult::LaneMuteToggled { lane_id, muted } => {
+            format!("Lane {lane_id} muted: {muted}")
+        }
+        AppCommandResult::LaneSoloToggled { lane_id, soloed } => {
+            format!("Lane {lane_id} soloed: {soloed}")
+        }
         AppCommandResult::PerformanceCancelled(Some(queued)) => {
             format!("Cancelled {:?}", queued.gesture)
         }
@@ -1751,6 +1775,7 @@ mod tests {
                     launch_quantization: Some("1 bar".to_owned()),
                     muted: false,
                     soloed: false,
+                    active_pattern_bank_id: Some("groove".to_owned()),
                     active_variation_id: Some("pad-a".to_owned()),
                     variation_ids: vec![
                         "pad-a".to_owned(),
@@ -1785,6 +1810,7 @@ mod tests {
                     launch_quantization: Some("1 bar".to_owned()),
                     muted: true,
                     soloed: false,
+                    active_pattern_bank_id: Some("drums".to_owned()),
                     active_variation_id: Some("kick-a".to_owned()),
                     variation_ids: vec!["kick-a".to_owned()],
                     pattern_banks: vec![meldritch_app::PerformancePatternBankView {
@@ -1826,6 +1852,7 @@ mod tests {
         assert!(content.contains("polyphonic_synth"));
         assert!(content.contains("4 variations"));
         assert!(content.contains("live"));
+        assert!(content.contains("bank groove"));
         assert!(content.contains("var pad-a"));
         assert!(content.contains("q 1 bar"));
         assert!(content.contains("banks Groove:2/Fills:2"));
