@@ -3014,6 +3014,7 @@ fn tui_song(
     );
     let live_control_targets = live_song_control_targets(&song);
     controller.set_curated_controls(controls);
+    controller.set_performance_pages(song_performance_pages_for_view(&song));
     if let Some(phrase_variations) = scene_bank.phrase_variations.clone() {
         controller
             .configure_phrase_variations(phrase_variations)
@@ -3242,6 +3243,40 @@ fn song_controls_for_view(
                 binding: control.binding().to_owned(),
                 value,
             }
+        })
+        .collect()
+}
+
+fn song_performance_pages_for_view(
+    song: &meldritch_dsl::ValidatedSong,
+) -> Vec<meldritch_app::PerformancePageView> {
+    let lanes = song
+        .performance()
+        .lanes()
+        .iter()
+        .map(|lane| (lane.id(), lane))
+        .collect::<BTreeMap<_, _>>();
+    song.performance()
+        .pages()
+        .iter()
+        .map(|page| meldritch_app::PerformancePageView {
+            id: page.id().to_owned(),
+            label: page.label().to_owned(),
+            strips: page
+                .strips()
+                .iter()
+                .filter_map(|strip| {
+                    let lane = lanes.get(strip.lane_id())?;
+                    Some(meldritch_app::PerformanceStripView {
+                        strip: strip.strip(),
+                        lane_id: lane.id().to_owned(),
+                        lane_label: lane.label().to_owned(),
+                        lane_role: lane.role().to_owned(),
+                        track_id: lane.track_id().map(str::to_owned),
+                        variation_ids: lane.variation_ids().to_vec(),
+                    })
+                })
+                .collect(),
         })
         .collect()
 }
@@ -7206,6 +7241,29 @@ mod tests {
             map_script_midi_note(&action_bindings, "launch-control-xl", 9, 108, false),
             None
         );
+    }
+
+    #[test]
+    fn performance_pages_are_derived_from_song_scripts() {
+        let song = meldritch_dsl::load_song_directory(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join("songs/examples/16-launch-control-xl-playground"),
+        )
+        .expect("LaunchControl XL playground example should load");
+
+        let pages = song_performance_pages_for_view(&song);
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].id, "main");
+        assert_eq!(pages[0].label, "Main");
+        assert_eq!(pages[0].strips.len(), 1);
+        let strip = &pages[0].strips[0];
+        assert_eq!(strip.strip, 1);
+        assert_eq!(strip.lane_id, "playground");
+        assert_eq!(strip.lane_label, "Playground Synth");
+        assert_eq!(strip.lane_role, "monophonic_synth");
+        assert_eq!(strip.track_id.as_deref(), Some("playground"));
+        assert_eq!(strip.variation_ids.len(), 8);
     }
 
     #[test]

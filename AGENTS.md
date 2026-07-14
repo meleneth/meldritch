@@ -162,13 +162,15 @@ bank/page switching. The example scene may put the beat drum on another page,
 but that layout is scene/performance-authored data; Rust must only implement
 generic bank/page mapping and keep the selected page reachable without stopping
 playback. Generic `.mlperformance` lane/page declarations are parsed and
-validated, but runtime use of them is not implemented yet. Build this from
-examples first, then implement only the required multi-track, sample-track,
-poly-synth, pattern-bank, and modifier control support. Modifier/layer behavior
-such as “hold button + fader becomes octave pusher” must be script-declared,
-typed, captured, and replayable; do not hard-code LaunchControl policy in Rust.
-LED feedback remains deferred until the ensemble control semantics are stable.
-Full all-parameters inspection remains open after that.
+validated, loaded into app view state, and rendered by the performance-mode TUI
+as generic pages/strips. Page switching actions and runtime use of the selected
+page are not implemented yet. Build this from examples first, then implement
+only the required multi-track, sample-track, poly-synth, pattern-bank, and
+modifier control support. Modifier/layer behavior such as “hold button + fader
+becomes octave pusher” must be script-declared, typed, captured, and replayable;
+do not hard-code LaunchControl policy in Rust. LED feedback remains deferred
+until the ensemble control semantics are stable. Full all-parameters inspection
+remains open after that.
 
 ## Important files
 

@@ -462,11 +462,16 @@ fn draw_curated_performance_mode(
     view: &AppViewModel,
     status: &StatusMessage,
 ) {
+    let groovebox_height = if view.performance.pages.is_empty() {
+        4
+    } else {
+        10
+    };
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
-            Constraint::Length(4),
+            Constraint::Length(groovebox_height),
             Constraint::Min(6),
             Constraint::Length(5),
             Constraint::Length(3),
@@ -494,6 +499,10 @@ fn draw_curated_performance_mode(
 }
 
 fn draw_groovebox_surface(frame: &mut ratatui::Frame<'_>, area: Rect, view: &AppViewModel) {
+    if !view.performance.pages.is_empty() {
+        draw_performance_pages(frame, area, view);
+        return;
+    }
     let active = view
         .performance
         .active_scene
@@ -513,6 +522,61 @@ fn draw_groovebox_surface(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
     frame.render_widget(
         panel(
             "Groovebox Scenes",
+            Paragraph::new(lines).wrap(Wrap { trim: false }),
+        ),
+        area,
+    );
+}
+
+fn draw_performance_pages(frame: &mut ratatui::Frame<'_>, area: Rect, view: &AppViewModel) {
+    let active_page_index = view.performance.active_page.unwrap_or(0);
+    let page = view
+        .performance
+        .pages
+        .get(active_page_index)
+        .or_else(|| view.performance.pages.first())
+        .expect("performance pages are not empty");
+    let page_tabs = view
+        .performance
+        .pages
+        .iter()
+        .enumerate()
+        .map(|(index, page)| {
+            if index == active_page_index {
+                format!("[{}]", page.label)
+            } else {
+                page.label.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let mut lines = vec![
+        Line::from(format!("Pages: {page_tabs}")),
+        Line::from(format!(
+            "Active page: {} · {} visible strips · Pattern {} · {} steps",
+            page.label,
+            page.strips.len(),
+            view.pattern_grid.pattern.raw(),
+            view.pattern_grid.length_steps
+        )),
+    ];
+    lines.extend(page.strips.iter().map(|strip| {
+        let track = strip
+            .track_id
+            .as_ref()
+            .map_or_else(|| "—".to_owned(), String::clone);
+        Line::from(format!(
+            "F{:02}: {} ({}) · track {} · {} variations",
+            strip.strip,
+            strip.lane_label,
+            strip.lane_role,
+            track,
+            strip.variation_ids.len()
+        ))
+    }));
+    frame.render_widget(
+        panel(
+            "Groovebox Pages",
             Paragraph::new(lines).wrap(Wrap { trim: false }),
         ),
         area,
@@ -1294,6 +1358,8 @@ mod tests {
                 fill_end_frame: None,
                 diagnostics: meldritch_render::futures::PerformanceLauncherDiagnostics::default(),
                 learned_phrase_cues: Vec::new(),
+                pages: Vec::new(),
+                active_page: None,
             },
             pattern_grid: PatternGridView {
                 pattern: PatternId::new(1),
@@ -1570,7 +1636,7 @@ mod tests {
                     value: Some(4350.0),
                 });
         }
-        let backend = TestBackend::new(140, 24);
+        let backend = TestBackend::new(140, 32);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| draw(frame, &view)).unwrap();
         let content = terminal
@@ -1597,6 +1663,63 @@ mod tests {
         assert!(content.contains("mix"));
         assert!(content.contains("cutoff"));
         assert!(content.contains("4350.000 filter.cutoff_hz"));
+    }
+
+    #[test]
+    fn performance_mode_renders_script_declared_pages_when_present() {
+        let mut view = view();
+        view.cockpit_mode = meldritch_app::CockpitMode::Performance;
+        view.performance.pages = vec![
+            meldritch_app::PerformancePageView {
+                id: "main".to_owned(),
+                label: "Main".to_owned(),
+                strips: vec![meldritch_app::PerformanceStripView {
+                    strip: 1,
+                    lane_id: "pad".to_owned(),
+                    lane_label: "Pad".to_owned(),
+                    lane_role: "polyphonic_synth".to_owned(),
+                    track_id: Some("pad-track".to_owned()),
+                    variation_ids: vec![
+                        "pad-a".to_owned(),
+                        "pad-b".to_owned(),
+                        "pad-c".to_owned(),
+                        "pad-d".to_owned(),
+                    ],
+                }],
+            },
+            meldritch_app::PerformancePageView {
+                id: "drums".to_owned(),
+                label: "Drums".to_owned(),
+                strips: vec![meldritch_app::PerformanceStripView {
+                    strip: 8,
+                    lane_id: "kick".to_owned(),
+                    lane_label: "Kick".to_owned(),
+                    lane_role: "drum".to_owned(),
+                    track_id: Some("kick-track".to_owned()),
+                    variation_ids: vec!["kick-a".to_owned()],
+                }],
+            },
+        ];
+        view.performance.active_page = Some(0);
+        let backend = TestBackend::new(140, 32);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, &view)).unwrap();
+        let content = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(content.contains("Groovebox Pages"));
+        assert!(content.contains("[Main]"));
+        assert!(content.contains("Drums"));
+        assert!(content.contains("F01"));
+        assert!(content.contains("Pad"));
+        assert!(content.contains("polyphonic_synth"));
+        assert!(content.contains("4 variations"));
+        assert!(!content.contains("B01-B04 scenes"));
     }
 
     #[test]

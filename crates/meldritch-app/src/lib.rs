@@ -219,12 +219,31 @@ pub struct PerformanceView {
     pub fill_end_frame: Option<Frame>,
     pub diagnostics: PerformanceLauncherDiagnostics,
     pub learned_phrase_cues: Vec<LearnedPhraseCueView>,
+    pub pages: Vec<PerformancePageView>,
+    pub active_page: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LearnedPhraseCueView {
     pub scene: SceneId,
     pub frame: Frame,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerformancePageView {
+    pub id: String,
+    pub label: String,
+    pub strips: Vec<PerformanceStripView>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerformanceStripView {
+    pub strip: u8,
+    pub lane_id: String,
+    pub lane_label: String,
+    pub lane_role: String,
+    pub track_id: Option<String>,
+    pub variation_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -614,6 +633,8 @@ pub struct AppController {
     transform_view: Option<TransformView>,
     future_cache_view: Option<FutureCacheView>,
     performance_launcher: PerformanceLauncher,
+    performance_pages: Vec<PerformancePageView>,
+    active_performance_page: Option<usize>,
     performance_scenes: Vec<SceneId>,
     phrase_patterns: BTreeMap<SceneId, Vec<Pattern>>,
     queued_phrase_variation: Option<(SceneId, usize)>,
@@ -654,6 +675,8 @@ impl AppController {
             transform_view: None,
             future_cache_view: None,
             performance_launcher: PerformanceLauncher::new(LaunchQuantization::Bar { beats: 4 }),
+            performance_pages: Vec::new(),
+            active_performance_page: None,
             performance_scenes: Vec::new(),
             phrase_patterns: BTreeMap::new(),
             queued_phrase_variation: None,
@@ -700,6 +723,11 @@ impl AppController {
 
     pub fn set_curated_controls(&mut self, controls: Vec<CuratedControlView>) {
         self.curated_controls = controls;
+    }
+
+    pub fn set_performance_pages(&mut self, pages: Vec<PerformancePageView>) {
+        self.active_performance_page = if pages.is_empty() { None } else { Some(0) };
+        self.performance_pages = pages;
     }
 
     pub fn show_effect_sends(&mut self, rules: Vec<EffectSendRule>) {
@@ -1289,6 +1317,8 @@ impl AppController {
                 fill_end_frame: self.performance_launcher.fill_end_frame(),
                 diagnostics: self.performance_launcher.diagnostics(),
                 learned_phrase_cues: self.learned_phrase_cues.clone(),
+                pages: self.performance_pages.clone(),
+                active_page: self.active_performance_page,
             },
             pattern_grid: PatternGridView {
                 pattern: pattern.id(),
@@ -2061,6 +2091,49 @@ mod tests {
         assert_eq!(view.transport.state, transport.state);
         assert_eq!(controller.history().len(), 3);
         assert!(!controller.history()[1].changed);
+    }
+
+    #[test]
+    fn performance_pages_are_view_state_not_hard_coded_policy() {
+        let (mut controller, _engine) = controller(8);
+        controller.set_performance_pages(vec![
+            PerformancePageView {
+                id: "main".to_owned(),
+                label: "Main".to_owned(),
+                strips: vec![PerformanceStripView {
+                    strip: 1,
+                    lane_id: "pad".to_owned(),
+                    lane_label: "Pad".to_owned(),
+                    lane_role: "polyphonic_synth".to_owned(),
+                    track_id: Some("pad-track".to_owned()),
+                    variation_ids: vec![
+                        "pad-a".to_owned(),
+                        "pad-b".to_owned(),
+                        "pad-c".to_owned(),
+                        "pad-d".to_owned(),
+                    ],
+                }],
+            },
+            PerformancePageView {
+                id: "drums".to_owned(),
+                label: "Drums".to_owned(),
+                strips: vec![PerformanceStripView {
+                    strip: 8,
+                    lane_id: "kick".to_owned(),
+                    lane_label: "Kick".to_owned(),
+                    lane_role: "drum".to_owned(),
+                    track_id: Some("kick-track".to_owned()),
+                    variation_ids: vec!["kick-a".to_owned()],
+                }],
+            },
+        ]);
+
+        let view = controller.view_model();
+        assert_eq!(view.performance.active_page, Some(0));
+        assert_eq!(view.performance.pages.len(), 2);
+        assert_eq!(view.performance.pages[0].id, "main");
+        assert_eq!(view.performance.pages[0].strips[0].lane_id, "pad");
+        assert_eq!(view.performance.pages[1].strips[0].strip, 8);
     }
 
     #[test]

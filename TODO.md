@@ -185,6 +185,8 @@ assigned, switched, and rendered deterministically from text definitions.
   runtime support, including exact LaunchControl row/side-button semantics
 - [x] Add generic `.mlperformance` lane/page declarations with validation for
   scene-authored banked LaunchControl surfaces
+- [x] Load generic lane/page declarations into app view state and render the
+  active page in performance mode without hard-coded lane/page policy
 - [ ] Define the script-level lane model for the ensemble: track IDs, lane
   roles, pattern banks, variation IDs, mute/solo behavior, launch quantization,
   and which controls are per-lane versus global
