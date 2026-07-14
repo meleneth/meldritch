@@ -19,7 +19,7 @@ Status values:
 | `11-session-capture` | Timestamped `.mlperformance` session capture | compile |
 | `15-launch-control-xl-input` | LaunchControl XL faders/buttons drive curated controls | compile |
 | `16-launch-control-xl-playground` | Full LaunchControl XL MIDI surface with playable groove scenes | play |
-| `17-launch-control-xl-ensemble` | Banked multi-lane LaunchControl XL groovebox ensemble with sample-bank metadata | parse |
+| `17-launch-control-xl-ensemble` | Banked multi-lane LaunchControl XL groovebox ensemble with lane/pattern-bank/sample metadata | parse |
 
 An implementation may advance a row only when all earlier statuses for that row
 are satisfied. New schema or runtime behavior requires a new row or an explicit

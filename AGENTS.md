@@ -172,14 +172,17 @@ control bindings may be scoped to a declared page, so the selected page can
 remap physical controls without hard-coded LaunchControl policy.
 `17-launch-control-xl-ensemble` now parses as a skeleton: nine tracks/lanes,
 two scene-authored pages, four placeholder note variations per lane, and
-page-scoped fader controls. It also parses `.mlsamples` sample-bank metadata
-and attaches the three sample lanes to a Raven voice placeholder bank. Audio
-sample decoding, sample triggering, and sample rendering are not implemented
-yet. The skeleton intentionally uses a placeholder synth and shared note
-patterns until sample-track playback, poly-synth, and multi-track audio support
-land. Build this from examples first, then implement only the required
-multi-track, sample-track playback, poly-synth, pattern-bank, and modifier
-control support.
+page-scoped fader controls. Its lane declarations now carry authored launch
+quantization, default mute/solo state, per-lane control IDs, and nested pattern
+banks that group four variations into selectable banks. It also parses
+`.mlsamples` sample-bank metadata and attaches the three sample lanes to a Raven
+voice placeholder bank. Audio sample decoding, sample triggering, sample
+rendering, runtime pattern-bank selection, and runtime mute/solo behavior are
+not implemented yet. The skeleton intentionally uses a placeholder synth and
+shared note patterns until sample-track playback, poly-synth, and multi-track
+audio support land. Build this from examples first, then implement only the
+required multi-track, sample-track playback, poly-synth, pattern-bank runtime,
+and modifier control support.
 Modifier/layer behavior such as “hold button + fader becomes octave pusher”
 must be script-declared, typed, captured, and replayable; do not hard-code
 LaunchControl policy in Rust. LED feedback remains deferred until the ensemble

@@ -544,7 +544,12 @@ pub struct PerformanceLaneDefinition {
     label: String,
     role: String,
     track_id: Option<String>,
+    launch_quantization: Option<String>,
+    default_muted: bool,
+    default_soloed: bool,
+    control_ids: Vec<String>,
     variation_ids: Vec<String>,
+    pattern_banks: Vec<PerformancePatternBankDefinition>,
 }
 
 impl PerformanceLaneDefinition {
@@ -566,6 +571,55 @@ impl PerformanceLaneDefinition {
     #[must_use]
     pub fn track_id(&self) -> Option<&str> {
         self.track_id.as_deref()
+    }
+
+    #[must_use]
+    pub fn launch_quantization(&self) -> Option<&str> {
+        self.launch_quantization.as_deref()
+    }
+
+    #[must_use]
+    pub const fn default_muted(&self) -> bool {
+        self.default_muted
+    }
+
+    #[must_use]
+    pub const fn default_soloed(&self) -> bool {
+        self.default_soloed
+    }
+
+    #[must_use]
+    pub fn control_ids(&self) -> &[String] {
+        &self.control_ids
+    }
+
+    #[must_use]
+    pub fn variation_ids(&self) -> &[String] {
+        &self.variation_ids
+    }
+
+    #[must_use]
+    pub fn pattern_banks(&self) -> &[PerformancePatternBankDefinition] {
+        &self.pattern_banks
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerformancePatternBankDefinition {
+    id: String,
+    label: String,
+    variation_ids: Vec<String>,
+}
+
+impl PerformancePatternBankDefinition {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn label(&self) -> &str {
+        &self.label
     }
 
     #[must_use]
@@ -1015,6 +1069,23 @@ struct RawPerformanceLane {
     role: String,
     #[serde(default)]
     track: Option<String>,
+    launch_quantization: Option<String>,
+    #[serde(default)]
+    default_muted: bool,
+    #[serde(default)]
+    default_soloed: bool,
+    #[serde(default)]
+    controls: Vec<String>,
+    #[serde(default)]
+    variations: Vec<String>,
+    #[serde(default)]
+    pattern_banks: Vec<RawPerformancePatternBank>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPerformancePatternBank {
+    id: String,
+    label: String,
     #[serde(default)]
     variations: Vec<String>,
 }
@@ -1533,6 +1604,16 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                 format!("lane '{}' has an empty role", raw.id),
             ));
         }
+        if raw
+            .launch_quantization
+            .as_deref()
+            .is_some_and(str::is_empty)
+        {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("lane '{}' has an empty launch_quantization", raw.id),
+            ));
+        }
         if let Some(track) = raw.track.as_deref() {
             if !track_ids.contains(track) {
                 return Err(SongLoadError::one(
@@ -1570,12 +1651,103 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                 }
             }
         }
+        let mut lane_control_ids = BTreeSet::new();
+        for control in &raw.controls {
+            if control.trim().is_empty() {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!("lane '{}' has an empty control id", raw.id),
+                ));
+            }
+            if !lane_control_ids.insert(control.as_str()) {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!(
+                        "lane '{}' control '{}' is declared more than once",
+                        raw.id, control
+                    ),
+                ));
+            }
+        }
+        let lane_variation_ids = raw
+            .variations
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        let mut pattern_bank_ids = BTreeSet::new();
+        let mut pattern_banks = Vec::with_capacity(raw.pattern_banks.len());
+        for bank in raw.pattern_banks {
+            if bank.id.trim().is_empty() {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!("lane '{}' has an empty pattern bank id", raw.id),
+                ));
+            }
+            if !pattern_bank_ids.insert(bank.id.clone()) {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!(
+                        "lane '{}' pattern bank '{}' is declared more than once",
+                        raw.id, bank.id
+                    ),
+                ));
+            }
+            if bank.label.trim().is_empty() {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!(
+                        "lane '{}' pattern bank '{}' has an empty label",
+                        raw.id, bank.id
+                    ),
+                ));
+            }
+            if bank.variations.is_empty() {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!(
+                        "lane '{}' pattern bank '{}' must declare at least one variation",
+                        raw.id, bank.id
+                    ),
+                ));
+            }
+            let mut bank_variation_ids = BTreeSet::new();
+            for variation in &bank.variations {
+                if !bank_variation_ids.insert(variation.as_str()) {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!(
+                            "lane '{}' pattern bank '{}' repeats variation '{}'",
+                            raw.id, bank.id, variation
+                        ),
+                    ));
+                }
+                if !lane_variation_ids.contains(variation.as_str()) {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!(
+                            "lane '{}' pattern bank '{}' references unknown variation '{}'",
+                            raw.id, bank.id, variation
+                        ),
+                    ));
+                }
+            }
+            pattern_banks.push(PerformancePatternBankDefinition {
+                id: bank.id,
+                label: bank.label,
+                variation_ids: bank.variations,
+            });
+        }
         lanes.push(PerformanceLaneDefinition {
             id: raw.id,
             label: raw.label,
             role: raw.role,
             track_id: raw.track,
+            launch_quantization: raw.launch_quantization,
+            default_muted: raw.default_muted,
+            default_soloed: raw.default_soloed,
+            control_ids: raw.controls,
             variation_ids: raw.variations,
+            pattern_banks,
         });
     }
 
@@ -1877,6 +2049,20 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                         ),
                     ));
                 }
+            }
+        }
+    }
+    for lane in &lanes {
+        for control_id in lane.control_ids() {
+            if !declared_control_ids.contains(control_id.as_str()) {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!(
+                        "lane '{}' references unknown control '{}'",
+                        lane.id(),
+                        control_id
+                    ),
+                ));
             }
         }
     }
@@ -3189,8 +3375,21 @@ fn fingerprint_song(
         fingerprint.string(&lane.label);
         fingerprint.string(&lane.role);
         fingerprint.optional_string(lane.track_id.as_deref());
+        fingerprint.optional_string(lane.launch_quantization.as_deref());
+        fingerprint.u64(u64::from(lane.default_muted));
+        fingerprint.u64(u64::from(lane.default_soloed));
+        for control in &lane.control_ids {
+            fingerprint.string(control);
+        }
         for variation in &lane.variation_ids {
             fingerprint.string(variation);
+        }
+        for bank in &lane.pattern_banks {
+            fingerprint.string(&bank.id);
+            fingerprint.string(&bank.label);
+            for variation in &bank.variation_ids {
+                fingerprint.string(variation);
+            }
         }
     }
     for page in &performance.pages {

@@ -392,7 +392,27 @@ fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
         "sample-c",
     ] {
         assert_eq!(lanes[id].variation_ids().len(), 4);
+        assert_eq!(lanes[id].launch_quantization(), Some("1 bar"));
+        assert!(!lanes[id].default_muted());
+        assert!(!lanes[id].default_soloed());
+        assert_eq!(lanes[id].pattern_banks().len(), 2);
+        assert_eq!(lanes[id].pattern_banks()[0].id(), "groove");
+        assert_eq!(
+            lanes[id].pattern_banks()[0].variation_ids(),
+            &["ensemble-a", "ensemble-b"]
+        );
+        assert_eq!(lanes[id].pattern_banks()[1].id(), "fill");
+        assert_eq!(
+            lanes[id].pattern_banks()[1].variation_ids(),
+            &["ensemble-c", "ensemble-d"]
+        );
     }
+    assert_eq!(lanes["beat-drum"].control_ids(), &["drums-fader-01"]);
+    assert_eq!(
+        lanes["rhythm-drum-a"].control_ids(),
+        &["main-fader-01", "drums-fader-02"]
+    );
+    assert_eq!(lanes["sample-c"].control_ids(), &["main-fader-08"]);
 
     let pages = song.performance().pages();
     assert_eq!(pages[0].id(), "main");

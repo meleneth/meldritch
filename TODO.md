@@ -198,7 +198,7 @@ assigned, switched, and rendered deterministically from text definitions.
   page-scoped fader controls
 - [x] Add `.mlsamples` sample-bank metadata parsing and attach the ensemble
   sample lanes to a Raven voice placeholder bank
-- [ ] Define the script-level lane model for the ensemble: track IDs, lane
+- [x] Define the script-level lane model for the ensemble: track IDs, lane
   roles, pattern banks, variation IDs, mute/solo behavior, launch quantization,
   and which controls are per-lane versus global
 - [ ] Extend `.mlperformance` controls to support momentary modifiers/layers
@@ -206,9 +206,9 @@ assigned, switched, and rendered deterministically from text definitions.
 - [ ] Implement a first modifier example: while a declared modifier button is
   held, one or more faders send octave/transpose commands instead of their
   normal continuous parameter target
-- [ ] Add script-declared pattern-bank selection for each lane so the same
-  controller can switch at least four variations per lane without requiring 32
-  dedicated buttons
+- [ ] Add runtime pattern-bank selection for each lane so the same controller
+  can switch at least four variations per lane without requiring 32 dedicated
+  buttons
 - [ ] Add multi-track song compilation/playback for the subset needed by the
   ensemble example: drums/percussion first, then basses, then poly pad, then
   samples

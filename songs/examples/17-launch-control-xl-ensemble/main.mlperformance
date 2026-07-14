@@ -74,63 +74,171 @@ id = "beat-drum"
 label = "Beat Drum"
 role = "beat_drum"
 track = "beat-drum"
+launch_quantization = "1 bar"
+default_muted = false
+default_soloed = false
+controls = ["drums-fader-01"]
 variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+[[lanes.pattern_banks]]
+id = "groove"
+label = "Groove"
+variations = ["ensemble-a", "ensemble-b"]
+[[lanes.pattern_banks]]
+id = "fill"
+label = "Fills"
+variations = ["ensemble-c", "ensemble-d"]
 
 [[lanes]]
 id = "rhythm-drum-a"
 label = "Rhythm Drum A"
 role = "rhythm_drum"
 track = "rhythm-drum-a"
+launch_quantization = "1 bar"
+default_muted = false
+default_soloed = false
+controls = ["main-fader-01", "drums-fader-02"]
 variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+[[lanes.pattern_banks]]
+id = "groove"
+label = "Groove"
+variations = ["ensemble-a", "ensemble-b"]
+[[lanes.pattern_banks]]
+id = "fill"
+label = "Fills"
+variations = ["ensemble-c", "ensemble-d"]
 
 [[lanes]]
 id = "rhythm-drum-b"
 label = "Rhythm Drum B"
 role = "rhythm_drum"
 track = "rhythm-drum-b"
+launch_quantization = "1 bar"
+default_muted = false
+default_soloed = false
+controls = ["main-fader-02", "drums-fader-03"]
 variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+[[lanes.pattern_banks]]
+id = "groove"
+label = "Groove"
+variations = ["ensemble-a", "ensemble-b"]
+[[lanes.pattern_banks]]
+id = "fill"
+label = "Fills"
+variations = ["ensemble-c", "ensemble-d"]
 
 [[lanes]]
 id = "pad"
 label = "Chords / Pad"
 role = "polyphonic_pad"
 track = "pad"
+launch_quantization = "1 bar"
+default_muted = false
+default_soloed = false
+controls = ["main-fader-03"]
 variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+[[lanes.pattern_banks]]
+id = "groove"
+label = "Groove"
+variations = ["ensemble-a", "ensemble-b"]
+[[lanes.pattern_banks]]
+id = "fill"
+label = "Fills"
+variations = ["ensemble-c", "ensemble-d"]
 
 [[lanes]]
 id = "bass-a"
 label = "Bass A"
 role = "monophonic_bass"
 track = "bass-a"
+launch_quantization = "1 bar"
+default_muted = false
+default_soloed = false
+controls = ["main-fader-04", "drums-fader-04"]
 variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+[[lanes.pattern_banks]]
+id = "groove"
+label = "Groove"
+variations = ["ensemble-a", "ensemble-b"]
+[[lanes.pattern_banks]]
+id = "fill"
+label = "Fills"
+variations = ["ensemble-c", "ensemble-d"]
 
 [[lanes]]
 id = "bass-b"
 label = "Bass B"
 role = "monophonic_bass"
 track = "bass-b"
+launch_quantization = "1 bar"
+default_muted = false
+default_soloed = false
+controls = ["main-fader-05"]
 variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+[[lanes.pattern_banks]]
+id = "groove"
+label = "Groove"
+variations = ["ensemble-a", "ensemble-b"]
+[[lanes.pattern_banks]]
+id = "fill"
+label = "Fills"
+variations = ["ensemble-c", "ensemble-d"]
 
 [[lanes]]
 id = "sample-a"
 label = "Sample A"
 role = "sample_based"
 track = "sample-a"
+launch_quantization = "1 bar"
+default_muted = false
+default_soloed = false
+controls = ["main-fader-06", "drums-fader-05"]
 variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+[[lanes.pattern_banks]]
+id = "groove"
+label = "Groove"
+variations = ["ensemble-a", "ensemble-b"]
+[[lanes.pattern_banks]]
+id = "fill"
+label = "Fills"
+variations = ["ensemble-c", "ensemble-d"]
 
 [[lanes]]
 id = "sample-b"
 label = "Sample B"
 role = "sample_based"
 track = "sample-b"
+launch_quantization = "1 bar"
+default_muted = false
+default_soloed = false
+controls = ["main-fader-07"]
 variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+[[lanes.pattern_banks]]
+id = "groove"
+label = "Groove"
+variations = ["ensemble-a", "ensemble-b"]
+[[lanes.pattern_banks]]
+id = "fill"
+label = "Fills"
+variations = ["ensemble-c", "ensemble-d"]
 
 [[lanes]]
 id = "sample-c"
 label = "Sample C"
 role = "sample_based"
 track = "sample-c"
+launch_quantization = "1 bar"
+default_muted = false
+default_soloed = false
+controls = ["main-fader-08"]
 variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+[[lanes.pattern_banks]]
+id = "groove"
+label = "Groove"
+variations = ["ensemble-a", "ensemble-b"]
+[[lanes.pattern_banks]]
+id = "fill"
+label = "Fills"
+variations = ["ensemble-c", "ensemble-d"]
 
 [[pages]]
 id = "main"
