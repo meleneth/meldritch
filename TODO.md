@@ -170,6 +170,45 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Add `tui-song --audio-debug` status telemetry for live output diagnosis:
   transport callbacks, playhead position, current sample peak, and upcoming
   song-publication peak
+- [ ] Design `17-launch-control-xl-ensemble` as the next example-first target:
+  a multi-lane LaunchControl XL performance with 4+ variations per lane:
+  - Lane 1: one beat drum track
+  - Lanes 2-3: rhythm/percussion drum tracks
+  - Lane 4: polyphonic synth for chords/pads
+  - Lanes 5-6: monophonic bass synth tracks
+  - Lanes 7-9: sample-based tracks, if the product intent is literally 8
+    faders plus three sample lanes then resolve whether one lane is shared,
+    banked, or the desired target is actually nine musical lanes
+- [ ] Add an `ACCEPTANCE.md` for the ensemble example before implementing
+  runtime support, including exact LaunchControl row/side-button semantics
+- [ ] Define the script-level lane model for the ensemble: track IDs, lane
+  roles, pattern banks, variation IDs, mute/solo behavior, launch quantization,
+  and which controls are per-lane versus global
+- [ ] Extend `.mlperformance` controls to support momentary modifiers/layers
+  such as “hold button + move fader” without hard-coded Rust policy
+- [ ] Implement a first modifier example: while a declared modifier button is
+  held, one or more faders send octave/transpose commands instead of their
+  normal continuous parameter target
+- [ ] Add script-declared pattern-bank selection for each lane so the same
+  controller can switch at least four variations per lane without requiring 32
+  dedicated buttons
+- [ ] Add multi-track song compilation/playback for the subset needed by the
+  ensemble example: drums/percussion first, then basses, then poly pad, then
+  samples
+- [ ] Add sample-track format support for text-authored sample references,
+  sample slots, one-shots/loops, start/end slices, level, pitch, and per-pattern
+  triggering
+- [ ] Add a polyphonic synth path for chord/pad note patterns in `.mlsynth`
+  songs, with enough ADSR/filter control to be musically distinct from bass
+- [ ] Add TUI performance-mode lane overview for the ensemble: 8 visible
+  controller strips, active variation per lane, mute/solo state, modifier state,
+  and compact values
+- [ ] Add session-capture tests proving normal controls and modifier-layer
+  gestures record as typed inputs and can replay without the LaunchControl
+  attached
+- [ ] Defer LED feedback until after the ensemble control semantics are stable,
+  then map LEDs to active variation/mute/modifier state from script-authored
+  output declarations
 - [ ] Verify LaunchControl XL input with the diagnostic path on
   both Windows and Linux
 - [ ] Add MIDI output/LED feedback support after confirming the LaunchControl XL
