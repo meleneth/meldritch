@@ -249,8 +249,20 @@ pub struct PerformanceStripView {
     pub lane_label: String,
     pub lane_role: String,
     pub track_id: Option<String>,
+    pub launch_quantization: Option<String>,
+    pub muted: bool,
+    pub soloed: bool,
+    pub active_variation_id: Option<String>,
     pub variation_ids: Vec<String>,
+    pub pattern_banks: Vec<PerformancePatternBankView>,
     pub control_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerformancePatternBankView {
+    pub id: String,
+    pub label: String,
+    pub variation_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -2149,12 +2161,21 @@ mod tests {
                     lane_label: "Pad".to_owned(),
                     lane_role: "polyphonic_synth".to_owned(),
                     track_id: Some("pad-track".to_owned()),
+                    launch_quantization: Some("1 bar".to_owned()),
+                    muted: false,
+                    soloed: false,
+                    active_variation_id: Some("pad-a".to_owned()),
                     variation_ids: vec![
                         "pad-a".to_owned(),
                         "pad-b".to_owned(),
                         "pad-c".to_owned(),
                         "pad-d".to_owned(),
                     ],
+                    pattern_banks: vec![PerformancePatternBankView {
+                        id: "groove".to_owned(),
+                        label: "Groove".to_owned(),
+                        variation_ids: vec!["pad-a".to_owned(), "pad-b".to_owned()],
+                    }],
                     control_ids: vec!["pad-cutoff".to_owned()],
                 }],
             },
@@ -2167,7 +2188,16 @@ mod tests {
                     lane_label: "Kick".to_owned(),
                     lane_role: "drum".to_owned(),
                     track_id: Some("kick-track".to_owned()),
+                    launch_quantization: Some("1 bar".to_owned()),
+                    muted: true,
+                    soloed: false,
+                    active_variation_id: Some("kick-a".to_owned()),
                     variation_ids: vec!["kick-a".to_owned()],
+                    pattern_banks: vec![PerformancePatternBankView {
+                        id: "drums".to_owned(),
+                        label: "Drums".to_owned(),
+                        variation_ids: vec!["kick-a".to_owned()],
+                    }],
                     control_ids: vec!["kick-level".to_owned()],
                 }],
             },
@@ -2178,7 +2208,18 @@ mod tests {
         assert_eq!(view.performance.pages.len(), 2);
         assert_eq!(view.performance.pages[0].id, "main");
         assert_eq!(view.performance.pages[0].strips[0].lane_id, "pad");
+        assert_eq!(
+            view.performance.pages[0].strips[0]
+                .launch_quantization
+                .as_deref(),
+            Some("1 bar")
+        );
+        assert_eq!(
+            view.performance.pages[0].strips[0].pattern_banks[0].variation_ids,
+            ["pad-a", "pad-b"]
+        );
         assert_eq!(view.performance.pages[1].strips[0].strip, 8);
+        assert!(view.performance.pages[1].strips[0].muted);
 
         assert_eq!(
             controller

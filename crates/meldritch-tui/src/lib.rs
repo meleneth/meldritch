@@ -565,8 +565,35 @@ fn draw_performance_pages(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
             .track_id
             .as_ref()
             .map_or_else(|| "—".to_owned(), String::clone);
+        let quantization = strip
+            .launch_quantization
+            .as_ref()
+            .map_or_else(|| "free".to_owned(), String::clone);
+        let active_variation = strip
+            .active_variation_id
+            .as_ref()
+            .map_or_else(|| "—".to_owned(), String::clone);
+        let status = match (strip.muted, strip.soloed) {
+            (true, true) => "muted+solo",
+            (true, false) => "muted",
+            (false, true) => "solo",
+            (false, false) => "live",
+        };
+        let banks = if strip.pattern_banks.is_empty() {
+            "banks —".to_owned()
+        } else {
+            format!(
+                "banks {}",
+                strip
+                    .pattern_banks
+                    .iter()
+                    .map(|bank| format!("{}:{}", bank.label, bank.variation_ids.len()))
+                    .collect::<Vec<_>>()
+                    .join("/")
+            )
+        };
         Line::from(format!(
-            "F{:02}: {} ({}) · track {} · {} variations",
+            "F{:02}: {} ({}) · track {} · {status} · var {active_variation} · q {quantization} · {} variations · {banks}",
             strip.strip,
             strip.lane_label,
             strip.lane_role,
@@ -1721,11 +1748,27 @@ mod tests {
                     lane_label: "Pad".to_owned(),
                     lane_role: "polyphonic_synth".to_owned(),
                     track_id: Some("pad-track".to_owned()),
+                    launch_quantization: Some("1 bar".to_owned()),
+                    muted: false,
+                    soloed: false,
+                    active_variation_id: Some("pad-a".to_owned()),
                     variation_ids: vec![
                         "pad-a".to_owned(),
                         "pad-b".to_owned(),
                         "pad-c".to_owned(),
                         "pad-d".to_owned(),
+                    ],
+                    pattern_banks: vec![
+                        meldritch_app::PerformancePatternBankView {
+                            id: "groove".to_owned(),
+                            label: "Groove".to_owned(),
+                            variation_ids: vec!["pad-a".to_owned(), "pad-b".to_owned()],
+                        },
+                        meldritch_app::PerformancePatternBankView {
+                            id: "fill".to_owned(),
+                            label: "Fills".to_owned(),
+                            variation_ids: vec!["pad-c".to_owned(), "pad-d".to_owned()],
+                        },
                     ],
                     control_ids: vec!["pad-cutoff".to_owned()],
                 }],
@@ -1739,7 +1782,16 @@ mod tests {
                     lane_label: "Kick".to_owned(),
                     lane_role: "drum".to_owned(),
                     track_id: Some("kick-track".to_owned()),
+                    launch_quantization: Some("1 bar".to_owned()),
+                    muted: true,
+                    soloed: false,
+                    active_variation_id: Some("kick-a".to_owned()),
                     variation_ids: vec!["kick-a".to_owned()],
+                    pattern_banks: vec![meldritch_app::PerformancePatternBankView {
+                        id: "drums".to_owned(),
+                        label: "Drums".to_owned(),
+                        variation_ids: vec!["kick-a".to_owned()],
+                    }],
                     control_ids: Vec::new(),
                 }],
             },
@@ -1773,6 +1825,10 @@ mod tests {
         assert!(content.contains("Pad"));
         assert!(content.contains("polyphonic_synth"));
         assert!(content.contains("4 variations"));
+        assert!(content.contains("live"));
+        assert!(content.contains("var pad-a"));
+        assert!(content.contains("q 1 bar"));
+        assert!(content.contains("banks Groove:2/Fills:2"));
         assert!(content.contains("Active page Main"));
         assert!(content.contains("1234.000 filter.cutoff_hz"));
         assert!(!content.contains("B01-B04 scenes"));

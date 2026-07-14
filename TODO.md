@@ -201,6 +201,8 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Define the script-level lane model for the ensemble: track IDs, lane
   roles, pattern banks, variation IDs, mute/solo behavior, launch quantization,
   and which controls are per-lane versus global
+- [x] Load authored lane quantization, mute/solo defaults, active variation,
+  and pattern banks into app/TUI performance-page view state
 - [ ] Extend `.mlperformance` controls to support momentary modifiers/layers
   such as “hold button + move fader” without hard-coded Rust policy
 - [ ] Implement a first modifier example: while a declared modifier button is

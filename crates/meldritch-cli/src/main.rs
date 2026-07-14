@@ -3318,7 +3318,20 @@ fn song_performance_pages_for_view(
                         lane_label: lane.label().to_owned(),
                         lane_role: lane.role().to_owned(),
                         track_id: lane.track_id().map(str::to_owned),
+                        launch_quantization: lane.launch_quantization().map(str::to_owned),
+                        muted: lane.default_muted(),
+                        soloed: lane.default_soloed(),
+                        active_variation_id: lane.variation_ids().first().cloned(),
                         variation_ids: lane.variation_ids().to_vec(),
+                        pattern_banks: lane
+                            .pattern_banks()
+                            .iter()
+                            .map(|bank| meldritch_app::PerformancePatternBankView {
+                                id: bank.id().to_owned(),
+                                label: bank.label().to_owned(),
+                                variation_ids: bank.variation_ids().to_vec(),
+                            })
+                            .collect(),
                         control_ids: strip.control_ids().to_vec(),
                     })
                 })
@@ -7381,6 +7394,28 @@ mod tests {
         assert_eq!(
             strip.control_ids,
             ["knob-01", "knob-09", "knob-17", "fader-01"]
+        );
+
+        let ensemble = meldritch_dsl::load_song_directory(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join("songs/examples/17-launch-control-xl-ensemble"),
+        )
+        .expect("LaunchControl XL ensemble example should load");
+        let pages = song_performance_pages_for_view(&ensemble);
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0].strips.len(), 8);
+        let strip = &pages[0].strips[0];
+        assert_eq!(strip.lane_id, "rhythm-drum-a");
+        assert_eq!(strip.launch_quantization.as_deref(), Some("1 bar"));
+        assert!(!strip.muted);
+        assert!(!strip.soloed);
+        assert_eq!(strip.active_variation_id.as_deref(), Some("ensemble-a"));
+        assert_eq!(strip.pattern_banks.len(), 2);
+        assert_eq!(strip.pattern_banks[0].id, "groove");
+        assert_eq!(
+            strip.pattern_banks[0].variation_ids,
+            ["ensemble-a", "ensemble-b"]
         );
     }
 
