@@ -587,6 +587,9 @@ fn performance_control_lines(view: &AppViewModel) -> Vec<Line<'static>> {
     if view.curated_controls.is_empty() {
         return vec![Line::from("No controls exposed by this performance")];
     }
+    if let Some(lines) = active_page_control_lines(view) {
+        return lines;
+    }
     if has_launch_control_strip_surface(view) {
         return launch_control_strip_lines(view);
     }
@@ -608,6 +611,42 @@ fn performance_control_lines(view: &AppViewModel) -> Vec<Line<'static>> {
             ))
         })
         .collect()
+}
+
+fn active_page_control_lines(view: &AppViewModel) -> Option<Vec<Line<'static>>> {
+    let page = active_performance_page(view)?;
+    if page.strips.iter().all(|strip| strip.control_ids.is_empty()) {
+        return None;
+    }
+    let mut lines = vec![Line::from(format!(
+        "Active page {} · declared controls only",
+        page.label
+    ))];
+    lines.extend(page.strips.iter().map(|strip| {
+        let controls = if strip.control_ids.is_empty() {
+            "—".to_owned()
+        } else {
+            strip
+                .control_ids
+                .iter()
+                .map(|id| compact_control_value(view, id))
+                .collect::<Vec<_>>()
+                .join(" · ")
+        };
+        Line::from(format!(
+            "F{:02} {}: {}",
+            strip.strip, strip.lane_label, controls
+        ))
+    }));
+    Some(lines)
+}
+
+fn active_performance_page(view: &AppViewModel) -> Option<&meldritch_app::PerformancePageView> {
+    let index = view.performance.active_page.unwrap_or(0);
+    view.performance
+        .pages
+        .get(index)
+        .or_else(|| view.performance.pages.first())
 }
 
 fn has_launch_control_strip_surface(view: &AppViewModel) -> bool {
@@ -1688,6 +1727,7 @@ mod tests {
                         "pad-c".to_owned(),
                         "pad-d".to_owned(),
                     ],
+                    control_ids: vec!["pad-cutoff".to_owned()],
                 }],
             },
             meldritch_app::PerformancePageView {
@@ -1700,9 +1740,20 @@ mod tests {
                     lane_role: "drum".to_owned(),
                     track_id: Some("kick-track".to_owned()),
                     variation_ids: vec!["kick-a".to_owned()],
+                    control_ids: Vec::new(),
                 }],
             },
         ];
+        view.curated_controls = vec![meldritch_app::CuratedControlView {
+            id: "pad-cutoff".to_owned(),
+            label: "Pad Cutoff".to_owned(),
+            target: "synth:pad/filter.cutoff_hz".to_owned(),
+            minimum: 100.0,
+            maximum: 5000.0,
+            step: 50.0,
+            binding: "f01".to_owned(),
+            value: Some(1234.0),
+        }];
         view.performance.active_page = Some(0);
         let backend = TestBackend::new(140, 32);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1722,6 +1773,8 @@ mod tests {
         assert!(content.contains("Pad"));
         assert!(content.contains("polyphonic_synth"));
         assert!(content.contains("4 variations"));
+        assert!(content.contains("Active page Main"));
+        assert!(content.contains("1234.000 filter.cutoff_hz"));
         assert!(!content.contains("B01-B04 scenes"));
     }
 

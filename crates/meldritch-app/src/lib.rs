@@ -250,6 +250,7 @@ pub struct PerformanceStripView {
     pub lane_role: String,
     pub track_id: Option<String>,
     pub variation_ids: Vec<String>,
+    pub control_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -2141,6 +2142,7 @@ mod tests {
                         "pad-c".to_owned(),
                         "pad-d".to_owned(),
                     ],
+                    control_ids: vec!["pad-cutoff".to_owned()],
                 }],
             },
             PerformancePageView {
@@ -2153,6 +2155,7 @@ mod tests {
                     lane_role: "drum".to_owned(),
                     track_id: Some("kick-track".to_owned()),
                     variation_ids: vec!["kick-a".to_owned()],
+                    control_ids: vec!["kick-level".to_owned()],
                 }],
             },
         ]);

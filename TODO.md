@@ -189,6 +189,8 @@ assigned, switched, and rendered deterministically from text definitions.
   active page in performance mode without hard-coded lane/page policy
 - [x] Add script-declared `select_page` performance actions that switch active
   performance pages by page id
+- [x] Add script-declared per-strip visible control lists and render only the
+  active page's declared controls in performance-mode telemetry
 - [ ] Define the script-level lane model for the ensemble: track IDs, lane
   roles, pattern banks, variation IDs, mute/solo behavior, launch quantization,
   and which controls are per-lane versus global

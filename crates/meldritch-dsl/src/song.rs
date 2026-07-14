@@ -590,6 +590,7 @@ impl PerformancePageDefinition {
 pub struct PerformancePageStripDefinition {
     strip: u8,
     lane_id: String,
+    control_ids: Vec<String>,
 }
 
 impl PerformancePageStripDefinition {
@@ -601,6 +602,11 @@ impl PerformancePageStripDefinition {
     #[must_use]
     pub fn lane_id(&self) -> &str {
         &self.lane_id
+    }
+
+    #[must_use]
+    pub fn control_ids(&self) -> &[String] {
+        &self.control_ids
     }
 }
 
@@ -909,6 +915,8 @@ struct RawPerformancePage {
 struct RawPerformancePageStrip {
     strip: u8,
     lane: String,
+    #[serde(default)]
+    controls: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1439,6 +1447,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
             strips.push(PerformancePageStripDefinition {
                 strip: strip.strip,
                 lane_id: strip.lane,
+                control_ids: strip.controls,
             });
         }
         pages.push(PerformancePageDefinition {
@@ -1636,6 +1645,39 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
             binding: raw.binding,
             bindings,
         });
+    }
+    let declared_control_ids = controls
+        .iter()
+        .map(|control| control.id())
+        .collect::<BTreeSet<_>>();
+    for page in &pages {
+        for strip in page.strips() {
+            let mut strip_control_ids = BTreeSet::new();
+            for control_id in strip.control_ids() {
+                if !strip_control_ids.insert(control_id.as_str()) {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!(
+                            "page '{}' strip {} control '{}' is declared more than once",
+                            page.id(),
+                            strip.strip(),
+                            control_id
+                        ),
+                    ));
+                }
+                if !declared_control_ids.contains(control_id.as_str()) {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!(
+                            "page '{}' strip {} references unknown control '{}'",
+                            page.id(),
+                            strip.strip(),
+                            control_id
+                        ),
+                    ));
+                }
+            }
+        }
     }
 
     let mut action_ids = BTreeSet::new();
@@ -2801,6 +2843,9 @@ fn fingerprint_song(
         for strip in &page.strips {
             fingerprint.u64(u64::from(strip.strip));
             fingerprint.string(&strip.lane_id);
+            for control in &strip.control_ids {
+                fingerprint.string(control);
+            }
         }
     }
     for control in &performance.controls {

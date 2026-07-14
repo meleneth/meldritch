@@ -64,7 +64,8 @@ actions, live rerendered parameters, authored groove variations, default
 performance mode, and continuous audio publication for a single-synth
 playground. `.mlperformance` can now declare generic lanes and visible pages,
 the app/TUI can show the active declared page as generic visible strips, and
-script-declared `select_page` actions can switch active pages by page id. This
-example still requires runtime control rebinding for selected pages, multi-lane
-songs, sample tracks, polyphonic pad rendering, pattern banks, momentary
-modifier layers, and replayable modifier gestures.
+script-declared `select_page` actions can switch active pages by page id. Page
+strips can declare visible control IDs for active-page telemetry. This example
+still requires runtime control rebinding for selected pages, multi-lane songs,
+sample tracks, polyphonic pad rendering, pattern banks, momentary modifier
+layers, and replayable modifier gestures.

@@ -3290,6 +3290,7 @@ fn song_performance_pages_for_view(
                         lane_role: lane.role().to_owned(),
                         track_id: lane.track_id().map(str::to_owned),
                         variation_ids: lane.variation_ids().to_vec(),
+                        control_ids: strip.control_ids().to_vec(),
                     })
                 })
                 .collect(),
@@ -7304,6 +7305,10 @@ mod tests {
         assert_eq!(strip.lane_role, "monophonic_synth");
         assert_eq!(strip.track_id.as_deref(), Some("playground"));
         assert_eq!(strip.variation_ids.len(), 8);
+        assert_eq!(
+            strip.control_ids,
+            ["knob-01", "knob-09", "knob-17", "fader-01"]
+        );
     }
 
     #[test]

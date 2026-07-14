@@ -309,6 +309,10 @@ fn launch_control_xl_playground_declares_full_midi_surface_in_scripts() {
     assert_eq!(pages[0].strips().len(), 1);
     assert_eq!(pages[0].strips()[0].strip(), 1);
     assert_eq!(pages[0].strips()[0].lane_id(), "playground");
+    assert_eq!(
+        pages[0].strips()[0].control_ids(),
+        &["knob-01", "knob-09", "knob-17", "fader-01"]
+    );
     let actions = song.performance().actions();
     assert_eq!(actions.len(), 24);
     let midi_cc_bindings = controls

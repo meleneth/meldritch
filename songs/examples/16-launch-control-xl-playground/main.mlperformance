@@ -50,6 +50,7 @@ label = "Main"
 [[pages.strips]]
 strip = 1
 lane = "playground"
+controls = ["knob-01", "knob-09", "knob-17", "fader-01"]
 
 [[controls]]
 id = "knob-01"
