@@ -339,3 +339,60 @@ fn launch_control_xl_playground_declares_full_midi_surface_in_scripts() {
         .count();
     assert_eq!(midi_note_bindings, 20);
 }
+
+#[test]
+fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
+    let song = load_song_directory(examples_root().join("17-launch-control-xl-ensemble"))
+        .expect("LaunchControl XL ensemble should validate");
+
+    assert_eq!(song.performance().tracks().len(), 9);
+    assert_eq!(song.performance().lanes().len(), 9);
+    assert_eq!(song.performance().pages().len(), 2);
+
+    let lanes = song
+        .performance()
+        .lanes()
+        .iter()
+        .map(|lane| (lane.id(), lane))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for id in [
+        "beat-drum",
+        "rhythm-drum-a",
+        "rhythm-drum-b",
+        "pad",
+        "bass-a",
+        "bass-b",
+        "sample-a",
+        "sample-b",
+        "sample-c",
+    ] {
+        assert_eq!(lanes[id].variation_ids().len(), 4);
+    }
+
+    let pages = song.performance().pages();
+    assert_eq!(pages[0].id(), "main");
+    assert_eq!(pages[0].strips().len(), 8);
+    assert!(
+        !pages[0]
+            .strips()
+            .iter()
+            .any(|strip| strip.lane_id() == "beat-drum")
+    );
+    assert_eq!(pages[1].id(), "drums");
+    assert_eq!(pages[1].strips()[0].lane_id(), "beat-drum");
+    assert_eq!(pages[1].strips()[0].control_ids(), &["drums-fader-01"]);
+
+    let page_scoped_controls = song
+        .performance()
+        .controls()
+        .iter()
+        .flat_map(|control| control.bindings())
+        .filter(|binding| {
+            matches!(
+                binding,
+                meldritch_dsl::ControlBindingDefinition::MidiCc { page: Some(_), .. }
+            )
+        })
+        .count();
+    assert_eq!(page_scoped_controls, 13);
+}

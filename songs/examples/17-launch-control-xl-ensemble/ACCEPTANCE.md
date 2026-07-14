@@ -58,15 +58,13 @@ Initial example scene page model:
 - The runtime must not special-case the beat drum, the page names, or which
   lanes appear together; those are scene-authored declarations.
 
-Current implementation status: design only for this example. The existing
-LaunchControl XL playground proves script-authored LaunchControl input, typed
-actions, live rerendered parameters, authored groove variations, default
-performance mode, and continuous audio publication for a single-synth
-playground. `.mlperformance` can now declare generic lanes and visible pages,
-the app/TUI can show the active declared page as generic visible strips, and
-script-declared `select_page` actions can switch active pages by page id. Page
-strips can declare visible control IDs for active-page telemetry, and MIDI CC
-control bindings can be scoped to a page so the same physical controls can drive
-different script controls on different pages. This example still requires
+Current implementation status: parse. This directory now contains a validating
+song skeleton with nine declared tracks/lanes, two scene-authored pages, four
+placeholder note variations per lane, page-visible controls, and page-scoped
+MIDI fader bindings. The existing LaunchControl XL playground proves
+script-authored LaunchControl input, typed actions, live rerendered parameters,
+authored groove variations, default performance mode, and continuous audio
+publication for a single-synth playground. This ensemble skeleton intentionally
+uses a placeholder synth and shared note patterns until this example gains real
 multi-lane songs, sample tracks, polyphonic pad rendering, pattern banks,
 momentary modifier layers, and replayable modifier gestures.

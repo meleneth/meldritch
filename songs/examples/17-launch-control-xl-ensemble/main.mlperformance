@@ -1,0 +1,433 @@
+[meldritch]
+kind = "performance"
+version = 1
+
+[performance]
+id = "launch-control-xl-ensemble"
+title = "LaunchControl XL Ensemble"
+bpm = 118.0
+sample_rate = 48000
+
+[[midi_devices]]
+id = "launch-control-xl"
+name_contains = "Launch Control XL"
+
+[[tracks]]
+id = "beat-drum"
+synth = "synths/ensemble-placeholder.mlsynth"
+patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
+initial_pattern = "ensemble-a"
+
+[[tracks]]
+id = "rhythm-drum-a"
+synth = "synths/ensemble-placeholder.mlsynth"
+patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
+initial_pattern = "ensemble-a"
+
+[[tracks]]
+id = "rhythm-drum-b"
+synth = "synths/ensemble-placeholder.mlsynth"
+patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
+initial_pattern = "ensemble-a"
+
+[[tracks]]
+id = "pad"
+synth = "synths/ensemble-placeholder.mlsynth"
+patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
+initial_pattern = "ensemble-c"
+
+[[tracks]]
+id = "bass-a"
+synth = "synths/ensemble-placeholder.mlsynth"
+patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
+initial_pattern = "ensemble-a"
+
+[[tracks]]
+id = "bass-b"
+synth = "synths/ensemble-placeholder.mlsynth"
+patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
+initial_pattern = "ensemble-b"
+
+[[tracks]]
+id = "sample-a"
+synth = "synths/ensemble-placeholder.mlsynth"
+patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
+initial_pattern = "ensemble-d"
+
+[[tracks]]
+id = "sample-b"
+synth = "synths/ensemble-placeholder.mlsynth"
+patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
+initial_pattern = "ensemble-b"
+
+[[tracks]]
+id = "sample-c"
+synth = "synths/ensemble-placeholder.mlsynth"
+patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
+initial_pattern = "ensemble-c"
+
+[[lanes]]
+id = "beat-drum"
+label = "Beat Drum"
+role = "beat_drum"
+track = "beat-drum"
+variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+
+[[lanes]]
+id = "rhythm-drum-a"
+label = "Rhythm Drum A"
+role = "rhythm_drum"
+track = "rhythm-drum-a"
+variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+
+[[lanes]]
+id = "rhythm-drum-b"
+label = "Rhythm Drum B"
+role = "rhythm_drum"
+track = "rhythm-drum-b"
+variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+
+[[lanes]]
+id = "pad"
+label = "Chords / Pad"
+role = "polyphonic_pad"
+track = "pad"
+variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+
+[[lanes]]
+id = "bass-a"
+label = "Bass A"
+role = "monophonic_bass"
+track = "bass-a"
+variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+
+[[lanes]]
+id = "bass-b"
+label = "Bass B"
+role = "monophonic_bass"
+track = "bass-b"
+variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+
+[[lanes]]
+id = "sample-a"
+label = "Sample A"
+role = "sample_based"
+track = "sample-a"
+variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+
+[[lanes]]
+id = "sample-b"
+label = "Sample B"
+role = "sample_based"
+track = "sample-b"
+variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+
+[[lanes]]
+id = "sample-c"
+label = "Sample C"
+role = "sample_based"
+track = "sample-c"
+variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+
+[[pages]]
+id = "main"
+label = "Main Ensemble"
+
+[[pages.strips]]
+strip = 1
+lane = "rhythm-drum-a"
+controls = ["main-fader-01"]
+
+[[pages.strips]]
+strip = 2
+lane = "rhythm-drum-b"
+controls = ["main-fader-02"]
+
+[[pages.strips]]
+strip = 3
+lane = "pad"
+controls = ["main-fader-03"]
+
+[[pages.strips]]
+strip = 4
+lane = "bass-a"
+controls = ["main-fader-04"]
+
+[[pages.strips]]
+strip = 5
+lane = "bass-b"
+controls = ["main-fader-05"]
+
+[[pages.strips]]
+strip = 6
+lane = "sample-a"
+controls = ["main-fader-06"]
+
+[[pages.strips]]
+strip = 7
+lane = "sample-b"
+controls = ["main-fader-07"]
+
+[[pages.strips]]
+strip = 8
+lane = "sample-c"
+controls = ["main-fader-08"]
+
+[[pages]]
+id = "drums"
+label = "Beat Drum"
+
+[[pages.strips]]
+strip = 1
+lane = "beat-drum"
+controls = ["drums-fader-01"]
+
+[[pages.strips]]
+strip = 2
+lane = "rhythm-drum-a"
+controls = ["drums-fader-02"]
+
+[[pages.strips]]
+strip = 3
+lane = "rhythm-drum-b"
+controls = ["drums-fader-03"]
+
+[[pages.strips]]
+strip = 4
+lane = "bass-a"
+controls = ["drums-fader-04"]
+
+[[pages.strips]]
+strip = 5
+lane = "sample-a"
+controls = ["drums-fader-05"]
+
+[[controls]]
+id = "main-fader-01"
+label = "Main Strip 01 Level"
+target = "synth:ensemble-placeholder/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+page = "main"
+channel = 9
+cc = 77
+action = "overdrive"
+normal = 4350.0
+normal_midi = 108
+
+[[controls]]
+id = "main-fader-02"
+label = "Main Strip 02 Level"
+target = "synth:ensemble-placeholder/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+page = "main"
+channel = 9
+cc = 78
+action = "overdrive"
+normal = 4350.0
+normal_midi = 108
+
+[[controls]]
+id = "main-fader-03"
+label = "Main Strip 03 Level"
+target = "synth:ensemble-placeholder/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+page = "main"
+channel = 9
+cc = 79
+action = "overdrive"
+normal = 4350.0
+normal_midi = 108
+
+[[controls]]
+id = "main-fader-04"
+label = "Main Strip 04 Level"
+target = "synth:ensemble-placeholder/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+page = "main"
+channel = 9
+cc = 80
+action = "overdrive"
+normal = 4350.0
+normal_midi = 108
+
+[[controls]]
+id = "main-fader-05"
+label = "Main Strip 05 Level"
+target = "synth:ensemble-placeholder/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+page = "main"
+channel = 9
+cc = 81
+action = "overdrive"
+normal = 4350.0
+normal_midi = 108
+
+[[controls]]
+id = "main-fader-06"
+label = "Main Strip 06 Level"
+target = "synth:ensemble-placeholder/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+page = "main"
+channel = 9
+cc = 82
+action = "overdrive"
+normal = 4350.0
+normal_midi = 108
+
+[[controls]]
+id = "main-fader-07"
+label = "Main Strip 07 Level"
+target = "synth:ensemble-placeholder/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+page = "main"
+channel = 9
+cc = 83
+action = "overdrive"
+normal = 4350.0
+normal_midi = 108
+
+[[controls]]
+id = "main-fader-08"
+label = "Main Strip 08 Level"
+target = "synth:ensemble-placeholder/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+page = "main"
+channel = 9
+cc = 84
+action = "overdrive"
+normal = 4350.0
+normal_midi = 108
+
+[[controls]]
+id = "drums-fader-01"
+label = "Drums Strip 01 Beat Drum"
+target = "synth:ensemble-placeholder/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+page = "drums"
+channel = 9
+cc = 77
+action = "overdrive"
+normal = 4350.0
+normal_midi = 108
+
+[[controls]]
+id = "drums-fader-02"
+label = "Drums Strip 02 Rhythm A"
+target = "synth:ensemble-placeholder/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+page = "drums"
+channel = 9
+cc = 78
+action = "overdrive"
+normal = 4350.0
+normal_midi = 108
+
+[[controls]]
+id = "drums-fader-03"
+label = "Drums Strip 03 Rhythm B"
+target = "synth:ensemble-placeholder/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+page = "drums"
+channel = 9
+cc = 79
+action = "overdrive"
+normal = 4350.0
+normal_midi = 108
+
+[[controls]]
+id = "drums-fader-04"
+label = "Drums Strip 04 Bass Context"
+target = "synth:ensemble-placeholder/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+page = "drums"
+channel = 9
+cc = 80
+action = "overdrive"
+normal = 4350.0
+normal_midi = 108
+
+[[controls]]
+id = "drums-fader-05"
+label = "Drums Strip 05 Sample Context"
+target = "synth:ensemble-placeholder/filter.cutoff_hz"
+range = [100.0, 5000.0]
+step = 50.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+page = "drums"
+channel = 9
+cc = 81
+action = "overdrive"
+normal = 4350.0
+normal_midi = 108
+
+[[actions]]
+id = "select-main-page"
+label = "Track Select Next Main Page"
+action = "select_page"
+page = "main"
+[[actions.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 9
+cc = 107
+
+[[actions]]
+id = "select-drums-page"
+label = "Track Select Prev Beat Drum Page"
+action = "select_page"
+page = "drums"
+[[actions.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 9
+cc = 106

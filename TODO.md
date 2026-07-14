@@ -193,6 +193,9 @@ assigned, switched, and rendered deterministically from text definitions.
   active page's declared controls in performance-mode telemetry
 - [x] Add page-scoped MIDI control bindings so active page selection can remap
   physical controls without hard-coded LaunchControl policy
+- [x] Add a validating `17-launch-control-xl-ensemble` song skeleton with nine
+  lanes, two scene-authored pages, four placeholder variations per lane, and
+  page-scoped fader controls
 - [ ] Define the script-level lane model for the ensemble: track IDs, lane
   roles, pattern banks, variation IDs, mute/solo behavior, launch quantization,
   and which controls are per-lane versus global

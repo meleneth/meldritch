@@ -167,9 +167,13 @@ as generic pages/strips. Script-declared `select_page` actions can switch the
 active page by page id. Page strips can declare visible control IDs, and
 performance-mode telemetry renders the active page's declared controls. MIDI CC
 control bindings may be scoped to a declared page, so the selected page can
-remap physical controls without hard-coded LaunchControl policy. Build this
-from examples first, then implement only the required multi-track,
-sample-track, poly-synth, pattern-bank, and modifier control support.
+remap physical controls without hard-coded LaunchControl policy.
+`17-launch-control-xl-ensemble` now parses as a skeleton: nine tracks/lanes,
+two scene-authored pages, four placeholder note variations per lane, and
+page-scoped fader controls. The skeleton intentionally uses a placeholder synth
+and shared note patterns until sample-track, poly-synth, and multi-track audio
+support land. Build this from examples first, then implement only the required
+multi-track, sample-track, poly-synth, pattern-bank, and modifier control support.
 Modifier/layer behavior such as “hold button + fader becomes octave pusher”
 must be script-declared, typed, captured, and replayable; do not hard-code
 LaunchControl policy in Rust. LED feedback remains deferred until the ensemble

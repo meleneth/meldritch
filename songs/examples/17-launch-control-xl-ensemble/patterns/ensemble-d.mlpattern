@@ -1,0 +1,34 @@
+[meldritch]
+kind = "pattern"
+version = 1
+
+[pattern]
+id = "ensemble-d"
+type = "notes"
+length = "1 bar"
+resolution = "1/16"
+loop = true
+
+[[events]]
+at = "1:1:480"
+note = "C2"
+duration = "1/16"
+velocity = 0.70
+
+[[events]]
+at = "1:2:240"
+note = "G2"
+duration = "1/16"
+velocity = 0.68
+
+[[events]]
+at = "1:3:240"
+note = "Bb2"
+duration = "1/16"
+velocity = 0.72
+
+[[events]]
+at = "1:4:480"
+note = "C3"
+duration = "1/16"
+velocity = 0.76
