@@ -20,6 +20,7 @@ pub use song::{
     NoteEventDefinition, NotePatternDefinition, ParameterInterpolation, ParameterLaneDefinition,
     ParameterOwner, ParameterPatternDefinition, ParameterPointDefinition,
     ParameterTargetDefinition, PatchInput, PerformanceActionDefinition, PerformanceDefinition,
+    PerformanceLaneDefinition, PerformancePageDefinition, PerformancePageStripDefinition,
     SignalType, SongDiagnostic, SongLoadError, SynthDefinition, TrackDefinition, ValidatedSong,
     load_song_directory,
 };

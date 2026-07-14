@@ -297,6 +297,18 @@ fn launch_control_xl_playground_declares_full_midi_surface_in_scripts() {
     assert_eq!(devices[0].name_contains(), "Launch Control XL");
     let controls = song.performance().controls();
     assert_eq!(controls.len(), 32);
+    let lanes = song.performance().lanes();
+    assert_eq!(lanes.len(), 1);
+    assert_eq!(lanes[0].id(), "playground");
+    assert_eq!(lanes[0].role(), "monophonic_synth");
+    assert_eq!(lanes[0].track_id(), Some("playground"));
+    assert_eq!(lanes[0].variation_ids().len(), 8);
+    let pages = song.performance().pages();
+    assert_eq!(pages.len(), 1);
+    assert_eq!(pages[0].id(), "main");
+    assert_eq!(pages[0].strips().len(), 1);
+    assert_eq!(pages[0].strips()[0].strip(), 1);
+    assert_eq!(pages[0].strips()[0].lane_id(), "playground");
     let actions = song.performance().actions();
     assert_eq!(actions.len(), 24);
     let midi_cc_bindings = controls

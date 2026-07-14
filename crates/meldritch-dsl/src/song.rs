@@ -450,6 +450,8 @@ pub struct PerformanceDefinition {
     sample_rate: u32,
     midi_devices: Vec<MidiDeviceDefinition>,
     tracks: Vec<TrackDefinition>,
+    lanes: Vec<PerformanceLaneDefinition>,
+    pages: Vec<PerformancePageDefinition>,
     controls: Vec<CuratedControlDefinition>,
     actions: Vec<ActionControlDefinition>,
 }
@@ -486,6 +488,16 @@ impl PerformanceDefinition {
     }
 
     #[must_use]
+    pub fn lanes(&self) -> &[PerformanceLaneDefinition] {
+        &self.lanes
+    }
+
+    #[must_use]
+    pub fn pages(&self) -> &[PerformancePageDefinition] {
+        &self.pages
+    }
+
+    #[must_use]
     pub fn controls(&self) -> &[CuratedControlDefinition] {
         &self.controls
     }
@@ -511,6 +523,84 @@ impl MidiDeviceDefinition {
     #[must_use]
     pub fn name_contains(&self) -> &str {
         &self.name_contains
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerformanceLaneDefinition {
+    id: String,
+    label: String,
+    role: String,
+    track_id: Option<String>,
+    variation_ids: Vec<String>,
+}
+
+impl PerformanceLaneDefinition {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    #[must_use]
+    pub fn role(&self) -> &str {
+        &self.role
+    }
+
+    #[must_use]
+    pub fn track_id(&self) -> Option<&str> {
+        self.track_id.as_deref()
+    }
+
+    #[must_use]
+    pub fn variation_ids(&self) -> &[String] {
+        &self.variation_ids
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerformancePageDefinition {
+    id: String,
+    label: String,
+    strips: Vec<PerformancePageStripDefinition>,
+}
+
+impl PerformancePageDefinition {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    #[must_use]
+    pub fn strips(&self) -> &[PerformancePageStripDefinition] {
+        &self.strips
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerformancePageStripDefinition {
+    strip: u8,
+    lane_id: String,
+}
+
+impl PerformancePageStripDefinition {
+    #[must_use]
+    pub const fn strip(&self) -> u8 {
+        self.strip
+    }
+
+    #[must_use]
+    pub fn lane_id(&self) -> &str {
+        &self.lane_id
     }
 }
 
@@ -759,6 +849,10 @@ struct RawPerformanceFile {
     #[serde(default)]
     tracks: Vec<RawTrack>,
     #[serde(default)]
+    lanes: Vec<RawPerformanceLane>,
+    #[serde(default)]
+    pages: Vec<RawPerformancePage>,
+    #[serde(default)]
     controls: Vec<RawControl>,
     #[serde(default)]
     actions: Vec<RawActionControl>,
@@ -789,6 +883,31 @@ struct RawTrack {
 struct RawMidiDevice {
     id: String,
     name_contains: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPerformanceLane {
+    id: String,
+    label: String,
+    role: String,
+    #[serde(default)]
+    track: Option<String>,
+    #[serde(default)]
+    variations: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPerformancePage {
+    id: String,
+    label: String,
+    #[serde(default)]
+    strips: Vec<RawPerformancePageStrip>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPerformancePageStrip {
+    strip: u8,
+    lane: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1198,6 +1317,133 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         });
     }
 
+    let mut lane_ids = BTreeSet::new();
+    let mut lanes = Vec::with_capacity(raw_performance.lanes.len());
+    for raw in raw_performance.lanes {
+        if raw.id.trim().is_empty() {
+            return Err(SongLoadError::one(&entry, "lane id must not be empty"));
+        }
+        if !lane_ids.insert(raw.id.clone()) {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("lane id '{}' is declared more than once", raw.id),
+            ));
+        }
+        if raw.label.trim().is_empty() {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("lane '{}' has an empty label", raw.id),
+            ));
+        }
+        if raw.role.trim().is_empty() {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("lane '{}' has an empty role", raw.id),
+            ));
+        }
+        if let Some(track) = raw.track.as_deref() {
+            if !track_ids.contains(track) {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!("lane '{}' references unknown track '{}'", raw.id, track),
+                ));
+            }
+            let track_definition = tracks
+                .iter()
+                .find(|definition| definition.id() == track)
+                .expect("track id set was built from track definitions");
+            let mut variation_ids = BTreeSet::new();
+            for variation in &raw.variations {
+                if !variation_ids.insert(variation.as_str()) {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!(
+                            "lane '{}' variation '{}' is declared more than once",
+                            raw.id, variation
+                        ),
+                    ));
+                }
+                if !track_definition
+                    .pattern_ids()
+                    .iter()
+                    .any(|id| id == variation)
+                {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!(
+                            "lane '{}' variation '{}' is not among track '{}' patterns",
+                            raw.id, variation, track
+                        ),
+                    ));
+                }
+            }
+        }
+        lanes.push(PerformanceLaneDefinition {
+            id: raw.id,
+            label: raw.label,
+            role: raw.role,
+            track_id: raw.track,
+            variation_ids: raw.variations,
+        });
+    }
+
+    let mut page_ids = BTreeSet::new();
+    let mut pages = Vec::with_capacity(raw_performance.pages.len());
+    for raw in raw_performance.pages {
+        if raw.id.trim().is_empty() {
+            return Err(SongLoadError::one(&entry, "page id must not be empty"));
+        }
+        if !page_ids.insert(raw.id.clone()) {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("page id '{}' is declared more than once", raw.id),
+            ));
+        }
+        if raw.label.trim().is_empty() {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("page '{}' has an empty label", raw.id),
+            ));
+        }
+        let mut strip_ids = BTreeSet::new();
+        let mut strips = Vec::with_capacity(raw.strips.len());
+        for strip in raw.strips {
+            if !(1..=8).contains(&strip.strip) {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!(
+                        "page '{}' strip {} is outside the LaunchControl strip range 1..=8",
+                        raw.id, strip.strip
+                    ),
+                ));
+            }
+            if !strip_ids.insert(strip.strip) {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!(
+                        "page '{}' strip {} is declared more than once",
+                        raw.id, strip.strip
+                    ),
+                ));
+            }
+            if !lane_ids.contains(&strip.lane) {
+                return Err(SongLoadError::one(
+                    &entry,
+                    format!("page '{}' references unknown lane '{}'", raw.id, strip.lane),
+                ));
+            }
+            strips.push(PerformancePageStripDefinition {
+                strip: strip.strip,
+                lane_id: strip.lane,
+            });
+        }
+        pages.push(PerformancePageDefinition {
+            id: raw.id,
+            label: raw.label,
+            strips,
+        });
+    }
+
     let mut control_ids = BTreeSet::new();
     let mut key_bindings = BTreeSet::new();
     let mut midi_cc_claims = BTreeSet::new();
@@ -1531,6 +1777,8 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         sample_rate: raw_performance.performance.sample_rate,
         midi_devices,
         tracks,
+        lanes,
+        pages,
         controls,
         actions,
     };
@@ -2517,6 +2765,23 @@ fn fingerprint_song(
         }
         for dsp in &track.dsp_ids {
             fingerprint.string(dsp);
+        }
+    }
+    for lane in &performance.lanes {
+        fingerprint.string(&lane.id);
+        fingerprint.string(&lane.label);
+        fingerprint.string(&lane.role);
+        fingerprint.optional_string(lane.track_id.as_deref());
+        for variation in &lane.variation_ids {
+            fingerprint.string(variation);
+        }
+    }
+    for page in &performance.pages {
+        fingerprint.string(&page.id);
+        fingerprint.string(&page.label);
+        for strip in &page.strips {
+            fingerprint.u64(u64::from(strip.strip));
+            fingerprint.string(&strip.lane_id);
         }
     }
     for control in &performance.controls {

@@ -28,6 +28,29 @@ patterns = [
 ]
 initial_pattern = "playground-line"
 
+[[lanes]]
+id = "playground"
+label = "Playground Synth"
+role = "monophonic_synth"
+track = "playground"
+variations = [
+  "playground-line",
+  "playground-line-fill",
+  "playground-stab",
+  "playground-stab-fill",
+  "playground-bounce",
+  "playground-bounce-fill",
+  "playground-climb",
+  "playground-climb-fill",
+]
+
+[[pages]]
+id = "main"
+label = "Main"
+[[pages.strips]]
+strip = 1
+lane = "playground"
+
 [[controls]]
 id = "knob-01"
 label = "Strip 01 Resonance"

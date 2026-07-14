@@ -58,10 +58,11 @@ Initial example scene page model:
 - The runtime must not special-case the beat drum, the page names, or which
   lanes appear together; those are scene-authored declarations.
 
-Current implementation status: design only. The existing LaunchControl XL
-playground proves script-authored LaunchControl input, typed actions, live
-rerendered parameters, authored groove variations, default performance mode,
-and continuous audio publication for a single-synth playground. This example
-requires new schema/runtime support for multi-lane songs, sample tracks,
-polyphonic pad rendering, script-declared banking, momentary modifier layers,
-and replayable modifier gestures.
+Current implementation status: design only for this example. The existing
+LaunchControl XL playground proves script-authored LaunchControl input, typed
+actions, live rerendered parameters, authored groove variations, default
+performance mode, and continuous audio publication for a single-synth
+playground. `.mlperformance` can now declare generic lanes and visible pages,
+but this example still requires new schema/runtime support for multi-lane
+songs, sample tracks, polyphonic pad rendering, pattern banks, momentary
+modifier layers, and replayable modifier gestures.
