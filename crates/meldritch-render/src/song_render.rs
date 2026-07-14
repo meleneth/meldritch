@@ -247,6 +247,7 @@ impl CompiledFilteredNotePatch {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompiledNotePatch {
     song_fingerprint: u64,
+    synth_id: String,
     sample_rate: u32,
     channels: u16,
     waveform: Waveform,
@@ -263,6 +264,51 @@ pub struct CompiledMixedNoteSong {
     sample_rate: u32,
     channels: u16,
     tracks: Vec<CompiledNotePatch>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompiledSynthFilterOverride {
+    synth_id: String,
+    module_id: String,
+    cutoff_hz: Option<f64>,
+    resonance: Option<f64>,
+}
+
+impl CompiledSynthFilterOverride {
+    #[must_use]
+    pub fn new(
+        synth_id: impl Into<String>,
+        module_id: impl Into<String>,
+        cutoff_hz: Option<f64>,
+        resonance: Option<f64>,
+    ) -> Self {
+        Self {
+            synth_id: synth_id.into(),
+            module_id: module_id.into(),
+            cutoff_hz,
+            resonance,
+        }
+    }
+
+    #[must_use]
+    pub fn synth_id(&self) -> &str {
+        &self.synth_id
+    }
+
+    #[must_use]
+    pub fn module_id(&self) -> &str {
+        &self.module_id
+    }
+
+    #[must_use]
+    pub const fn cutoff_hz(&self) -> Option<f64> {
+        self.cutoff_hz
+    }
+
+    #[must_use]
+    pub const fn resonance(&self) -> Option<f64> {
+        self.resonance
+    }
 }
 
 impl CompiledMixedNoteSong {
@@ -287,6 +333,14 @@ impl CompiledMixedNoteSong {
     }
 
     pub fn render(&self, range: FrameRange) -> Result<AudioBlock, SongRenderError> {
+        self.render_with_synth_filter_overrides(range, &[])
+    }
+
+    pub fn render_with_synth_filter_overrides(
+        &self,
+        range: FrameRange,
+        overrides: &[CompiledSynthFilterOverride],
+    ) -> Result<AudioBlock, SongRenderError> {
         let frame_count = range.end() - range.start();
         let frames = u32::try_from(frame_count).map_err(|_| SongRenderError::RangeTooLong {
             frames: frame_count,
@@ -297,7 +351,8 @@ impl CompiledMixedNoteSong {
         }
         let gain = 1.0 / (self.tracks.len() as f64).sqrt();
         for track in &self.tracks {
-            let block = track.render(range)?;
+            let (cutoff_hz, resonance) = track.synth_filter_overrides(overrides);
+            let block = track.render_with_filter_overrides(range, cutoff_hz, resonance)?;
             if block.channels() != self.channels || block.frames() != frames {
                 return Err(SongRenderError::IncompatibleTrackRender);
             }
@@ -317,6 +372,24 @@ struct CompiledNoteFilter {
 }
 
 impl CompiledNotePatch {
+    fn synth_filter_overrides(
+        &self,
+        overrides: &[CompiledSynthFilterOverride],
+    ) -> (Option<f64>, Option<f64>) {
+        let Some(filter) = &self.filter else {
+            return (None, None);
+        };
+        overrides
+            .iter()
+            .rev()
+            .find(|override_| {
+                override_.synth_id == self.synth_id && override_.module_id == filter.module_id
+            })
+            .map_or((None, None), |override_| {
+                (override_.cutoff_hz, override_.resonance)
+            })
+    }
+
     #[must_use]
     pub const fn pattern_length(&self) -> u64 {
         self.pattern_length
@@ -680,6 +753,7 @@ fn compile_note_track_for_pattern(
     let waveform = parse_waveform(oscillator.id(), waveform_name)?;
     Ok(CompiledNotePatch {
         song_fingerprint: song.fingerprint(),
+        synth_id: synth.id().to_owned(),
         sample_rate: song.performance().sample_rate(),
         channels: output.channels().unwrap_or(1),
         waveform,

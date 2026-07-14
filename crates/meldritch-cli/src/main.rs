@@ -1769,7 +1769,7 @@ impl CompiledSongPatch {
     fn render(
         &self,
         range: FrameRange,
-        overrides: SongLiveOverrides,
+        overrides: &SongLiveOverrides,
     ) -> Result<meldritch_audio::AudioBlock, meldritch_render::song_render::SongRenderError> {
         match self {
             Self::Delayed(patch) => patch.render_with_extended_overrides(
@@ -1779,7 +1779,10 @@ impl CompiledSongPatch {
                 overrides.resonance,
                 overrides.mix,
             ),
-            Self::Mixed(patch) => patch.render(range),
+            Self::Mixed(patch) => {
+                let synth_filter_overrides = overrides.synth_filter_overrides();
+                patch.render_with_synth_filter_overrides(range, &synth_filter_overrides)
+            }
         }
     }
 
@@ -1787,7 +1790,7 @@ impl CompiledSongPatch {
         &self,
         range: FrameRange,
     ) -> Result<meldritch_audio::AudioBlock, meldritch_render::song_render::SongRenderError> {
-        self.render(range, SongLiveOverrides::default())
+        self.render(range, &SongLiveOverrides::default())
     }
 
     fn feedback(&self) -> Option<f64> {
@@ -1819,12 +1822,43 @@ impl CompiledSongPatch {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct SongLiveOverrides {
     feedback: Option<f64>,
     cutoff_hz: Option<f64>,
     resonance: Option<f64>,
     mix: Option<f64>,
+    synth_filters: BTreeMap<SynthFilterTarget, SongFilterLiveOverrides>,
+}
+
+impl SongLiveOverrides {
+    fn synth_filter_overrides(
+        &self,
+    ) -> Vec<meldritch_render::song_render::CompiledSynthFilterOverride> {
+        self.synth_filters
+            .iter()
+            .map(|(target, overrides)| {
+                meldritch_render::song_render::CompiledSynthFilterOverride::new(
+                    target.synth_id.clone(),
+                    target.module_id.clone(),
+                    overrides.cutoff_hz,
+                    overrides.resonance,
+                )
+            })
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct SynthFilterTarget {
+    synth_id: String,
+    module_id: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct SongFilterLiveOverrides {
+    cutoff_hz: Option<f64>,
+    resonance: Option<f64>,
 }
 
 struct SongRerenderWorker {
@@ -1863,7 +1897,7 @@ impl SongRerenderWorker {
                         .take()
                         .expect("latest request exists after wait")
                 };
-                let Ok(block) = request.patch.render(range, request.overrides) else {
+                let Ok(block) = request.patch.render(range, &request.overrides) else {
                     continue;
                 };
                 if completed_tx
@@ -3034,12 +3068,12 @@ fn decode_midi_diagnostic_message(message: &[u8]) -> Option<MidiDiagnosticMessag
     Some(MidiDiagnosticMessage::Raw(message.to_vec()))
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum LiveSongControlTarget {
     DelayFeedback,
     DelayMix,
-    FilterCutoff,
-    FilterResonance,
+    FilterCutoff(SynthFilterTarget),
+    FilterResonance(SynthFilterTarget),
 }
 
 fn live_song_control_targets(
@@ -3054,10 +3088,16 @@ fn live_song_control_targets(
                 "dsp:echo/delay.feedback" => LiveSongControlTarget::DelayFeedback,
                 "dsp:echo/delay.mix" => LiveSongControlTarget::DelayMix,
                 value if value.ends_with("/filter.cutoff_hz") => {
-                    LiveSongControlTarget::FilterCutoff
+                    LiveSongControlTarget::FilterCutoff(SynthFilterTarget {
+                        synth_id: control.target().definition_id().to_owned(),
+                        module_id: control.target().module_id().to_owned(),
+                    })
                 }
                 value if value.ends_with("/filter.resonance") => {
-                    LiveSongControlTarget::FilterResonance
+                    LiveSongControlTarget::FilterResonance(SynthFilterTarget {
+                        synth_id: control.target().definition_id().to_owned(),
+                        module_id: control.target().module_id().to_owned(),
+                    })
                 }
                 _ => return None,
             };
@@ -3286,9 +3326,10 @@ fn tui_song(
                 *input_active_patch
                     .lock()
                     .expect("song active patch lock poisoned") = patch.clone();
-                let overrides = *input_live_overrides
+                let overrides = input_live_overrides
                     .lock()
-                    .expect("song live override lock poisoned");
+                    .expect("song live override lock poisoned")
+                    .clone();
                 let mut generation = input_generation
                     .lock()
                     .expect("song render generation lock poisoned");
@@ -3305,9 +3346,10 @@ fn tui_song(
                 *input_active_patch
                     .lock()
                     .expect("song active patch lock poisoned") = patch.clone();
-                let overrides = *input_live_overrides
+                let overrides = input_live_overrides
                     .lock()
-                    .expect("song live override lock poisoned");
+                    .expect("song live override lock poisoned")
+                    .clone();
                 let mut generation = input_generation
                     .lock()
                     .expect("song render generation lock poisoned");
@@ -3342,10 +3384,24 @@ fn tui_song(
                 match target {
                     LiveSongControlTarget::DelayFeedback => overrides.feedback = Some(value),
                     LiveSongControlTarget::DelayMix => overrides.mix = Some(value),
-                    LiveSongControlTarget::FilterCutoff => overrides.cutoff_hz = Some(value),
-                    LiveSongControlTarget::FilterResonance => overrides.resonance = Some(value),
+                    LiveSongControlTarget::FilterCutoff(target) => {
+                        overrides.cutoff_hz = Some(value);
+                        overrides
+                            .synth_filters
+                            .entry(target.clone())
+                            .or_default()
+                            .cutoff_hz = Some(value);
+                    }
+                    LiveSongControlTarget::FilterResonance(target) => {
+                        overrides.resonance = Some(value);
+                        overrides
+                            .synth_filters
+                            .entry(target.clone())
+                            .or_default()
+                            .resonance = Some(value);
+                    }
                 }
-                *overrides
+                overrides.clone()
             };
             let mut generation = input_generation
                 .lock()
@@ -7628,6 +7684,25 @@ mod tests {
             meldritch_app::AppInput::ToggleLaneMute("rhythm-drum-a".to_owned())
         );
         assert_eq!(mute.label.as_deref(), Some("Rhythm Drum A Mute"));
+    }
+
+    #[test]
+    fn ensemble_live_controls_target_mixed_synth_filter_overrides() {
+        let song = meldritch_dsl::load_song_directory(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join("songs/examples/17-launch-control-xl-ensemble"),
+        )
+        .expect("LaunchControl XL ensemble example should load");
+
+        let targets = live_song_control_targets(&song);
+        assert_eq!(
+            targets.get("main-fader-01"),
+            Some(&LiveSongControlTarget::FilterCutoff(SynthFilterTarget {
+                synth_id: "ensemble-placeholder".to_owned(),
+                module_id: "filter".to_owned(),
+            }))
+        );
     }
 
     #[test]

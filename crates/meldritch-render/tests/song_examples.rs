@@ -1,7 +1,7 @@
 use meldritch_core::FrameRange;
 use meldritch_dsl::load_song_directory;
 use meldritch_render::song_render::{
-    compile_automated_delayed_note_song, compile_delayed_note_song,
+    CompiledSynthFilterOverride, compile_automated_delayed_note_song, compile_delayed_note_song,
     compile_delayed_note_song_for_pattern, compile_drone_song, compile_filtered_note_song,
     compile_mixed_note_song, compile_mixed_note_song_with_lane_variation, compile_note_song,
 };
@@ -339,6 +339,28 @@ fn launch_control_ensemble_lane_variation_changes_one_track_in_the_mix() {
     assert_eq!(varied.track_count(), 9);
     assert_ne!(initial_block.samples(), varied_block.samples());
     assert!(varied_block.peak_abs() > 0.01);
+}
+
+#[test]
+fn launch_control_ensemble_mixed_filter_override_changes_the_mix() {
+    let song = load_song_directory(example("17-launch-control-xl-ensemble"))
+        .expect("LaunchControl XL ensemble song should load");
+    let patch = compile_mixed_note_song(&song).expect("ensemble mix should compile");
+    let normal = patch.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+    let filtered = patch
+        .render_with_synth_filter_overrides(
+            FrameRange::new(0, 96_000).unwrap(),
+            &[CompiledSynthFilterOverride::new(
+                "ensemble-placeholder",
+                "filter",
+                Some(100.0),
+                None,
+            )],
+        )
+        .unwrap();
+
+    assert_ne!(normal.samples(), filtered.samples());
+    assert!(filtered.samples().iter().all(|sample| sample.is_finite()));
 }
 
 #[test]

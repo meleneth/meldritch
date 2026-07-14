@@ -75,13 +75,16 @@ variation and pattern-bank selection now rerender the current song audio
 through the song rerender worker. Single-track songs keep the legacy
 delayed-note patch path with live override support; this multi-track ensemble
 uses a compiled mixed-note patch, and lane variation selection changes one
-track's selected placeholder pattern inside that mixed audio. The existing
+track's selected placeholder pattern inside that mixed audio. Mixed-note
+rendering accepts script-targeted synth filter overrides, so `tui-song`
+controls can change audio for mixed patches. The current ensemble script still
+points those controls at the same placeholder synth/filter; distinct
+per-lane/per-instrument synth targets remain to be authored. The existing
 LaunchControl XL playground proves script-authored LaunchControl input, typed
 actions, live rerendered parameters, authored groove variations, default
 performance mode, and continuous audio publication for a single-synth
 playground. This ensemble skeleton intentionally uses a placeholder synth and
 shared note patterns until this example gains real multi-lane songs, audio
 sample decoding/rendering, per-pattern sample triggering, full pattern-bank
-runtime semantics, audio-affecting mute/solo behavior, live parameter routing
-into mixed multi-track patches, polyphonic pad rendering, momentary modifier
-layers, and replayable modifier gestures.
+runtime semantics, audio-affecting mute/solo behavior, polyphonic pad
+rendering, momentary modifier layers, and replayable modifier gestures.

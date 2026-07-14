@@ -187,14 +187,18 @@ currently selected song audio through the song rerender worker. Single-track
 songs keep the delayed-note patch path with live override support; multi-track
 placeholder songs use a compiled mixed-note patch. It also parses
 `.mlsamples` sample-bank metadata and attaches the three sample lanes to a Raven
-voice placeholder bank. Audio sample decoding, sample triggering, sample
-rendering, audio-affecting mute/solo behavior, live parameter routing into mixed
-multi-track patches, and real pattern-bank runtime semantics beyond choosing a
-lane variation are not implemented yet. The skeleton intentionally uses a
-placeholder synth and shared note patterns until sample-track playback,
-poly-synth, and full multi-track audio support land. Build this from examples
-first, then implement only the required multi-track, sample-track playback,
-poly-synth, pattern-bank runtime, and modifier control support.
+voice placeholder bank. Mixed-note rendering accepts script-targeted synth
+filter overrides, so `tui-song` controls can change audio for mixed patches.
+The current ensemble script still points those controls at the same placeholder
+synth/filter; author distinct synth/filter targets before treating the faders as
+true per-lane instrument controls. Audio sample decoding, sample triggering,
+sample rendering, audio-affecting mute/solo behavior, and real pattern-bank
+runtime semantics beyond choosing a lane variation are not implemented yet. The
+skeleton intentionally uses a placeholder synth and shared note patterns until
+sample-track playback, poly-synth, and full multi-track audio support land.
+Build this from examples first, then implement only the required multi-track,
+sample-track playback, poly-synth, pattern-bank runtime, and modifier control
+support.
 Modifier/layer behavior such as “hold button + fader becomes octave pusher”
 must be script-declared, typed, captured, and replayable; do not hard-code
 LaunchControl policy in Rust. LED feedback remains deferred until the ensemble
