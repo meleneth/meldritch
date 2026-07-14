@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SignalType {
@@ -225,6 +225,8 @@ pub struct TrackDefinition {
     id: String,
     synth_path: PathBuf,
     synth_id: String,
+    sample_bank_path: Option<PathBuf>,
+    sample_bank_id: Option<String>,
     pattern_ids: Vec<String>,
     initial_pattern: Option<String>,
     parameter_pattern_ids: Vec<String>,
@@ -245,6 +247,16 @@ impl TrackDefinition {
     #[must_use]
     pub fn synth_id(&self) -> &str {
         &self.synth_id
+    }
+
+    #[must_use]
+    pub fn sample_bank_path(&self) -> Option<&Path> {
+        self.sample_bank_path.as_deref()
+    }
+
+    #[must_use]
+    pub fn sample_bank_id(&self) -> Option<&str> {
+        self.sample_bank_id.as_deref()
     }
 
     #[must_use]
@@ -732,11 +744,108 @@ pub enum PerformanceActionDefinition {
     CancelPerformance,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SamplePlaybackMode {
+    OneShot,
+    Loop,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SampleSliceDefinition {
+    id: String,
+    start: String,
+    end: String,
+}
+
+impl SampleSliceDefinition {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn start(&self) -> &str {
+        &self.start
+    }
+
+    #[must_use]
+    pub fn end(&self) -> &str {
+        &self.end
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SampleSlotDefinition {
+    id: String,
+    label: String,
+    path: PathBuf,
+    mode: SamplePlaybackMode,
+    level: f64,
+    pitch_semitones: f64,
+    slices: Vec<SampleSliceDefinition>,
+}
+
+impl SampleSlotDefinition {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    #[must_use]
+    pub const fn mode(&self) -> SamplePlaybackMode {
+        self.mode
+    }
+
+    #[must_use]
+    pub const fn level(&self) -> f64 {
+        self.level
+    }
+
+    #[must_use]
+    pub const fn pitch_semitones(&self) -> f64 {
+        self.pitch_semitones
+    }
+
+    #[must_use]
+    pub fn slices(&self) -> &[SampleSliceDefinition] {
+        &self.slices
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SampleBankDefinition {
+    id: String,
+    slots: Vec<SampleSlotDefinition>,
+}
+
+impl SampleBankDefinition {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn slots(&self) -> &[SampleSlotDefinition] {
+        &self.slots
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ValidatedSong {
     root: PathBuf,
     performance: PerformanceDefinition,
     synths: BTreeMap<String, SynthDefinition>,
+    sample_banks: BTreeMap<String, SampleBankDefinition>,
     note_patterns: BTreeMap<String, NotePatternDefinition>,
     parameter_patterns: BTreeMap<String, ParameterPatternDefinition>,
     dsps: BTreeMap<String, DspDefinition>,
@@ -757,6 +866,11 @@ impl ValidatedSong {
     #[must_use]
     pub fn synths(&self) -> &BTreeMap<String, SynthDefinition> {
         &self.synths
+    }
+
+    #[must_use]
+    pub fn sample_banks(&self) -> &BTreeMap<String, SampleBankDefinition> {
+        &self.sample_banks
     }
 
     #[must_use]
@@ -878,6 +992,7 @@ struct RawPerformance {
 struct RawTrack {
     id: String,
     synth: PathBuf,
+    sample_bank: Option<PathBuf>,
     #[serde(default)]
     patterns: Vec<PathBuf>,
     initial_pattern: Option<String>,
@@ -1082,6 +1197,38 @@ struct RawDsp {
 }
 
 #[derive(Debug, Deserialize)]
+struct RawSampleBankFile {
+    meldritch: RawHeader,
+    samples: RawSampleBank,
+    #[serde(default)]
+    slots: Vec<RawSampleSlot>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSampleBank {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSampleSlot {
+    id: String,
+    label: String,
+    path: PathBuf,
+    mode: String,
+    level: f64,
+    pitch_semitones: f64,
+    #[serde(default)]
+    slices: Vec<RawSampleSlice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSampleSlice {
+    id: String,
+    start: String,
+    end: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct RawPatternFile {
     meldritch: RawHeader,
     pattern: RawPatternMeta,
@@ -1173,6 +1320,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
     let mut track_ids = BTreeSet::new();
     let mut tracks = Vec::with_capacity(raw_performance.tracks.len());
     let mut synths = BTreeMap::new();
+    let mut sample_banks = BTreeMap::new();
     let mut note_patterns = BTreeMap::new();
     let mut parameter_patterns = BTreeMap::new();
     let mut dsps = BTreeMap::new();
@@ -1198,6 +1346,33 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         } else {
             synths.insert(synth.id.clone(), synth.clone());
         }
+        let (sample_bank_path, sample_bank_id) = if let Some(reference) = &raw_track.sample_bank {
+            let path = resolve_song_reference(&root, &entry, reference)?;
+            let bank = load_sample_bank(&path)?;
+            if let Some(existing) = sample_banks.get(bank.id()) {
+                if existing != &bank {
+                    return Err(SongLoadError::one(
+                        &path,
+                        format!(
+                            "sample bank id '{}' resolves to different definitions",
+                            bank.id()
+                        ),
+                    ));
+                }
+            } else {
+                sample_banks.insert(bank.id().to_owned(), bank.clone());
+            }
+            (
+                Some(
+                    path.strip_prefix(&root)
+                        .expect("resolved song reference stays inside root")
+                        .to_path_buf(),
+                ),
+                Some(bank.id().to_owned()),
+            )
+        } else {
+            (None, None)
+        };
         let mut track_dsps = BTreeMap::new();
         let mut dsp_ids = Vec::with_capacity(raw_track.dsp.len());
         for reference in &raw_track.dsp {
@@ -1304,6 +1479,8 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                 .expect("resolved song reference stays inside root")
                 .to_path_buf(),
             synth_id: synth.id,
+            sample_bank_path,
+            sample_bank_id,
             pattern_ids,
             initial_pattern: raw_track.initial_pattern,
             parameter_pattern_ids: raw_track.parameter_patterns,
@@ -1882,11 +2059,13 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         &note_patterns,
         &parameter_patterns,
         &dsps,
+        &sample_banks,
     );
     Ok(ValidatedSong {
         root,
         performance,
         synths,
+        sample_banks,
         note_patterns,
         parameter_patterns,
         dsps,
@@ -2209,6 +2388,117 @@ fn load_dsp(path: &Path) -> Result<DspDefinition, SongLoadError> {
         inputs,
         modules,
         cables,
+    })
+}
+
+fn load_sample_bank(path: &Path) -> Result<SampleBankDefinition, SongLoadError> {
+    let raw: RawSampleBankFile = read_toml(path)?;
+    validate_header(path, &raw.meldritch, "samples")?;
+    if raw.samples.id.trim().is_empty() {
+        return Err(SongLoadError::one(path, "samples.id must not be empty"));
+    }
+    let mut slot_ids = BTreeSet::new();
+    let mut slots = Vec::with_capacity(raw.slots.len());
+    for raw_slot in raw.slots {
+        if raw_slot.id.trim().is_empty() {
+            return Err(SongLoadError::one(path, "sample slot id must not be empty"));
+        }
+        if !slot_ids.insert(raw_slot.id.clone()) {
+            return Err(SongLoadError::one(
+                path,
+                format!(
+                    "sample slot id '{}' is declared more than once",
+                    raw_slot.id
+                ),
+            ));
+        }
+        if raw_slot.label.trim().is_empty() {
+            return Err(SongLoadError::one(
+                path,
+                format!("sample slot '{}' has an empty label", raw_slot.id),
+            ));
+        }
+        validate_relative_asset_path(path, &raw_slot.path)?;
+        let mode = match raw_slot.mode.as_str() {
+            "one_shot" => SamplePlaybackMode::OneShot,
+            "loop" => SamplePlaybackMode::Loop,
+            unknown => {
+                return Err(SongLoadError::one(
+                    path,
+                    format!(
+                        "sample slot '{}' has unsupported mode '{unknown}'",
+                        raw_slot.id
+                    ),
+                ));
+            }
+        };
+        if !raw_slot.level.is_finite() || raw_slot.level < 0.0 {
+            return Err(SongLoadError::one(
+                path,
+                format!("sample slot '{}' has invalid level", raw_slot.id),
+            ));
+        }
+        if !raw_slot.pitch_semitones.is_finite() {
+            return Err(SongLoadError::one(
+                path,
+                format!("sample slot '{}' has invalid pitch_semitones", raw_slot.id),
+            ));
+        }
+        let mut slice_ids = BTreeSet::new();
+        let mut slices = Vec::with_capacity(raw_slot.slices.len());
+        for raw_slice in raw_slot.slices {
+            if raw_slice.id.trim().is_empty() {
+                return Err(SongLoadError::one(
+                    path,
+                    format!("sample slot '{}' has an empty slice id", raw_slot.id),
+                ));
+            }
+            if !slice_ids.insert(raw_slice.id.clone()) {
+                return Err(SongLoadError::one(
+                    path,
+                    format!(
+                        "sample slot '{}' slice id '{}' is declared more than once",
+                        raw_slot.id, raw_slice.id
+                    ),
+                ));
+            }
+            if raw_slice.start.trim().is_empty() || raw_slice.end.trim().is_empty() {
+                return Err(SongLoadError::one(
+                    path,
+                    format!(
+                        "sample slot '{}' slice '{}' has empty bounds",
+                        raw_slot.id, raw_slice.id
+                    ),
+                ));
+            }
+            slices.push(SampleSliceDefinition {
+                id: raw_slice.id,
+                start: raw_slice.start,
+                end: raw_slice.end,
+            });
+        }
+        slots.push(SampleSlotDefinition {
+            id: raw_slot.id,
+            label: raw_slot.label,
+            path: raw_slot.path,
+            mode,
+            level: raw_slot.level,
+            pitch_semitones: raw_slot.pitch_semitones,
+            slices,
+        });
+    }
+    if slots.is_empty() {
+        return Err(SongLoadError::one(
+            path,
+            format!(
+                "sample bank '{}' must declare at least one slot",
+                raw.samples.id
+            ),
+        ));
+    }
+    Ok(SampleBankDefinition {
+        id: raw.samples.id,
+        slots,
     })
 }
 
@@ -2829,12 +3119,39 @@ fn resolve_song_reference(
     Ok(resolved)
 }
 
+fn validate_relative_asset_path(referring_file: &Path, path: &Path) -> Result<(), SongLoadError> {
+    if path.is_absolute() {
+        return Err(SongLoadError::one(
+            referring_file,
+            format!("absolute asset path '{}' is not allowed", path.display()),
+        ));
+    }
+    if path.as_os_str().is_empty()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(SongLoadError::one(
+            referring_file,
+            format!(
+                "asset path '{}' must stay inside the song tree",
+                path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn fingerprint_song(
     performance: &PerformanceDefinition,
     synths: &BTreeMap<String, SynthDefinition>,
     note_patterns: &BTreeMap<String, NotePatternDefinition>,
     parameter_patterns: &BTreeMap<String, ParameterPatternDefinition>,
     dsps: &BTreeMap<String, DspDefinition>,
+    sample_banks: &BTreeMap<String, SampleBankDefinition>,
 ) -> u64 {
     let mut fingerprint = Fnv64::new();
     fingerprint.string("meldritch-song-v1");
@@ -2850,6 +3167,12 @@ fn fingerprint_song(
         fingerprint.string(&track.id);
         fingerprint.string(&track.synth_path.to_string_lossy());
         fingerprint.string(&track.synth_id);
+        if let Some(sample_bank_path) = &track.sample_bank_path {
+            fingerprint.string(&sample_bank_path.to_string_lossy());
+        } else {
+            fingerprint.string("");
+        }
+        fingerprint.optional_string(track.sample_bank_id.as_deref());
         for pattern in &track.pattern_ids {
             fingerprint.string(pattern);
         }
@@ -3015,6 +3338,22 @@ fn fingerprint_song(
             fingerprint.string(&cable.from);
             fingerprint.string(&cable.to);
             fingerprint.u64(cable.signal as u64);
+        }
+    }
+    for bank in sample_banks.values() {
+        fingerprint.string(&bank.id);
+        for slot in &bank.slots {
+            fingerprint.string(&slot.id);
+            fingerprint.string(&slot.label);
+            fingerprint.string(&slot.path.to_string_lossy());
+            fingerprint.u64(slot.mode as u64);
+            fingerprint.u64(slot.level.to_bits());
+            fingerprint.u64(slot.pitch_semitones.to_bits());
+            for slice in &slot.slices {
+                fingerprint.string(&slice.id);
+                fingerprint.string(&slice.start);
+                fingerprint.string(&slice.end);
+            }
         }
     }
     for pattern in note_patterns.values() {

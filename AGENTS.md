@@ -12,6 +12,8 @@ Songs are directories of human-readable TOML files that reference each other:
 - `.mlsynth` — modular synth patch graphs
 - `.mldsp` — modular DSP patch graphs
 - `.mlpattern` — note/event or parameter patterns
+- `.mlsamples` — sample-bank metadata: slots, relative asset paths, playback
+  modes, levels, pitch offsets, and named slices
 - `.mlperformance` — song assembly, curated controls, and recorded sessions
 
 An authored song entry point is `main.mlperformance`. Timestamped captured
@@ -170,10 +172,14 @@ control bindings may be scoped to a declared page, so the selected page can
 remap physical controls without hard-coded LaunchControl policy.
 `17-launch-control-xl-ensemble` now parses as a skeleton: nine tracks/lanes,
 two scene-authored pages, four placeholder note variations per lane, and
-page-scoped fader controls. The skeleton intentionally uses a placeholder synth
-and shared note patterns until sample-track, poly-synth, and multi-track audio
-support land. Build this from examples first, then implement only the required
-multi-track, sample-track, poly-synth, pattern-bank, and modifier control support.
+page-scoped fader controls. It also parses `.mlsamples` sample-bank metadata
+and attaches the three sample lanes to a Raven voice placeholder bank. Audio
+sample decoding, sample triggering, and sample rendering are not implemented
+yet. The skeleton intentionally uses a placeholder synth and shared note
+patterns until sample-track playback, poly-synth, and multi-track audio support
+land. Build this from examples first, then implement only the required
+multi-track, sample-track playback, poly-synth, pattern-bank, and modifier
+control support.
 Modifier/layer behavior such as “hold button + fader becomes octave pusher”
 must be script-declared, typed, captured, and replayable; do not hard-code
 LaunchControl policy in Rust. LED feedback remains deferred until the ensemble

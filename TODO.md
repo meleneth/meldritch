@@ -196,6 +196,8 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Add a validating `17-launch-control-xl-ensemble` song skeleton with nine
   lanes, two scene-authored pages, four placeholder variations per lane, and
   page-scoped fader controls
+- [x] Add `.mlsamples` sample-bank metadata parsing and attach the ensemble
+  sample lanes to a Raven voice placeholder bank
 - [ ] Define the script-level lane model for the ensemble: track IDs, lane
   roles, pattern banks, variation IDs, mute/solo behavior, launch quantization,
   and which controls are per-lane versus global
@@ -210,7 +212,7 @@ assigned, switched, and rendered deterministically from text definitions.
 - [ ] Add multi-track song compilation/playback for the subset needed by the
   ensemble example: drums/percussion first, then basses, then poly pad, then
   samples
-- [ ] Add sample-track format support for text-authored sample references,
+- [ ] Add sample-track playback support for text-authored sample references,
   sample slots, one-shots/loops, start/end slices, level, pitch, and per-pattern
   triggering
 - [ ] Add a polyphonic synth path for chord/pad note patterns in `.mlsynth`

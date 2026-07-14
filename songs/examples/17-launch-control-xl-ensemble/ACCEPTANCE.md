@@ -60,11 +60,13 @@ Initial example scene page model:
 
 Current implementation status: parse. This directory now contains a validating
 song skeleton with nine declared tracks/lanes, two scene-authored pages, four
-placeholder note variations per lane, page-visible controls, and page-scoped
-MIDI fader bindings. The existing LaunchControl XL playground proves
-script-authored LaunchControl input, typed actions, live rerendered parameters,
-authored groove variations, default performance mode, and continuous audio
-publication for a single-synth playground. This ensemble skeleton intentionally
-uses a placeholder synth and shared note patterns until this example gains real
-multi-lane songs, sample tracks, polyphonic pad rendering, pattern banks,
+placeholder note variations per lane, page-visible controls, page-scoped MIDI
+fader bindings, and a `.mlsamples` Raven voice sample-bank metadata file
+attached to the three sample lanes. The existing LaunchControl XL playground
+proves script-authored LaunchControl input, typed actions, live rerendered
+parameters, authored groove variations, default performance mode, and
+continuous audio publication for a single-synth playground. This ensemble
+skeleton intentionally uses a placeholder synth and shared note patterns until
+this example gains real multi-lane songs, audio sample decoding/rendering,
+per-pattern sample triggering, polyphonic pad rendering, pattern banks,
 momentary modifier layers, and replayable modifier gestures.

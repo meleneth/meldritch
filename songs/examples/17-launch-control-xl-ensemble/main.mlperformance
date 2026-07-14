@@ -51,18 +51,21 @@ initial_pattern = "ensemble-b"
 [[tracks]]
 id = "sample-a"
 synth = "synths/ensemble-placeholder.mlsynth"
+sample_bank = "samples/raven-voice.mlsamples"
 patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
 initial_pattern = "ensemble-d"
 
 [[tracks]]
 id = "sample-b"
 synth = "synths/ensemble-placeholder.mlsynth"
+sample_bank = "samples/raven-voice.mlsamples"
 patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
 initial_pattern = "ensemble-b"
 
 [[tracks]]
 id = "sample-c"
 synth = "synths/ensemble-placeholder.mlsynth"
+sample_bank = "samples/raven-voice.mlsamples"
 patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
 initial_pattern = "ensemble-c"
 

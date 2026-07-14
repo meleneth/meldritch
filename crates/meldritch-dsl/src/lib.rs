@@ -21,6 +21,7 @@ pub use song::{
     ParameterOwner, ParameterPatternDefinition, ParameterPointDefinition,
     ParameterTargetDefinition, PatchInput, PerformanceActionDefinition, PerformanceDefinition,
     PerformanceLaneDefinition, PerformancePageDefinition, PerformancePageStripDefinition,
+    SampleBankDefinition, SamplePlaybackMode, SampleSliceDefinition, SampleSlotDefinition,
     SignalType, SongDiagnostic, SongLoadError, SynthDefinition, TrackDefinition, ValidatedSong,
     load_song_directory,
 };

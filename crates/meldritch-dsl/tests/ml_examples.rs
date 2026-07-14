@@ -2,7 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use meldritch_dsl::{
-    ModuleKind, ParameterInterpolation, ParameterOwner, SignalType, load_song_directory,
+    ModuleKind, ParameterInterpolation, ParameterOwner, SamplePlaybackMode, SignalType,
+    load_song_directory,
 };
 
 fn examples_root() -> PathBuf {
@@ -26,7 +27,7 @@ fn collect_ml_files(directory: &Path, output: &mut Vec<PathBuf>) {
             collect_ml_files(&path, output);
         } else if matches!(
             path.extension().and_then(|extension| extension.to_str()),
-            Some("mlsynth" | "mldsp" | "mlpattern" | "mlperformance")
+            Some("mlsynth" | "mldsp" | "mlpattern" | "mlperformance" | "mlsamples")
         ) {
             output.push(path);
         }
@@ -66,6 +67,7 @@ fn every_example_file_is_versioned_toml_with_matching_kind() {
             Some("mldsp") => "dsp",
             Some("mlpattern") => "pattern",
             Some("mlperformance") => "performance",
+            Some("mlsamples") => "samples",
             _ => unreachable!(),
         };
         assert_eq!(
@@ -117,6 +119,9 @@ fn performance_references_resolve_inside_their_song_root() {
                         })
                     }));
                 }
+            }
+            if let Some(reference) = track.get("sample_bank").and_then(toml::Value::as_str) {
+                references.push(reference);
             }
 
             for reference in references {
@@ -348,6 +353,26 @@ fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
     assert_eq!(song.performance().tracks().len(), 9);
     assert_eq!(song.performance().lanes().len(), 9);
     assert_eq!(song.performance().pages().len(), 2);
+    assert_eq!(song.sample_banks().len(), 1);
+
+    let tracks = song
+        .performance()
+        .tracks()
+        .iter()
+        .map(|track| (track.id(), track))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for id in ["sample-a", "sample-b", "sample-c"] {
+        assert_eq!(tracks[id].sample_bank_id(), Some("raven-voice"));
+        assert_eq!(
+            tracks[id].sample_bank_path().map(Path::to_path_buf),
+            Some(PathBuf::from("samples/raven-voice.mlsamples"))
+        );
+    }
+    let bank = &song.sample_banks()["raven-voice"];
+    assert_eq!(bank.slots().len(), 1);
+    assert_eq!(bank.slots()[0].id(), "raven-voice");
+    assert_eq!(bank.slots()[0].mode(), SamplePlaybackMode::OneShot);
+    assert_eq!(bank.slots()[0].slices().len(), 4);
 
     let lanes = song
         .performance()

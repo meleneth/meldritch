@@ -1725,10 +1725,11 @@ fn summarize_project_json(path: PathBuf) -> Result<(), String> {
 fn validate_song(path: PathBuf) -> Result<(), String> {
     let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
     println!(
-        "valid song '{}' · {} track(s) · {} synth(s) · {} DSP graph(s) · {} note pattern(s) · {} parameter pattern(s) · fingerprint {:016x}",
+        "valid song '{}' · {} track(s) · {} synth(s) · {} sample bank(s) · {} DSP graph(s) · {} note pattern(s) · {} parameter pattern(s) · fingerprint {:016x}",
         song.performance().title(),
         song.performance().tracks().len(),
         song.synths().len(),
+        song.sample_banks().len(),
         song.dsps().len(),
         song.note_patterns().len(),
         song.parameter_patterns().len(),
