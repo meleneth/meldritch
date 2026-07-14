@@ -397,6 +397,7 @@ step = 50.0
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
+page = "main"
 channel = 9
 cc = 77
 action = "overdrive"

@@ -165,9 +165,10 @@ playback. Generic `.mlperformance` lane/page declarations are parsed and
 validated, loaded into app view state, and rendered by the performance-mode TUI
 as generic pages/strips. Script-declared `select_page` actions can switch the
 active page by page id. Page strips can declare visible control IDs, and
-performance-mode telemetry renders the active page's declared controls. Runtime
-use of the selected page for MIDI/control rebinding is not implemented yet.
-Build this from examples first, then implement only the required multi-track,
+performance-mode telemetry renders the active page's declared controls. MIDI CC
+control bindings may be scoped to a declared page, so the selected page can
+remap physical controls without hard-coded LaunchControl policy. Build this
+from examples first, then implement only the required multi-track,
 sample-track, poly-synth, pattern-bank, and modifier control support.
 Modifier/layer behavior such as “hold button + fader becomes octave pusher”
 must be script-declared, typed, captured, and replayable; do not hard-code

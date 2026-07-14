@@ -191,6 +191,8 @@ assigned, switched, and rendered deterministically from text definitions.
   performance pages by page id
 - [x] Add script-declared per-strip visible control lists and render only the
   active page's declared controls in performance-mode telemetry
+- [x] Add page-scoped MIDI control bindings so active page selection can remap
+  physical controls without hard-coded LaunchControl policy
 - [ ] Define the script-level lane model for the ensemble: track IDs, lane
   roles, pattern banks, variation IDs, mute/solo behavior, launch quantization,
   and which controls are per-lane versus global

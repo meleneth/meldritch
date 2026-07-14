@@ -2483,6 +2483,7 @@ fn connect_midi_control_input(
     sender: mpsc::Sender<meldritch_tui::ExternalInputEvent>,
     bindings: Vec<meldritch_app::MidiControlBinding>,
     action_bindings: Vec<MidiActionBinding>,
+    active_page: Arc<Mutex<Option<String>>>,
     debug: bool,
 ) -> Result<Option<MidiControlInputConnection>, String> {
     let mut midi_input = midir::MidiInput::new(&format!("meldritch-midi-{}", device.id()))
@@ -2505,8 +2506,17 @@ fn connect_midi_control_input(
             &port,
             &format!("meldritch-midi-{}-input", device.id()),
             move |_timestamp, message, _state| {
-                let input =
-                    decode_script_midi_input(message, &device_id, &bindings, &action_bindings);
+                let page = active_page
+                    .lock()
+                    .expect("active page lock poisoned")
+                    .clone();
+                let input = decode_script_midi_input(
+                    message,
+                    &device_id,
+                    &bindings,
+                    &action_bindings,
+                    page.as_deref(),
+                );
                 let Some(input) = input else {
                     if debug {
                         let diagnostic = decode_midi_diagnostic_message(message).map_or_else(
@@ -2576,6 +2586,7 @@ fn connect_midi_control_diagnostic(
                                 cc,
                                 value,
                             },
+                            None,
                         );
                         (
                             MidiDiagnosticMessage::ControlChange { channel, cc, value },
@@ -2643,6 +2654,7 @@ fn midi_control_bindings_for_song(
             control.bindings().iter().filter_map(|binding| {
                 let meldritch_dsl::ControlBindingDefinition::MidiCc {
                     device,
+                    page,
                     channel,
                     cc,
                     action,
@@ -2674,6 +2686,7 @@ fn midi_control_bindings_for_song(
                 Some(meldritch_app::MidiControlBinding {
                     control_id: control.id().to_owned(),
                     device: device.clone(),
+                    page_id: page.clone(),
                     channel: *channel,
                     cc: *cc,
                     minimum: control.range().0,
@@ -2710,6 +2723,7 @@ fn midi_action_bindings_for_song(song: &meldritch_dsl::ValidatedSong) -> Vec<Mid
                 .filter_map(move |binding| match binding {
                     meldritch_dsl::ControlBindingDefinition::MidiCc {
                         device,
+                        page: _,
                         channel,
                         cc,
                         ..
@@ -2794,6 +2808,7 @@ fn decode_script_midi_input(
     device: &str,
     control_bindings: &[meldritch_app::MidiControlBinding],
     action_bindings: &[MidiActionBinding],
+    active_page: Option<&str>,
 ) -> Option<MappedMidiInput> {
     if let Some((channel, cc, value)) = decode_midi_cc_message(message) {
         return map_script_midi_control_change(
@@ -2805,6 +2820,7 @@ fn decode_script_midi_input(
                 cc,
                 value,
             },
+            active_page,
         );
     }
     let (channel, note, _velocity, on) = decode_midi_note_message(message)?;
@@ -2815,8 +2831,9 @@ fn map_script_midi_control_change(
     control_bindings: &[meldritch_app::MidiControlBinding],
     action_bindings: &[MidiActionBinding],
     input: meldritch_app::MidiControlInput,
+    active_page: Option<&str>,
 ) -> Option<MappedMidiInput> {
-    meldritch_app::map_midi_control_input(control_bindings, input.clone())
+    meldritch_app::map_midi_control_input_for_page(control_bindings, input.clone(), active_page)
         .map(|input| MappedMidiInput { input, label: None })
         .or_else(|| {
             if input.value == 0 {
@@ -3039,6 +3056,7 @@ fn tui_song(
     let (external_input_sender, external_input_receiver) = mpsc::channel();
     let midi_control_bindings = midi_control_bindings_for_song(&song);
     let midi_action_bindings = midi_action_bindings_for_song(&song);
+    let midi_active_page = Arc::new(Mutex::new(active_page_id(&controller.view_model())));
     let _midi_inputs = if midi_controls {
         let mut connections = Vec::new();
         for device in song.performance().midi_devices() {
@@ -3053,6 +3071,7 @@ fn tui_song(
                 external_input_sender.clone(),
                 bindings,
                 action_bindings,
+                Arc::clone(&midi_active_page),
                 midi_debug,
             )? {
                 Some(connection) => connections.push(connection),
@@ -3101,6 +3120,7 @@ fn tui_song(
         frame_count,
     )?));
     let input_capture = Arc::clone(&capture);
+    let input_midi_active_page = Arc::clone(&midi_active_page);
     let run_result = meldritch_tui::run_with_hooks_and_external_inputs(
         &mut controller,
         Step::new(36),
@@ -3144,6 +3164,14 @@ fn tui_song(
                 .record(controller, input, result, frame_count, tempo)
             {
                 eprintln!("session capture failed: {error}");
+            }
+            if matches!(
+                result,
+                meldritch_app::AppCommandResult::PerformancePageSelected { .. }
+            ) {
+                *input_midi_active_page
+                    .lock()
+                    .expect("active page lock poisoned") = active_page_id(&controller.view_model());
             }
             if let Some((scene, variation)) = song_scene_selection(input, result)
                 && let Some(patch) = scene_patches.get(&(scene, variation)).cloned()
@@ -3296,6 +3324,15 @@ fn song_performance_pages_for_view(
                 .collect(),
         })
         .collect()
+}
+
+fn active_page_id(view: &meldritch_app::AppViewModel) -> Option<String> {
+    let index = view.performance.active_page.unwrap_or(0);
+    view.performance
+        .pages
+        .get(index)
+        .or_else(|| view.performance.pages.first())
+        .map(|page| page.id.clone())
 }
 
 fn publish_song_audio(
@@ -7220,6 +7257,7 @@ mod tests {
                     cc: 13,
                     value: 64,
                 },
+                None,
             )
             .map(|mapped| mapped.input),
             Some(meldritch_app::AppInput::SetCuratedControlNormalized {
@@ -7237,6 +7275,7 @@ mod tests {
                     cc: 49,
                     value: 64,
                 },
+                None,
             )
             .map(|mapped| mapped.input),
             Some(meldritch_app::AppInput::SetCuratedControlNormalized {
@@ -7272,6 +7311,7 @@ mod tests {
                 cc: 106,
                 value: 127,
             },
+            None,
         )
         .expect("page select CC should map");
         assert_eq!(
@@ -7281,6 +7321,38 @@ mod tests {
         assert_eq!(
             page_cc.label.as_deref(),
             Some("Track Select Prev Main Page")
+        );
+        assert_eq!(
+            map_script_midi_control_change(
+                &control_bindings,
+                &action_bindings,
+                meldritch_app::MidiControlInput {
+                    device: "launch-control-xl".to_owned(),
+                    channel: 9,
+                    cc: 77,
+                    value: 108,
+                },
+                None,
+            ),
+            None
+        );
+        assert_eq!(
+            map_script_midi_control_change(
+                &control_bindings,
+                &action_bindings,
+                meldritch_app::MidiControlInput {
+                    device: "launch-control-xl".to_owned(),
+                    channel: 9,
+                    cc: 77,
+                    value: 108,
+                },
+                Some("main"),
+            )
+            .map(|mapped| mapped.input),
+            Some(meldritch_app::AppInput::SetCuratedControlNormalized {
+                id: "fader-01".to_owned(),
+                value: (4350.0 - 100.0) / (5000.0 - 100.0),
+            })
         );
     }
 

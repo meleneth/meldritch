@@ -675,6 +675,7 @@ pub enum ControlBindingDefinition {
     },
     MidiCc {
         device: String,
+        page: Option<String>,
         channel: Option<u8>,
         cc: u8,
         action: ControlBindingAction,
@@ -940,6 +941,8 @@ enum RawControlBinding {
     },
     MidiCc {
         device: String,
+        #[serde(default)]
+        page: Option<String>,
         #[serde(default)]
         channel: Option<u8>,
         cc: u8,
@@ -1459,7 +1462,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
 
     let mut control_ids = BTreeSet::new();
     let mut key_bindings = BTreeSet::new();
-    let mut midi_cc_claims = BTreeSet::new();
+    let mut midi_cc_claims: BTreeSet<(String, Option<String>, Option<u8>, u8)> = BTreeSet::new();
     let mut midi_note_claims = BTreeSet::new();
     let mut controls = Vec::with_capacity(raw_performance.controls.len());
     for raw in raw_performance.controls {
@@ -1507,6 +1510,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                 }
                 RawControlBinding::MidiCc {
                     device,
+                    page,
                     channel,
                     cc,
                     action,
@@ -1534,14 +1538,33 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                             ));
                         }
                     }
-                    if !midi_cc_claims.insert((device.clone(), channel, cc)) {
+                    if let Some(page) = page.as_deref() {
+                        if !page_ids.contains(page) {
+                            return Err(SongLoadError::one(
+                                &entry,
+                                format!("control '{}' references unknown page '{}'", raw.id, page),
+                            ));
+                        }
+                    }
+                    let claim_conflicts = midi_cc_claims.iter().any(
+                        |(claimed_device, claimed_page, claimed_channel, claimed_cc)| {
+                            claimed_device == &device
+                                && claimed_channel == &channel
+                                && claimed_cc == &cc
+                                && (claimed_page.is_none()
+                                    || page.is_none()
+                                    || claimed_page == &page)
+                        },
+                    );
+                    if claim_conflicts {
                         return Err(SongLoadError::one(
                             &entry,
                             format!(
-                                "MIDI CC binding device='{device}' channel='{channel:?}' cc={cc} is declared more than once"
+                                "MIDI CC binding device='{device}' page='{page:?}' channel='{channel:?}' cc={cc} conflicts with another binding"
                             ),
                         ));
                     }
+                    midi_cc_claims.insert((device.clone(), page.clone(), channel, cc));
                     let action = match action {
                         RawControlBindingAction::Absolute => ControlBindingAction::Absolute,
                         RawControlBindingAction::Centered => {
@@ -1608,6 +1631,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                     };
                     bindings.push(ControlBindingDefinition::MidiCc {
                         device,
+                        page,
                         channel,
                         cc,
                         action,
@@ -1781,16 +1805,25 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                     channel,
                     cc,
                 } => {
-                    if !midi_cc_claims.insert((device.clone(), channel, cc)) {
+                    let claim_conflicts = midi_cc_claims.iter().any(
+                        |(claimed_device, _claimed_page, claimed_channel, claimed_cc)| {
+                            claimed_device == &device
+                                && claimed_channel == &channel
+                                && claimed_cc == &cc
+                        },
+                    );
+                    if claim_conflicts {
                         return Err(SongLoadError::one(
                             &entry,
                             format!(
-                                "MIDI CC binding device='{device}' channel='{channel:?}' cc={cc} is declared more than once"
+                                "MIDI CC action binding device='{device}' channel='{channel:?}' cc={cc} conflicts with another binding"
                             ),
                         ));
                     }
+                    midi_cc_claims.insert((device.clone(), None, channel, cc));
                     bindings.push(ControlBindingDefinition::MidiCc {
                         device,
+                        page: None,
                         channel,
                         cc,
                         action: ControlBindingAction::Increment,
@@ -2867,12 +2900,14 @@ fn fingerprint_song(
                 }
                 ControlBindingDefinition::MidiCc {
                     device,
+                    page,
                     channel,
                     cc,
                     action,
                 } => {
                     fingerprint.string("midi_cc");
                     fingerprint.string(device);
+                    fingerprint.optional_string(page.as_deref());
                     fingerprint.u64(channel.map_or(0, u64::from));
                     fingerprint.u64(u64::from(*cc));
                     fingerprint_control_binding_action(&mut fingerprint, *action);
@@ -2928,12 +2963,14 @@ fn fingerprint_song(
                 }
                 ControlBindingDefinition::MidiCc {
                     device,
+                    page,
                     channel,
                     cc,
                     action,
                 } => {
                     fingerprint.string("midi_cc");
                     fingerprint.string(device);
+                    fingerprint.optional_string(page.as_deref());
                     fingerprint.u64(channel.map_or(0, u64::from));
                     fingerprint.u64(u64::from(*cc));
                     fingerprint_control_binding_action(&mut fingerprint, *action);

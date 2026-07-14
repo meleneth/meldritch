@@ -412,6 +412,7 @@ pub enum MidiControlAction {
 pub struct MidiControlBinding {
     pub control_id: String,
     pub device: String,
+    pub page_id: Option<String>,
     pub channel: Option<u8>,
     pub cc: u8,
     pub minimum: f64,
@@ -431,56 +432,68 @@ pub fn map_midi_control_input(
     bindings: &[MidiControlBinding],
     input: MidiControlInput,
 ) -> Option<AppInput> {
-    bindings
-        .iter()
-        .find(|binding| {
-            binding.device == input.device
-                && binding.cc == input.cc
-                && binding
-                    .channel
-                    .is_none_or(|channel| channel == input.channel)
-        })
-        .and_then(|binding| match binding.action {
-            MidiControlAction::Absolute => Some(AppInput::SetCuratedControlNormalized {
-                id: binding.control_id.clone(),
-                value: f64::from(input.value.min(127)) / 127.0,
-            }),
-            MidiControlAction::Centered { center } => Some(AppInput::SetCuratedControlNormalized {
-                id: binding.control_id.clone(),
-                value: normalized_from_centered_midi(
-                    input.value,
-                    binding.minimum,
-                    binding.maximum,
-                    center,
-                ),
-            }),
-            MidiControlAction::Overdrive {
+    map_midi_control_input_for_page(bindings, input, None)
+}
+
+pub fn map_midi_control_input_for_page(
+    bindings: &[MidiControlBinding],
+    input: MidiControlInput,
+    active_page: Option<&str>,
+) -> Option<AppInput> {
+    let binding = active_page
+        .and_then(|page| find_midi_control_binding(bindings, &input, Some(page)))
+        .or_else(|| find_midi_control_binding(bindings, &input, None))?;
+    midi_control_binding_input(binding, input.value)
+}
+
+fn find_midi_control_binding<'a>(
+    bindings: &'a [MidiControlBinding],
+    input: &MidiControlInput,
+    page: Option<&str>,
+) -> Option<&'a MidiControlBinding> {
+    bindings.iter().find(|binding| {
+        binding.device == input.device
+            && binding.page_id.as_deref() == page
+            && binding.cc == input.cc
+            && binding
+                .channel
+                .is_none_or(|channel| channel == input.channel)
+    })
+}
+
+fn midi_control_binding_input(binding: &MidiControlBinding, value: u8) -> Option<AppInput> {
+    match binding.action {
+        MidiControlAction::Absolute => Some(AppInput::SetCuratedControlNormalized {
+            id: binding.control_id.clone(),
+            value: f64::from(value.min(127)) / 127.0,
+        }),
+        MidiControlAction::Centered { center } => Some(AppInput::SetCuratedControlNormalized {
+            id: binding.control_id.clone(),
+            value: normalized_from_centered_midi(value, binding.minimum, binding.maximum, center),
+        }),
+        MidiControlAction::Overdrive {
+            normal,
+            normal_midi,
+        } => Some(AppInput::SetCuratedControlNormalized {
+            id: binding.control_id.clone(),
+            value: normalized_from_overdrive_midi(
+                value,
+                binding.minimum,
+                binding.maximum,
                 normal,
                 normal_midi,
-            } => Some(AppInput::SetCuratedControlNormalized {
-                id: binding.control_id.clone(),
-                value: normalized_from_overdrive_midi(
-                    input.value,
-                    binding.minimum,
-                    binding.maximum,
-                    normal,
-                    normal_midi,
-                ),
-            }),
-            MidiControlAction::Decrement if input.value != 0 => {
-                Some(AppInput::AdjustCuratedControl {
-                    id: binding.control_id.clone(),
-                    steps: -1,
-                })
-            }
-            MidiControlAction::Increment if input.value != 0 => {
-                Some(AppInput::AdjustCuratedControl {
-                    id: binding.control_id.clone(),
-                    steps: 1,
-                })
-            }
-            MidiControlAction::Decrement | MidiControlAction::Increment => None,
-        })
+            ),
+        }),
+        MidiControlAction::Decrement if value != 0 => Some(AppInput::AdjustCuratedControl {
+            id: binding.control_id.clone(),
+            steps: -1,
+        }),
+        MidiControlAction::Increment if value != 0 => Some(AppInput::AdjustCuratedControl {
+            id: binding.control_id.clone(),
+            steps: 1,
+        }),
+        MidiControlAction::Decrement | MidiControlAction::Increment => None,
+    }
 }
 
 fn normalized_from_centered_midi(value: u8, minimum: f64, maximum: f64, center: f64) -> f64 {
@@ -2244,6 +2257,7 @@ mod tests {
             MidiControlBinding {
                 control_id: "echo-feedback".to_owned(),
                 device: "launch-control-xl".to_owned(),
+                page_id: None,
                 channel: Some(1),
                 cc: 77,
                 minimum: 0.0,
@@ -2253,6 +2267,7 @@ mod tests {
             MidiControlBinding {
                 control_id: "echo-feedback".to_owned(),
                 device: "launch-control-xl".to_owned(),
+                page_id: None,
                 channel: Some(1),
                 cc: 41,
                 minimum: 0.0,
@@ -2262,6 +2277,7 @@ mod tests {
             MidiControlBinding {
                 control_id: "echo-feedback".to_owned(),
                 device: "launch-control-xl".to_owned(),
+                page_id: None,
                 channel: Some(1),
                 cc: 57,
                 minimum: 0.0,
@@ -2332,6 +2348,7 @@ mod tests {
                 &[MidiControlBinding {
                     control_id: "echo-feedback".to_owned(),
                     device: "launch-control-xl".to_owned(),
+                    page_id: None,
                     channel: None,
                     cc: 57,
                     minimum: 0.0,
@@ -2355,6 +2372,7 @@ mod tests {
                 &[MidiControlBinding {
                     control_id: "cutoff".to_owned(),
                     device: "launch-control-xl".to_owned(),
+                    page_id: None,
                     channel: Some(9),
                     cc: 13,
                     minimum: 100.0,
@@ -2378,6 +2396,7 @@ mod tests {
                 &[MidiControlBinding {
                     control_id: "cutoff".to_owned(),
                     device: "launch-control-xl".to_owned(),
+                    page_id: None,
                     channel: Some(9),
                     cc: 77,
                     minimum: 100.0,
@@ -2397,6 +2416,79 @@ mod tests {
             Some(AppInput::SetCuratedControlNormalized {
                 id: "cutoff".to_owned(),
                 value: (4350.0 - 100.0) / (5000.0 - 100.0),
+            })
+        );
+    }
+
+    #[test]
+    fn midi_control_bindings_can_be_scoped_to_active_performance_page() {
+        let bindings = vec![
+            MidiControlBinding {
+                control_id: "global-cutoff".to_owned(),
+                device: "launch-control-xl".to_owned(),
+                page_id: None,
+                channel: Some(9),
+                cc: 77,
+                minimum: 0.0,
+                maximum: 1.0,
+                action: MidiControlAction::Absolute,
+            },
+            MidiControlBinding {
+                control_id: "main-cutoff".to_owned(),
+                device: "launch-control-xl".to_owned(),
+                page_id: Some("main".to_owned()),
+                channel: Some(9),
+                cc: 13,
+                minimum: 0.0,
+                maximum: 1.0,
+                action: MidiControlAction::Absolute,
+            },
+            MidiControlBinding {
+                control_id: "drum-pitch".to_owned(),
+                device: "launch-control-xl".to_owned(),
+                page_id: Some("drums".to_owned()),
+                channel: Some(9),
+                cc: 13,
+                minimum: 0.0,
+                maximum: 1.0,
+                action: MidiControlAction::Absolute,
+            },
+        ];
+
+        let input = MidiControlInput {
+            device: "launch-control-xl".to_owned(),
+            channel: 9,
+            cc: 13,
+            value: 64,
+        };
+        assert_eq!(
+            map_midi_control_input_for_page(&bindings, input.clone(), Some("main")),
+            Some(AppInput::SetCuratedControlNormalized {
+                id: "main-cutoff".to_owned(),
+                value: 64.0 / 127.0,
+            })
+        );
+        assert_eq!(
+            map_midi_control_input_for_page(&bindings, input, Some("drums")),
+            Some(AppInput::SetCuratedControlNormalized {
+                id: "drum-pitch".to_owned(),
+                value: 64.0 / 127.0,
+            })
+        );
+        assert_eq!(
+            map_midi_control_input_for_page(
+                &bindings,
+                MidiControlInput {
+                    device: "launch-control-xl".to_owned(),
+                    channel: 9,
+                    cc: 77,
+                    value: 127,
+                },
+                Some("drums"),
+            ),
+            Some(AppInput::SetCuratedControlNormalized {
+                id: "global-cutoff".to_owned(),
+                value: 1.0,
             })
         );
     }
