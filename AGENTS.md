@@ -156,13 +156,15 @@ The next implementation direction is `17-launch-control-xl-ensemble`: an
 example-first multi-lane LaunchControl XL performance. The requested musical
 surface is one beat drum lane, two rhythm/percussion lanes, one polyphonic
 chord/pad lane, two monophonic bass lanes, and three sample-based lanes. That
-adds up to nine musical lanes against eight physical faders, so implementation
-must not assume the mapping until the example/acceptance text resolves whether
-one lane is banked/shared or whether the intended performance has nine lanes
-with eight visible strips. Build this from examples first, then implement only
-the required multi-track, sample-track, poly-synth, pattern-bank, and modifier
-control support. Modifier/layer behavior such as “hold button + fader becomes
-octave pusher” must be script-declared, typed, captured, and replayable; do not
+adds up to nine musical lanes against eight physical faders; the resolved
+direction is nine musical lanes with eight visible strips and script-declared
+bank/page switching. The example scene may put the beat drum on another page,
+but that layout is scene/performance-authored data; Rust must only implement
+generic bank/page mapping and keep the selected page reachable without stopping
+playback. Build this from examples first, then implement only the required
+multi-track, sample-track, poly-synth, pattern-bank, and modifier control
+support. Modifier/layer behavior such as “hold button + fader becomes octave
+pusher” must be script-declared, typed, captured, and replayable; do not
 hard-code LaunchControl policy in Rust. LED feedback remains deferred until the
 ensemble control semantics are stable. Full all-parameters inspection remains
 open after that.

@@ -176,10 +176,12 @@ assigned, switched, and rendered deterministically from text definitions.
   - Lanes 2-3: rhythm/percussion drum tracks
   - Lane 4: polyphonic synth for chords/pads
   - Lanes 5-6: monophonic bass synth tracks
-  - Lanes 7-9: sample-based tracks, if the product intent is literally 8
-    faders plus three sample lanes then resolve whether one lane is shared,
-    banked, or the desired target is actually nine musical lanes
-- [ ] Add an `ACCEPTANCE.md` for the ensemble example before implementing
+  - Lanes 7-9: sample-based tracks
+  - Resolve the 9-lane/8-fader mismatch with script-declared banking: the beat
+    drum can live on another page in this example, but the specific scene/
+    performance declaration owns that distinction; Rust must only implement
+    generic bank/page mapping
+- [x] Add an `ACCEPTANCE.md` for the ensemble example before implementing
   runtime support, including exact LaunchControl row/side-button semantics
 - [ ] Define the script-level lane model for the ensemble: track IDs, lane
   roles, pattern banks, variation IDs, mute/solo behavior, launch quantization,
