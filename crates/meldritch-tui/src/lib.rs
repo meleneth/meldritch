@@ -1273,6 +1273,9 @@ fn command_result_text(result: &AppCommandResult) -> String {
             "Queued {:?} for frame {}",
             queued.gesture, queued.launch_frame
         ),
+        AppCommandResult::PerformancePageSelected { previous, current } => {
+            format!("Performance page: {previous:?} → {current}")
+        }
         AppCommandResult::PerformanceCancelled(Some(queued)) => {
             format!("Cancelled {:?}", queued.gesture)
         }

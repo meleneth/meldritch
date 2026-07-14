@@ -63,7 +63,8 @@ LaunchControl XL playground proves script-authored LaunchControl input, typed
 actions, live rerendered parameters, authored groove variations, default
 performance mode, and continuous audio publication for a single-synth
 playground. `.mlperformance` can now declare generic lanes and visible pages,
-and the app/TUI can show the active declared page as generic visible strips,
-but this example still requires page switching actions, multi-lane songs,
-sample tracks, polyphonic pad rendering, pattern banks, momentary modifier
-layers, and replayable modifier gestures.
+the app/TUI can show the active declared page as generic visible strips, and
+script-declared `select_page` actions can switch active pages by page id. This
+example still requires runtime control rebinding for selected pages, multi-lane
+songs, sample tracks, polyphonic pad rendering, pattern banks, momentary
+modifier layers, and replayable modifier gestures.

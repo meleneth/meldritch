@@ -719,6 +719,7 @@ pub enum PerformanceActionDefinition {
     QueueNextScene,
     QueuePhrase { scene: u64 },
     QueuePhraseVariation { scene: u64, variation: usize },
+    SelectPage { page: String },
     ToggleTrackMute,
     TriggerFill,
     CancelPerformance,
@@ -964,6 +965,8 @@ struct RawActionControl {
     #[serde(default)]
     variation: Option<usize>,
     #[serde(default)]
+    page: Option<String>,
+    #[serde(default)]
     bindings: Vec<RawActionBinding>,
 }
 
@@ -977,6 +980,7 @@ enum RawPerformanceAction {
     QueueNextScene,
     QueuePhrase,
     QueuePhraseVariation,
+    SelectPage,
     ToggleTrackMute,
     TriggerFill,
     CancelPerformance,
@@ -1677,6 +1681,21 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                         )
                     })?,
                 }
+            }
+            RawPerformanceAction::SelectPage => {
+                let page = raw.page.ok_or_else(|| {
+                    SongLoadError::one(
+                        &entry,
+                        format!("action '{}' select_page requires page", raw.id),
+                    )
+                })?;
+                if !page_ids.contains(&page) {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!("action '{}' references unknown page '{}'", raw.id, page),
+                    ));
+                }
+                PerformanceActionDefinition::SelectPage { page }
             }
             RawPerformanceAction::ToggleTrackMute => PerformanceActionDefinition::ToggleTrackMute,
             RawPerformanceAction::TriggerFill => PerformanceActionDefinition::TriggerFill,
@@ -2845,6 +2864,10 @@ fn fingerprint_song(
                 fingerprint.string("queue_phrase_variation");
                 fingerprint.u64(*scene);
                 fingerprint.u64(*variation as u64);
+            }
+            PerformanceActionDefinition::SelectPage { page } => {
+                fingerprint.string("select_page");
+                fingerprint.string(page);
             }
             PerformanceActionDefinition::ToggleTrackMute => fingerprint.string("toggle_track_mute"),
             PerformanceActionDefinition::TriggerFill => fingerprint.string("trigger_fill"),

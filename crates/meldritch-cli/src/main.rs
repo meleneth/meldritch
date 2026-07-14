@@ -17,7 +17,7 @@ use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum LearnedAction {
     IncreaseCutoff,
@@ -36,6 +36,7 @@ enum LearnedAction {
     QueueNextScene,
     QueuePhrase(u64),
     QueuePhraseVariation(u64, usize),
+    SelectPerformancePage(String),
     ToggleTrackMute,
     TriggerFill,
     IncreaseDelayFeedback,
@@ -71,6 +72,9 @@ impl LearnedAction {
             AppInput::QueuePhraseVariation(scene, variation) => {
                 Self::QueuePhraseVariation(scene.raw(), *variation)
             }
+            AppInput::SelectPerformancePage(page_id) => {
+                Self::SelectPerformancePage(page_id.clone())
+            }
             AppInput::ToggleTrackMute => Self::ToggleTrackMute,
             AppInput::TriggerFill => Self::TriggerFill,
             AppInput::IncreaseDelayFeedback => Self::IncreaseDelayFeedback,
@@ -86,7 +90,7 @@ impl LearnedAction {
         })
     }
 
-    const fn input(self) -> Option<meldritch_app::AppInput> {
+    fn input(self) -> Option<meldritch_app::AppInput> {
         use meldritch_app::AppInput;
         Some(match self {
             Self::IncreaseCutoff => AppInput::IncreaseCutoff,
@@ -107,6 +111,7 @@ impl LearnedAction {
             Self::QueuePhraseVariation(scene, variation) => {
                 AppInput::QueuePhraseVariation(SceneId::new(scene), variation)
             }
+            Self::SelectPerformancePage(page_id) => AppInput::SelectPerformancePage(page_id),
             Self::ToggleTrackMute => AppInput::ToggleTrackMute,
             Self::TriggerFill => AppInput::TriggerFill,
             Self::IncreaseDelayFeedback => AppInput::IncreaseDelayFeedback,
@@ -154,16 +159,18 @@ fn merge_performer_futures(
 ) {
     let mut learned = std::mem::take(&mut library.learned)
         .into_iter()
-        .map(|future| (future.action, future))
+        .map(|future| (future.action.clone(), future))
         .collect::<BTreeMap<_, _>>();
     for event in captured.iter().filter(|event| event.origin == "performer") {
-        let future = learned.entry(event.action).or_insert(LearnedFuture {
-            action: event.action,
-            occurrences: 0,
-            last_session: session,
-            mean_phase: event.phase,
-            score: 0,
-        });
+        let future = learned
+            .entry(event.action.clone())
+            .or_insert(LearnedFuture {
+                action: event.action.clone(),
+                occurrences: 0,
+                last_session: session,
+                mean_phase: event.phase,
+                score: 0,
+            });
         let old_count = future.occurrences;
         future.occurrences = future.occurrences.saturating_add(1);
         future.mean_phase =
@@ -196,15 +203,15 @@ fn learned_phrase_schedule(
     let mut schedule = library
         .learned
         .iter()
-        .filter_map(|future| match future.action {
+        .filter_map(|future| match &future.action {
             LearnedAction::QueuePhrase(scene) => Some((
                 (future.mean_phase.clamp(0.0, 1.0) * f64::from(last_frame)).round() as u32,
-                SceneId::new(scene),
+                SceneId::new(*scene),
                 future.score,
             )),
             LearnedAction::QueuePhraseVariation(scene, _) => Some((
                 (future.mean_phase.clamp(0.0, 1.0) * f64::from(last_frame)).round() as u32,
-                SceneId::new(scene),
+                SceneId::new(*scene),
                 future.score,
             )),
             _ => None,
@@ -223,7 +230,7 @@ fn learned_phrase_schedule(
         .collect()
 }
 
-fn is_dsp_action(action: LearnedAction) -> bool {
+fn is_dsp_action(action: &LearnedAction) -> bool {
     matches!(
         action,
         LearnedAction::IncreaseDelayFeedback
@@ -247,11 +254,11 @@ fn learned_dsp_schedule(
     let mut schedule = library
         .learned
         .iter()
-        .filter(|future| is_dsp_action(future.action))
+        .filter(|future| is_dsp_action(&future.action))
         .map(|future| {
             (
                 (future.mean_phase.clamp(0.0, 1.0) * f64::from(last)).round() as u32,
-                future.action,
+                future.action.clone(),
                 future.score,
             )
         })
@@ -2218,6 +2225,12 @@ fn session_result_fields(
             None,
             Some(format!("{result:?}")),
         ),
+        meldritch_app::AppCommandResult::PerformancePageSelected { .. } => (
+            "performance_page".to_owned(),
+            Some(format!("{input:?}")),
+            None,
+            Some(format!("{result:?}")),
+        ),
         meldritch_app::AppCommandResult::PerformanceCancelled(_) => (
             "performance_cancel".to_owned(),
             Some(format!("{input:?}")),
@@ -2760,6 +2773,9 @@ fn app_input_for_performance_action(
         }
         meldritch_dsl::PerformanceActionDefinition::QueuePhraseVariation { scene, variation } => {
             meldritch_app::AppInput::QueuePhraseVariation(SceneId::new(*scene), *variation)
+        }
+        meldritch_dsl::PerformanceActionDefinition::SelectPage { page } => {
+            meldritch_app::AppInput::SelectPerformancePage(page.clone())
         }
         meldritch_dsl::PerformanceActionDefinition::ToggleTrackMute => {
             meldritch_app::AppInput::ToggleTrackMute
@@ -6142,10 +6158,15 @@ fn tui_samples(
     for learned in ranked.into_iter().take(4) {
         match learned.action {
             LearnedAction::QueuePhrase(_) | LearnedAction::QueuePhraseVariation(_, _) => continue,
-            action if is_dsp_action(action) => continue,
+            action if is_dsp_action(&action) => continue,
             action => {
                 controller
-                    .handle_input(action.input().expect("non-phrase action has an input"))
+                    .handle_input(
+                        action
+                            .clone()
+                            .input()
+                            .expect("non-phrase action has an input"),
+                    )
                     .map_err(|err| format!("failed to prepare learned future: {err:?}"))?;
             }
         }
@@ -6219,7 +6240,7 @@ fn tui_samples(
                 for (index, (frame, action)) in learned_dsp_cues.iter().enumerate() {
                     if !dsp_fired[index] && position >= *frame {
                         controller
-                            .handle_input(action.input().expect("DSP action has an input"))
+                            .handle_input(action.clone().input().expect("DSP action has an input"))
                             .map_err(|err| format!("learned DSP cue failed: {err:?}"))?;
                         dsp_fired[index] = true;
                         return Ok(Some(format!("Learned DSP gesture: {action:?}")));
@@ -7240,6 +7261,25 @@ mod tests {
         assert_eq!(
             map_script_midi_note(&action_bindings, "launch-control-xl", 9, 108, false),
             None
+        );
+        let page_cc = map_script_midi_control_change(
+            &control_bindings,
+            &action_bindings,
+            meldritch_app::MidiControlInput {
+                device: "launch-control-xl".to_owned(),
+                channel: 9,
+                cc: 106,
+                value: 127,
+            },
+        )
+        .expect("page select CC should map");
+        assert_eq!(
+            page_cc.input,
+            meldritch_app::AppInput::SelectPerformancePage("main".to_owned())
+        );
+        assert_eq!(
+            page_cc.label.as_deref(),
+            Some("Track Select Prev Main Page")
         );
     }
 

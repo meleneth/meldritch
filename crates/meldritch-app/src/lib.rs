@@ -68,6 +68,7 @@ pub enum AppCommand {
     QueueNextScene,
     QueueScene(SceneId),
     QueueSceneVariation(SceneId, usize),
+    SelectPerformancePage(String),
     ToggleTrackMute(TrackId),
     TriggerFill(PatternId),
     CancelPerformance,
@@ -104,6 +105,10 @@ pub enum AppCommandResult {
         transformed: bool,
     },
     PerformanceQueued(QueuedPerformanceGesture),
+    PerformancePageSelected {
+        previous: Option<usize>,
+        current: usize,
+    },
     PerformanceCancelled(Option<QueuedPerformanceGesture>),
     CockpitModeChanged {
         previous: CockpitMode,
@@ -128,6 +133,7 @@ pub enum AppCommandError {
     TransformSourceUnavailable,
     Publication(meldritch_render::ChunkPublicationError),
     NoPerformanceScenes,
+    UnknownPerformancePage(String),
     NoFillPattern,
     UnknownCuratedControl(String),
 }
@@ -377,6 +383,7 @@ pub enum AppInput {
     QueueNextScene,
     QueuePhrase(SceneId),
     QueuePhraseVariation(SceneId, usize),
+    SelectPerformancePage(String),
     ToggleTrackMute,
     TriggerFill,
     CancelPerformance,
@@ -730,6 +737,23 @@ impl AppController {
         self.performance_pages = pages;
     }
 
+    pub fn select_performance_page(
+        &mut self,
+        page_id: &str,
+    ) -> Result<AppCommandResult, AppCommandError> {
+        let index = self
+            .performance_pages
+            .iter()
+            .position(|page| page.id == page_id)
+            .ok_or_else(|| AppCommandError::UnknownPerformancePage(page_id.to_owned()))?;
+        let previous = self.active_performance_page;
+        self.active_performance_page = Some(index);
+        Ok(AppCommandResult::PerformancePageSelected {
+            previous,
+            current: index,
+        })
+    }
+
     pub fn show_effect_sends(&mut self, rules: Vec<EffectSendRule>) {
         self.effect_rules = rules;
     }
@@ -1054,6 +1078,7 @@ impl AppController {
                     .queue_phrase_variation(*scene, *variation)
                     .map(AppCommandResult::PerformanceQueued);
             }
+            AppCommand::SelectPerformancePage(page_id) => self.select_performance_page(page_id)?,
             AppCommand::ToggleTrackMute(track) => {
                 let gesture = if self
                     .performance_launcher
@@ -1142,6 +1167,9 @@ impl AppController {
             AppCommandResult::TransformCreated { .. } => (true, Vec::new()),
             AppCommandResult::AudioSourceSwitched { .. } => (true, Vec::new()),
             AppCommandResult::PerformanceQueued(_) => (true, Vec::new()),
+            AppCommandResult::PerformancePageSelected { previous, current } => {
+                (previous != &Some(*current), Vec::new())
+            }
             AppCommandResult::PerformanceCancelled(queued) => (queued.is_some(), Vec::new()),
             AppCommandResult::CockpitModeChanged { previous, current } => {
                 (previous != current, Vec::new())
@@ -1608,6 +1636,7 @@ impl AppController {
             AppInput::QueuePhraseVariation(scene, variation) => {
                 AppCommand::QueueSceneVariation(scene, variation)
             }
+            AppInput::SelectPerformancePage(page_id) => AppCommand::SelectPerformancePage(page_id),
             AppInput::ToggleTrackMute => AppCommand::ToggleTrackMute(self.selection.track),
             AppInput::TriggerFill => {
                 AppCommand::TriggerFill(self.fill_pattern.ok_or(AppCommandError::NoFillPattern)?)
@@ -2134,6 +2163,21 @@ mod tests {
         assert_eq!(view.performance.pages[0].id, "main");
         assert_eq!(view.performance.pages[0].strips[0].lane_id, "pad");
         assert_eq!(view.performance.pages[1].strips[0].strip, 8);
+
+        assert_eq!(
+            controller
+                .handle_input(AppInput::SelectPerformancePage("drums".to_owned()))
+                .unwrap(),
+            AppCommandResult::PerformancePageSelected {
+                previous: Some(0),
+                current: 1,
+            }
+        );
+        assert_eq!(controller.view_model().performance.active_page, Some(1));
+        assert!(matches!(
+            controller.handle_input(AppInput::SelectPerformancePage("missing".to_owned())),
+            Err(AppCommandError::UnknownPerformancePage(page)) if page == "missing"
+        ));
     }
 
     #[test]

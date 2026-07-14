@@ -187,6 +187,8 @@ assigned, switched, and rendered deterministically from text definitions.
   scene-authored banked LaunchControl surfaces
 - [x] Load generic lane/page declarations into app view state and render the
   active page in performance mode without hard-coded lane/page policy
+- [x] Add script-declared `select_page` performance actions that switch active
+  performance pages by page id
 - [ ] Define the script-level lane model for the ensemble: track IDs, lane
   roles, pattern banks, variation IDs, mute/solo behavior, launch quantization,
   and which controls are per-lane versus global

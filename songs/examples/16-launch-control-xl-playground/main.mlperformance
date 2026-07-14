@@ -731,8 +731,9 @@ cc = 107
 
 [[actions]]
 id = "side-left-02"
-label = "Track Select Prev Stop"
-action = "stop"
+label = "Track Select Prev Main Page"
+action = "select_page"
+page = "main"
 [[actions.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
