@@ -16,6 +16,12 @@ duration = "1/16"
 velocity = 0.95
 
 [[events]]
+at = "1:1:480"
+note = "C3"
+duration = "1/16"
+velocity = 0.72
+
+[[events]]
 at = "1:2:0"
 note = "G2"
 duration = "1/16"

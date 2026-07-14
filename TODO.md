@@ -149,6 +149,8 @@ assigned, switched, and rendered deterministically from text definitions.
   LaunchControl XL side-column note/CC buttons in the playground example
 - [x] Add authored LaunchControl XL playground groove scenes/variations and
   rerender selected song patterns during `tui-song` playback
+- [x] Make the LaunchControl XL playground scenes/fills musically differentiated
+  enough to verify by ear instead of minor note-list variants
 - [x] Add script-declared centered and overdrive MIDI curves so the LaunchControl
   playground has neutral center-detent knobs and faders with a normal/full-open
   value below the physical maximum

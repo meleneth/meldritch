@@ -566,27 +566,27 @@ fn launch_control_strip_lines(view: &AppViewModel) -> Vec<Line<'static>> {
             control_source_summary(&view.curated_controls)
         )),
         Line::from(format!(
-            "Strip 01: K01 {} · K09 {} · K17 {} · F01 {}",
+            "Strip 01: resonance K01 {} · feedback K09 {} · mix K17 {} · cutoff F01 {}",
             compact_control_value(view, "knob-01"),
             compact_control_value(view, "knob-09"),
             compact_control_value(view, "knob-17"),
             compact_control_value(view, "fader-01"),
         )),
         Line::from(format!(
-            "Faders cutoff: {}",
-            compact_control_values(view, "F", (1..=8).map(|strip| format!("fader-{strip:02}")))
-        )),
-        Line::from(format!(
-            "Top knobs: {}",
+            "Top resonance: {}",
             compact_control_values(view, "K", (1..=8).map(|knob| format!("knob-{knob:02}")))
         )),
         Line::from(format!(
-            "Mid knobs: {}",
+            "Mid feedback: {}",
             compact_control_values(view, "K", (9..=16).map(|knob| format!("knob-{knob:02}")))
         )),
         Line::from(format!(
-            "Bot knobs: {}",
+            "Bot mix: {}",
             compact_control_values(view, "K", (17..=24).map(|knob| format!("knob-{knob:02}")))
+        )),
+        Line::from(format!(
+            "Faders cutoff: {}",
+            compact_control_values(view, "F", (1..=8).map(|strip| format!("fader-{strip:02}")))
         )),
     ]
 }
@@ -1592,6 +1592,10 @@ mod tests {
         assert!(content.contains("K09"));
         assert!(content.contains("K17"));
         assert!(content.contains("F01"));
+        assert!(content.contains("resonance"));
+        assert!(content.contains("feedback"));
+        assert!(content.contains("mix"));
+        assert!(content.contains("cutoff"));
         assert!(content.contains("4350.000 filter.cutoff_hz"));
     }
 

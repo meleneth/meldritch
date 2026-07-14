@@ -7237,7 +7237,7 @@ mod tests {
             initial_song_pattern_to_grid(&song, tempo_from_song(&song).unwrap(), PatternId::new(1))
                 .expect("initial playground grid should be built from the authored pattern");
         assert_eq!(initial_grid.length_steps(), 16);
-        assert_eq!(initial_grid.active_step_count(), 4);
+        assert_eq!(initial_grid.active_step_count(), 6);
         assert_eq!(
             initial_grid
                 .get_step(TrackId::new(1), StepIndex::new(0))

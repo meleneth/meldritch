@@ -25,6 +25,12 @@ It must:
   script-declared typed performance actions, not hard-coded Rust behavior
 - provide four authored groove scenes and one authored variation/fill per scene;
   the B row selects scenes 1-4 and variation 1 for scenes 1-4
+- make those scenes musically distinct enough to verify by ear:
+  - Scene 1: simple ascending line
+  - Scene 2: low stab pattern
+  - Scene 3: syncopated bounce
+  - Scene 4: climbing/tension pattern
+  - fills: denser one-bar variations for each scene
 - author pattern event positions with the loader's 960 PPQ ticks per beat
   (`240` ticks per sixteenth), so the visible grid and rendered groove agree
 - normalize the physical surface so centered knobs are neutral and faders use
