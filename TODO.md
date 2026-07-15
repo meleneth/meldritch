@@ -212,7 +212,7 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Implement a first modifier example: while a declared modifier button is
   held, one or more faders send octave/transpose commands instead of their
   normal continuous parameter target
-- [ ] Apply script-declared lane octave/transpose state to the mixed song
+- [x] Apply script-declared lane octave/transpose state to the mixed song
   renderer so modifier-layer octave pushes affect audio, not only typed
   performance state
 - [x] Make authored lane pattern-bank and variation selections rerender the

@@ -10,6 +10,7 @@ use meldritch_dsl::{
     ModuleKind, ParameterInterpolation, ParameterOwner, SampleSlotDefinition, TrackDefinition,
     ValidatedSong,
 };
+use std::collections::BTreeMap;
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -975,13 +976,14 @@ pub fn compile_note_song_for_pattern(
             found: song.performance().tracks().len(),
         });
     };
-    compile_note_track_for_pattern(song, track, pattern_id)
+    compile_note_track_for_pattern(song, track, pattern_id, 0)
 }
 
 fn compile_note_track_for_pattern(
     song: &ValidatedSong,
     track: &TrackDefinition,
     pattern_id: &str,
+    transpose_semitones: i8,
 ) -> Result<CompiledNotePatch, SongRenderError> {
     let synth =
         song.synths()
@@ -1071,19 +1073,32 @@ fn compile_note_track_for_pattern(
             .map(|event| CompiledNoteEvent {
                 start: event.start_frame(),
                 end: event.start_frame() + event.duration_frames(),
-                note: event.note(),
+                note: transposed_midi_note(event.note(), transpose_semitones),
                 velocity: event.velocity(),
             })
             .collect(),
     })
 }
 
+fn transposed_midi_note(note: u8, transpose_semitones: i8) -> u8 {
+    (i16::from(note) + i16::from(transpose_semitones)).clamp(0, 127) as u8
+}
+
 pub fn compile_mixed_note_song(
     song: &ValidatedSong,
 ) -> Result<CompiledMixedNoteSong, SongRenderError> {
-    compile_mixed_note_song_with_track_patterns(song, |track| {
-        track.initial_pattern().map(ToOwned::to_owned)
-    })
+    compile_mixed_note_song_with_lane_transposes(song, &BTreeMap::new())
+}
+
+pub fn compile_mixed_note_song_with_lane_transposes(
+    song: &ValidatedSong,
+    lane_transpose_semitones: &BTreeMap<String, i8>,
+) -> Result<CompiledMixedNoteSong, SongRenderError> {
+    compile_mixed_note_song_with_track_patterns_and_transposes(
+        song,
+        |track| track.initial_pattern().map(ToOwned::to_owned),
+        lane_transpose_semitones,
+    )
 }
 
 pub fn compile_mixed_note_song_with_lane_variation(
@@ -1113,18 +1128,107 @@ pub fn compile_mixed_note_song_with_lane_variation(
         .ok_or_else(|| SongRenderError::MissingLane {
             id: lane_id.to_owned(),
         })?;
-    compile_mixed_note_song_with_track_patterns(song, |track| {
-        if track.id() == track_id {
-            Some(variation_id.to_owned())
-        } else {
-            track.initial_pattern().map(ToOwned::to_owned)
-        }
-    })
+    compile_mixed_note_song_with_track_patterns_and_transposes(
+        song,
+        |track| {
+            if track.id() == track_id {
+                Some(variation_id.to_owned())
+            } else {
+                track.initial_pattern().map(ToOwned::to_owned)
+            }
+        },
+        &BTreeMap::new(),
+    )
 }
 
-fn compile_mixed_note_song_with_track_patterns(
+pub fn compile_mixed_note_song_with_lane_variation_and_transposes(
+    song: &ValidatedSong,
+    lane_id: &str,
+    variation_id: &str,
+    lane_transpose_semitones: &BTreeMap<String, i8>,
+) -> Result<CompiledMixedNoteSong, SongRenderError> {
+    let lane = song
+        .performance()
+        .lanes()
+        .iter()
+        .find(|lane| lane.id() == lane_id)
+        .ok_or_else(|| SongRenderError::MissingLane {
+            id: lane_id.to_owned(),
+        })?;
+    if !lane
+        .variation_ids()
+        .iter()
+        .any(|available| available == variation_id)
+    {
+        return Err(SongRenderError::MissingPattern {
+            id: variation_id.to_owned(),
+        });
+    }
+    let track_id = lane
+        .track_id()
+        .ok_or_else(|| SongRenderError::MissingLane {
+            id: lane_id.to_owned(),
+        })?;
+    compile_mixed_note_song_with_track_patterns_and_transposes(
+        song,
+        |track| {
+            if track.id() == track_id {
+                Some(variation_id.to_owned())
+            } else {
+                track.initial_pattern().map(ToOwned::to_owned)
+            }
+        },
+        lane_transpose_semitones,
+    )
+}
+
+pub fn compile_mixed_note_song_with_lane_variations_and_transposes(
+    song: &ValidatedSong,
+    lane_variations: &BTreeMap<String, String>,
+    lane_transpose_semitones: &BTreeMap<String, i8>,
+) -> Result<CompiledMixedNoteSong, SongRenderError> {
+    let mut track_patterns = BTreeMap::new();
+    for (lane_id, variation_id) in lane_variations {
+        let lane = song
+            .performance()
+            .lanes()
+            .iter()
+            .find(|lane| lane.id() == lane_id)
+            .ok_or_else(|| SongRenderError::MissingLane {
+                id: lane_id.clone(),
+            })?;
+        if !lane
+            .variation_ids()
+            .iter()
+            .any(|available| available == variation_id)
+        {
+            return Err(SongRenderError::MissingPattern {
+                id: variation_id.clone(),
+            });
+        }
+        let track_id = lane
+            .track_id()
+            .ok_or_else(|| SongRenderError::MissingLane {
+                id: lane_id.clone(),
+            })?;
+        track_patterns.insert(track_id.to_owned(), variation_id.clone());
+    }
+    compile_mixed_note_song_with_track_patterns_and_transposes(
+        song,
+        |track| {
+            track_patterns
+                .get(track.id())
+                .cloned()
+                .or_else(|| track.initial_pattern().map(ToOwned::to_owned))
+        },
+        lane_transpose_semitones,
+    )
+}
+
+fn compile_mixed_note_song_with_track_patterns_and_transposes(
     song: &ValidatedSong,
     pattern_for_track: impl Fn(&TrackDefinition) -> Option<String>,
+    lane_transpose_semitones: &BTreeMap<String, i8>,
 ) -> Result<CompiledMixedNoteSong, SongRenderError> {
     let mut tracks = Vec::with_capacity(song.performance().tracks().len());
     let mut channels = None;
@@ -1133,10 +1237,21 @@ fn compile_mixed_note_song_with_track_patterns(
             pattern_for_track(track).ok_or_else(|| SongRenderError::MissingPattern {
                 id: format!("initial pattern for track '{}'", track.id()),
             })?;
+        let transpose = track_lane_transpose_semitones(song, track, lane_transpose_semitones);
         let patch = if track.sample_bank_id().is_some() {
-            CompiledMixedTrack::Sample(compile_sample_track_for_pattern(song, track, &pattern_id)?)
+            CompiledMixedTrack::Sample(compile_sample_track_for_pattern(
+                song,
+                track,
+                &pattern_id,
+                transpose,
+            )?)
         } else {
-            CompiledMixedTrack::Note(compile_note_track_for_pattern(song, track, &pattern_id)?)
+            CompiledMixedTrack::Note(compile_note_track_for_pattern(
+                song,
+                track,
+                &pattern_id,
+                transpose,
+            )?)
         };
         if let Some(channels) = channels {
             if patch.channels() != channels {
@@ -1155,10 +1270,25 @@ fn compile_mixed_note_song_with_track_patterns(
     })
 }
 
+fn track_lane_transpose_semitones(
+    song: &ValidatedSong,
+    track: &TrackDefinition,
+    lane_transpose_semitones: &BTreeMap<String, i8>,
+) -> i8 {
+    song.performance()
+        .lanes()
+        .iter()
+        .find(|lane| lane.track_id() == Some(track.id()))
+        .and_then(|lane| lane_transpose_semitones.get(lane.id()))
+        .copied()
+        .unwrap_or(0)
+}
+
 fn compile_sample_track_for_pattern(
     song: &ValidatedSong,
     track: &TrackDefinition,
     pattern_id: &str,
+    transpose_semitones: i8,
 ) -> Result<CompiledSampleTrack, SongRenderError> {
     let sampler = track.sampler_id().and_then(|id| song.samplers().get(id));
     let sample_bank_id =
@@ -1236,7 +1366,8 @@ fn compile_sample_track_for_pattern(
         let base_semitones = sampler.map_or(0.0, |sampler| sampler.pitch_semitones())
             + slot.pitch_semitones()
             + event.pitch_semitones()
-            + tracking_semitones;
+            + tracking_semitones
+            + f64::from(transpose_semitones);
         events.push(CompiledSampleEvent {
             start: event.start_frame(),
             duration: event.duration_frames(),

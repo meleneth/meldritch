@@ -76,7 +76,8 @@ launch quantization, pattern-bank names/counts, compact visible control values,
 and real held modifier state. The example declares an `octave-layer` momentary
 modifier in `.mlperformance`; while that modifier is held, main-page fader 1 is
 mapped to a typed `set_lane_octave` command for the `rhythm-drum-a` lane instead
-of its normal cutoff control.
+of its normal cutoff control; that lane octave state is applied as semitone
+transpose in the mixed-song renderer, so the held-layer fader affects audio.
 Generic typed app commands can
 select lane variations, select lane pattern banks, toggle lane mute, and toggle
 lane solo in that performance-page state, and the results are classified for
@@ -102,5 +103,4 @@ playground. Synths with `polyphony > 1` now render overlapping notes as
 independent voices, and the ensemble pad uses four voices. This ensemble
 skeleton still needs loop-mode sample playback, live sample level/pitch/slice
 controls, full pattern-bank runtime semantics, audio-affecting mute/solo
-behavior, applying lane-octave modifier state to rendered audio, and replayable
-modifier gestures.
+behavior, and replayable modifier gestures.

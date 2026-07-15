@@ -186,7 +186,8 @@ toggle lane solo against that performance-page state; those results are
 classified for session capture. `.mlperformance` modifier declarations can bind
 momentary MIDI inputs and modifier-layer controls; the ensemble currently maps
 the `octave-layer` modifier plus main-page fader 1 to a typed
-`set_lane_octave` command for `rhythm-drum-a`. `.mlperformance` actions can now bind
+`set_lane_octave` command for `rhythm-drum-a`, and mixed-song rendering applies
+that lane octave state as semitone transpose so it affects audio. `.mlperformance` actions can now bind
 LaunchControl MIDI buttons/CCs to those lane commands without hard-coded
 controller policy. Lane variation and pattern-bank selection now rerender the
 currently selected song audio through the song rerender worker. Single-track
@@ -204,9 +205,8 @@ for synth-backed mixed patches. The main and drums pages now map faders to
 distinct lane synth/filter targets; sample-lane faders need explicit sample
 level/pitch/slice targets before they affect sample audio. Audio-affecting
 mute/solo behavior, loop-mode sample playback, live sample level/pitch/slice
-controls, applying lane octave/transpose state to rendered audio, and real
-pattern-bank runtime semantics beyond choosing a lane variation are not
-implemented yet. `.mlsynth` patches with `polyphony > 1` now
+controls, and real pattern-bank runtime semantics beyond choosing a lane
+variation are not implemented yet. `.mlsynth` patches with `polyphony > 1` now
 render overlapping note events as independent voices in the song renderer; the
 ensemble pad uses four voices.
 Build this from examples first, then implement only the required multi-track,

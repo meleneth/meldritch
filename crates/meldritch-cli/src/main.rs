@@ -1829,6 +1829,7 @@ struct SongLiveOverrides {
     resonance: Option<f64>,
     mix: Option<f64>,
     synth_filters: BTreeMap<SynthFilterTarget, SongFilterLiveOverrides>,
+    lane_transpose_semitones: BTreeMap<String, i8>,
 }
 
 impl SongLiveOverrides {
@@ -3530,6 +3531,7 @@ fn tui_song(
     let live_overrides = Arc::new(Mutex::new(SongLiveOverrides::default()));
     let input_live_overrides = Arc::clone(&live_overrides);
     let input_active_patch = Arc::clone(&active_patch);
+    let input_song = song.clone();
     let scene_patches = scene_bank.patches;
     let lane_patches = scene_bank.lane_patches;
     let published_generation = Arc::new(Mutex::new(0_u64));
@@ -3617,16 +3619,77 @@ fn tui_song(
                     .submit(*generation, patch, overrides);
                 return;
             }
-            if let Some((lane, variation)) = song_lane_selection(result)
-                && let Some(patch) = lane_patches.get(&(lane, variation)).cloned()
+            if let meldritch_app::AppCommandResult::LaneOctaveSet {
+                lane_id, current, ..
+            } = result
             {
+                let overrides = {
+                    let mut overrides = input_live_overrides
+                        .lock()
+                        .expect("song live override lock poisoned");
+                    if *current == 0 {
+                        overrides.lane_transpose_semitones.remove(lane_id);
+                    } else {
+                        overrides
+                            .lane_transpose_semitones
+                            .insert(lane_id.clone(), current.saturating_mul(12));
+                    }
+                    overrides.clone()
+                };
+                let active_variations = active_lane_variations(&controller.view_model());
+                let patch = match compile_mixed_song_for_active_lanes(
+                    &input_song,
+                    &active_variations,
+                    &overrides.lane_transpose_semitones,
+                ) {
+                    Ok(patch) => patch,
+                    Err(error) => {
+                        eprintln!("{error}");
+                        return;
+                    }
+                };
                 *input_active_patch
                     .lock()
                     .expect("song active patch lock poisoned") = patch.clone();
+                let mut generation = input_generation
+                    .lock()
+                    .expect("song render generation lock poisoned");
+                *generation = generation.saturating_add(1);
+                input_worker
+                    .lock()
+                    .expect("song render worker lock poisoned")
+                    .submit(*generation, patch, overrides);
+                return;
+            }
+            if let Some((lane, variation)) = song_lane_selection(result) {
                 let overrides = input_live_overrides
                     .lock()
                     .expect("song live override lock poisoned")
                     .clone();
+                let patch = if overrides.lane_transpose_semitones.is_empty() {
+                    lane_patches
+                        .get(&(lane.clone(), variation.clone()))
+                        .cloned()
+                } else {
+                    let active_variations = active_lane_variations(&controller.view_model());
+                    match compile_mixed_song_for_active_lanes(
+                        &input_song,
+                        &active_variations,
+                        &overrides.lane_transpose_semitones,
+                    ) {
+                        Ok(patch) => Some(patch),
+                        Err(error) => {
+                            eprintln!("{error}");
+                            None
+                        }
+                    }
+                };
+                let Some(patch) = patch else {
+                    return;
+                };
+                *input_active_patch
+                    .lock()
+                    .expect("song active patch lock poisoned") = patch.clone();
                 let mut generation = input_generation
                     .lock()
                     .expect("song render generation lock poisoned");
@@ -4093,6 +4156,35 @@ fn song_lane_selection(result: &meldritch_app::AppCommandResult) -> Option<(Stri
         } => Some((lane_id.clone(), current_variation.clone())),
         _ => None,
     }
+}
+
+fn active_lane_variations(view: &meldritch_app::AppViewModel) -> BTreeMap<String, String> {
+    view.performance
+        .pages
+        .iter()
+        .flat_map(|page| page.strips.iter())
+        .filter_map(|strip| {
+            Some((
+                strip.lane_id.clone(),
+                strip.active_variation_id.as_ref()?.clone(),
+            ))
+        })
+        .collect()
+}
+
+fn compile_mixed_song_for_active_lanes(
+    song: &meldritch_dsl::ValidatedSong,
+    active_variations: &BTreeMap<String, String>,
+    lane_transpose_semitones: &BTreeMap<String, i8>,
+) -> Result<CompiledSongPatch, String> {
+    let patch =
+        meldritch_render::song_render::compile_mixed_note_song_with_lane_variations_and_transposes(
+            song,
+            active_variations,
+            lane_transpose_semitones,
+        )
+        .map_err(|error| format!("failed to compile active mixed song: {error:?}"))?;
+    Ok(CompiledSongPatch::Mixed(patch))
 }
 
 fn parameter_target_label(target: &ParameterTargetDefinition) -> String {

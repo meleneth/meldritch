@@ -3,8 +3,10 @@ use meldritch_dsl::load_song_directory;
 use meldritch_render::song_render::{
     CompiledSynthFilterOverride, compile_automated_delayed_note_song, compile_delayed_note_song,
     compile_delayed_note_song_for_pattern, compile_drone_song, compile_filtered_note_song,
-    compile_mixed_note_song, compile_mixed_note_song_with_lane_variation, compile_note_song,
+    compile_mixed_note_song, compile_mixed_note_song_with_lane_transposes,
+    compile_mixed_note_song_with_lane_variation, compile_note_song,
 };
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 fn example(name: &str) -> PathBuf {
@@ -340,6 +342,32 @@ fn launch_control_ensemble_lane_variation_changes_one_track_in_the_mix() {
     assert_eq!(varied.track_count(), 9);
     assert_ne!(initial_block.samples(), varied_block.samples());
     assert!(varied_block.peak_abs() > 0.01);
+}
+
+#[test]
+fn launch_control_ensemble_lane_transpose_changes_the_mix() {
+    let song = load_song_directory(example("17-launch-control-xl-ensemble"))
+        .expect("LaunchControl XL ensemble song should load");
+    let initial = compile_mixed_note_song(&song).expect("ensemble mix should compile");
+    let transposed = compile_mixed_note_song_with_lane_transposes(
+        &song,
+        &BTreeMap::from([("rhythm-drum-a".to_owned(), 12)]),
+    )
+    .expect("ensemble transposed mix should compile");
+    let initial_block = initial.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+    let transposed_block = transposed
+        .render(FrameRange::new(0, 96_000).unwrap())
+        .unwrap();
+
+    assert_eq!(transposed.track_count(), 9);
+    assert_ne!(initial_block.samples(), transposed_block.samples());
+    assert!(transposed_block.peak_abs() > 0.01);
+    assert!(
+        transposed_block
+            .samples()
+            .iter()
+            .all(|sample| sample.is_finite())
+    );
 }
 
 #[test]
