@@ -239,9 +239,11 @@ assigned, switched, and rendered deterministically from text definitions.
   controls, and richer per-event sample selection/mapping
 - [x] Add a polyphonic synth path for chord/pad note patterns in `.mlsynth`
   songs, with enough ADSR/filter control to be musically distinct from bass
-- [ ] Add TUI performance-mode lane overview for the ensemble: 8 visible
-  controller strips, active variation per lane, mute/solo state, modifier state,
-  and compact values
+- [x] Add TUI performance-mode lane overview for the ensemble: active page, 8
+  visible controller strips, active variation per lane, mute/solo state, compact
+  visible control values, and an explicit modifier-state placeholder
+- [ ] Replace the TUI modifier-state placeholder with real script-declared
+  held/layer state after `.mlperformance` modifier controls exist
 - [ ] Add session-capture tests proving normal controls and modifier-layer
   gestures record as typed inputs and can replay without the LaunchControl
   attached

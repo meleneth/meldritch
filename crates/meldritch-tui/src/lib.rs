@@ -465,7 +465,7 @@ fn draw_curated_performance_mode(
     let groovebox_height = if view.performance.pages.is_empty() {
         4
     } else {
-        10
+        12
     };
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -483,7 +483,7 @@ fn draw_curated_performance_mode(
     draw_grid(frame, rows[2], view);
     frame.render_widget(
         panel(
-            "Control Telemetry · last MIDI/action in status",
+            "Visible Control Values · last MIDI/action in status",
             Paragraph::new(performance_control_lines(view)).wrap(Wrap { trim: false }),
         ),
         rows[3],
@@ -553,7 +553,7 @@ fn draw_performance_pages(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
     let mut lines = vec![
         Line::from(format!("Pages: {page_tabs}")),
         Line::from(format!(
-            "Active page: {} · {} visible strips · Pattern {} · {} steps",
+            "Active page: {} · {} visible strips · modifiers none active · Pattern {} · {} steps",
             page.label,
             page.strips.len(),
             view.pattern_grid.pattern.raw(),
@@ -584,30 +584,27 @@ fn draw_performance_pages(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
             (false, false) => "live",
         };
         let banks = if strip.pattern_banks.is_empty() {
-            "banks —".to_owned()
+            "—".to_owned()
         } else {
-            format!(
-                "banks {}",
-                strip
-                    .pattern_banks
-                    .iter()
-                    .map(|bank| format!("{}:{}", bank.label, bank.variation_ids.len()))
-                    .collect::<Vec<_>>()
-                    .join("/")
-            )
+            strip
+                .pattern_banks
+                .iter()
+                .map(|bank| format!("{}:{}", bank.label, bank.variation_ids.len()))
+                .collect::<Vec<_>>()
+                .join("/")
         };
+        let controls = compact_strip_control_summary(view, strip);
         Line::from(format!(
-            "F{:02}: {} ({}) · track {} · {status} · bank {active_bank} · var {active_variation} · q {quantization} · {} variations · {banks}",
+            "F{:02} {:<16} {:<17} {status:<10} var {active_variation:<12} bank {active_bank:<8} vars {:<2} q {quantization:<5} ctl {controls} · banks {banks} · track {track}",
             strip.strip,
             strip.lane_label,
             strip.lane_role,
-            track,
             strip.variation_ids.len()
         ))
     }));
     frame.render_widget(
         panel(
-            "Groovebox Pages",
+            "Ensemble Page Overview",
             Paragraph::new(lines).wrap(Wrap { trim: false }),
         ),
         area,
@@ -650,7 +647,7 @@ fn active_page_control_lines(view: &AppViewModel) -> Option<Vec<Line<'static>>> 
         return None;
     }
     let mut lines = vec![Line::from(format!(
-        "Active page {} · declared controls only",
+        "Active page {} · declared strip controls only",
         page.label
     ))];
     lines.extend(page.strips.iter().map(|strip| {
@@ -670,6 +667,28 @@ fn active_page_control_lines(view: &AppViewModel) -> Option<Vec<Line<'static>>> 
         ))
     }));
     Some(lines)
+}
+
+fn compact_strip_control_summary(
+    view: &AppViewModel,
+    strip: &meldritch_app::PerformanceStripView,
+) -> String {
+    if strip.control_ids.is_empty() {
+        return "—".to_owned();
+    }
+    strip
+        .control_ids
+        .iter()
+        .map(|id| {
+            let label = id
+                .rsplit('-')
+                .next()
+                .filter(|suffix| !suffix.is_empty())
+                .unwrap_or(id.as_str());
+            format!("{label} {}", compact_control_value(view, id))
+        })
+        .collect::<Vec<_>>()
+        .join(" / ")
 }
 
 fn active_performance_page(view: &AppViewModel) -> Option<&meldritch_app::PerformancePageView> {
@@ -1685,7 +1704,7 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
 
-        assert!(content.contains("Control Telemetry"));
+        assert!(content.contains("Visible Control Values"));
         assert!(content.contains("Groovebox Scenes"));
         assert!(content.contains("Echo Feedback"));
         assert!(content.contains("dsp:echo/delay.feedback"));
@@ -1743,7 +1762,7 @@ mod tests {
         assert!(content.contains("Groovebox Scenes"));
         assert!(content.contains("B01-B04 scenes"));
         assert!(content.contains("B05-B08 fills"));
-        assert!(content.contains("Control Telemetry"));
+        assert!(content.contains("Visible Control Values"));
         assert!(content.contains("Surface"));
         assert!(content.contains("synth:playground"));
         assert!(content.contains("dsp:echo"));
@@ -1833,7 +1852,7 @@ mod tests {
             value: Some(1234.0),
         }];
         view.performance.active_page = Some(0);
-        let backend = TestBackend::new(140, 32);
+        let backend = TestBackend::new(180, 34);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| draw(frame, &view)).unwrap();
         let content = terminal
@@ -1844,17 +1863,18 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
 
-        assert!(content.contains("Groovebox Pages"));
+        assert!(content.contains("Ensemble Page Overview"));
         assert!(content.contains("[Main]"));
         assert!(content.contains("Drums"));
         assert!(content.contains("F01"));
         assert!(content.contains("Pad"));
         assert!(content.contains("polyphonic_synth"));
-        assert!(content.contains("4 variations"));
+        assert!(content.contains("vars 4"));
         assert!(content.contains("live"));
         assert!(content.contains("bank groove"));
         assert!(content.contains("var pad-a"));
         assert!(content.contains("q 1 bar"));
+        assert!(content.contains("modifiers none active"));
         assert!(content.contains("banks Groove:2/Fills:2"));
         assert!(content.contains("Active page Main"));
         assert!(content.contains("1234.000 filter.cutoff_hz"));

@@ -70,8 +70,11 @@ final usable Raven voice asset is committed. The sample lanes use an
 `.mlsampler` voice definition with pitch tracking, level, polyphony, a pitch
 envelope, and explicit slice events in their patterns.
 `tui-song` now carries that lane metadata into app view state, and performance
-mode renders visible strips with lane status, active variation, launch
-quantization, and pattern-bank names/counts. Generic typed app commands can
+mode renders an ensemble page overview centered on the active page, eight
+visible controller strips, lane role, mute/solo state, active variation,
+launch quantization, pattern-bank names/counts, compact visible control values,
+and an explicit placeholder showing that no modifier layer is active yet.
+Generic typed app commands can
 select lane variations, select lane pattern banks, toggle lane mute, and toggle
 lane solo in that performance-page state, and the results are classified for
 session capture. `.mlperformance` actions can bind LaunchControl MIDI buttons

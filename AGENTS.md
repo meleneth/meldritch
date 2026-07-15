@@ -173,13 +173,14 @@ remap physical controls without hard-coded LaunchControl policy.
 `17-launch-control-xl-ensemble` now parses as a skeleton: nine tracks/lanes,
 two scene-authored pages, 36 lane-owned note patterns/four variations per lane,
 nine distinct renderer-compatible synth patches, and page-scoped fader
-controls. Its lane
-declarations now carry authored launch
-quantization, default mute/solo state, per-lane control IDs, and nested pattern
-banks that group four variations into selectable banks. `tui-song` loads that
-lane metadata into generic app performance-page view state, and performance
-mode renders visible strips with lane status, active variation, launch
-quantization, and pattern-bank names/counts. Generic typed app commands can now
+controls. Its lane declarations now carry authored launch quantization, default
+mute/solo state, per-lane control IDs, and nested pattern banks that group four
+variations into selectable banks. `tui-song` loads that lane metadata into
+generic app performance-page view state, and performance mode renders an
+ensemble page overview centered on the active page, eight visible controller
+strips, lane role, active variation, mute/solo state, launch quantization,
+pattern-bank names/counts, compact visible control values, and an explicit
+placeholder for modifier/layer state. Generic typed app commands can now
 select a lane variation, select a lane pattern bank, toggle lane mute, and
 toggle lane solo against that performance-page state; those results are
 classified for session capture. `.mlperformance` actions can now bind
@@ -200,8 +201,8 @@ for synth-backed mixed patches. The main and drums pages now map faders to
 distinct lane synth/filter targets; sample-lane faders need explicit sample
 level/pitch/slice targets before they affect sample audio. Audio-affecting
 mute/solo behavior, loop-mode sample playback, live sample level/pitch/slice
-controls, and real pattern-bank runtime semantics beyond choosing a lane
-variation are not implemented yet. `.mlsynth` patches with `polyphony > 1` now
+controls, real modifier/layer state, and real pattern-bank runtime semantics
+beyond choosing a lane variation are not implemented yet. `.mlsynth` patches with `polyphony > 1` now
 render overlapping note events as independent voices in the song renderer; the
 ensemble pad uses four voices.
 Build this from examples first, then implement only the required multi-track,
