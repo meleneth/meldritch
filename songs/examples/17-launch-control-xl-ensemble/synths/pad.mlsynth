@@ -4,7 +4,7 @@ version = 1
 
 [synth]
 id = "pad"
-polyphony = 1
+polyphony = 4
 
 [[inputs]]
 id = "pitch"
@@ -65,4 +65,3 @@ to = "filter.audio"
 [[cables]]
 from = "filter.audio"
 to = "out.audio"
-

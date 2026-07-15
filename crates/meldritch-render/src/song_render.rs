@@ -1,7 +1,8 @@
 //! Compilation and offline rendering for directory-based modular songs.
 
 use crate::dsp::{
-    AdsrEnvelope, AdsrSettings, FilterMode, Oscillator, StateVariableFilter, Waveform,
+    AdsrEnvelope, AdsrSettings, EnvelopeStage, FilterMode, Oscillator, StateVariableFilter,
+    Waveform,
 };
 use meldritch_audio::{AudioBlock, SampleBuffer, read_wav};
 use meldritch_core::FrameRange;
@@ -251,6 +252,7 @@ pub struct CompiledNotePatch {
     synth_id: String,
     sample_rate: u32,
     channels: u16,
+    polyphony: u16,
     waveform: Waveform,
     envelope: AdsrSettings,
     filter: Option<CompiledNoteFilter>,
@@ -528,6 +530,13 @@ impl CompiledNotePatch {
         cutoff_override: Option<f64>,
         resonance_override: Option<f64>,
     ) -> Result<AudioBlock, SongRenderError> {
+        if self.polyphony > 1 {
+            return self.render_polyphonic_with_filter_overrides(
+                range,
+                cutoff_override,
+                resonance_override,
+            );
+        }
         if cutoff_override.is_some_and(|value| !value.is_finite() || value <= 0.0) {
             return Err(SongRenderError::InvalidCutoffOverride);
         }
@@ -594,6 +603,104 @@ impl CompiledNotePatch {
         }
         Ok(block)
     }
+
+    fn render_polyphonic_with_filter_overrides(
+        &self,
+        range: FrameRange,
+        cutoff_override: Option<f64>,
+        resonance_override: Option<f64>,
+    ) -> Result<AudioBlock, SongRenderError> {
+        if cutoff_override.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+            return Err(SongRenderError::InvalidCutoffOverride);
+        }
+        if resonance_override
+            .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
+        {
+            return Err(SongRenderError::InvalidResonanceOverride);
+        }
+        let frame_count = range.end() - range.start();
+        let frames = u32::try_from(frame_count).map_err(|_| SongRenderError::RangeTooLong {
+            frames: frame_count,
+        })?;
+        let mut block = AudioBlock::silent(self.channels, frames);
+        let mut voices = Vec::<CompiledNoteVoice>::new();
+        for absolute_frame in 0..range.end() {
+            for voice in voices
+                .iter_mut()
+                .filter(|voice| !voice.released && voice.end == absolute_frame)
+            {
+                voice.envelope.note_off();
+                voice.released = true;
+            }
+            let pattern_frame = if self.looped {
+                absolute_frame % self.pattern_length
+            } else {
+                absolute_frame
+            };
+            if self.looped && absolute_frame > 0 && pattern_frame == 0 {
+                for voice in voices.iter_mut().filter(|voice| !voice.released) {
+                    voice.envelope.note_off();
+                    voice.released = true;
+                }
+            }
+            for event in self
+                .events
+                .iter()
+                .filter(|event| event.start == pattern_frame)
+            {
+                if voices.len() >= usize::from(self.polyphony) {
+                    voices.remove(0);
+                }
+                let mut envelope = AdsrEnvelope::new(self.envelope, self.sample_rate);
+                envelope.note_on();
+                voices.push(CompiledNoteVoice {
+                    oscillator: Oscillator::new(self.waveform),
+                    envelope,
+                    filter: StateVariableFilter::new(),
+                    frequency: midi_frequency(event.note),
+                    velocity: event.velocity,
+                    end: absolute_frame + (event.end - event.start),
+                    released: false,
+                });
+            }
+            let mut sample = 0.0;
+            for voice in &mut voices {
+                let mut voice_sample = voice.oscillator.next(voice.frequency, self.sample_rate);
+                if let Some(filter_settings) = &self.filter {
+                    voice_sample = voice.filter.process(
+                        voice_sample,
+                        cutoff_override.unwrap_or(filter_settings.cutoff_hz),
+                        resonance_override.unwrap_or(filter_settings.resonance),
+                        FilterMode::LowPass,
+                        self.sample_rate,
+                    );
+                }
+                sample += voice_sample * voice.envelope.next_value() * voice.velocity;
+            }
+            voices.retain(|voice| voice.envelope.stage() != EnvelopeStage::Idle);
+            let sample = sample / f64::from(self.polyphony).sqrt();
+            if absolute_frame < range.start() {
+                continue;
+            }
+            let relative = usize::try_from(absolute_frame - range.start())
+                .expect("u32 render length fits usize");
+            let frame_start = relative * usize::from(self.channels);
+            for channel in 0..usize::from(self.channels) {
+                block.samples_mut()[frame_start + channel] = sample;
+            }
+        }
+        Ok(block)
+    }
+}
+
+struct CompiledNoteVoice {
+    oscillator: Oscillator,
+    envelope: AdsrEnvelope,
+    filter: StateVariableFilter,
+    frequency: f64,
+    velocity: f64,
+    end: u64,
+    released: bool,
 }
 
 impl CompiledDronePatch {
@@ -889,6 +996,7 @@ fn compile_note_track_for_pattern(
         synth_id: synth.id().to_owned(),
         sample_rate: song.performance().sample_rate(),
         channels: output.channels().unwrap_or(1),
+        polyphony: synth.polyphony(),
         waveform,
         envelope: AdsrSettings {
             attack_seconds: envelope.attack().unwrap_or(0.0),

@@ -89,8 +89,9 @@ level/pitch/slice targets before they affect sample audio. The existing
 LaunchControl XL playground proves script-authored LaunchControl input, typed
 actions, live rerendered parameters, authored groove variations, default
 performance mode, and continuous audio publication for a single-synth
-playground. This ensemble skeleton still needs explicit per-pattern sample
+playground. Synths with `polyphony > 1` now render overlapping notes as
+independent voices, and the ensemble pad uses four voices. This ensemble
+skeleton still needs explicit per-pattern sample
 slot/slice targeting, loop-mode sample playback, sample level/pitch controls,
 full pattern-bank runtime semantics, audio-affecting mute/solo behavior,
-polyphonic pad rendering, momentary modifier layers, and replayable modifier
-gestures.
+momentary modifier layers, and replayable modifier gestures.

@@ -355,6 +355,7 @@ fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
     assert_eq!(song.performance().pages().len(), 2);
     assert_eq!(song.sample_banks().len(), 1);
     assert_eq!(song.note_patterns().len(), 36);
+    assert_eq!(song.synths()["pad"].polyphony(), 4);
 
     let tracks = song
         .performance()

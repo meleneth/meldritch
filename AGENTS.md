@@ -197,9 +197,11 @@ controls can change audio for synth-backed mixed patches. The main and drums
 pages now map faders to distinct lane synth/filter targets; sample-lane faders
 need explicit sample level/pitch/slice targets before they affect sample audio.
 Audio-affecting mute/solo behavior, explicit per-event sample slot/slice
-selection, loop-mode sample playback, sample level/pitch controls, poly-synth,
-and real pattern-bank runtime semantics beyond choosing a lane variation are
-not implemented yet.
+selection, loop-mode sample playback, sample level/pitch controls, and real
+pattern-bank runtime semantics beyond choosing a lane variation are not
+implemented yet. `.mlsynth` patches with `polyphony > 1` now render overlapping
+note events as independent voices in the song renderer; the ensemble pad uses
+four voices.
 Build this from examples first, then implement only the required multi-track,
 sample-track playback, poly-synth, pattern-bank runtime, and modifier control
 support.

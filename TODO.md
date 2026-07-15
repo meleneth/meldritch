@@ -221,7 +221,7 @@ assigned, switched, and rendered deterministically from text definitions.
   synth tracks
 - [x] Wire multi-track song compilation into `tui-song` playback and lane
   variation changes
-- [ ] Extend multi-track song playback for the subset needed by the ensemble
+- [x] Extend multi-track song playback for the subset needed by the ensemble
   example: drums/percussion first, then basses, then poly pad
 - [x] Route live controls into mixed multi-track patches so script-authored
   per-lane/global parameter changes affect the currently selected ensemble
@@ -235,7 +235,7 @@ assigned, switched, and rendered deterministically from text definitions.
 - [ ] Extend sample-track playback with explicit pattern targeting for sample
   slots/slices, loop mode, level controls, pitch controls, and per-event sample
   selection
-- [ ] Add a polyphonic synth path for chord/pad note patterns in `.mlsynth`
+- [x] Add a polyphonic synth path for chord/pad note patterns in `.mlsynth`
   songs, with enough ADSR/filter control to be musically distinct from bass
 - [ ] Add TUI performance-mode lane overview for the ensemble: 8 visible
   controller strips, active variation per lane, mute/solo state, modifier state,
