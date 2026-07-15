@@ -3,10 +3,11 @@
 use crate::dsp::{
     AdsrEnvelope, AdsrSettings, FilterMode, Oscillator, StateVariableFilter, Waveform,
 };
-use meldritch_audio::AudioBlock;
+use meldritch_audio::{AudioBlock, SampleBuffer, read_wav};
 use meldritch_core::FrameRange;
 use meldritch_dsl::{
-    ModuleKind, ParameterInterpolation, ParameterOwner, TrackDefinition, ValidatedSong,
+    ModuleKind, ParameterInterpolation, ParameterOwner, SampleSlotDefinition, TrackDefinition,
+    ValidatedSong,
 };
 use std::fmt;
 
@@ -263,7 +264,112 @@ pub struct CompiledMixedNoteSong {
     song_fingerprint: u64,
     sample_rate: u32,
     channels: u16,
-    tracks: Vec<CompiledNotePatch>,
+    tracks: Vec<CompiledMixedTrack>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum CompiledMixedTrack {
+    Note(CompiledNotePatch),
+    Sample(CompiledSampleTrack),
+}
+
+impl CompiledMixedTrack {
+    const fn channels(&self) -> u16 {
+        match self {
+            Self::Note(track) => track.channels,
+            Self::Sample(track) => track.channels,
+        }
+    }
+
+    fn render(
+        &self,
+        range: FrameRange,
+        overrides: &[CompiledSynthFilterOverride],
+    ) -> Result<AudioBlock, SongRenderError> {
+        match self {
+            Self::Note(track) => {
+                let (cutoff_hz, resonance) = track.synth_filter_overrides(overrides);
+                track.render_with_filter_overrides(range, cutoff_hz, resonance)
+            }
+            Self::Sample(track) => track.render(range),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CompiledSampleTrack {
+    sample_rate: u32,
+    channels: u16,
+    sample: SampleBuffer,
+    slice_start: u64,
+    slice_end: u64,
+    level: f64,
+    pitch_ratio: f64,
+    pattern_length: u64,
+    looped: bool,
+    events: Vec<CompiledNoteEvent>,
+}
+
+impl CompiledSampleTrack {
+    fn render(&self, range: FrameRange) -> Result<AudioBlock, SongRenderError> {
+        if self.pitch_ratio <= 0.0 || !self.pitch_ratio.is_finite() {
+            return Err(SongRenderError::InvalidSamplePitch);
+        }
+        let frame_count = range.end() - range.start();
+        let frames = u32::try_from(frame_count).map_err(|_| SongRenderError::RangeTooLong {
+            frames: frame_count,
+        })?;
+        let mut block = AudioBlock::silent(self.channels, frames);
+        if self.slice_end <= self.slice_start || self.events.is_empty() {
+            return Ok(block);
+        }
+        let channels = usize::from(self.channels);
+        let sample_channels = usize::from(self.sample.channels());
+        for event in &self.events {
+            if self.pattern_length == 0 {
+                continue;
+            }
+            let starts = if self.looped {
+                let first_cycle = range.start().saturating_sub(event.start) / self.pattern_length;
+                let last_cycle = range.end().saturating_sub(event.start) / self.pattern_length + 1;
+                (first_cycle..=last_cycle)
+                    .map(|cycle| event.start + cycle * self.pattern_length)
+                    .collect::<Vec<_>>()
+            } else {
+                vec![event.start]
+            };
+            for start in starts {
+                let trigger_end = start
+                    + ((self.slice_end - self.slice_start) as f64 / self.pitch_ratio).ceil() as u64;
+                if trigger_end <= range.start() || start >= range.end() {
+                    continue;
+                }
+                let out_start = start.max(range.start());
+                let out_end = trigger_end.min(range.end());
+                for absolute_frame in out_start..out_end {
+                    let source_offset =
+                        ((absolute_frame - start) as f64 * self.pitch_ratio).floor() as u64;
+                    let source_frame = self.slice_start + source_offset;
+                    if source_frame >= self.slice_end {
+                        break;
+                    }
+                    let source_index = usize::try_from(source_frame)
+                        .expect("sample frame index fits usize")
+                        * sample_channels;
+                    let relative = usize::try_from(absolute_frame - range.start())
+                        .expect("render range fits usize");
+                    let output_index = relative * channels;
+                    let gain = self.level * event.velocity;
+                    for channel in 0..channels {
+                        let sample_channel = channel.min(sample_channels.saturating_sub(1));
+                        block.samples_mut()[output_index + channel] +=
+                            self.sample.samples()[source_index + sample_channel] * gain;
+                    }
+                }
+            }
+        }
+        Ok(block)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -351,8 +457,7 @@ impl CompiledMixedNoteSong {
         }
         let gain = 1.0 / (self.tracks.len() as f64).sqrt();
         for track in &self.tracks {
-            let (cutoff_hz, resonance) = track.synth_filter_overrides(overrides);
-            let block = track.render_with_filter_overrides(range, cutoff_hz, resonance)?;
+            let block = track.render(range, overrides)?;
             if block.channels() != self.channels || block.frames() != frames {
                 return Err(SongRenderError::IncompatibleTrackRender);
             }
@@ -547,6 +652,11 @@ pub enum SongRenderError {
     MultipleModules { kind: ModuleKind },
     MissingCable { from: String, to: String },
     MissingPattern { id: String },
+    MissingSampleBank { id: String },
+    MissingSampleSlot { id: String },
+    MissingSampleSlice { id: String },
+    SampleLoad { path: String, message: String },
+    UnsupportedSampleRate { found: u32, expected: u32 },
     UnsupportedInterpolation,
     MissingDsp { id: String },
     DspCount { found: usize },
@@ -556,6 +666,7 @@ pub enum SongRenderError {
     InvalidCutoffOverride,
     InvalidResonanceOverride,
     InvalidMixOverride,
+    InvalidSamplePitch,
     IncompatibleTrackRender,
     RangeTooLong { frames: u64 },
 }
@@ -611,6 +722,22 @@ impl fmt::Display for SongRenderError {
             Self::MissingPattern { id } => {
                 write!(formatter, "track references missing note pattern '{id}'")
             }
+            Self::MissingSampleBank { id } => {
+                write!(formatter, "track references missing sample bank '{id}'")
+            }
+            Self::MissingSampleSlot { id } => {
+                write!(formatter, "sample bank has no sample slot '{id}'")
+            }
+            Self::MissingSampleSlice { id } => {
+                write!(formatter, "sample slot has no sample slice '{id}'")
+            }
+            Self::SampleLoad { path, message } => {
+                write!(formatter, "failed to load sample '{path}': {message}")
+            }
+            Self::UnsupportedSampleRate { found, expected } => write!(
+                formatter,
+                "sample rate {found} does not match song sample rate {expected}"
+            ),
             Self::UnsupportedInterpolation => write!(
                 formatter,
                 "parameter lane interpolation is incompatible with the target compiler"
@@ -647,6 +774,12 @@ impl fmt::Display for SongRenderError {
                 write!(
                     formatter,
                     "live delay mix override must be finite and within 0.0..=1.0"
+                )
+            }
+            Self::InvalidSamplePitch => {
+                write!(
+                    formatter,
+                    "sample pitch ratio must be finite and greater than zero"
                 )
             }
             Self::IncompatibleTrackRender => {
@@ -838,13 +971,17 @@ fn compile_mixed_note_song_with_track_patterns(
             pattern_for_track(track).ok_or_else(|| SongRenderError::MissingPattern {
                 id: format!("initial pattern for track '{}'", track.id()),
             })?;
-        let patch = compile_note_track_for_pattern(song, track, &pattern_id)?;
+        let patch = if track.sample_bank_id().is_some() {
+            CompiledMixedTrack::Sample(compile_sample_track_for_pattern(song, track, &pattern_id)?)
+        } else {
+            CompiledMixedTrack::Note(compile_note_track_for_pattern(song, track, &pattern_id)?)
+        };
         if let Some(channels) = channels {
-            if patch.channels != channels {
+            if patch.channels() != channels {
                 return Err(SongRenderError::IncompatibleTrackRender);
             }
         } else {
-            channels = Some(patch.channels);
+            channels = Some(patch.channels());
         }
         tracks.push(patch);
     }
@@ -854,6 +991,113 @@ fn compile_mixed_note_song_with_track_patterns(
         channels: channels.unwrap_or(1),
         tracks,
     })
+}
+
+fn compile_sample_track_for_pattern(
+    song: &ValidatedSong,
+    track: &TrackDefinition,
+    pattern_id: &str,
+) -> Result<CompiledSampleTrack, SongRenderError> {
+    let sample_bank_id =
+        track
+            .sample_bank_id()
+            .ok_or_else(|| SongRenderError::MissingSampleBank {
+                id: format!("sample bank for track '{}'", track.id()),
+            })?;
+    let sample_bank = song.sample_banks().get(sample_bank_id).ok_or_else(|| {
+        SongRenderError::MissingSampleBank {
+            id: sample_bank_id.to_owned(),
+        }
+    })?;
+    let slot = sample_bank
+        .slots()
+        .first()
+        .ok_or_else(|| SongRenderError::MissingSampleSlot {
+            id: format!("first slot in sample bank '{}'", sample_bank.id()),
+        })?;
+    let sample_bank_path =
+        track
+            .sample_bank_path()
+            .ok_or_else(|| SongRenderError::MissingSampleBank {
+                id: sample_bank_id.to_owned(),
+            })?;
+    let sample_path = song
+        .root()
+        .join(sample_bank_path)
+        .parent()
+        .expect("sample bank path has a parent")
+        .join(slot.path());
+    let sample = read_wav(&sample_path).map_err(|error| SongRenderError::SampleLoad {
+        path: sample_path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    if sample.sample_rate() != song.performance().sample_rate() {
+        return Err(SongRenderError::UnsupportedSampleRate {
+            found: sample.sample_rate(),
+            expected: song.performance().sample_rate(),
+        });
+    }
+    let (slice_start, slice_end) = compile_sample_slice(slot, &sample)?;
+    let pattern =
+        song.note_patterns()
+            .get(pattern_id)
+            .ok_or_else(|| SongRenderError::MissingPattern {
+                id: pattern_id.to_owned(),
+            })?;
+    Ok(CompiledSampleTrack {
+        sample_rate: song.performance().sample_rate(),
+        channels: sample.channels(),
+        sample,
+        slice_start,
+        slice_end,
+        level: slot.level(),
+        pitch_ratio: 2.0_f64.powf(slot.pitch_semitones() / 12.0),
+        pattern_length: pattern.length_frames(),
+        looped: pattern.is_looped(),
+        events: pattern
+            .events()
+            .iter()
+            .map(|event| CompiledNoteEvent {
+                start: event.start_frame(),
+                end: event.start_frame() + event.duration_frames(),
+                note: event.note(),
+                velocity: event.velocity(),
+            })
+            .collect(),
+    })
+}
+
+fn compile_sample_slice(
+    slot: &SampleSlotDefinition,
+    sample: &SampleBuffer,
+) -> Result<(u64, u64), SongRenderError> {
+    let Some(slice) = slot.slices().first() else {
+        return Ok((0, u64::from(sample.frames())));
+    };
+    let start = parse_sample_timestamp(slice.start(), sample.sample_rate()).ok_or_else(|| {
+        SongRenderError::MissingSampleSlice {
+            id: slice.id().to_owned(),
+        }
+    })?;
+    let end = parse_sample_timestamp(slice.end(), sample.sample_rate()).ok_or_else(|| {
+        SongRenderError::MissingSampleSlice {
+            id: slice.id().to_owned(),
+        }
+    })?;
+    Ok((
+        start.min(u64::from(sample.frames())),
+        end.min(u64::from(sample.frames())),
+    ))
+}
+
+fn parse_sample_timestamp(value: &str, sample_rate: u32) -> Option<u64> {
+    let (minutes, seconds) = value.split_once(':')?;
+    let minutes = minutes.parse::<u64>().ok()?;
+    let seconds = seconds.parse::<f64>().ok()?;
+    if !seconds.is_finite() || seconds < 0.0 {
+        return None;
+    }
+    Some(((minutes as f64 * 60.0 + seconds) * f64::from(sample_rate)).round() as u64)
 }
 
 pub fn compile_filtered_note_song(

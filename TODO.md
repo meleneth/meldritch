@@ -222,16 +222,19 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Wire multi-track song compilation into `tui-song` playback and lane
   variation changes
 - [ ] Extend multi-track song playback for the subset needed by the ensemble
-  example: drums/percussion first, then basses, then poly pad, then samples
+  example: drums/percussion first, then basses, then poly pad
 - [x] Route live controls into mixed multi-track patches so script-authored
   per-lane/global parameter changes affect the currently selected ensemble
   tracks, not only the legacy single-track delayed-note patch
 - [x] Author distinct ensemble synth/filter targets so each visible lane control
   changes the intended lane/instrument instead of the former shared placeholder
   synth filter
-- [ ] Add sample-track playback support for text-authored sample references,
-  sample slots, one-shots/loops, start/end slices, level, pitch, and per-pattern
-  triggering
+- [x] Add sample-track playback v1 for mixed songs: load text-authored sample
+  references, trigger the first slot/first slice as deterministic one-shots from
+  sample-bank track note patterns, and include them in range-identical mixes
+- [ ] Extend sample-track playback with explicit pattern targeting for sample
+  slots/slices, loop mode, level controls, pitch controls, and per-event sample
+  selection
 - [ ] Add a polyphonic synth path for chord/pad note patterns in `.mlsynth`
   songs, with enough ADSR/filter control to be musically distinct from bass
 - [ ] Add TUI performance-mode lane overview for the ensemble: 8 visible

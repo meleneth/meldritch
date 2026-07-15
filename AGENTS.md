@@ -189,15 +189,17 @@ currently selected song audio through the song rerender worker. Single-track
 songs keep the delayed-note patch path with live override support; multi-track
 placeholder songs use a compiled mixed-note patch. It also parses
 `.mlsamples` sample-bank metadata and attaches the three sample lanes to a Raven
-voice placeholder bank. Mixed-note rendering accepts script-targeted synth
-filter overrides, so `tui-song` controls can change audio for mixed patches.
-The main and drums pages now map faders to distinct lane synth/filter targets,
-giving the hardware a simple but real palette before sample/poly engines land.
-Audio sample decoding, sample triggering, sample rendering, audio-affecting
-mute/solo behavior, and real pattern-bank runtime semantics beyond choosing a
-lane variation are not implemented yet. The skeleton still uses placeholder
-synth stand-ins for the sample lanes until sample-track playback, poly-synth,
-and full multi-track audio support land.
+voice placeholder bank. Mixed-note rendering can now compile sample-bank tracks
+as deterministic one-shot sample playback using the first slot/first slice, so
+sample lanes render audio from WAV assets instead of synth stand-ins. Mixed-note
+rendering also accepts script-targeted synth filter overrides, so `tui-song`
+controls can change audio for synth-backed mixed patches. The main and drums
+pages now map faders to distinct lane synth/filter targets; sample-lane faders
+need explicit sample level/pitch/slice targets before they affect sample audio.
+Audio-affecting mute/solo behavior, explicit per-event sample slot/slice
+selection, loop-mode sample playback, sample level/pitch controls, poly-synth,
+and real pattern-bank runtime semantics beyond choosing a lane variation are
+not implemented yet.
 Build this from examples first, then implement only the required multi-track,
 sample-track playback, poly-synth, pattern-bank runtime, and modifier control
 support.
