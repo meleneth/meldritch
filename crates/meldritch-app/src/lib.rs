@@ -325,6 +325,7 @@ pub struct PerformanceStripView {
     pub octave: i8,
     pub variation_ids: Vec<String>,
     pub pattern_banks: Vec<PerformancePatternBankView>,
+    pub pattern_monitors: Vec<PerformancePatternMonitorView>,
     pub control_ids: Vec<String>,
 }
 
@@ -333,6 +334,14 @@ pub struct PerformancePatternBankView {
     pub id: String,
     pub label: String,
     pub variation_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerformancePatternMonitorView {
+    pub variation_id: String,
+    pub length_frames: u64,
+    pub length_steps: u32,
+    pub active_steps: Vec<u32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2565,6 +2574,12 @@ mod tests {
                         label: "Groove".to_owned(),
                         variation_ids: vec!["pad-a".to_owned(), "pad-b".to_owned()],
                     }],
+                    pattern_monitors: vec![PerformancePatternMonitorView {
+                        variation_id: "pad-a".to_owned(),
+                        length_frames: 96_000,
+                        length_steps: 16,
+                        active_steps: vec![0, 4, 8, 12],
+                    }],
                     control_ids: vec!["pad-cutoff".to_owned()],
                 }],
             },
@@ -2588,6 +2603,12 @@ mod tests {
                         id: "drums".to_owned(),
                         label: "Drums".to_owned(),
                         variation_ids: vec!["kick-a".to_owned()],
+                    }],
+                    pattern_monitors: vec![PerformancePatternMonitorView {
+                        variation_id: "kick-a".to_owned(),
+                        length_frames: 96_000,
+                        length_steps: 16,
+                        active_steps: vec![0, 8],
                     }],
                     control_ids: vec!["kick-level".to_owned()],
                 }],
@@ -2664,6 +2685,12 @@ mod tests {
                         variation_ids: vec!["pad-c".to_owned(), "pad-d".to_owned()],
                     },
                 ],
+                pattern_monitors: vec![PerformancePatternMonitorView {
+                    variation_id: "pad-a".to_owned(),
+                    length_frames: 96_000,
+                    length_steps: 16,
+                    active_steps: vec![0, 4, 8, 12],
+                }],
                 control_ids: vec!["pad-cutoff".to_owned()],
             }],
         }]);

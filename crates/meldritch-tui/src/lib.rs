@@ -594,9 +594,9 @@ fn draw_performance_pages(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
                 .collect::<Vec<_>>()
                 .join("/")
         };
-        let controls = compact_strip_control_summary(view, strip);
+        let monitor = compact_strip_pattern_monitor(view, strip);
         Line::from(format!(
-            "F{:02} {:<16} {:<17} {status:<10} oct {:+} var {active_variation:<12} bank {active_bank:<8} vars {:<2} q {quantization:<5} ctl {controls} · banks {banks} · track {track}",
+            "F{:02} {:<16} {:<17} {status:<10} oct {:+} var {active_variation:<12} bank {active_bank:<8} vars {:<2} q {quantization:<5} banks {banks} {monitor} track {track}",
             strip.strip,
             strip.lane_label,
             strip.lane_role,
@@ -611,6 +611,52 @@ fn draw_performance_pages(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
         ),
         area,
     );
+}
+
+fn compact_strip_pattern_monitor(
+    view: &AppViewModel,
+    strip: &meldritch_app::PerformanceStripView,
+) -> String {
+    let Some(active_variation) = strip.active_variation_id.as_deref() else {
+        return "pat —".to_owned();
+    };
+    let Some(monitor) = strip
+        .pattern_monitors
+        .iter()
+        .find(|monitor| monitor.variation_id == active_variation)
+    else {
+        return "pat —".to_owned();
+    };
+    if monitor.length_steps == 0 {
+        return "pat —".to_owned();
+    }
+    let active_step = if monitor.length_frames == 0 {
+        None
+    } else {
+        Some(
+            (u64::from(view.transport.position) % monitor.length_frames)
+                .saturating_mul(u64::from(monitor.length_steps))
+                / monitor.length_frames,
+        )
+    };
+    let active_steps = monitor
+        .active_steps
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    let cells = (0..monitor.length_steps)
+        .map(|step| {
+            let has_event = active_steps.contains(&step);
+            if active_step == Some(u64::from(step)) {
+                if has_event { '◆' } else { '▶' }
+            } else if has_event {
+                '●'
+            } else {
+                '·'
+            }
+        })
+        .collect::<String>();
+    format!("pat {cells}")
 }
 
 fn performance_control_lines(view: &AppViewModel) -> Vec<Line<'static>> {
@@ -669,28 +715,6 @@ fn active_page_control_lines(view: &AppViewModel) -> Option<Vec<Line<'static>>> 
         ))
     }));
     Some(lines)
-}
-
-fn compact_strip_control_summary(
-    view: &AppViewModel,
-    strip: &meldritch_app::PerformanceStripView,
-) -> String {
-    if strip.control_ids.is_empty() {
-        return "—".to_owned();
-    }
-    strip
-        .control_ids
-        .iter()
-        .map(|id| {
-            let label = id
-                .rsplit('-')
-                .next()
-                .filter(|suffix| !suffix.is_empty())
-                .unwrap_or(id.as_str());
-            format!("{label} {}", compact_control_value(view, id))
-        })
-        .collect::<Vec<_>>()
-        .join(" / ")
 }
 
 fn active_performance_page(view: &AppViewModel) -> Option<&meldritch_app::PerformancePageView> {
@@ -1843,6 +1867,12 @@ mod tests {
                             variation_ids: vec!["pad-c".to_owned(), "pad-d".to_owned()],
                         },
                     ],
+                    pattern_monitors: vec![meldritch_app::PerformancePatternMonitorView {
+                        variation_id: "pad-a".to_owned(),
+                        length_frames: 96_000,
+                        length_steps: 16,
+                        active_steps: vec![0, 4, 8, 12],
+                    }],
                     control_ids: vec!["pad-cutoff".to_owned()],
                 }],
             },
@@ -1866,6 +1896,12 @@ mod tests {
                         id: "drums".to_owned(),
                         label: "Drums".to_owned(),
                         variation_ids: vec!["kick-a".to_owned()],
+                    }],
+                    pattern_monitors: vec![meldritch_app::PerformancePatternMonitorView {
+                        variation_id: "kick-a".to_owned(),
+                        length_frames: 96_000,
+                        length_steps: 16,
+                        active_steps: vec![0, 8],
                     }],
                     control_ids: Vec::new(),
                 }],
@@ -1909,6 +1945,7 @@ mod tests {
         assert!(content.contains("live"));
         assert!(content.contains("bank groove"));
         assert!(content.contains("var pad-a"));
+        assert!(content.contains("pat ◆···●···●···●···"));
         assert!(content.contains("q 1 bar"));
         assert!(content.contains("modifiers Octave Layer"));
         assert!(content.contains("oct +2"));

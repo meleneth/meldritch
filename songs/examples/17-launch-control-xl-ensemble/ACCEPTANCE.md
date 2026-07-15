@@ -39,6 +39,8 @@ It must:
   - active visible bank/page
   - eight visible controller strips
   - lane role and active variation per visible strip
+  - compact per-strip active-variation pattern monitors with authored event
+    steps and current playhead position
   - mute/solo state
   - modifier/layer state
   - compact current values for the relevant knobs/faders
@@ -110,4 +112,5 @@ performance mode, and continuous audio publication for a single-synth
 playground. Synths with `polyphony > 1` now render overlapping notes as
 independent voices, and the ensemble pad uses four voices. This ensemble
 skeleton still needs loop-mode sample playback, live sample pitch/slice
-controls, full pattern-bank runtime semantics, and replayable modifier gestures.
+controls, full pattern-bank runtime semantics, legacy performance-grid cleanup,
+and replayable modifier gestures.

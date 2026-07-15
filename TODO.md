@@ -242,8 +242,11 @@ assigned, switched, and rendered deterministically from text definitions.
 - [ ] Replace sample-lane placeholder tone controls with real sampler
   pitch/slice targets so Raven sample tracks are directly playable from the
   LaunchControl surface
-- [ ] Replace the stale single-pattern performance grid with an active
-  page/lane pattern view derived from the current ensemble state
+- [x] Add active page/lane pattern monitors to performance mode from authored
+  `.mlpattern` data so each visible strip shows the selected variation and a
+  compact step activity/playhead monitor
+- [ ] Replace or demote the remaining legacy single-pattern grid in performance
+  mode now that the page/lane monitor carries the useful ensemble state
 - [x] Add sample-track playback v1 for mixed songs: load text-authored sample
   references, trigger the first slot/first slice as deterministic one-shots from
   sample-bank track note patterns, and include them in range-identical mixes

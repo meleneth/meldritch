@@ -3933,12 +3933,54 @@ fn song_performance_pages_for_view(
                                 variation_ids: bank.variation_ids().to_vec(),
                             })
                             .collect(),
+                        pattern_monitors: lane
+                            .variation_ids()
+                            .iter()
+                            .filter_map(|variation_id| {
+                                let pattern = song.note_patterns().get(variation_id)?;
+                                Some(performance_pattern_monitor_for_song_pattern(
+                                    variation_id,
+                                    pattern,
+                                ))
+                            })
+                            .collect(),
                         control_ids: strip.control_ids().to_vec(),
                     })
                 })
                 .collect(),
         })
         .collect()
+}
+
+fn performance_pattern_monitor_for_song_pattern(
+    variation_id: &str,
+    pattern: &meldritch_dsl::NotePatternDefinition,
+) -> meldritch_app::PerformancePatternMonitorView {
+    let length_steps = 16;
+    let mut active_steps = pattern
+        .events()
+        .iter()
+        .map(|event| {
+            let step = if pattern.length_frames() == 0 {
+                0
+            } else {
+                event.start_frame().saturating_mul(u64::from(length_steps))
+                    / pattern.length_frames()
+            };
+            u32::try_from(step)
+                .unwrap_or(length_steps - 1)
+                .min(length_steps - 1)
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    active_steps.sort_unstable();
+    meldritch_app::PerformancePatternMonitorView {
+        variation_id: variation_id.to_owned(),
+        length_frames: pattern.length_frames(),
+        length_steps,
+        active_steps,
+    }
 }
 
 fn song_performance_modifiers_for_view(
@@ -8316,6 +8358,10 @@ mod tests {
             strip.pattern_banks[0].variation_ids,
             ["rhythm-drum-a-a", "rhythm-drum-a-b"]
         );
+        assert_eq!(strip.pattern_monitors.len(), 4);
+        assert_eq!(strip.pattern_monitors[0].variation_id, "rhythm-drum-a-a");
+        assert_eq!(strip.pattern_monitors[0].length_steps, 16);
+        assert!(!strip.pattern_monitors[0].active_steps.is_empty());
     }
 
     #[test]
