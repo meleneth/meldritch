@@ -675,10 +675,10 @@ center = 1200.0
 
 [[controls]]
 id = "main-fader-01"
-label = "Rhythm A Cutoff"
-target = "synth:rhythm-drum-a/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Rhythm A Level"
+target = "lane:rhythm-drum-a/level"
+range = [0.0, 1.25]
+step = 0.01
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
@@ -686,15 +686,15 @@ page = "main"
 channel = 9
 cc = 77
 action = "overdrive"
-normal = 4350.0
+normal = 1.0
 normal_midi = 108
 
 [[controls]]
 id = "main-fader-02"
-label = "Rhythm B Cutoff"
-target = "synth:rhythm-drum-b/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Rhythm B Level"
+target = "lane:rhythm-drum-b/level"
+range = [0.0, 1.25]
+step = 0.01
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
@@ -702,15 +702,15 @@ page = "main"
 channel = 9
 cc = 78
 action = "overdrive"
-normal = 4350.0
+normal = 1.0
 normal_midi = 108
 
 [[controls]]
 id = "main-fader-03"
-label = "Pad Cutoff"
-target = "synth:pad/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Pad Level"
+target = "lane:pad/level"
+range = [0.0, 1.25]
+step = 0.01
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
@@ -718,15 +718,15 @@ page = "main"
 channel = 9
 cc = 79
 action = "overdrive"
-normal = 4350.0
+normal = 1.0
 normal_midi = 108
 
 [[controls]]
 id = "main-fader-04"
-label = "Bass A Cutoff"
-target = "synth:bass-a/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Bass A Level"
+target = "lane:bass-a/level"
+range = [0.0, 1.25]
+step = 0.01
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
@@ -734,15 +734,15 @@ page = "main"
 channel = 9
 cc = 80
 action = "overdrive"
-normal = 4350.0
+normal = 1.0
 normal_midi = 108
 
 [[controls]]
 id = "main-fader-05"
-label = "Bass B Cutoff"
-target = "synth:bass-b/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Bass B Level"
+target = "lane:bass-b/level"
+range = [0.0, 1.25]
+step = 0.01
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
@@ -750,15 +750,15 @@ page = "main"
 channel = 9
 cc = 81
 action = "overdrive"
-normal = 4350.0
+normal = 1.0
 normal_midi = 108
 
 [[controls]]
 id = "main-fader-06"
-label = "Sample A Placeholder Cutoff"
-target = "synth:sample-a-placeholder/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Sample A Level"
+target = "lane:sample-a/level"
+range = [0.0, 1.25]
+step = 0.01
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
@@ -766,15 +766,15 @@ page = "main"
 channel = 9
 cc = 82
 action = "overdrive"
-normal = 4350.0
+normal = 1.0
 normal_midi = 108
 
 [[controls]]
 id = "main-fader-07"
-label = "Sample B Placeholder Cutoff"
-target = "synth:sample-b-placeholder/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Sample B Level"
+target = "lane:sample-b/level"
+range = [0.0, 1.25]
+step = 0.01
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
@@ -782,15 +782,15 @@ page = "main"
 channel = 9
 cc = 83
 action = "overdrive"
-normal = 4350.0
+normal = 1.0
 normal_midi = 108
 
 [[controls]]
 id = "main-fader-08"
-label = "Sample C Placeholder Cutoff"
-target = "synth:sample-c-placeholder/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Sample C Level"
+target = "lane:sample-c/level"
+range = [0.0, 1.25]
+step = 0.01
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
@@ -798,15 +798,15 @@ page = "main"
 channel = 9
 cc = 84
 action = "overdrive"
-normal = 4350.0
+normal = 1.0
 normal_midi = 108
 
 [[controls]]
 id = "drums-fader-01"
-label = "Drums Strip 01 Beat Drum"
-target = "synth:beat-drum/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Drums Strip 01 Beat Drum Level"
+target = "lane:beat-drum/level"
+range = [0.0, 1.25]
+step = 0.01
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
@@ -814,15 +814,15 @@ page = "drums"
 channel = 9
 cc = 77
 action = "overdrive"
-normal = 4350.0
+normal = 1.0
 normal_midi = 108
 
 [[controls]]
 id = "drums-fader-02"
-label = "Drums Strip 02 Rhythm A"
-target = "synth:rhythm-drum-a/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Drums Strip 02 Rhythm A Level"
+target = "lane:rhythm-drum-a/level"
+range = [0.0, 1.25]
+step = 0.01
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
@@ -830,15 +830,15 @@ page = "drums"
 channel = 9
 cc = 78
 action = "overdrive"
-normal = 4350.0
+normal = 1.0
 normal_midi = 108
 
 [[controls]]
 id = "drums-fader-03"
-label = "Drums Strip 03 Rhythm B"
-target = "synth:rhythm-drum-b/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Drums Strip 03 Rhythm B Level"
+target = "lane:rhythm-drum-b/level"
+range = [0.0, 1.25]
+step = 0.01
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
@@ -846,15 +846,15 @@ page = "drums"
 channel = 9
 cc = 79
 action = "overdrive"
-normal = 4350.0
+normal = 1.0
 normal_midi = 108
 
 [[controls]]
 id = "drums-fader-04"
-label = "Drums Strip 04 Bass Context"
-target = "synth:bass-a/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Drums Strip 04 Bass Context Level"
+target = "lane:bass-a/level"
+range = [0.0, 1.25]
+step = 0.01
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
@@ -862,15 +862,15 @@ page = "drums"
 channel = 9
 cc = 80
 action = "overdrive"
-normal = 4350.0
+normal = 1.0
 normal_midi = 108
 
 [[controls]]
 id = "drums-fader-05"
-label = "Drums Strip 05 Sample Context"
-target = "synth:sample-a-placeholder/filter.cutoff_hz"
-range = [100.0, 5000.0]
-step = 50.0
+label = "Drums Strip 05 Sample Context Level"
+target = "lane:sample-a/level"
+range = [0.0, 1.25]
+step = 0.01
 [[controls.bindings]]
 type = "midi_cc"
 device = "launch-control-xl"
@@ -878,7 +878,7 @@ page = "drums"
 channel = 9
 cc = 81
 action = "overdrive"
-normal = 4350.0
+normal = 1.0
 normal_midi = 108
 
 [[modifiers]]

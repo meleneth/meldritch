@@ -364,6 +364,7 @@ pub enum ParameterInterpolation {
 pub enum ParameterOwner {
     Synth,
     Dsp,
+    Lane,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -3800,6 +3801,11 @@ fn parse_parameter_target(
         (ParameterOwner::Synth, remainder)
     } else if let Some(remainder) = value.strip_prefix("dsp:") {
         (ParameterOwner::Dsp, remainder)
+    } else if value.strip_prefix("lane:").is_some() {
+        return Err(SongLoadError::one(
+            path,
+            format!("parameter target '{value}' is only valid for performance controls"),
+        ));
     } else {
         return Err(SongLoadError::one(
             path,
@@ -3830,6 +3836,7 @@ fn parse_parameter_target(
             }
             &synth.modules
         }
+        ParameterOwner::Lane => unreachable!("lane targets are rejected before module lookup"),
         ParameterOwner::Dsp => &dsps
             .get(definition_id)
             .ok_or_else(|| {
@@ -3881,10 +3888,29 @@ fn parse_global_parameter_target(
         (ParameterOwner::Synth, remainder)
     } else if let Some(remainder) = value.strip_prefix("dsp:") {
         (ParameterOwner::Dsp, remainder)
+    } else if let Some(remainder) = value.strip_prefix("lane:") {
+        let (lane_id, parameter) = remainder.split_once('/').ok_or_else(|| {
+            SongLoadError::one(
+                path,
+                format!("parameter target '{value}' must be lane:id/parameter"),
+            )
+        })?;
+        if parameter != "level" {
+            return Err(SongLoadError::one(
+                path,
+                format!("lane target '{value}' supports only the 'level' parameter"),
+            ));
+        }
+        return Ok(ParameterTargetDefinition {
+            owner: ParameterOwner::Lane,
+            definition_id: lane_id.to_owned(),
+            module_id: "lane".to_owned(),
+            parameter: parameter.to_owned(),
+        });
     } else {
         return Err(SongLoadError::one(
             path,
-            format!("parameter target '{value}' must begin with 'synth:' or 'dsp:'"),
+            format!("parameter target '{value}' must begin with 'synth:', 'dsp:', or 'lane:'"),
         ));
     };
     let (definition_id, endpoint) = remainder.split_once('/').ok_or_else(|| {
@@ -3923,6 +3949,7 @@ fn parse_global_parameter_target(
                     )
                 })?
                 .modules,
+            ParameterOwner::Lane => unreachable!("lane targets return before module lookup"),
         };
     let module = modules
         .iter()

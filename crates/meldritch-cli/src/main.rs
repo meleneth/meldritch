@@ -1781,7 +1781,12 @@ impl CompiledSongPatch {
             ),
             Self::Mixed(patch) => {
                 let synth_filter_overrides = overrides.synth_filter_overrides();
-                patch.render_with_synth_filter_overrides(range, &synth_filter_overrides)
+                let lane_level_overrides = overrides.lane_level_overrides();
+                patch.render_with_live_overrides(
+                    range,
+                    &synth_filter_overrides,
+                    &lane_level_overrides,
+                )
             }
         }
     }
@@ -1829,6 +1834,7 @@ struct SongLiveOverrides {
     resonance: Option<f64>,
     mix: Option<f64>,
     synth_filters: BTreeMap<SynthFilterTarget, SongFilterLiveOverrides>,
+    lane_levels: BTreeMap<String, f64>,
     lane_transpose_semitones: BTreeMap<String, i8>,
 }
 
@@ -1844,6 +1850,20 @@ impl SongLiveOverrides {
                     target.module_id.clone(),
                     overrides.cutoff_hz,
                     overrides.resonance,
+                )
+            })
+            .collect()
+    }
+
+    fn lane_level_overrides(
+        &self,
+    ) -> Vec<meldritch_render::song_render::CompiledLaneLevelOverride> {
+        self.lane_levels
+            .iter()
+            .map(|(lane_id, level)| {
+                meldritch_render::song_render::CompiledLaneLevelOverride::new(
+                    lane_id.clone(),
+                    *level,
                 )
             })
             .collect()
@@ -3335,6 +3355,7 @@ enum LiveSongControlTarget {
     DelayMix,
     FilterCutoff(SynthFilterTarget),
     FilterResonance(SynthFilterTarget),
+    LaneLevel(String),
 }
 
 fn live_song_control_targets(
@@ -3359,6 +3380,9 @@ fn live_song_control_targets(
                         synth_id: control.target().definition_id().to_owned(),
                         module_id: control.target().module_id().to_owned(),
                     })
+                }
+                value if value.starts_with("lane:") && value.ends_with("/level") => {
+                    LiveSongControlTarget::LaneLevel(control.target().definition_id().to_owned())
                 }
                 _ => return None,
             };
@@ -3785,6 +3809,9 @@ fn tui_song(
                             .entry(target.clone())
                             .or_default()
                             .resonance = Some(value);
+                    }
+                    LiveSongControlTarget::LaneLevel(lane_id) => {
+                        overrides.lane_levels.insert(lane_id.clone(), value);
                     }
                 }
                 overrides.clone()
@@ -4276,9 +4303,13 @@ fn compile_mixed_song_for_active_lanes(
 }
 
 fn parameter_target_label(target: &ParameterTargetDefinition) -> String {
+    if matches!(target.owner(), ParameterOwner::Lane) {
+        return format!("lane:{}/{}", target.definition_id(), target.parameter());
+    }
     let owner = match target.owner() {
         ParameterOwner::Synth => "synth",
         ParameterOwner::Dsp => "dsp",
+        ParameterOwner::Lane => unreachable!("lane targets are formatted above"),
     };
     format!(
         "{}:{}/{}.{}",
@@ -7487,6 +7518,16 @@ fn resolve_project_path(project_path: &Path, relative_or_absolute: &str) -> Path
 mod tests {
     use super::*;
 
+    fn example_song_path(relative: &str) -> PathBuf {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let workspace_path = manifest.join(relative);
+        if workspace_path.exists() {
+            workspace_path
+        } else {
+            manifest.join("../..").join(relative)
+        }
+    }
+
     #[test]
     fn performer_actions_are_ranked_across_sessions_and_autopilot_is_not_learned() {
         let mut library = FutureLibrary::default();
@@ -7644,11 +7685,9 @@ mod tests {
 
     #[test]
     fn performance_session_capture_checkpoints_parseable_timestamped_toml() {
-        let song = meldritch_dsl::load_song_directory(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join("songs/examples/11-session-capture"),
-        )
+        let song = meldritch_dsl::load_song_directory(example_song_path(
+            "songs/examples/11-session-capture",
+        ))
         .expect("session capture example should load");
         let root = std::env::temp_dir().join(format!(
             "meldritch-session-capture-test-{}",
@@ -7723,11 +7762,9 @@ mod tests {
 
     #[test]
     fn session_capture_buffers_events_until_the_configured_checkpoint_limit() {
-        let song = meldritch_dsl::load_song_directory(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join("songs/examples/11-session-capture"),
-        )
+        let song = meldritch_dsl::load_song_directory(example_song_path(
+            "songs/examples/11-session-capture",
+        ))
         .expect("session capture example should load");
         let root = std::env::temp_dir().join(format!(
             "meldritch-session-buffer-test-{}",
@@ -7973,11 +8010,9 @@ mod tests {
 
     #[test]
     fn midi_control_bindings_are_derived_from_song_scripts() {
-        let song = meldritch_dsl::load_song_directory(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join("songs/examples/15-launch-control-xl-input"),
-        )
+        let song = meldritch_dsl::load_song_directory(example_song_path(
+            "songs/examples/15-launch-control-xl-input",
+        ))
         .expect("LaunchControl XL example should load");
 
         let bindings = midi_control_bindings_for_song(&song);
@@ -7992,11 +8027,9 @@ mod tests {
 
     #[test]
     fn midi_action_bindings_are_derived_from_song_scripts() {
-        let song = meldritch_dsl::load_song_directory(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join("songs/examples/16-launch-control-xl-playground"),
-        )
+        let song = meldritch_dsl::load_song_directory(example_song_path(
+            "songs/examples/16-launch-control-xl-playground",
+        ))
         .expect("LaunchControl XL playground example should load");
 
         let control_bindings = midi_control_bindings_for_song(&song);
@@ -8112,11 +8145,9 @@ mod tests {
 
     #[test]
     fn ensemble_lane_actions_are_derived_from_song_scripts() {
-        let song = meldritch_dsl::load_song_directory(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join("songs/examples/17-launch-control-xl-ensemble"),
-        )
+        let song = meldritch_dsl::load_song_directory(example_song_path(
+            "songs/examples/17-launch-control-xl-ensemble",
+        ))
         .expect("LaunchControl XL ensemble example should load");
 
         let control_bindings = midi_control_bindings_for_song(&song);
@@ -8193,55 +8224,57 @@ mod tests {
 
     #[test]
     fn ensemble_live_controls_target_mixed_synth_filter_overrides() {
-        let song = meldritch_dsl::load_song_directory(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join("songs/examples/17-launch-control-xl-ensemble"),
-        )
+        let song = meldritch_dsl::load_song_directory(example_song_path(
+            "songs/examples/17-launch-control-xl-ensemble",
+        ))
         .expect("LaunchControl XL ensemble example should load");
 
         let targets = live_song_control_targets(&song);
         assert_eq!(
             targets.get("main-fader-01"),
-            Some(&LiveSongControlTarget::FilterCutoff(SynthFilterTarget {
-                synth_id: "rhythm-drum-a".to_owned(),
-                module_id: "filter".to_owned(),
-            }))
+            Some(&LiveSongControlTarget::LaneLevel(
+                "rhythm-drum-a".to_owned()
+            ))
         );
-        let main_page_synths = (1..=8)
+        let main_page_lanes = (1..=8)
             .map(|strip| {
                 let id = format!("main-fader-{strip:02}");
                 match targets
                     .get(&id)
                     .expect("main fader should target live audio")
                 {
-                    LiveSongControlTarget::FilterCutoff(target) => target.synth_id.clone(),
-                    target => panic!("main fader {id} should target filter cutoff, got {target:?}"),
+                    LiveSongControlTarget::LaneLevel(lane_id) => lane_id.clone(),
+                    target => panic!("main fader {id} should target lane level, got {target:?}"),
                 }
             })
             .collect::<BTreeSet<_>>();
         assert_eq!(
-            main_page_synths,
+            main_page_lanes,
             BTreeSet::from([
                 "rhythm-drum-a".to_owned(),
                 "rhythm-drum-b".to_owned(),
                 "pad".to_owned(),
                 "bass-a".to_owned(),
                 "bass-b".to_owned(),
-                "sample-a-placeholder".to_owned(),
-                "sample-b-placeholder".to_owned(),
-                "sample-c-placeholder".to_owned(),
+                "sample-a".to_owned(),
+                "sample-b".to_owned(),
+                "sample-c".to_owned(),
             ])
+        );
+        assert_eq!(
+            targets.get("main-knob-01"),
+            Some(&LiveSongControlTarget::FilterResonance(SynthFilterTarget {
+                synth_id: "rhythm-drum-a".to_owned(),
+                module_id: "filter".to_owned(),
+            }))
         );
     }
 
     #[test]
     fn performance_pages_are_derived_from_song_scripts() {
-        let song = meldritch_dsl::load_song_directory(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join("songs/examples/16-launch-control-xl-playground"),
-        )
+        let song = meldritch_dsl::load_song_directory(example_song_path(
+            "songs/examples/16-launch-control-xl-playground",
+        ))
         .expect("LaunchControl XL playground example should load");
 
         let pages = song_performance_pages_for_view(&song);
@@ -8261,11 +8294,9 @@ mod tests {
             ["knob-01", "knob-09", "knob-17", "fader-01"]
         );
 
-        let ensemble = meldritch_dsl::load_song_directory(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join("songs/examples/17-launch-control-xl-ensemble"),
-        )
+        let ensemble = meldritch_dsl::load_song_directory(example_song_path(
+            "songs/examples/17-launch-control-xl-ensemble",
+        ))
         .expect("LaunchControl XL ensemble example should load");
         let pages = song_performance_pages_for_view(&ensemble);
         assert_eq!(pages.len(), 2);
@@ -8289,11 +8320,9 @@ mod tests {
 
     #[test]
     fn launch_control_playground_builds_song_scene_bank_from_patterns() {
-        let song = meldritch_dsl::load_song_directory(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join("songs/examples/16-launch-control-xl-playground"),
-        )
+        let song = meldritch_dsl::load_song_directory(example_song_path(
+            "songs/examples/16-launch-control-xl-playground",
+        ))
         .expect("LaunchControl XL playground example should load");
 
         let bank = song_scene_bank(&song, tempo_from_song(&song).unwrap())
@@ -8338,11 +8367,9 @@ mod tests {
 
     #[test]
     fn launch_control_ensemble_builds_lane_scene_bank_for_mixed_rendering() {
-        let song = meldritch_dsl::load_song_directory(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join("songs/examples/17-launch-control-xl-ensemble"),
-        )
+        let song = meldritch_dsl::load_song_directory(example_song_path(
+            "songs/examples/17-launch-control-xl-ensemble",
+        ))
         .expect("LaunchControl XL ensemble example should load");
 
         let bank = song_scene_bank(&song, tempo_from_song(&song).unwrap())

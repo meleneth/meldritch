@@ -203,13 +203,16 @@ events can explicitly select sample slots/slices while also using `note`,
 sampler tracks as deterministic one-shot sample playback, so sample lanes render
 WAV audio from authored slice events. Mixed-note rendering also accepts
 script-targeted synth filter overrides, so `tui-song` controls can change audio
-for synth-backed mixed patches. The main and drums pages now map faders to
-distinct lane synth/filter targets; sample-lane faders need explicit sample
-level/pitch/slice targets before they affect sample audio. Loop-mode sample
-playback, live sample level/pitch/slice controls, and real pattern-bank runtime
-semantics beyond choosing a lane variation are not implemented yet. `.mlsynth` patches with `polyphony > 1` now
-render overlapping note events as independent voices in the song renderer; the
-ensemble pad uses four voices.
+for synth-backed mixed patches. Performance controls can now target
+`lane:<id>/level`; the mixed renderer applies those level overrides to both
+synth and sample lanes, so strip fader minimum silences the lane and the
+normalized fader point is unity. Main-page knobs still provide synth-filter tone
+controls, including placeholder tone controls for sample strips until real live
+sample pitch/slice targets exist. Loop-mode sample playback, live sample
+pitch/slice controls, and real pattern-bank runtime semantics beyond choosing a
+lane variation are not implemented yet. `.mlsynth` patches with `polyphony > 1`
+now render overlapping note events as independent voices in the song renderer;
+the ensemble pad uses four voices.
 Build this from examples first, then implement only the required multi-track,
 sample-track playback, poly-synth, pattern-bank runtime, and modifier control
 support.

@@ -434,6 +434,15 @@ fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
     let pages = song.performance().pages();
     assert_eq!(pages[0].id(), "main");
     assert_eq!(pages[0].strips().len(), 8);
+    assert_eq!(
+        pages[0].strips()[0].control_ids(),
+        &[
+            "main-knob-01",
+            "main-knob-09",
+            "main-knob-17",
+            "main-fader-01"
+        ]
+    );
     assert!(
         !pages[0]
             .strips()
@@ -456,7 +465,7 @@ fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
             )
         })
         .count();
-    assert_eq!(page_scoped_controls, 13);
+    assert_eq!(page_scoped_controls, 37);
 
     let actions = song.performance().actions();
     assert!(actions.iter().any(|action| {

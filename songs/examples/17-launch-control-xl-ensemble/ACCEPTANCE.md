@@ -98,16 +98,16 @@ accepts script-targeted synth filter overrides, so `tui-song` controls can
 change audio for synth-backed mixed patches. The main page now declares all 24
 LaunchControl XL knobs plus eight faders across the visible strips: top-row
 knobs map resonance, middle-row knobs map normal tone cutoff, bottom-row knobs
-map a darker cutoff range, and faders retain the normalized full-open/overdrive
-cutoff behavior. The drums page currently maps faders only. Sample-lane
-knob/fader definitions still target placeholder synth filters until explicit
-sample level/pitch/slice live targets exist, so they are authored and visible
-but not yet honest sampler controls. The existing
+map a darker cutoff range, and faders target script-declared `lane:<id>/level`
+with normalized unity/overdrive behavior. Lane level overrides apply to both
+synth and sample tracks, so fader minimum silences the lane regardless of
+instrument type. The drums page currently maps faders only. Sample lanes still
+need explicit pitch/slice live targets before Raven slicing is fully playable
+from the control surface. The existing
 LaunchControl XL playground proves script-authored LaunchControl input, typed
 actions, live rerendered parameters, authored groove variations, default
 performance mode, and continuous audio publication for a single-synth
 playground. Synths with `polyphony > 1` now render overlapping notes as
 independent voices, and the ensemble pad uses four voices. This ensemble
-skeleton still needs loop-mode sample playback, live sample level/pitch/slice
-controls, full pattern-bank runtime semantics, and replayable modifier
-gestures.
+skeleton still needs loop-mode sample playback, live sample pitch/slice
+controls, full pattern-bank runtime semantics, and replayable modifier gestures.

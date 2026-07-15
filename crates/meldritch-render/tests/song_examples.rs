@@ -1,9 +1,9 @@
 use meldritch_core::FrameRange;
 use meldritch_dsl::load_song_directory;
 use meldritch_render::song_render::{
-    CompiledSynthFilterOverride, compile_automated_delayed_note_song, compile_delayed_note_song,
-    compile_delayed_note_song_for_pattern, compile_drone_song, compile_filtered_note_song,
-    compile_mixed_note_song, compile_mixed_note_song_with_lane_state,
+    CompiledLaneLevelOverride, CompiledSynthFilterOverride, compile_automated_delayed_note_song,
+    compile_delayed_note_song, compile_delayed_note_song_for_pattern, compile_drone_song,
+    compile_filtered_note_song, compile_mixed_note_song, compile_mixed_note_song_with_lane_state,
     compile_mixed_note_song_with_lane_transposes, compile_mixed_note_song_with_lane_variation,
     compile_note_song,
 };
@@ -440,6 +440,32 @@ fn launch_control_ensemble_mixed_filter_override_changes_the_mix() {
 
     assert_ne!(normal.samples(), filtered.samples());
     assert!(filtered.samples().iter().all(|sample| sample.is_finite()));
+}
+
+#[test]
+fn launch_control_ensemble_lane_level_override_silences_a_lane() {
+    let song = load_song_directory(example("17-launch-control-xl-ensemble"))
+        .expect("LaunchControl XL ensemble song should load");
+    let normal_patch = compile_mixed_note_song_with_lane_state(
+        &song,
+        &BTreeMap::from([("sample-a".to_owned(), "sample-a-d".to_owned())]),
+        &BTreeMap::new(),
+        &BTreeSet::from(["sample-a".to_owned()]),
+    )
+    .expect("sample lane should compile");
+    let normal = normal_patch
+        .render(FrameRange::new(0, 96_000).unwrap())
+        .unwrap();
+    let silent = normal_patch
+        .render_with_live_overrides(
+            FrameRange::new(0, 96_000).unwrap(),
+            &[],
+            &[CompiledLaneLevelOverride::new("sample-a", 0.0)],
+        )
+        .unwrap();
+
+    assert!(normal.peak_abs() > 0.01);
+    assert_eq!(silent.peak_abs(), 0.0);
 }
 
 #[test]

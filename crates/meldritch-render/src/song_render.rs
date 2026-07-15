@@ -273,30 +273,54 @@ pub struct CompiledMixedNoteSong {
 
 #[derive(Clone, Debug, PartialEq)]
 enum CompiledMixedTrack {
-    Note(CompiledNotePatch),
-    Sample(CompiledSampleTrack),
+    Note {
+        lane_id: Option<String>,
+        patch: CompiledNotePatch,
+    },
+    Sample {
+        lane_id: Option<String>,
+        track: CompiledSampleTrack,
+    },
 }
 
 impl CompiledMixedTrack {
     const fn channels(&self) -> u16 {
         match self {
-            Self::Note(track) => track.channels,
-            Self::Sample(track) => track.channels,
+            Self::Note { patch, .. } => patch.channels,
+            Self::Sample { track, .. } => track.channels,
         }
     }
 
     fn render(
         &self,
         range: FrameRange,
-        overrides: &[CompiledSynthFilterOverride],
+        filter_overrides: &[CompiledSynthFilterOverride],
+        lane_level_overrides: &[CompiledLaneLevelOverride],
     ) -> Result<AudioBlock, SongRenderError> {
-        match self {
-            Self::Note(track) => {
-                let (cutoff_hz, resonance) = track.synth_filter_overrides(overrides);
-                track.render_with_filter_overrides(range, cutoff_hz, resonance)
+        let mut block = match self {
+            Self::Note { patch, .. } => {
+                let (cutoff_hz, resonance) = patch.synth_filter_overrides(filter_overrides);
+                patch.render_with_filter_overrides(range, cutoff_hz, resonance)?
             }
-            Self::Sample(track) => track.render(range),
+            Self::Sample { track, .. } => track.render(range)?,
+        };
+        if let Some(level) = self.lane_level(lane_level_overrides) {
+            for sample in block.samples_mut() {
+                *sample *= level;
+            }
         }
+        Ok(block)
+    }
+
+    fn lane_level(&self, overrides: &[CompiledLaneLevelOverride]) -> Option<f64> {
+        let lane_id = match self {
+            Self::Note { lane_id, .. } | Self::Sample { lane_id, .. } => lane_id.as_deref(),
+        }?;
+        overrides
+            .iter()
+            .rev()
+            .find(|override_| override_.lane_id == lane_id)
+            .map(|override_| override_.level)
     }
 }
 
@@ -475,6 +499,32 @@ impl CompiledSynthFilterOverride {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompiledLaneLevelOverride {
+    lane_id: String,
+    level: f64,
+}
+
+impl CompiledLaneLevelOverride {
+    #[must_use]
+    pub fn new(lane_id: impl Into<String>, level: f64) -> Self {
+        Self {
+            lane_id: lane_id.into(),
+            level,
+        }
+    }
+
+    #[must_use]
+    pub fn lane_id(&self) -> &str {
+        &self.lane_id
+    }
+
+    #[must_use]
+    pub const fn level(&self) -> f64 {
+        self.level
+    }
+}
+
 impl CompiledMixedNoteSong {
     #[must_use]
     pub const fn song_fingerprint(&self) -> u64 {
@@ -505,6 +555,15 @@ impl CompiledMixedNoteSong {
         range: FrameRange,
         overrides: &[CompiledSynthFilterOverride],
     ) -> Result<AudioBlock, SongRenderError> {
+        self.render_with_live_overrides(range, overrides, &[])
+    }
+
+    pub fn render_with_live_overrides(
+        &self,
+        range: FrameRange,
+        filter_overrides: &[CompiledSynthFilterOverride],
+        lane_level_overrides: &[CompiledLaneLevelOverride],
+    ) -> Result<AudioBlock, SongRenderError> {
         let frame_count = range.end() - range.start();
         let frames = u32::try_from(frame_count).map_err(|_| SongRenderError::RangeTooLong {
             frames: frame_count,
@@ -513,9 +572,15 @@ impl CompiledMixedNoteSong {
         if self.tracks.is_empty() {
             return Ok(mix);
         }
+        if lane_level_overrides
+            .iter()
+            .any(|override_| !override_.level.is_finite() || override_.level < 0.0)
+        {
+            return Err(SongRenderError::InvalidLaneLevelOverride);
+        }
         let gain = 1.0 / (self.tracks.len() as f64).sqrt();
         for track in &self.tracks {
-            let block = track.render(range, overrides)?;
+            let block = track.render(range, filter_overrides, lane_level_overrides)?;
             if block.channels() != self.channels || block.frames() != frames {
                 return Err(SongRenderError::IncompatibleTrackRender);
             }
@@ -829,6 +894,7 @@ pub enum SongRenderError {
     InvalidCutoffOverride,
     InvalidResonanceOverride,
     InvalidMixOverride,
+    InvalidLaneLevelOverride,
     InvalidSamplePitch,
     IncompatibleTrackRender,
     RangeTooLong { frames: u64 },
@@ -937,6 +1003,12 @@ impl fmt::Display for SongRenderError {
                 write!(
                     formatter,
                     "live delay mix override must be finite and within 0.0..=1.0"
+                )
+            }
+            Self::InvalidLaneLevelOverride => {
+                write!(
+                    formatter,
+                    "live lane level override must be finite and greater than or equal to zero"
                 )
             }
             Self::InvalidSamplePitch => {
@@ -1279,21 +1351,18 @@ fn compile_mixed_note_song_with_track_patterns_transposes_and_included_lanes(
             pattern_for_track(track).ok_or_else(|| SongRenderError::MissingPattern {
                 id: format!("initial pattern for track '{}'", track.id()),
             })?;
+        let lane_id = track_lane_id(song, track).map(ToOwned::to_owned);
         let transpose = track_lane_transpose_semitones(song, track, lane_transpose_semitones);
         let patch = if track.sample_bank_id().is_some() {
-            CompiledMixedTrack::Sample(compile_sample_track_for_pattern(
-                song,
-                track,
-                &pattern_id,
-                transpose,
-            )?)
+            CompiledMixedTrack::Sample {
+                lane_id,
+                track: compile_sample_track_for_pattern(song, track, &pattern_id, transpose)?,
+            }
         } else {
-            CompiledMixedTrack::Note(compile_note_track_for_pattern(
-                song,
-                track,
-                &pattern_id,
-                transpose,
-            )?)
+            CompiledMixedTrack::Note {
+                lane_id,
+                patch: compile_note_track_for_pattern(song, track, &pattern_id, transpose)?,
+            }
         };
         if let Some(channels) = channels {
             if patch.channels() != channels {

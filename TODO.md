@@ -236,9 +236,12 @@ assigned, switched, and rendered deterministically from text definitions.
   LaunchControl XL knobs plus eight faders from the `.mlperformance` script:
   top row resonance, middle row full-range tone cutoff, bottom row darker
   cutoff range, and normalized fader overdrive curves
-- [ ] Replace sample-lane placeholder filter controls with real sampler
-  level/pitch/slice targets so Raven sample tracks are directly playable from
-  the LaunchControl surface
+- [x] Add script-declared `lane:<id>/level` performance controls and mixed-song
+  lane-level overrides so faders can silence or overdrive synth and sample
+  lanes without depending on placeholder synth filters
+- [ ] Replace sample-lane placeholder tone controls with real sampler
+  pitch/slice targets so Raven sample tracks are directly playable from the
+  LaunchControl surface
 - [ ] Replace the stale single-pattern performance grid with an active
   page/lane pattern view derived from the current ensemble state
 - [x] Add sample-track playback v1 for mixed songs: load text-authored sample
@@ -247,8 +250,8 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Add `.mlsampler` voice definitions with explicit pattern targeting for
   sample slots/slices, note/root pitch tracking, per-event pitch offsets, and a
   sampler pitch envelope
-- [ ] Extend sample-track playback with loop mode, live level/pitch/slice
-  controls, and richer per-event sample selection/mapping
+- [ ] Extend sample-track playback with loop mode, live pitch/slice controls,
+  and richer per-event sample selection/mapping
 - [x] Add a polyphonic synth path for chord/pad note patterns in `.mlsynth`
   songs, with enough ADSR/filter control to be musically distinct from bass
 - [x] Add TUI performance-mode lane overview for the ensemble: active page, 8
