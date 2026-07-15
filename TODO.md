@@ -232,6 +232,15 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Author distinct ensemble synth/filter targets so each visible lane control
   changes the intended lane/instrument instead of the former shared placeholder
   synth filter
+- [x] Author the `17-launch-control-xl-ensemble` main page with all 24
+  LaunchControl XL knobs plus eight faders from the `.mlperformance` script:
+  top row resonance, middle row full-range tone cutoff, bottom row darker
+  cutoff range, and normalized fader overdrive curves
+- [ ] Replace sample-lane placeholder filter controls with real sampler
+  level/pitch/slice targets so Raven sample tracks are directly playable from
+  the LaunchControl surface
+- [ ] Replace the stale single-pattern performance grid with an active
+  page/lane pattern view derived from the current ensemble state
 - [x] Add sample-track playback v1 for mixed songs: load text-authored sample
   references, trigger the first slot/first slice as deterministic one-shots from
   sample-bank track note patterns, and include them in range-identical mixes
