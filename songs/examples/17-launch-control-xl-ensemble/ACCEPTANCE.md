@@ -58,13 +58,13 @@ Initial example scene page model:
 - The runtime must not special-case the beat drum, the page names, or which
   lanes appear together; those are scene-authored declarations.
 
-Current implementation status: placeholder mixed playback. This directory now contains a validating
-song skeleton with nine declared tracks/lanes, two scene-authored pages, four
-note variations per lane, nine distinct renderer-compatible synth patches,
-lane-authored launch quantization, default mute/solo state, per-lane control
-IDs, nested pattern banks, page-visible controls, page-scoped MIDI fader
-bindings, and a `.mlsamples` Raven voice sample-bank metadata file attached to
-the three sample lanes.
+Current implementation status: placeholder mixed playback. This directory now
+contains a validating song skeleton with nine declared tracks/lanes, two
+scene-authored pages, 36 lane-owned note patterns/four variations per lane, nine
+distinct renderer-compatible synth patches, lane-authored launch quantization,
+default mute/solo state, per-lane control IDs, nested pattern banks,
+page-visible controls, page-scoped MIDI fader bindings, and a `.mlsamples`
+Raven voice sample-bank metadata file attached to the three sample lanes.
 `tui-song` now carries that lane metadata into app view state, and performance
 mode renders visible strips with lane status, active variation, launch
 quantization, and pattern-bank names/counts. Generic typed app commands can
@@ -84,8 +84,8 @@ palette of drum, pad, bass, and sample-lane stand-in sounds. The existing
 LaunchControl XL playground proves script-authored LaunchControl input, typed
 actions, live rerendered parameters, authored groove variations, default
 performance mode, and continuous audio publication for a single-synth
-playground. This ensemble skeleton intentionally keeps shared note patterns and
-synth stand-ins for the sample lanes until this example gains real multi-lane
-songs, audio sample decoding/rendering, per-pattern sample triggering, full
-pattern-bank runtime semantics, audio-affecting mute/solo behavior, polyphonic
-pad rendering, momentary modifier layers, and replayable modifier gestures.
+playground. This ensemble skeleton intentionally keeps synth stand-ins for the
+sample lanes until this example gains audio sample decoding/rendering,
+per-pattern sample triggering, full pattern-bank runtime semantics,
+audio-affecting mute/solo behavior, polyphonic pad rendering, momentary
+modifier layers, and replayable modifier gestures.

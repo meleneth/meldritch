@@ -171,8 +171,9 @@ performance-mode telemetry renders the active page's declared controls. MIDI CC
 control bindings may be scoped to a declared page, so the selected page can
 remap physical controls without hard-coded LaunchControl policy.
 `17-launch-control-xl-ensemble` now parses as a skeleton: nine tracks/lanes,
-two scene-authored pages, four note variations per lane, nine distinct
-renderer-compatible synth patches, and page-scoped fader controls. Its lane
+two scene-authored pages, 36 lane-owned note patterns/four variations per lane,
+nine distinct renderer-compatible synth patches, and page-scoped fader
+controls. Its lane
 declarations now carry authored launch
 quantization, default mute/solo state, per-lane control IDs, and nested pattern
 banks that group four variations into selectable banks. `tui-song` loads that
@@ -194,9 +195,9 @@ The main and drums pages now map faders to distinct lane synth/filter targets,
 giving the hardware a simple but real palette before sample/poly engines land.
 Audio sample decoding, sample triggering, sample rendering, audio-affecting
 mute/solo behavior, and real pattern-bank runtime semantics beyond choosing a
-lane variation are not implemented yet. The skeleton still uses shared note
-patterns and placeholder synth stand-ins for the sample lanes until
-sample-track playback, poly-synth, and full multi-track audio support land.
+lane variation are not implemented yet. The skeleton still uses placeholder
+synth stand-ins for the sample lanes until sample-track playback, poly-synth,
+and full multi-track audio support land.
 Build this from examples first, then implement only the required multi-track,
 sample-track playback, poly-synth, pattern-bank runtime, and modifier control
 support.

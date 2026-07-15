@@ -354,6 +354,7 @@ fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
     assert_eq!(song.performance().lanes().len(), 9);
     assert_eq!(song.performance().pages().len(), 2);
     assert_eq!(song.sample_banks().len(), 1);
+    assert_eq!(song.note_patterns().len(), 36);
 
     let tracks = song
         .performance()
@@ -399,12 +400,12 @@ fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
         assert_eq!(lanes[id].pattern_banks()[0].id(), "groove");
         assert_eq!(
             lanes[id].pattern_banks()[0].variation_ids(),
-            &["ensemble-a", "ensemble-b"]
+            &[format!("{id}-a"), format!("{id}-b")]
         );
         assert_eq!(lanes[id].pattern_banks()[1].id(), "fill");
         assert_eq!(
             lanes[id].pattern_banks()[1].variation_ids(),
-            &["ensemble-c", "ensemble-d"]
+            &[format!("{id}-c"), format!("{id}-d")]
         );
     }
     assert_eq!(lanes["beat-drum"].control_ids(), &["drums-fader-01"]);
@@ -453,7 +454,7 @@ fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
         matches!(
             action.action(),
             meldritch_dsl::PerformanceActionDefinition::SelectLaneVariation { lane, variation }
-                if lane == "rhythm-drum-a" && variation == "ensemble-b"
+                if lane == "rhythm-drum-a" && variation == "rhythm-drum-a-b"
         )
     }));
     assert!(actions.iter().any(|action| {

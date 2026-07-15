@@ -3,7 +3,7 @@ kind = "pattern"
 version = 1
 
 [pattern]
-id = "ensemble-a"
+id = "bass-a-d"
 type = "notes"
 length = "1 bar"
 resolution = "1/16"
@@ -12,23 +12,30 @@ loop = true
 [[events]]
 at = "1:1:0"
 note = "C2"
-duration = "1/8"
-velocity = 0.82
+duration = "1/16"
+velocity = 0.92
 
 [[events]]
-at = "1:2:0"
-note = "G2"
-duration = "1/8"
+at = "1:1:720"
+note = "Eb2"
+duration = "1/16"
+velocity = 0.64
+
+[[events]]
+at = "1:2:480"
+note = "G1"
+duration = "1/16"
 velocity = 0.72
 
 [[events]]
 at = "1:3:0"
-note = "Bb2"
+note = "Bb1"
 duration = "1/8"
 velocity = 0.78
 
 [[events]]
-at = "1:4:0"
-note = "C3"
-duration = "1/4"
-velocity = 0.70
+at = "1:4:480"
+note = "C2"
+duration = "1/16"
+velocity = 0.68
+

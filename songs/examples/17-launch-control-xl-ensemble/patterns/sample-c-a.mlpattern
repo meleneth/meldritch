@@ -1,0 +1,17 @@
+[meldritch]
+kind = "pattern"
+version = 1
+
+[pattern]
+id = "sample-c-a"
+type = "notes"
+length = "1 bar"
+resolution = "1/16"
+loop = true
+
+[[events]]
+at = "1:4:720"
+note = "G4"
+duration = "1/16"
+velocity = 0.62
+

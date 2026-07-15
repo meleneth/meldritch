@@ -15,59 +15,59 @@ name_contains = "Launch Control XL"
 [[tracks]]
 id = "beat-drum"
 synth = "synths/beat-drum.mlsynth"
-patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
-initial_pattern = "ensemble-a"
+patterns = ["patterns/beat-drum-a.mlpattern", "patterns/beat-drum-b.mlpattern", "patterns/beat-drum-c.mlpattern", "patterns/beat-drum-d.mlpattern"]
+initial_pattern = "beat-drum-a"
 
 [[tracks]]
 id = "rhythm-drum-a"
 synth = "synths/rhythm-drum-a.mlsynth"
-patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
-initial_pattern = "ensemble-a"
+patterns = ["patterns/rhythm-drum-a-a.mlpattern", "patterns/rhythm-drum-a-b.mlpattern", "patterns/rhythm-drum-a-c.mlpattern", "patterns/rhythm-drum-a-d.mlpattern"]
+initial_pattern = "rhythm-drum-a-a"
 
 [[tracks]]
 id = "rhythm-drum-b"
 synth = "synths/rhythm-drum-b.mlsynth"
-patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
-initial_pattern = "ensemble-a"
+patterns = ["patterns/rhythm-drum-b-a.mlpattern", "patterns/rhythm-drum-b-b.mlpattern", "patterns/rhythm-drum-b-c.mlpattern", "patterns/rhythm-drum-b-d.mlpattern"]
+initial_pattern = "rhythm-drum-b-a"
 
 [[tracks]]
 id = "pad"
 synth = "synths/pad.mlsynth"
-patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
-initial_pattern = "ensemble-c"
+patterns = ["patterns/pad-a.mlpattern", "patterns/pad-b.mlpattern", "patterns/pad-c.mlpattern", "patterns/pad-d.mlpattern"]
+initial_pattern = "pad-c"
 
 [[tracks]]
 id = "bass-a"
 synth = "synths/bass-a.mlsynth"
-patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
-initial_pattern = "ensemble-a"
+patterns = ["patterns/bass-a-a.mlpattern", "patterns/bass-a-b.mlpattern", "patterns/bass-a-c.mlpattern", "patterns/bass-a-d.mlpattern"]
+initial_pattern = "bass-a-a"
 
 [[tracks]]
 id = "bass-b"
 synth = "synths/bass-b.mlsynth"
-patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
-initial_pattern = "ensemble-b"
+patterns = ["patterns/bass-b-a.mlpattern", "patterns/bass-b-b.mlpattern", "patterns/bass-b-c.mlpattern", "patterns/bass-b-d.mlpattern"]
+initial_pattern = "bass-b-b"
 
 [[tracks]]
 id = "sample-a"
 synth = "synths/sample-a-placeholder.mlsynth"
 sample_bank = "samples/raven-voice.mlsamples"
-patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
-initial_pattern = "ensemble-d"
+patterns = ["patterns/sample-a-a.mlpattern", "patterns/sample-a-b.mlpattern", "patterns/sample-a-c.mlpattern", "patterns/sample-a-d.mlpattern"]
+initial_pattern = "sample-a-d"
 
 [[tracks]]
 id = "sample-b"
 synth = "synths/sample-b-placeholder.mlsynth"
 sample_bank = "samples/raven-voice.mlsamples"
-patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
-initial_pattern = "ensemble-b"
+patterns = ["patterns/sample-b-a.mlpattern", "patterns/sample-b-b.mlpattern", "patterns/sample-b-c.mlpattern", "patterns/sample-b-d.mlpattern"]
+initial_pattern = "sample-b-b"
 
 [[tracks]]
 id = "sample-c"
 synth = "synths/sample-c-placeholder.mlsynth"
 sample_bank = "samples/raven-voice.mlsamples"
-patterns = ["patterns/ensemble-a.mlpattern", "patterns/ensemble-b.mlpattern", "patterns/ensemble-c.mlpattern", "patterns/ensemble-d.mlpattern"]
-initial_pattern = "ensemble-c"
+patterns = ["patterns/sample-c-a.mlpattern", "patterns/sample-c-b.mlpattern", "patterns/sample-c-c.mlpattern", "patterns/sample-c-d.mlpattern"]
+initial_pattern = "sample-c-c"
 
 [[lanes]]
 id = "beat-drum"
@@ -78,15 +78,15 @@ launch_quantization = "1 bar"
 default_muted = false
 default_soloed = false
 controls = ["drums-fader-01"]
-variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+variations = ["beat-drum-a", "beat-drum-b", "beat-drum-c", "beat-drum-d"]
 [[lanes.pattern_banks]]
 id = "groove"
 label = "Groove"
-variations = ["ensemble-a", "ensemble-b"]
+variations = ["beat-drum-a", "beat-drum-b"]
 [[lanes.pattern_banks]]
 id = "fill"
 label = "Fills"
-variations = ["ensemble-c", "ensemble-d"]
+variations = ["beat-drum-c", "beat-drum-d"]
 
 [[lanes]]
 id = "rhythm-drum-a"
@@ -97,15 +97,15 @@ launch_quantization = "1 bar"
 default_muted = false
 default_soloed = false
 controls = ["main-fader-01", "drums-fader-02"]
-variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+variations = ["rhythm-drum-a-a", "rhythm-drum-a-b", "rhythm-drum-a-c", "rhythm-drum-a-d"]
 [[lanes.pattern_banks]]
 id = "groove"
 label = "Groove"
-variations = ["ensemble-a", "ensemble-b"]
+variations = ["rhythm-drum-a-a", "rhythm-drum-a-b"]
 [[lanes.pattern_banks]]
 id = "fill"
 label = "Fills"
-variations = ["ensemble-c", "ensemble-d"]
+variations = ["rhythm-drum-a-c", "rhythm-drum-a-d"]
 
 [[lanes]]
 id = "rhythm-drum-b"
@@ -116,15 +116,15 @@ launch_quantization = "1 bar"
 default_muted = false
 default_soloed = false
 controls = ["main-fader-02", "drums-fader-03"]
-variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+variations = ["rhythm-drum-b-a", "rhythm-drum-b-b", "rhythm-drum-b-c", "rhythm-drum-b-d"]
 [[lanes.pattern_banks]]
 id = "groove"
 label = "Groove"
-variations = ["ensemble-a", "ensemble-b"]
+variations = ["rhythm-drum-b-a", "rhythm-drum-b-b"]
 [[lanes.pattern_banks]]
 id = "fill"
 label = "Fills"
-variations = ["ensemble-c", "ensemble-d"]
+variations = ["rhythm-drum-b-c", "rhythm-drum-b-d"]
 
 [[lanes]]
 id = "pad"
@@ -135,15 +135,15 @@ launch_quantization = "1 bar"
 default_muted = false
 default_soloed = false
 controls = ["main-fader-03"]
-variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+variations = ["pad-a", "pad-b", "pad-c", "pad-d"]
 [[lanes.pattern_banks]]
 id = "groove"
 label = "Groove"
-variations = ["ensemble-a", "ensemble-b"]
+variations = ["pad-a", "pad-b"]
 [[lanes.pattern_banks]]
 id = "fill"
 label = "Fills"
-variations = ["ensemble-c", "ensemble-d"]
+variations = ["pad-c", "pad-d"]
 
 [[lanes]]
 id = "bass-a"
@@ -154,15 +154,15 @@ launch_quantization = "1 bar"
 default_muted = false
 default_soloed = false
 controls = ["main-fader-04", "drums-fader-04"]
-variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+variations = ["bass-a-a", "bass-a-b", "bass-a-c", "bass-a-d"]
 [[lanes.pattern_banks]]
 id = "groove"
 label = "Groove"
-variations = ["ensemble-a", "ensemble-b"]
+variations = ["bass-a-a", "bass-a-b"]
 [[lanes.pattern_banks]]
 id = "fill"
 label = "Fills"
-variations = ["ensemble-c", "ensemble-d"]
+variations = ["bass-a-c", "bass-a-d"]
 
 [[lanes]]
 id = "bass-b"
@@ -173,15 +173,15 @@ launch_quantization = "1 bar"
 default_muted = false
 default_soloed = false
 controls = ["main-fader-05"]
-variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+variations = ["bass-b-a", "bass-b-b", "bass-b-c", "bass-b-d"]
 [[lanes.pattern_banks]]
 id = "groove"
 label = "Groove"
-variations = ["ensemble-a", "ensemble-b"]
+variations = ["bass-b-a", "bass-b-b"]
 [[lanes.pattern_banks]]
 id = "fill"
 label = "Fills"
-variations = ["ensemble-c", "ensemble-d"]
+variations = ["bass-b-c", "bass-b-d"]
 
 [[lanes]]
 id = "sample-a"
@@ -192,15 +192,15 @@ launch_quantization = "1 bar"
 default_muted = false
 default_soloed = false
 controls = ["main-fader-06", "drums-fader-05"]
-variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+variations = ["sample-a-a", "sample-a-b", "sample-a-c", "sample-a-d"]
 [[lanes.pattern_banks]]
 id = "groove"
 label = "Groove"
-variations = ["ensemble-a", "ensemble-b"]
+variations = ["sample-a-a", "sample-a-b"]
 [[lanes.pattern_banks]]
 id = "fill"
 label = "Fills"
-variations = ["ensemble-c", "ensemble-d"]
+variations = ["sample-a-c", "sample-a-d"]
 
 [[lanes]]
 id = "sample-b"
@@ -211,15 +211,15 @@ launch_quantization = "1 bar"
 default_muted = false
 default_soloed = false
 controls = ["main-fader-07"]
-variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+variations = ["sample-b-a", "sample-b-b", "sample-b-c", "sample-b-d"]
 [[lanes.pattern_banks]]
 id = "groove"
 label = "Groove"
-variations = ["ensemble-a", "ensemble-b"]
+variations = ["sample-b-a", "sample-b-b"]
 [[lanes.pattern_banks]]
 id = "fill"
 label = "Fills"
-variations = ["ensemble-c", "ensemble-d"]
+variations = ["sample-b-c", "sample-b-d"]
 
 [[lanes]]
 id = "sample-c"
@@ -230,15 +230,15 @@ launch_quantization = "1 bar"
 default_muted = false
 default_soloed = false
 controls = ["main-fader-08"]
-variations = ["ensemble-a", "ensemble-b", "ensemble-c", "ensemble-d"]
+variations = ["sample-c-a", "sample-c-b", "sample-c-c", "sample-c-d"]
 [[lanes.pattern_banks]]
 id = "groove"
 label = "Groove"
-variations = ["ensemble-a", "ensemble-b"]
+variations = ["sample-c-a", "sample-c-b"]
 [[lanes.pattern_banks]]
 id = "fill"
 label = "Fills"
-variations = ["ensemble-c", "ensemble-d"]
+variations = ["sample-c-c", "sample-c-d"]
 
 [[pages]]
 id = "main"
@@ -572,7 +572,7 @@ id = "rhythm-drum-a-variation-b"
 label = "Rhythm Drum A Variation B"
 action = "select_lane_variation"
 lane = "rhythm-drum-a"
-variation_id = "ensemble-b"
+variation_id = "rhythm-drum-a-b"
 [[actions.bindings]]
 type = "midi_note"
 device = "launch-control-xl"

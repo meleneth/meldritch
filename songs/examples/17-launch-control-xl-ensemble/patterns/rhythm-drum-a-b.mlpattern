@@ -1,0 +1,41 @@
+[meldritch]
+kind = "pattern"
+version = 1
+
+[pattern]
+id = "rhythm-drum-a-b"
+type = "notes"
+length = "1 bar"
+resolution = "1/16"
+loop = true
+
+[[events]]
+at = "1:1:480"
+note = "D3"
+duration = "1/16"
+velocity = 0.7
+
+[[events]]
+at = "1:2:0"
+note = "E3"
+duration = "1/16"
+velocity = 0.55
+
+[[events]]
+at = "1:2:480"
+note = "D3"
+duration = "1/16"
+velocity = 0.78
+
+[[events]]
+at = "1:3:480"
+note = "D3"
+duration = "1/16"
+velocity = 0.64
+
+[[events]]
+at = "1:4:720"
+note = "E3"
+duration = "1/16"
+velocity = 0.7
+

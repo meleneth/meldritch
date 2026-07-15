@@ -1,0 +1,29 @@
+[meldritch]
+kind = "pattern"
+version = 1
+
+[pattern]
+id = "pad-d"
+type = "notes"
+length = "1 bar"
+resolution = "1/16"
+loop = true
+
+[[events]]
+at = "1:1:0"
+note = "G3"
+duration = "1/1"
+velocity = 0.36
+
+[[events]]
+at = "1:1:0"
+note = "Bb3"
+duration = "1/1"
+velocity = 0.32
+
+[[events]]
+at = "1:1:0"
+note = "D4"
+duration = "1/1"
+velocity = 0.34
+

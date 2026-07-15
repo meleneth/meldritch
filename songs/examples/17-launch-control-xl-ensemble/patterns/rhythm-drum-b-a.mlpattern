@@ -1,0 +1,23 @@
+[meldritch]
+kind = "pattern"
+version = 1
+
+[pattern]
+id = "rhythm-drum-b-a"
+type = "notes"
+length = "1 bar"
+resolution = "1/16"
+loop = true
+
+[[events]]
+at = "1:2:0"
+note = "G3"
+duration = "1/16"
+velocity = 0.7
+
+[[events]]
+at = "1:4:0"
+note = "G3"
+duration = "1/16"
+velocity = 0.78
+

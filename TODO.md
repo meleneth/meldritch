@@ -194,7 +194,7 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Add page-scoped MIDI control bindings so active page selection can remap
   physical controls without hard-coded LaunchControl policy
 - [x] Add a validating `17-launch-control-xl-ensemble` song skeleton with nine
-  lanes, two scene-authored pages, four placeholder variations per lane, and
+  lanes, two scene-authored pages, four lane-specific variations per lane, and
   page-scoped fader controls
 - [x] Add `.mlsamples` sample-bank metadata parsing and attach the ensemble
   sample lanes to a Raven voice placeholder bank

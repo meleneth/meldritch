@@ -1,0 +1,35 @@
+[meldritch]
+kind = "pattern"
+version = 1
+
+[pattern]
+id = "bass-a-c"
+type = "notes"
+length = "1 bar"
+resolution = "1/16"
+loop = true
+
+[[events]]
+at = "1:1:0"
+note = "C2"
+duration = "1/16"
+velocity = 0.9
+
+[[events]]
+at = "1:1:720"
+note = "G1"
+duration = "1/16"
+velocity = 0.58
+
+[[events]]
+at = "1:2:480"
+note = "Bb1"
+duration = "1/8"
+velocity = 0.76
+
+[[events]]
+at = "1:4:0"
+note = "C2"
+duration = "1/8"
+velocity = 0.72
+

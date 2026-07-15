@@ -331,8 +331,9 @@ fn launch_control_ensemble_lane_variation_changes_one_track_in_the_mix() {
     let song = load_song_directory(example("17-launch-control-xl-ensemble"))
         .expect("LaunchControl XL ensemble song should load");
     let initial = compile_mixed_note_song(&song).expect("ensemble mix should compile");
-    let varied = compile_mixed_note_song_with_lane_variation(&song, "rhythm-drum-a", "ensemble-b")
-        .expect("ensemble lane variation should compile");
+    let varied =
+        compile_mixed_note_song_with_lane_variation(&song, "rhythm-drum-a", "rhythm-drum-a-b")
+            .expect("ensemble lane variation should compile");
     let initial_block = initial.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
     let varied_block = varied.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
 

@@ -7664,7 +7664,7 @@ mod tests {
             variation_b.input,
             meldritch_app::AppInput::SelectLaneVariation {
                 lane_id: "rhythm-drum-a".to_owned(),
-                variation_id: "ensemble-b".to_owned(),
+                variation_id: "rhythm-drum-a-b".to_owned(),
             }
         );
         let mute = map_script_midi_control_change(
@@ -7770,12 +7770,15 @@ mod tests {
         assert_eq!(strip.launch_quantization.as_deref(), Some("1 bar"));
         assert!(!strip.muted);
         assert!(!strip.soloed);
-        assert_eq!(strip.active_variation_id.as_deref(), Some("ensemble-a"));
+        assert_eq!(
+            strip.active_variation_id.as_deref(),
+            Some("rhythm-drum-a-a")
+        );
         assert_eq!(strip.pattern_banks.len(), 2);
         assert_eq!(strip.pattern_banks[0].id, "groove");
         assert_eq!(
             strip.pattern_banks[0].variation_ids,
-            ["ensemble-a", "ensemble-b"]
+            ["rhythm-drum-a-a", "rhythm-drum-a-b"]
         );
     }
 
@@ -7839,11 +7842,12 @@ mod tests {
 
         let bank = song_scene_bank(&song, tempo_from_song(&song).unwrap())
             .expect("LaunchControl XL ensemble scene bank should build");
+        assert_eq!(song.note_patterns().len(), 36);
         assert_eq!(bank.patches.len(), 0);
         assert_eq!(bank.lane_patches.len(), 36);
         assert!(
             bank.lane_patches
-                .contains_key(&("rhythm-drum-a".to_owned(), "ensemble-b".to_owned()))
+                .contains_key(&("rhythm-drum-a".to_owned(), "rhythm-drum-a-b".to_owned()))
         );
         assert!(
             bank.lane_patches
@@ -7858,20 +7862,20 @@ mod tests {
         assert_eq!(
             song_lane_selection(&meldritch_app::AppCommandResult::LaneVariationSelected {
                 lane_id: "rhythm-drum-a".to_owned(),
-                previous: Some("ensemble-a".to_owned()),
-                current: "ensemble-b".to_owned(),
+                previous: Some("rhythm-drum-a-a".to_owned()),
+                current: "rhythm-drum-a-b".to_owned(),
             }),
-            Some(("rhythm-drum-a".to_owned(), "ensemble-b".to_owned()))
+            Some(("rhythm-drum-a".to_owned(), "rhythm-drum-a-b".to_owned()))
         );
         assert_eq!(
             song_lane_selection(&meldritch_app::AppCommandResult::LanePatternBankSelected {
                 lane_id: "rhythm-drum-a".to_owned(),
                 previous_bank: Some("groove".to_owned()),
                 current_bank: "fill".to_owned(),
-                previous_variation: Some("ensemble-b".to_owned()),
-                current_variation: "ensemble-c".to_owned(),
+                previous_variation: Some("rhythm-drum-a-b".to_owned()),
+                current_variation: "rhythm-drum-a-c".to_owned(),
             }),
-            Some(("rhythm-drum-a".to_owned(), "ensemble-c".to_owned()))
+            Some(("rhythm-drum-a".to_owned(), "rhythm-drum-a-c".to_owned()))
         );
         assert_eq!(
             song_lane_selection(&meldritch_app::AppCommandResult::LaneMuteToggled {
