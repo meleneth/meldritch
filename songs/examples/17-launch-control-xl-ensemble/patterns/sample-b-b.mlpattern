@@ -12,18 +12,27 @@ loop = true
 [[events]]
 at = "1:1:720"
 note = "F4"
+slot = "raven-voice"
+slice = "rapping"
+root = "C3"
 duration = "1/16"
 velocity = 0.42
 
 [[events]]
 at = "1:2:240"
 note = "Ab4"
+slot = "raven-voice"
+slice = "shadow"
+root = "C3"
+pitch_semitones = 3.0
 duration = "1/16"
 velocity = 0.52
 
 [[events]]
 at = "1:4:240"
 note = "C5"
+slot = "raven-voice"
+slice = "nevermore"
+root = "C4"
 duration = "1/16"
 velocity = 0.58
-

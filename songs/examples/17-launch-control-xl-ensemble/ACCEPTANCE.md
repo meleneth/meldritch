@@ -66,7 +66,9 @@ default mute/solo state, per-lane control IDs, nested pattern banks,
 page-visible controls, page-scoped MIDI fader bindings, and a `.mlsamples`
 Raven voice sample-bank metadata file attached to the three sample lanes. The
 referenced WAV is currently a deterministic generated placeholder until the
-final usable Raven voice asset is committed.
+final usable Raven voice asset is committed. The sample lanes use an
+`.mlsampler` voice definition with pitch tracking, level, polyphony, a pitch
+envelope, and explicit slice events in their patterns.
 `tui-song` now carries that lane metadata into app view state, and performance
 mode renders visible strips with lane status, active variation, launch
 quantization, and pattern-bank names/counts. Generic typed app commands can
@@ -80,18 +82,18 @@ delayed-note patch path with live override support; this multi-track ensemble
 uses a compiled mixed-note patch, and lane variation selection changes one
 track's selected placeholder pattern inside that mixed audio. Mixed-note
 rendering can compile sample-bank tracks as deterministic one-shot sample
-playback using the first slot/first slice, so sample lanes now render WAV audio
-inside the mixed song. Mixed-note rendering also accepts script-targeted synth
-filter overrides, so `tui-song` controls can change audio for synth-backed
-mixed patches. The main and drums pages map faders to distinct lane
-synth/filter targets; sample-lane faders still need explicit sample
-level/pitch/slice targets before they affect sample audio. The existing
+playback from authored `.mlsampler` voices; sample events can select slot/slice
+while `note`, `root`, and `pitch_semitones` control playback pitch, with smooth
+sampler pitch-envelope modulation applied per voice. Mixed-note rendering also
+accepts script-targeted synth filter overrides, so `tui-song` controls can
+change audio for synth-backed mixed patches. The main and drums pages map
+faders to distinct lane synth/filter targets; sample-lane faders still need
+explicit sample level/pitch/slice targets before they affect sample audio. The existing
 LaunchControl XL playground proves script-authored LaunchControl input, typed
 actions, live rerendered parameters, authored groove variations, default
 performance mode, and continuous audio publication for a single-synth
 playground. Synths with `polyphony > 1` now render overlapping notes as
 independent voices, and the ensemble pad uses four voices. This ensemble
-skeleton still needs explicit per-pattern sample
-slot/slice targeting, loop-mode sample playback, sample level/pitch controls,
-full pattern-bank runtime semantics, audio-affecting mute/solo behavior,
-momentary modifier layers, and replayable modifier gestures.
+skeleton still needs loop-mode sample playback, live sample level/pitch/slice
+controls, full pattern-bank runtime semantics, audio-affecting mute/solo
+behavior, momentary modifier layers, and replayable modifier gestures.

@@ -225,6 +225,8 @@ pub struct TrackDefinition {
     id: String,
     synth_path: PathBuf,
     synth_id: String,
+    sampler_path: Option<PathBuf>,
+    sampler_id: Option<String>,
     sample_bank_path: Option<PathBuf>,
     sample_bank_id: Option<String>,
     pattern_ids: Vec<String>,
@@ -247,6 +249,16 @@ impl TrackDefinition {
     #[must_use]
     pub fn synth_id(&self) -> &str {
         &self.synth_id
+    }
+
+    #[must_use]
+    pub fn sampler_path(&self) -> Option<&Path> {
+        self.sampler_path.as_deref()
+    }
+
+    #[must_use]
+    pub fn sampler_id(&self) -> Option<&str> {
+        self.sampler_id.as_deref()
     }
 
     #[must_use]
@@ -286,6 +298,10 @@ pub struct NoteEventDefinition {
     duration_frames: u64,
     note: u8,
     velocity: f64,
+    sample_slot: Option<String>,
+    sample_slice: Option<String>,
+    root_note: Option<u8>,
+    pitch_semitones: f64,
 }
 
 impl NoteEventDefinition {
@@ -307,6 +323,26 @@ impl NoteEventDefinition {
     #[must_use]
     pub const fn velocity(&self) -> f64 {
         self.velocity
+    }
+
+    #[must_use]
+    pub fn sample_slot(&self) -> Option<&str> {
+        self.sample_slot.as_deref()
+    }
+
+    #[must_use]
+    pub fn sample_slice(&self) -> Option<&str> {
+        self.sample_slice.as_deref()
+    }
+
+    #[must_use]
+    pub const fn root_note(&self) -> Option<u8> {
+        self.root_note
+    }
+
+    #[must_use]
+    pub const fn pitch_semitones(&self) -> f64 {
+        self.pitch_semitones
     }
 }
 
@@ -899,10 +935,119 @@ impl SampleBankDefinition {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct SamplerPitchEnvelopeDefinition {
+    amount_semitones: f64,
+    attack_seconds: f64,
+    decay_seconds: f64,
+    sustain_level: f64,
+    release_seconds: f64,
+}
+
+impl SamplerPitchEnvelopeDefinition {
+    #[must_use]
+    pub const fn amount_semitones(&self) -> f64 {
+        self.amount_semitones
+    }
+
+    #[must_use]
+    pub const fn attack_seconds(&self) -> f64 {
+        self.attack_seconds
+    }
+
+    #[must_use]
+    pub const fn decay_seconds(&self) -> f64 {
+        self.decay_seconds
+    }
+
+    #[must_use]
+    pub const fn sustain_level(&self) -> f64 {
+        self.sustain_level
+    }
+
+    #[must_use]
+    pub const fn release_seconds(&self) -> f64 {
+        self.release_seconds
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SamplerDefinition {
+    id: String,
+    bank_path: PathBuf,
+    bank_id: String,
+    polyphony: u16,
+    default_slot: Option<String>,
+    default_slice: Option<String>,
+    root_note: Option<u8>,
+    pitch_tracking: bool,
+    level: f64,
+    pitch_semitones: f64,
+    pitch_envelope: Option<SamplerPitchEnvelopeDefinition>,
+}
+
+impl SamplerDefinition {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn bank_path(&self) -> &Path {
+        &self.bank_path
+    }
+
+    #[must_use]
+    pub fn bank_id(&self) -> &str {
+        &self.bank_id
+    }
+
+    #[must_use]
+    pub const fn polyphony(&self) -> u16 {
+        self.polyphony
+    }
+
+    #[must_use]
+    pub fn default_slot(&self) -> Option<&str> {
+        self.default_slot.as_deref()
+    }
+
+    #[must_use]
+    pub fn default_slice(&self) -> Option<&str> {
+        self.default_slice.as_deref()
+    }
+
+    #[must_use]
+    pub const fn root_note(&self) -> Option<u8> {
+        self.root_note
+    }
+
+    #[must_use]
+    pub const fn pitch_tracking(&self) -> bool {
+        self.pitch_tracking
+    }
+
+    #[must_use]
+    pub const fn level(&self) -> f64 {
+        self.level
+    }
+
+    #[must_use]
+    pub const fn pitch_semitones(&self) -> f64 {
+        self.pitch_semitones
+    }
+
+    #[must_use]
+    pub const fn pitch_envelope(&self) -> Option<&SamplerPitchEnvelopeDefinition> {
+        self.pitch_envelope.as_ref()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct ValidatedSong {
     root: PathBuf,
     performance: PerformanceDefinition,
     synths: BTreeMap<String, SynthDefinition>,
+    samplers: BTreeMap<String, SamplerDefinition>,
     sample_banks: BTreeMap<String, SampleBankDefinition>,
     note_patterns: BTreeMap<String, NotePatternDefinition>,
     parameter_patterns: BTreeMap<String, ParameterPatternDefinition>,
@@ -924,6 +1069,11 @@ impl ValidatedSong {
     #[must_use]
     pub fn synths(&self) -> &BTreeMap<String, SynthDefinition> {
         &self.synths
+    }
+
+    #[must_use]
+    pub fn samplers(&self) -> &BTreeMap<String, SamplerDefinition> {
+        &self.samplers
     }
 
     #[must_use]
@@ -1050,6 +1200,7 @@ struct RawPerformance {
 struct RawTrack {
     id: String,
     synth: PathBuf,
+    sampler: Option<PathBuf>,
     sample_bank: Option<PathBuf>,
     #[serde(default)]
     patterns: Vec<PathBuf>,
@@ -1338,6 +1489,60 @@ struct RawNoteEvent {
     note: String,
     duration: String,
     velocity: f64,
+    slot: Option<String>,
+    slice: Option<String>,
+    root: Option<String>,
+    #[serde(default)]
+    pitch_semitones: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSamplerFile {
+    meldritch: RawHeader,
+    sampler: RawSampler,
+    pitch_envelope: Option<RawSamplerPitchEnvelope>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSampler {
+    id: String,
+    bank: PathBuf,
+    #[serde(default = "default_sampler_polyphony")]
+    polyphony: u16,
+    default_slot: Option<String>,
+    default_slice: Option<String>,
+    root: Option<String>,
+    #[serde(default = "default_true")]
+    pitch_tracking: bool,
+    #[serde(default = "default_one")]
+    level: f64,
+    #[serde(default)]
+    pitch_semitones: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawSamplerPitchEnvelope {
+    amount_semitones: f64,
+    #[serde(default)]
+    attack: f64,
+    #[serde(default)]
+    decay: f64,
+    #[serde(default)]
+    sustain: f64,
+    #[serde(default)]
+    release: f64,
+}
+
+const fn default_sampler_polyphony() -> u16 {
+    1
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+const fn default_one() -> f64 {
+    1.0
 }
 
 #[derive(Debug, Deserialize)]
@@ -1405,6 +1610,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
     let mut track_ids = BTreeSet::new();
     let mut tracks = Vec::with_capacity(raw_performance.tracks.len());
     let mut synths = BTreeMap::new();
+    let mut samplers = BTreeMap::new();
     let mut sample_banks = BTreeMap::new();
     let mut note_patterns = BTreeMap::new();
     let mut parameter_patterns = BTreeMap::new();
@@ -1458,6 +1664,49 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         } else {
             (None, None)
         };
+        let (sampler_path, sampler_id, sampler_bank_path, sampler_bank_id) =
+            if let Some(reference) = &raw_track.sampler {
+                let path = resolve_song_reference(&root, &entry, reference)?;
+                let (sampler, bank) = load_sampler(&root, &path)?;
+                if let Some(existing) = samplers.get(sampler.id()) {
+                    if existing != &sampler {
+                        return Err(SongLoadError::one(
+                            &path,
+                            format!(
+                                "sampler id '{}' resolves to different definitions",
+                                sampler.id()
+                            ),
+                        ));
+                    }
+                } else {
+                    samplers.insert(sampler.id().to_owned(), sampler.clone());
+                }
+                if let Some(existing) = sample_banks.get(bank.id()) {
+                    if existing != &bank {
+                        return Err(SongLoadError::one(
+                            &path,
+                            format!(
+                                "sample bank id '{}' resolves to different definitions",
+                                bank.id()
+                            ),
+                        ));
+                    }
+                } else {
+                    sample_banks.insert(bank.id().to_owned(), bank.clone());
+                }
+                (
+                    Some(
+                        path.strip_prefix(&root)
+                            .expect("resolved song reference stays inside root")
+                            .to_path_buf(),
+                    ),
+                    Some(sampler.id().to_owned()),
+                    Some(sampler.bank_path().to_path_buf()),
+                    Some(sampler.bank_id().to_owned()),
+                )
+            } else {
+                (None, None, sample_bank_path, sample_bank_id)
+            };
         let mut track_dsps = BTreeMap::new();
         let mut dsp_ids = Vec::with_capacity(raw_track.dsp.len());
         for reference in &raw_track.dsp {
@@ -1564,8 +1813,10 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
                 .expect("resolved song reference stays inside root")
                 .to_path_buf(),
             synth_id: synth.id,
-            sample_bank_path,
-            sample_bank_id,
+            sampler_path,
+            sampler_id,
+            sample_bank_path: sampler_bank_path,
+            sample_bank_id: sampler_bank_id,
             pattern_ids,
             initial_pattern: raw_track.initial_pattern,
             parameter_pattern_ids: raw_track.parameter_patterns,
@@ -2363,6 +2614,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
     let fingerprint = fingerprint_song(
         &performance,
         &synths,
+        &samplers,
         &note_patterns,
         &parameter_patterns,
         &dsps,
@@ -2372,6 +2624,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         root,
         performance,
         synths,
+        samplers,
         sample_banks,
         note_patterns,
         parameter_patterns,
@@ -2809,6 +3062,115 @@ fn load_sample_bank(path: &Path) -> Result<SampleBankDefinition, SongLoadError> 
     })
 }
 
+fn load_sampler(
+    root: &Path,
+    path: &Path,
+) -> Result<(SamplerDefinition, SampleBankDefinition), SongLoadError> {
+    let raw: RawSamplerFile = read_toml(path)?;
+    validate_header(path, &raw.meldritch, "sampler")?;
+    if raw.sampler.id.trim().is_empty() {
+        return Err(SongLoadError::one(path, "sampler.id must not be empty"));
+    }
+    if raw.sampler.polyphony == 0 {
+        return Err(SongLoadError::one(
+            path,
+            "sampler.polyphony must be greater than zero",
+        ));
+    }
+    if !raw.sampler.level.is_finite() || raw.sampler.level < 0.0 {
+        return Err(SongLoadError::one(
+            path,
+            "sampler.level must be finite and >= 0",
+        ));
+    }
+    if !raw.sampler.pitch_semitones.is_finite() {
+        return Err(SongLoadError::one(
+            path,
+            "sampler.pitch_semitones must be finite",
+        ));
+    }
+    let bank_path = resolve_song_reference(root, path, &raw.sampler.bank)?;
+    let bank = load_sample_bank(&bank_path)?;
+    if let Some(default_slot) = &raw.sampler.default_slot
+        && !bank.slots().iter().any(|slot| slot.id() == default_slot)
+    {
+        return Err(SongLoadError::one(
+            path,
+            format!("sampler.default_slot '{default_slot}' is not in the sample bank"),
+        ));
+    }
+    if let Some(default_slice) = &raw.sampler.default_slice {
+        let slot = raw
+            .sampler
+            .default_slot
+            .as_deref()
+            .and_then(|id| bank.slots().iter().find(|slot| slot.id() == id))
+            .or_else(|| bank.slots().first())
+            .ok_or_else(|| SongLoadError::one(path, "sampler bank has no slots"))?;
+        if !slot
+            .slices()
+            .iter()
+            .any(|slice| slice.id() == default_slice)
+        {
+            return Err(SongLoadError::one(
+                path,
+                format!(
+                    "sampler.default_slice '{default_slice}' is not in slot '{}'",
+                    slot.id()
+                ),
+            ));
+        }
+    }
+    let pitch_envelope = raw
+        .pitch_envelope
+        .map(|envelope| {
+            if !envelope.amount_semitones.is_finite()
+                || !envelope.attack.is_finite()
+                || !envelope.decay.is_finite()
+                || !envelope.sustain.is_finite()
+                || !envelope.release.is_finite()
+            {
+                return Err(SongLoadError::one(
+                    path,
+                    "sampler pitch_envelope values must be finite",
+                ));
+            }
+            Ok(SamplerPitchEnvelopeDefinition {
+                amount_semitones: envelope.amount_semitones,
+                attack_seconds: envelope.attack,
+                decay_seconds: envelope.decay,
+                sustain_level: envelope.sustain,
+                release_seconds: envelope.release,
+            })
+        })
+        .transpose()?;
+    let relative_bank_path = bank_path
+        .strip_prefix(root)
+        .expect("resolved song reference stays inside root")
+        .to_path_buf();
+    Ok((
+        SamplerDefinition {
+            id: raw.sampler.id,
+            bank_path: relative_bank_path,
+            bank_id: bank.id().to_owned(),
+            polyphony: raw.sampler.polyphony,
+            default_slot: raw.sampler.default_slot,
+            default_slice: raw.sampler.default_slice,
+            root_note: raw
+                .sampler
+                .root
+                .as_deref()
+                .map(|note| parse_note(path, note))
+                .transpose()?,
+            pitch_tracking: raw.sampler.pitch_tracking,
+            level: raw.sampler.level,
+            pitch_semitones: raw.sampler.pitch_semitones,
+            pitch_envelope,
+        },
+        bank,
+    ))
+}
+
 fn resolve_port(
     path: &Path,
     modules: &BTreeMap<&str, ModuleKind>,
@@ -2946,6 +3308,14 @@ fn load_note_pattern(
             duration_frames,
             note: parse_note(path, &raw_event.note)?,
             velocity: raw_event.velocity,
+            sample_slot: raw_event.slot,
+            sample_slice: raw_event.slice,
+            root_note: raw_event
+                .root
+                .as_deref()
+                .map(|note| parse_note(path, note))
+                .transpose()?,
+            pitch_semitones: raw_event.pitch_semitones,
         });
     }
     Ok(NotePatternDefinition {
@@ -3455,6 +3825,7 @@ fn validate_relative_asset_path(referring_file: &Path, path: &Path) -> Result<()
 fn fingerprint_song(
     performance: &PerformanceDefinition,
     synths: &BTreeMap<String, SynthDefinition>,
+    samplers: &BTreeMap<String, SamplerDefinition>,
     note_patterns: &BTreeMap<String, NotePatternDefinition>,
     parameter_patterns: &BTreeMap<String, ParameterPatternDefinition>,
     dsps: &BTreeMap<String, DspDefinition>,
@@ -3474,6 +3845,14 @@ fn fingerprint_song(
         fingerprint.string(&track.id);
         fingerprint.string(&track.synth_path.to_string_lossy());
         fingerprint.string(&track.synth_id);
+        fingerprint.optional_string(
+            track
+                .sampler_path
+                .as_ref()
+                .map(|path| path.to_string_lossy())
+                .as_deref(),
+        );
+        fingerprint.optional_string(track.sampler_id.as_deref());
         if let Some(sample_bank_path) = &track.sample_bank_path {
             fingerprint.string(&sample_bank_path.to_string_lossy());
         } else {
@@ -3694,6 +4073,25 @@ fn fingerprint_song(
             }
         }
     }
+    for sampler in samplers.values() {
+        fingerprint.string(&sampler.id);
+        fingerprint.string(&sampler.bank_path.to_string_lossy());
+        fingerprint.string(&sampler.bank_id);
+        fingerprint.u64(u64::from(sampler.polyphony));
+        fingerprint.optional_string(sampler.default_slot.as_deref());
+        fingerprint.optional_string(sampler.default_slice.as_deref());
+        fingerprint.u64(u64::from(sampler.root_note.unwrap_or(0)));
+        fingerprint.u64(u64::from(sampler.pitch_tracking));
+        fingerprint.u64(sampler.level.to_bits());
+        fingerprint.u64(sampler.pitch_semitones.to_bits());
+        if let Some(envelope) = &sampler.pitch_envelope {
+            fingerprint.u64(envelope.amount_semitones.to_bits());
+            fingerprint.u64(envelope.attack_seconds.to_bits());
+            fingerprint.u64(envelope.decay_seconds.to_bits());
+            fingerprint.u64(envelope.sustain_level.to_bits());
+            fingerprint.u64(envelope.release_seconds.to_bits());
+        }
+    }
     for pattern in note_patterns.values() {
         fingerprint.string(&pattern.id);
         fingerprint.u64(pattern.length_frames);
@@ -3703,6 +4101,10 @@ fn fingerprint_song(
             fingerprint.u64(event.duration_frames);
             fingerprint.u64(u64::from(event.note));
             fingerprint.u64(event.velocity.to_bits());
+            fingerprint.optional_string(event.sample_slot.as_deref());
+            fingerprint.optional_string(event.sample_slice.as_deref());
+            fingerprint.u64(u64::from(event.root_note.unwrap_or(0)));
+            fingerprint.u64(event.pitch_semitones.to_bits());
         }
     }
     for pattern in parameter_patterns.values() {

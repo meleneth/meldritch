@@ -1,0 +1,22 @@
+[meldritch]
+kind = "sampler"
+version = 1
+
+[sampler]
+id = "raven-slicer"
+bank = "../samples/raven-voice.mlsamples"
+polyphony = 6
+default_slot = "raven-voice"
+default_slice = "nevermore"
+root = "C3"
+pitch_tracking = true
+level = 0.85
+pitch_semitones = 0.0
+
+[pitch_envelope]
+amount_semitones = -4.0
+attack = 0.0
+decay = 0.18
+sustain = 0.0
+release = 0.0
+

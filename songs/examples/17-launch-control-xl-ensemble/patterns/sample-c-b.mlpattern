@@ -12,12 +12,17 @@ loop = true
 [[events]]
 at = "1:2:720"
 note = "D5"
+slot = "raven-voice"
+slice = "chamber"
+root = "C4"
 duration = "1/16"
 velocity = 0.48
 
 [[events]]
 at = "1:4:720"
 note = "G4"
+slot = "raven-voice"
+slice = "shadow"
+root = "C3"
 duration = "1/16"
 velocity = 0.64
-

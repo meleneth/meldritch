@@ -22,8 +22,9 @@ pub use song::{
     ParameterTargetDefinition, PatchInput, PerformanceActionDefinition, PerformanceDefinition,
     PerformanceLaneDefinition, PerformancePageDefinition, PerformancePageStripDefinition,
     PerformancePatternBankDefinition, SampleBankDefinition, SamplePlaybackMode,
-    SampleSliceDefinition, SampleSlotDefinition, SignalType, SongDiagnostic, SongLoadError,
-    SynthDefinition, TrackDefinition, ValidatedSong, load_song_directory,
+    SampleSliceDefinition, SampleSlotDefinition, SamplerDefinition, SamplerPitchEnvelopeDefinition,
+    SignalType, SongDiagnostic, SongLoadError, SynthDefinition, TrackDefinition, ValidatedSong,
+    load_song_directory,
 };
 
 #[derive(Clone, Debug, PartialEq)]

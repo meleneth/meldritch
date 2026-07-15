@@ -51,21 +51,21 @@ initial_pattern = "bass-b-b"
 [[tracks]]
 id = "sample-a"
 synth = "synths/sample-a-placeholder.mlsynth"
-sample_bank = "samples/raven-voice.mlsamples"
+sampler = "samplers/raven-slicer.mlsampler"
 patterns = ["patterns/sample-a-a.mlpattern", "patterns/sample-a-b.mlpattern", "patterns/sample-a-c.mlpattern", "patterns/sample-a-d.mlpattern"]
 initial_pattern = "sample-a-d"
 
 [[tracks]]
 id = "sample-b"
 synth = "synths/sample-b-placeholder.mlsynth"
-sample_bank = "samples/raven-voice.mlsamples"
+sampler = "samplers/raven-slicer.mlsampler"
 patterns = ["patterns/sample-b-a.mlpattern", "patterns/sample-b-b.mlpattern", "patterns/sample-b-c.mlpattern", "patterns/sample-b-d.mlpattern"]
 initial_pattern = "sample-b-b"
 
 [[tracks]]
 id = "sample-c"
 synth = "synths/sample-c-placeholder.mlsynth"
-sample_bank = "samples/raven-voice.mlsamples"
+sampler = "samplers/raven-slicer.mlsampler"
 patterns = ["patterns/sample-c-a.mlpattern", "patterns/sample-c-b.mlpattern", "patterns/sample-c-c.mlpattern", "patterns/sample-c-d.mlpattern"]
 initial_pattern = "sample-c-c"
 

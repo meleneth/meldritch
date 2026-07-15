@@ -302,32 +302,51 @@ impl CompiledMixedTrack {
 struct CompiledSampleTrack {
     sample_rate: u32,
     channels: u16,
+    level: f64,
+    pitch_envelope: Option<CompiledSamplePitchEnvelope>,
+    pattern_length: u64,
+    looped: bool,
+    events: Vec<CompiledSampleEvent>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CompiledSamplePitchEnvelope {
+    amount_semitones: f64,
+    attack_frames: u64,
+    decay_frames: u64,
+    sustain_level: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CompiledSampleEvent {
+    start: u64,
+    duration: u64,
+    velocity: f64,
     sample: SampleBuffer,
     slice_start: u64,
     slice_end: u64,
-    level: f64,
     pitch_ratio: f64,
-    pattern_length: u64,
-    looped: bool,
-    events: Vec<CompiledNoteEvent>,
 }
 
 impl CompiledSampleTrack {
     fn render(&self, range: FrameRange) -> Result<AudioBlock, SongRenderError> {
-        if self.pitch_ratio <= 0.0 || !self.pitch_ratio.is_finite() {
-            return Err(SongRenderError::InvalidSamplePitch);
-        }
         let frame_count = range.end() - range.start();
         let frames = u32::try_from(frame_count).map_err(|_| SongRenderError::RangeTooLong {
             frames: frame_count,
         })?;
         let mut block = AudioBlock::silent(self.channels, frames);
-        if self.slice_end <= self.slice_start || self.events.is_empty() {
+        if self.events.is_empty() {
             return Ok(block);
         }
         let channels = usize::from(self.channels);
-        let sample_channels = usize::from(self.sample.channels());
         for event in &self.events {
+            if event.pitch_ratio <= 0.0 || !event.pitch_ratio.is_finite() {
+                return Err(SongRenderError::InvalidSamplePitch);
+            }
+            if event.slice_end <= event.slice_start {
+                continue;
+            }
+            let sample_channels = usize::from(event.sample.channels());
             if self.pattern_length == 0 {
                 continue;
             }
@@ -341,18 +360,25 @@ impl CompiledSampleTrack {
                 vec![event.start]
             };
             for start in starts {
-                let trigger_end = start
-                    + ((self.slice_end - self.slice_start) as f64 / self.pitch_ratio).ceil() as u64;
+                let max_render_frames = ((event.slice_end - event.slice_start) as f64
+                    / event.pitch_ratio)
+                    .ceil() as u64
+                    + self
+                        .pitch_envelope
+                        .map_or(0, |envelope| envelope.attack_frames + envelope.decay_frames);
+                let trigger_end = start + max_render_frames.max(event.duration);
                 if trigger_end <= range.start() || start >= range.end() {
                     continue;
                 }
                 let out_start = start.max(range.start());
                 let out_end = trigger_end.min(range.end());
+                let mut source_position = 0.0;
                 for absolute_frame in out_start..out_end {
-                    let source_offset =
-                        ((absolute_frame - start) as f64 * self.pitch_ratio).floor() as u64;
-                    let source_frame = self.slice_start + source_offset;
-                    if source_frame >= self.slice_end {
+                    if absolute_frame == out_start && out_start > start {
+                        source_position = self.sample_source_position(event, out_start - start);
+                    }
+                    let source_frame = event.slice_start + source_position.floor() as u64;
+                    if source_frame >= event.slice_end {
                         break;
                     }
                     let source_index = usize::try_from(source_frame)
@@ -365,12 +391,40 @@ impl CompiledSampleTrack {
                     for channel in 0..channels {
                         let sample_channel = channel.min(sample_channels.saturating_sub(1));
                         block.samples_mut()[output_index + channel] +=
-                            self.sample.samples()[source_index + sample_channel] * gain;
+                            event.sample.samples()[source_index + sample_channel] * gain;
                     }
+                    source_position += self.sample_pitch_ratio_at(event, absolute_frame - start);
                 }
             }
         }
         Ok(block)
+    }
+
+    fn sample_source_position(&self, event: &CompiledSampleEvent, frame_offset: u64) -> f64 {
+        (0..frame_offset)
+            .map(|offset| self.sample_pitch_ratio_at(event, offset))
+            .sum()
+    }
+
+    fn sample_pitch_ratio_at(&self, event: &CompiledSampleEvent, frame_offset: u64) -> f64 {
+        let envelope_semitones = self
+            .pitch_envelope
+            .map_or(0.0, |envelope| envelope.value_at(frame_offset));
+        event.pitch_ratio * 2.0_f64.powf(envelope_semitones / 12.0)
+    }
+}
+
+impl CompiledSamplePitchEnvelope {
+    fn value_at(self, frame: u64) -> f64 {
+        let level = if self.attack_frames > 0 && frame < self.attack_frames {
+            frame as f64 / self.attack_frames as f64
+        } else if self.decay_frames > 0 && frame < self.attack_frames + self.decay_frames {
+            let decay_frame = frame - self.attack_frames;
+            1.0 - (1.0 - self.sustain_level) * decay_frame as f64 / self.decay_frames as f64
+        } else {
+            self.sustain_level
+        };
+        self.amount_semitones * level
     }
 }
 
@@ -1106,6 +1160,7 @@ fn compile_sample_track_for_pattern(
     track: &TrackDefinition,
     pattern_id: &str,
 ) -> Result<CompiledSampleTrack, SongRenderError> {
+    let sampler = track.sampler_id().and_then(|id| song.samplers().get(id));
     let sample_bank_id =
         track
             .sample_bank_id()
@@ -1117,70 +1172,109 @@ fn compile_sample_track_for_pattern(
             id: sample_bank_id.to_owned(),
         }
     })?;
-    let slot = sample_bank
-        .slots()
-        .first()
-        .ok_or_else(|| SongRenderError::MissingSampleSlot {
-            id: format!("first slot in sample bank '{}'", sample_bank.id()),
-        })?;
     let sample_bank_path =
         track
             .sample_bank_path()
             .ok_or_else(|| SongRenderError::MissingSampleBank {
                 id: sample_bank_id.to_owned(),
             })?;
-    let sample_path = song
-        .root()
-        .join(sample_bank_path)
-        .parent()
-        .expect("sample bank path has a parent")
-        .join(slot.path());
-    let sample = read_wav(&sample_path).map_err(|error| SongRenderError::SampleLoad {
-        path: sample_path.display().to_string(),
-        message: error.to_string(),
-    })?;
-    if sample.sample_rate() != song.performance().sample_rate() {
-        return Err(SongRenderError::UnsupportedSampleRate {
-            found: sample.sample_rate(),
-            expected: song.performance().sample_rate(),
-        });
-    }
-    let (slice_start, slice_end) = compile_sample_slice(slot, &sample)?;
     let pattern =
         song.note_patterns()
             .get(pattern_id)
             .ok_or_else(|| SongRenderError::MissingPattern {
                 id: pattern_id.to_owned(),
             })?;
+    let pitch_envelope = sampler
+        .and_then(|sampler| sampler.pitch_envelope())
+        .map(|envelope| CompiledSamplePitchEnvelope {
+            amount_semitones: envelope.amount_semitones(),
+            attack_frames: seconds_to_frames(
+                envelope.attack_seconds(),
+                song.performance().sample_rate(),
+            ),
+            decay_frames: seconds_to_frames(
+                envelope.decay_seconds(),
+                song.performance().sample_rate(),
+            ),
+            sustain_level: envelope.sustain_level(),
+        });
+    let mut events = Vec::with_capacity(pattern.events().len());
+    for event in pattern.events() {
+        let slot = resolve_sample_slot(sample_bank, sampler, event.sample_slot())?;
+        let sample_path = song
+            .root()
+            .join(sample_bank_path)
+            .parent()
+            .expect("sample bank path has a parent")
+            .join(slot.path());
+        let sample = read_wav(&sample_path).map_err(|error| SongRenderError::SampleLoad {
+            path: sample_path.display().to_string(),
+            message: error.to_string(),
+        })?;
+        if sample.sample_rate() != song.performance().sample_rate() {
+            return Err(SongRenderError::UnsupportedSampleRate {
+                found: sample.sample_rate(),
+                expected: song.performance().sample_rate(),
+            });
+        }
+        let (slice_start, slice_end) = compile_sample_slice(
+            slot,
+            event
+                .sample_slice()
+                .or_else(|| sampler.and_then(|sampler| sampler.default_slice())),
+            &sample,
+        )?;
+        let root_note = event
+            .root_note()
+            .or_else(|| sampler.and_then(|sampler| sampler.root_note()))
+            .unwrap_or(event.note());
+        let tracking_semitones = if sampler.is_none_or(|sampler| sampler.pitch_tracking()) {
+            f64::from(event.note()) - f64::from(root_note)
+        } else {
+            0.0
+        };
+        let base_semitones = sampler.map_or(0.0, |sampler| sampler.pitch_semitones())
+            + slot.pitch_semitones()
+            + event.pitch_semitones()
+            + tracking_semitones;
+        events.push(CompiledSampleEvent {
+            start: event.start_frame(),
+            duration: event.duration_frames(),
+            velocity: event.velocity(),
+            sample,
+            slice_start,
+            slice_end,
+            pitch_ratio: 2.0_f64.powf(base_semitones / 12.0),
+        });
+    }
     Ok(CompiledSampleTrack {
         sample_rate: song.performance().sample_rate(),
-        channels: sample.channels(),
-        sample,
-        slice_start,
-        slice_end,
-        level: slot.level(),
-        pitch_ratio: 2.0_f64.powf(slot.pitch_semitones() / 12.0),
+        channels: events.first().map_or(1, |event| event.sample.channels()),
+        level: sampler.map_or(1.0, |sampler| sampler.level()),
+        pitch_envelope,
         pattern_length: pattern.length_frames(),
         looped: pattern.is_looped(),
-        events: pattern
-            .events()
-            .iter()
-            .map(|event| CompiledNoteEvent {
-                start: event.start_frame(),
-                end: event.start_frame() + event.duration_frames(),
-                note: event.note(),
-                velocity: event.velocity(),
-            })
-            .collect(),
+        events,
     })
 }
 
 fn compile_sample_slice(
     slot: &SampleSlotDefinition,
+    slice_id: Option<&str>,
     sample: &SampleBuffer,
 ) -> Result<(u64, u64), SongRenderError> {
-    let Some(slice) = slot.slices().first() else {
-        return Ok((0, u64::from(sample.frames())));
+    let slice = if let Some(slice_id) = slice_id {
+        slot.slices()
+            .iter()
+            .find(|slice| slice.id() == slice_id)
+            .ok_or_else(|| SongRenderError::MissingSampleSlice {
+                id: slice_id.to_owned(),
+            })?
+    } else {
+        let Some(slice) = slot.slices().first() else {
+            return Ok((0, u64::from(sample.frames())));
+        };
+        slice
     };
     let start = parse_sample_timestamp(slice.start(), sample.sample_rate()).ok_or_else(|| {
         SongRenderError::MissingSampleSlice {
@@ -1196,6 +1290,34 @@ fn compile_sample_slice(
         start.min(u64::from(sample.frames())),
         end.min(u64::from(sample.frames())),
     ))
+}
+
+fn resolve_sample_slot<'a>(
+    sample_bank: &'a meldritch_dsl::SampleBankDefinition,
+    sampler: Option<&meldritch_dsl::SamplerDefinition>,
+    event_slot: Option<&str>,
+) -> Result<&'a SampleSlotDefinition, SongRenderError> {
+    let slot_id = event_slot.or_else(|| sampler.and_then(|sampler| sampler.default_slot()));
+    if let Some(slot_id) = slot_id {
+        sample_bank
+            .slots()
+            .iter()
+            .find(|slot| slot.id() == slot_id)
+            .ok_or_else(|| SongRenderError::MissingSampleSlot {
+                id: slot_id.to_owned(),
+            })
+    } else {
+        sample_bank
+            .slots()
+            .first()
+            .ok_or_else(|| SongRenderError::MissingSampleSlot {
+                id: format!("first slot in sample bank '{}'", sample_bank.id()),
+            })
+    }
+}
+
+fn seconds_to_frames(seconds: f64, sample_rate: u32) -> u64 {
+    (seconds.max(0.0) * f64::from(sample_rate)).round() as u64
 }
 
 fn parse_sample_timestamp(value: &str, sample_rate: u32) -> Option<u64> {

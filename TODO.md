@@ -232,9 +232,11 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Add sample-track playback v1 for mixed songs: load text-authored sample
   references, trigger the first slot/first slice as deterministic one-shots from
   sample-bank track note patterns, and include them in range-identical mixes
-- [ ] Extend sample-track playback with explicit pattern targeting for sample
-  slots/slices, loop mode, level controls, pitch controls, and per-event sample
-  selection
+- [x] Add `.mlsampler` voice definitions with explicit pattern targeting for
+  sample slots/slices, note/root pitch tracking, per-event pitch offsets, and a
+  sampler pitch envelope
+- [ ] Extend sample-track playback with loop mode, live level/pitch/slice
+  controls, and richer per-event sample selection/mapping
 - [x] Add a polyphonic synth path for chord/pad note patterns in `.mlsynth`
   songs, with enough ADSR/filter control to be musically distinct from bass
 - [ ] Add TUI performance-mode lane overview for the ensemble: 8 visible

@@ -27,7 +27,7 @@ fn collect_ml_files(directory: &Path, output: &mut Vec<PathBuf>) {
             collect_ml_files(&path, output);
         } else if matches!(
             path.extension().and_then(|extension| extension.to_str()),
-            Some("mlsynth" | "mldsp" | "mlpattern" | "mlperformance" | "mlsamples")
+            Some("mlsynth" | "mldsp" | "mlpattern" | "mlperformance" | "mlsamples" | "mlsampler")
         ) {
             output.push(path);
         }
@@ -68,6 +68,7 @@ fn every_example_file_is_versioned_toml_with_matching_kind() {
             Some("mlpattern") => "pattern",
             Some("mlperformance") => "performance",
             Some("mlsamples") => "samples",
+            Some("mlsampler") => "sampler",
             _ => unreachable!(),
         };
         assert_eq!(
@@ -354,8 +355,10 @@ fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
     assert_eq!(song.performance().lanes().len(), 9);
     assert_eq!(song.performance().pages().len(), 2);
     assert_eq!(song.sample_banks().len(), 1);
+    assert_eq!(song.samplers().len(), 1);
     assert_eq!(song.note_patterns().len(), 36);
     assert_eq!(song.synths()["pad"].polyphony(), 4);
+    assert_eq!(song.samplers()["raven-slicer"].polyphony(), 6);
 
     let tracks = song
         .performance()
@@ -364,6 +367,11 @@ fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
         .map(|track| (track.id(), track))
         .collect::<std::collections::BTreeMap<_, _>>();
     for id in ["sample-a", "sample-b", "sample-c"] {
+        assert_eq!(tracks[id].sampler_id(), Some("raven-slicer"));
+        assert_eq!(
+            tracks[id].sampler_path().map(Path::to_path_buf),
+            Some(PathBuf::from("samplers/raven-slicer.mlsampler"))
+        );
         assert_eq!(tracks[id].sample_bank_id(), Some("raven-voice"));
         assert_eq!(
             tracks[id].sample_bank_path().map(Path::to_path_buf),
