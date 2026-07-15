@@ -501,6 +501,8 @@ pub struct PerformanceDefinition {
     lanes: Vec<PerformanceLaneDefinition>,
     pages: Vec<PerformancePageDefinition>,
     controls: Vec<CuratedControlDefinition>,
+    modifiers: Vec<PerformanceModifierDefinition>,
+    modifier_controls: Vec<ModifierControlDefinition>,
     actions: Vec<ActionControlDefinition>,
 }
 
@@ -548,6 +550,16 @@ impl PerformanceDefinition {
     #[must_use]
     pub fn controls(&self) -> &[CuratedControlDefinition] {
         &self.controls
+    }
+
+    #[must_use]
+    pub fn modifiers(&self) -> &[PerformanceModifierDefinition] {
+        &self.modifiers
+    }
+
+    #[must_use]
+    pub fn modifier_controls(&self) -> &[ModifierControlDefinition] {
+        &self.modifier_controls
     }
 
     #[must_use]
@@ -816,6 +828,75 @@ impl ActionControlDefinition {
     #[must_use]
     pub fn bindings(&self) -> &[ControlBindingDefinition] {
         &self.bindings
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PerformanceModifierDefinition {
+    id: String,
+    label: String,
+    bindings: Vec<ControlBindingDefinition>,
+}
+
+impl PerformanceModifierDefinition {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    #[must_use]
+    pub fn bindings(&self) -> &[ControlBindingDefinition] {
+        &self.bindings
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ModifierControlActionDefinition {
+    SetLaneOctave {
+        lane: String,
+        minimum: i8,
+        maximum: i8,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModifierControlDefinition {
+    id: String,
+    label: String,
+    modifier: String,
+    bindings: Vec<ControlBindingDefinition>,
+    action: ModifierControlActionDefinition,
+}
+
+impl ModifierControlDefinition {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    #[must_use]
+    pub fn modifier(&self) -> &str {
+        &self.modifier
+    }
+
+    #[must_use]
+    pub fn bindings(&self) -> &[ControlBindingDefinition] {
+        &self.bindings
+    }
+
+    #[must_use]
+    pub const fn action(&self) -> &ModifierControlActionDefinition {
+        &self.action
     }
 }
 
@@ -1185,6 +1266,10 @@ struct RawPerformanceFile {
     #[serde(default)]
     controls: Vec<RawControl>,
     #[serde(default)]
+    modifiers: Vec<RawPerformanceModifier>,
+    #[serde(default)]
+    modifier_controls: Vec<RawModifierControl>,
+    #[serde(default)]
     actions: Vec<RawActionControl>,
 }
 
@@ -1326,6 +1411,36 @@ struct RawActionControl {
     bank: Option<String>,
     #[serde(default)]
     bindings: Vec<RawActionBinding>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPerformanceModifier {
+    id: String,
+    label: String,
+    #[serde(default)]
+    bindings: Vec<RawActionBinding>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawModifierControl {
+    id: String,
+    label: String,
+    modifier: String,
+    action: RawModifierControlAction,
+    #[serde(default)]
+    page: Option<String>,
+    #[serde(default)]
+    lane: Option<String>,
+    #[serde(default)]
+    range: Option<[i8; 2]>,
+    #[serde(default)]
+    bindings: Vec<RawActionBinding>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RawModifierControlAction {
+    SetLaneOctave,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2332,6 +2447,256 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         }
     }
 
+    let mut modifier_ids = BTreeSet::new();
+    let mut modifiers = Vec::with_capacity(raw_performance.modifiers.len());
+    for raw in raw_performance.modifiers {
+        if !modifier_ids.insert(raw.id.clone()) {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("modifier id '{}' is declared more than once", raw.id),
+            ));
+        }
+        if raw.label.trim().is_empty() {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("modifier '{}' has an empty label", raw.id),
+            ));
+        }
+        let mut bindings = Vec::with_capacity(raw.bindings.len());
+        for binding in raw.bindings {
+            match binding {
+                RawActionBinding::MidiCc {
+                    device,
+                    channel,
+                    cc,
+                } => {
+                    if !midi_device_ids.contains(device.as_str()) {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!(
+                                "modifier '{}' references unknown MIDI device '{}'",
+                                raw.id, device
+                            ),
+                        ));
+                    }
+                    if let Some(channel) = channel
+                        && !(1..=16).contains(&channel)
+                    {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!(
+                                "modifier '{}' has MIDI channel {} outside 1..=16",
+                                raw.id, channel
+                            ),
+                        ));
+                    }
+                    let claim_conflicts = midi_cc_claims.iter().any(
+                        |(claimed_device, _claimed_page, claimed_channel, claimed_cc)| {
+                            claimed_device == &device
+                                && claimed_channel == &channel
+                                && claimed_cc == &cc
+                        },
+                    );
+                    if claim_conflicts {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!(
+                                "MIDI CC modifier binding device='{device}' channel='{channel:?}' cc={cc} conflicts with another binding"
+                            ),
+                        ));
+                    }
+                    midi_cc_claims.insert((device.clone(), None, channel, cc));
+                    bindings.push(ControlBindingDefinition::MidiCc {
+                        device,
+                        page: None,
+                        channel,
+                        cc,
+                        action: ControlBindingAction::Increment,
+                    });
+                }
+                RawActionBinding::MidiNote {
+                    device,
+                    channel,
+                    note,
+                } => {
+                    if !midi_device_ids.contains(device.as_str()) {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!(
+                                "modifier '{}' references unknown MIDI device '{}'",
+                                raw.id, device
+                            ),
+                        ));
+                    }
+                    if let Some(channel) = channel
+                        && !(1..=16).contains(&channel)
+                    {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!(
+                                "modifier '{}' has MIDI channel {} outside 1..=16",
+                                raw.id, channel
+                            ),
+                        ));
+                    }
+                    if !midi_note_claims.insert((device.clone(), channel, note)) {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!(
+                                "MIDI note modifier binding device='{device}' channel='{channel:?}' note={note} is declared more than once"
+                            ),
+                        ));
+                    }
+                    bindings.push(ControlBindingDefinition::MidiNote {
+                        device,
+                        channel,
+                        note,
+                    });
+                }
+            }
+        }
+        if bindings.is_empty() {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("modifier '{}' has no input bindings", raw.id),
+            ));
+        }
+        modifiers.push(PerformanceModifierDefinition {
+            id: raw.id,
+            label: raw.label,
+            bindings,
+        });
+    }
+
+    let mut modifier_control_ids = BTreeSet::new();
+    let mut modifier_controls = Vec::with_capacity(raw_performance.modifier_controls.len());
+    for raw in raw_performance.modifier_controls {
+        if !modifier_control_ids.insert(raw.id.clone()) {
+            return Err(SongLoadError::one(
+                &entry,
+                format!(
+                    "modifier control id '{}' is declared more than once",
+                    raw.id
+                ),
+            ));
+        }
+        if !modifier_ids.contains(raw.modifier.as_str()) {
+            return Err(SongLoadError::one(
+                &entry,
+                format!(
+                    "modifier control '{}' references unknown modifier '{}'",
+                    raw.id, raw.modifier
+                ),
+            ));
+        }
+        if let Some(page) = raw.page.as_deref()
+            && !page_ids.contains(page)
+        {
+            return Err(SongLoadError::one(
+                &entry,
+                format!(
+                    "modifier control '{}' references unknown page '{}'",
+                    raw.id, page
+                ),
+            ));
+        }
+        let action = match raw.action {
+            RawModifierControlAction::SetLaneOctave => {
+                let lane = raw.lane.ok_or_else(|| {
+                    SongLoadError::one(
+                        &entry,
+                        format!(
+                            "modifier control '{}' set_lane_octave requires lane",
+                            raw.id
+                        ),
+                    )
+                })?;
+                if !lane_ids.contains(&lane) {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!(
+                            "modifier control '{}' references unknown lane '{}'",
+                            raw.id, lane
+                        ),
+                    ));
+                }
+                let [minimum, maximum] = raw.range.unwrap_or([-2, 2]);
+                if minimum >= maximum {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!("modifier control '{}' has invalid octave range", raw.id),
+                    ));
+                }
+                ModifierControlActionDefinition::SetLaneOctave {
+                    lane,
+                    minimum,
+                    maximum,
+                }
+            }
+        };
+        let page = raw.page.clone();
+        let mut bindings = Vec::with_capacity(raw.bindings.len());
+        for binding in raw.bindings {
+            match binding {
+                RawActionBinding::MidiCc {
+                    device,
+                    channel,
+                    cc,
+                } => {
+                    if !midi_device_ids.contains(device.as_str()) {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!(
+                                "modifier control '{}' references unknown MIDI device '{}'",
+                                raw.id, device
+                            ),
+                        ));
+                    }
+                    if let Some(channel) = channel
+                        && !(1..=16).contains(&channel)
+                    {
+                        return Err(SongLoadError::one(
+                            &entry,
+                            format!(
+                                "modifier control '{}' has MIDI channel {} outside 1..=16",
+                                raw.id, channel
+                            ),
+                        ));
+                    }
+                    bindings.push(ControlBindingDefinition::MidiCc {
+                        device,
+                        page: page.clone(),
+                        channel,
+                        cc,
+                        action: ControlBindingAction::Absolute,
+                    });
+                }
+                RawActionBinding::MidiNote { .. } => {
+                    return Err(SongLoadError::one(
+                        &entry,
+                        format!(
+                            "modifier control '{}' currently supports only MIDI CC bindings",
+                            raw.id
+                        ),
+                    ));
+                }
+            }
+        }
+        if bindings.is_empty() {
+            return Err(SongLoadError::one(
+                &entry,
+                format!("modifier control '{}' has no input bindings", raw.id),
+            ));
+        }
+        modifier_controls.push(ModifierControlDefinition {
+            id: raw.id,
+            label: raw.label,
+            modifier: raw.modifier,
+            bindings,
+            action,
+        });
+    }
+
     let mut action_ids = BTreeSet::new();
     let mut actions = Vec::with_capacity(raw_performance.actions.len());
     for raw in raw_performance.actions {
@@ -2609,6 +2974,8 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         lanes,
         pages,
         controls,
+        modifiers,
+        modifier_controls,
         actions,
     };
     let fingerprint = fingerprint_song(
@@ -3915,36 +4282,34 @@ fn fingerprint_song(
         fingerprint.u64(control.step.to_bits());
         fingerprint.string(&control.binding);
         for binding in &control.bindings {
-            match binding {
-                ControlBindingDefinition::Key { key } => {
-                    fingerprint.string("key");
-                    fingerprint.string(key);
-                }
-                ControlBindingDefinition::MidiCc {
-                    device,
-                    page,
-                    channel,
-                    cc,
-                    action,
-                } => {
-                    fingerprint.string("midi_cc");
-                    fingerprint.string(device);
-                    fingerprint.optional_string(page.as_deref());
-                    fingerprint.u64(channel.map_or(0, u64::from));
-                    fingerprint.u64(u64::from(*cc));
-                    fingerprint_control_binding_action(&mut fingerprint, *action);
-                }
-                ControlBindingDefinition::MidiNote {
-                    device,
-                    channel,
-                    note,
-                } => {
-                    fingerprint.string("midi_note");
-                    fingerprint.string(device);
-                    fingerprint.u64(channel.map_or(0, u64::from));
-                    fingerprint.u64(u64::from(*note));
-                }
+            fingerprint_control_binding(&mut fingerprint, binding);
+        }
+    }
+    for modifier in &performance.modifiers {
+        fingerprint.string(&modifier.id);
+        fingerprint.string(&modifier.label);
+        for binding in &modifier.bindings {
+            fingerprint_control_binding(&mut fingerprint, binding);
+        }
+    }
+    for control in &performance.modifier_controls {
+        fingerprint.string(&control.id);
+        fingerprint.string(&control.label);
+        fingerprint.string(&control.modifier);
+        match &control.action {
+            ModifierControlActionDefinition::SetLaneOctave {
+                lane,
+                minimum,
+                maximum,
+            } => {
+                fingerprint.string("set_lane_octave");
+                fingerprint.string(lane);
+                fingerprint.u64(*minimum as i64 as u64);
+                fingerprint.u64(*maximum as i64 as u64);
             }
+        }
+        for binding in &control.bindings {
+            fingerprint_control_binding(&mut fingerprint, binding);
         }
     }
     for action in &performance.actions {
@@ -4163,6 +4528,39 @@ fn fingerprint_control_binding_action(fingerprint: &mut Fnv64, action: ControlBi
         }
         ControlBindingAction::Decrement => fingerprint.string("decrement"),
         ControlBindingAction::Increment => fingerprint.string("increment"),
+    }
+}
+
+fn fingerprint_control_binding(fingerprint: &mut Fnv64, binding: &ControlBindingDefinition) {
+    match binding {
+        ControlBindingDefinition::Key { key } => {
+            fingerprint.string("key");
+            fingerprint.string(key);
+        }
+        ControlBindingDefinition::MidiCc {
+            device,
+            page,
+            channel,
+            cc,
+            action,
+        } => {
+            fingerprint.string("midi_cc");
+            fingerprint.string(device);
+            fingerprint.optional_string(page.as_deref());
+            fingerprint.u64(channel.map_or(0, u64::from));
+            fingerprint.u64(u64::from(*cc));
+            fingerprint_control_binding_action(fingerprint, *action);
+        }
+        ControlBindingDefinition::MidiNote {
+            device,
+            channel,
+            note,
+        } => {
+            fingerprint.string("midi_note");
+            fingerprint.string(device);
+            fingerprint.u64(channel.map_or(0, u64::from));
+            fingerprint.u64(u64::from(*note));
+        }
     }
 }
 

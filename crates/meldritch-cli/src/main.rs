@@ -2342,6 +2342,23 @@ fn session_result_fields(
             None,
             Some(format!("{result:?}")),
         ),
+        meldritch_app::AppCommandResult::PerformanceModifierChanged {
+            modifier_id,
+            active,
+        } => (
+            "performance_modifier".to_owned(),
+            Some(modifier_id.clone()),
+            None,
+            Some(active.to_string()),
+        ),
+        meldritch_app::AppCommandResult::LaneOctaveSet {
+            lane_id, current, ..
+        } => (
+            "lane_octave".to_owned(),
+            Some(lane_id.clone()),
+            None,
+            Some(current.to_string()),
+        ),
         meldritch_app::AppCommandResult::LaneMuteToggled { lane_id, muted } => (
             "lane_mute".to_owned(),
             Some(lane_id.clone()),
@@ -2453,6 +2470,14 @@ struct MidiActionBinding {
     device: String,
     message: MidiActionMessage,
     input: meldritch_app::AppInput,
+    label: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct MidiModifierBinding {
+    device: String,
+    message: MidiActionMessage,
+    modifier_id: String,
     label: String,
 }
 
@@ -2605,8 +2630,11 @@ fn connect_midi_control_input(
     device: &meldritch_dsl::MidiDeviceDefinition,
     sender: mpsc::Sender<meldritch_tui::ExternalInputEvent>,
     bindings: Vec<meldritch_app::MidiControlBinding>,
+    modifier_control_bindings: Vec<meldritch_app::MidiModifierControlBinding>,
+    modifier_bindings: Vec<MidiModifierBinding>,
     action_bindings: Vec<MidiActionBinding>,
     active_page: Arc<Mutex<Option<String>>>,
+    active_modifiers: Arc<Mutex<Vec<String>>>,
     debug: bool,
 ) -> Result<Option<MidiControlInputConnection>, String> {
     let mut midi_input = midir::MidiInput::new(&format!("meldritch-midi-{}", device.id()))
@@ -2633,12 +2661,19 @@ fn connect_midi_control_input(
                     .lock()
                     .expect("active page lock poisoned")
                     .clone();
+                let modifiers = active_modifiers
+                    .lock()
+                    .expect("active modifier lock poisoned")
+                    .clone();
                 let input = decode_script_midi_input(
                     message,
                     &device_id,
                     &bindings,
+                    &modifier_control_bindings,
+                    &modifier_bindings,
                     &action_bindings,
                     page.as_deref(),
+                    &modifiers,
                 );
                 let Some(input) = input else {
                     if debug {
@@ -2652,6 +2687,22 @@ fn connect_midi_control_input(
                     }
                     return;
                 };
+                if let meldritch_app::AppInput::SetPerformanceModifier {
+                    modifier_id,
+                    active,
+                } = &input.input
+                {
+                    let mut modifiers = active_modifiers
+                        .lock()
+                        .expect("active modifier lock poisoned");
+                    if *active {
+                        if !modifiers.iter().any(|candidate| candidate == modifier_id) {
+                            modifiers.push(modifier_id.clone());
+                        }
+                    } else {
+                        modifiers.retain(|candidate| candidate != modifier_id);
+                    }
+                }
                 let label = input
                     .label
                     .clone()
@@ -2890,6 +2941,116 @@ fn midi_action_bindings_for_device(
         .collect()
 }
 
+fn midi_modifier_bindings_for_song(
+    song: &meldritch_dsl::ValidatedSong,
+) -> Vec<MidiModifierBinding> {
+    song.performance()
+        .modifiers()
+        .iter()
+        .flat_map(|modifier| {
+            modifier
+                .bindings()
+                .iter()
+                .filter_map(move |binding| match binding {
+                    meldritch_dsl::ControlBindingDefinition::MidiCc {
+                        device,
+                        page: _,
+                        channel,
+                        cc,
+                        ..
+                    } => Some(MidiModifierBinding {
+                        device: device.clone(),
+                        message: MidiActionMessage::ControlChange {
+                            channel: *channel,
+                            cc: *cc,
+                        },
+                        modifier_id: modifier.id().to_owned(),
+                        label: modifier.label().to_owned(),
+                    }),
+                    meldritch_dsl::ControlBindingDefinition::MidiNote {
+                        device,
+                        channel,
+                        note,
+                    } => Some(MidiModifierBinding {
+                        device: device.clone(),
+                        message: MidiActionMessage::Note {
+                            channel: *channel,
+                            note: *note,
+                        },
+                        modifier_id: modifier.id().to_owned(),
+                        label: modifier.label().to_owned(),
+                    }),
+                    meldritch_dsl::ControlBindingDefinition::Key { .. } => None,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn midi_modifier_bindings_for_device(
+    bindings: &[MidiModifierBinding],
+    device: &str,
+) -> Vec<MidiModifierBinding> {
+    bindings
+        .iter()
+        .filter(|binding| binding.device == device)
+        .cloned()
+        .collect()
+}
+
+fn midi_modifier_control_bindings_for_song(
+    song: &meldritch_dsl::ValidatedSong,
+) -> Vec<meldritch_app::MidiModifierControlBinding> {
+    song.performance()
+        .modifier_controls()
+        .iter()
+        .flat_map(|control| {
+            control.bindings().iter().filter_map(|binding| {
+                let meldritch_dsl::ControlBindingDefinition::MidiCc {
+                    device,
+                    page,
+                    channel,
+                    cc,
+                    ..
+                } = binding
+                else {
+                    return None;
+                };
+                let action = match control.action() {
+                    meldritch_dsl::ModifierControlActionDefinition::SetLaneOctave {
+                        lane,
+                        minimum,
+                        maximum,
+                    } => meldritch_app::MidiModifierControlAction::SetLaneOctave {
+                        lane_id: lane.clone(),
+                        minimum: *minimum,
+                        maximum: *maximum,
+                    },
+                };
+                Some(meldritch_app::MidiModifierControlBinding {
+                    modifier_id: control.modifier().to_owned(),
+                    device: device.clone(),
+                    page_id: page.clone(),
+                    channel: *channel,
+                    cc: *cc,
+                    action,
+                })
+            })
+        })
+        .collect()
+}
+
+fn midi_modifier_control_bindings_for_device(
+    bindings: &[meldritch_app::MidiModifierControlBinding],
+    device: &str,
+) -> Vec<meldritch_app::MidiModifierControlBinding> {
+    bindings
+        .iter()
+        .filter(|binding| binding.device == device)
+        .cloned()
+        .collect()
+}
+
 fn app_input_for_performance_action(
     action: &meldritch_dsl::PerformanceActionDefinition,
 ) -> Option<meldritch_app::AppInput> {
@@ -2948,12 +3109,21 @@ fn decode_script_midi_input(
     message: &[u8],
     device: &str,
     control_bindings: &[meldritch_app::MidiControlBinding],
+    modifier_control_bindings: &[meldritch_app::MidiModifierControlBinding],
+    modifier_bindings: &[MidiModifierBinding],
     action_bindings: &[MidiActionBinding],
     active_page: Option<&str>,
+    active_modifiers: &[String],
 ) -> Option<MappedMidiInput> {
     if let Some((channel, cc, value)) = decode_midi_cc_message(message) {
-        return map_script_midi_control_change(
+        if let Some(input) =
+            map_script_midi_modifier_cc(modifier_bindings, device, channel, cc, value)
+        {
+            return Some(input);
+        }
+        return map_script_midi_control_change_with_modifiers(
             control_bindings,
+            modifier_control_bindings,
             action_bindings,
             meldritch_app::MidiControlInput {
                 device: device.to_owned(),
@@ -2962,10 +3132,12 @@ fn decode_script_midi_input(
                 value,
             },
             active_page,
+            active_modifiers,
         );
     }
     let (channel, note, _velocity, on) = decode_midi_note_message(message)?;
-    map_script_midi_note(action_bindings, device, channel, note, on)
+    map_script_midi_modifier_note(modifier_bindings, device, channel, note, on)
+        .or_else(|| map_script_midi_note(action_bindings, device, channel, note, on))
 }
 
 fn map_script_midi_control_change(
@@ -2974,27 +3146,115 @@ fn map_script_midi_control_change(
     input: meldritch_app::MidiControlInput,
     active_page: Option<&str>,
 ) -> Option<MappedMidiInput> {
-    meldritch_app::map_midi_control_input_for_page(control_bindings, input.clone(), active_page)
-        .map(|input| MappedMidiInput { input, label: None })
-        .or_else(|| {
-            if input.value == 0 {
-                return None;
-            }
-            action_bindings
-                .iter()
-                .find(|binding| {
-                    binding.device == input.device
-                        && matches!(
-                            binding.message,
-                            MidiActionMessage::ControlChange { channel, cc }
-                                if cc == input.cc
-                                    && channel.is_none_or(|channel| channel == input.channel)
-                        )
-                })
-                .map(|binding| MappedMidiInput {
-                    input: binding.input.clone(),
-                    label: Some(binding.label.clone()),
-                })
+    map_script_midi_control_change_with_modifiers(
+        control_bindings,
+        &[],
+        action_bindings,
+        input,
+        active_page,
+        &[],
+    )
+}
+
+fn map_script_midi_control_change_with_modifiers(
+    control_bindings: &[meldritch_app::MidiControlBinding],
+    modifier_control_bindings: &[meldritch_app::MidiModifierControlBinding],
+    action_bindings: &[MidiActionBinding],
+    input: meldritch_app::MidiControlInput,
+    active_page: Option<&str>,
+    active_modifiers: &[String],
+) -> Option<MappedMidiInput> {
+    meldritch_app::map_midi_modifier_control_input_for_page(
+        modifier_control_bindings,
+        input.clone(),
+        active_page,
+        active_modifiers,
+    )
+    .map(|input| MappedMidiInput {
+        input,
+        label: Some("modifier control".to_owned()),
+    })
+    .or_else(|| {
+        meldritch_app::map_midi_control_input_for_page(control_bindings, input.clone(), active_page)
+            .map(|input| MappedMidiInput { input, label: None })
+    })
+    .or_else(|| {
+        if input.value == 0 {
+            return None;
+        }
+        action_bindings
+            .iter()
+            .find(|binding| {
+                binding.device == input.device
+                    && matches!(
+                        binding.message,
+                        MidiActionMessage::ControlChange { channel, cc }
+                            if cc == input.cc
+                                && channel.is_none_or(|channel| channel == input.channel)
+                    )
+            })
+            .map(|binding| MappedMidiInput {
+                input: binding.input.clone(),
+                label: Some(binding.label.clone()),
+            })
+    })
+}
+
+fn map_script_midi_modifier_cc(
+    bindings: &[MidiModifierBinding],
+    device: &str,
+    channel: u8,
+    cc: u8,
+    value: u8,
+) -> Option<MappedMidiInput> {
+    bindings
+        .iter()
+        .find(|binding| {
+            binding.device == device
+                && matches!(
+                    binding.message,
+                    MidiActionMessage::ControlChange {
+                        channel: binding_channel,
+                        cc: binding_cc,
+                    } if binding_cc == cc
+                        && binding_channel.is_none_or(|binding_channel| binding_channel == channel)
+                )
+        })
+        .map(|binding| MappedMidiInput {
+            input: meldritch_app::AppInput::SetPerformanceModifier {
+                modifier_id: binding.modifier_id.clone(),
+                active: value != 0,
+            },
+            label: Some(binding.label.clone()),
+        })
+}
+
+fn map_script_midi_modifier_note(
+    bindings: &[MidiModifierBinding],
+    device: &str,
+    channel: u8,
+    note: u8,
+    on: bool,
+) -> Option<MappedMidiInput> {
+    bindings
+        .iter()
+        .find(|binding| {
+            binding.device == device
+                && matches!(
+                    binding.message,
+                    MidiActionMessage::Note {
+                        channel: binding_channel,
+                        note: binding_note,
+                    } if binding_note == note
+                        && binding_channel.is_none_or(|binding_channel| binding_channel == channel)
+                )
+        })
+        .map(|binding| MappedMidiInput {
+            input: meldritch_app::AppInput::SetPerformanceModifier {
+                modifier_id: binding.modifier_id.clone(),
+                active: on,
+            },
+            label: Some(binding.label.clone()),
         })
 }
 
@@ -3194,6 +3454,7 @@ fn tui_song(
     let live_control_targets = live_song_control_targets(&song);
     controller.set_curated_controls(controls);
     controller.set_performance_pages(song_performance_pages_for_view(&song));
+    controller.set_performance_modifiers(song_performance_modifiers_for_view(&song));
     if let Some(phrase_variations) = scene_bank.phrase_variations.clone() {
         controller
             .configure_phrase_variations(phrase_variations)
@@ -3201,23 +3462,39 @@ fn tui_song(
     }
     let (external_input_sender, external_input_receiver) = mpsc::channel();
     let midi_control_bindings = midi_control_bindings_for_song(&song);
+    let midi_modifier_control_bindings = midi_modifier_control_bindings_for_song(&song);
+    let midi_modifier_bindings = midi_modifier_bindings_for_song(&song);
     let midi_action_bindings = midi_action_bindings_for_song(&song);
     let midi_active_page = Arc::new(Mutex::new(active_page_id(&controller.view_model())));
+    let midi_active_modifiers = Arc::new(Mutex::new(Vec::<String>::new()));
     let _midi_inputs = if midi_controls {
         let mut connections = Vec::new();
         for device in song.performance().midi_devices() {
             let bindings = midi_control_bindings_for_device(&midi_control_bindings, device.id());
+            let modifier_control_bindings = midi_modifier_control_bindings_for_device(
+                &midi_modifier_control_bindings,
+                device.id(),
+            );
+            let modifier_bindings =
+                midi_modifier_bindings_for_device(&midi_modifier_bindings, device.id());
             let action_bindings =
                 midi_action_bindings_for_device(&midi_action_bindings, device.id());
-            if bindings.is_empty() && action_bindings.is_empty() {
+            if bindings.is_empty()
+                && modifier_control_bindings.is_empty()
+                && modifier_bindings.is_empty()
+                && action_bindings.is_empty()
+            {
                 continue;
             }
             match connect_midi_control_input(
                 device,
                 external_input_sender.clone(),
                 bindings,
+                modifier_control_bindings,
+                modifier_bindings,
                 action_bindings,
                 Arc::clone(&midi_active_page),
+                Arc::clone(&midi_active_modifiers),
                 midi_debug,
             )? {
                 Some(connection) => connections.push(connection),
@@ -3509,6 +3786,7 @@ fn song_performance_pages_for_view(
                             .first()
                             .map(|bank| bank.id().to_owned()),
                         active_variation_id: lane.variation_ids().first().cloned(),
+                        octave: 0,
                         variation_ids: lane.variation_ids().to_vec(),
                         pattern_banks: lane
                             .pattern_banks()
@@ -3523,6 +3801,20 @@ fn song_performance_pages_for_view(
                     })
                 })
                 .collect(),
+        })
+        .collect()
+}
+
+fn song_performance_modifiers_for_view(
+    song: &meldritch_dsl::ValidatedSong,
+) -> Vec<meldritch_app::PerformanceModifierView> {
+    song.performance()
+        .modifiers()
+        .iter()
+        .map(|modifier| meldritch_app::PerformanceModifierView {
+            id: modifier.id().to_owned(),
+            label: modifier.label().to_owned(),
+            active: false,
         })
         .collect()
 }
@@ -7648,7 +7940,40 @@ mod tests {
         .expect("LaunchControl XL ensemble example should load");
 
         let control_bindings = midi_control_bindings_for_song(&song);
+        let modifier_control_bindings = midi_modifier_control_bindings_for_song(&song);
+        let modifier_bindings = midi_modifier_bindings_for_song(&song);
         let action_bindings = midi_action_bindings_for_song(&song);
+        let octave_modifier =
+            map_script_midi_modifier_note(&modifier_bindings, "launch-control-xl", 9, 108, true)
+                .expect("octave modifier note should map");
+        assert_eq!(
+            octave_modifier.input,
+            meldritch_app::AppInput::SetPerformanceModifier {
+                modifier_id: "octave-layer".to_owned(),
+                active: true,
+            }
+        );
+        let octave_fader = map_script_midi_control_change_with_modifiers(
+            &control_bindings,
+            &modifier_control_bindings,
+            &action_bindings,
+            meldritch_app::MidiControlInput {
+                device: "launch-control-xl".to_owned(),
+                channel: 9,
+                cc: 77,
+                value: 127,
+            },
+            Some("main"),
+            &["octave-layer".to_owned()],
+        )
+        .expect("modifier fader should map to lane octave");
+        assert_eq!(
+            octave_fader.input,
+            meldritch_app::AppInput::SetLaneOctave {
+                lane_id: "rhythm-drum-a".to_owned(),
+                octave: 2,
+            }
+        );
         let fill_bank = map_script_midi_note(&action_bindings, "launch-control-xl", 9, 106, true)
             .expect("fill bank note should map");
         assert_eq!(

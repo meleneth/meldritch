@@ -77,6 +77,14 @@ pub enum AppCommand {
         lane_id: String,
         bank_id: String,
     },
+    SetPerformanceModifier {
+        modifier_id: String,
+        active: bool,
+    },
+    SetLaneOctave {
+        lane_id: String,
+        octave: i8,
+    },
     ToggleLaneMute(String),
     ToggleLaneSolo(String),
     ToggleTrackMute(TrackId),
@@ -137,6 +145,15 @@ pub enum AppCommandResult {
         previous_variation: Option<String>,
         current_variation: String,
     },
+    PerformanceModifierChanged {
+        modifier_id: String,
+        active: bool,
+    },
+    LaneOctaveSet {
+        lane_id: String,
+        previous: i8,
+        current: i8,
+    },
     LaneMuteToggled {
         lane_id: String,
         muted: bool,
@@ -170,6 +187,7 @@ pub enum AppCommandError {
     Publication(meldritch_render::ChunkPublicationError),
     NoPerformanceScenes,
     UnknownPerformancePage(String),
+    UnknownPerformanceModifier(String),
     UnknownPerformanceLane(String),
     UnknownLaneVariation {
         lane_id: String,
@@ -276,6 +294,7 @@ pub struct PerformanceView {
     pub learned_phrase_cues: Vec<LearnedPhraseCueView>,
     pub pages: Vec<PerformancePageView>,
     pub active_page: Option<usize>,
+    pub active_modifiers: Vec<PerformanceModifierView>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -303,6 +322,7 @@ pub struct PerformanceStripView {
     pub soloed: bool,
     pub active_pattern_bank_id: Option<String>,
     pub active_variation_id: Option<String>,
+    pub octave: i8,
     pub variation_ids: Vec<String>,
     pub pattern_banks: Vec<PerformancePatternBankView>,
     pub control_ids: Vec<String>,
@@ -313,6 +333,13 @@ pub struct PerformancePatternBankView {
     pub id: String,
     pub label: String,
     pub variation_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerformanceModifierView {
+    pub id: String,
+    pub label: String,
+    pub active: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -461,6 +488,14 @@ pub enum AppInput {
         lane_id: String,
         bank_id: String,
     },
+    SetPerformanceModifier {
+        modifier_id: String,
+        active: bool,
+    },
+    SetLaneOctave {
+        lane_id: String,
+        octave: i8,
+    },
     ToggleLaneMute(String),
     ToggleLaneSolo(String),
     ToggleTrackMute,
@@ -499,6 +534,25 @@ pub struct MidiControlBinding {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MidiModifierControlAction {
+    SetLaneOctave {
+        lane_id: String,
+        minimum: i8,
+        maximum: i8,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MidiModifierControlBinding {
+    pub modifier_id: String,
+    pub device: String,
+    pub page_id: Option<String>,
+    pub channel: Option<u8>,
+    pub cc: u8,
+    pub action: MidiModifierControlAction,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MidiControlInput {
     pub device: String,
     pub channel: u8,
@@ -524,6 +578,36 @@ pub fn map_midi_control_input_for_page(
     midi_control_binding_input(binding, input.value)
 }
 
+pub fn map_midi_modifier_control_input_for_page(
+    bindings: &[MidiModifierControlBinding],
+    input: MidiControlInput,
+    active_page: Option<&str>,
+    active_modifiers: &[String],
+) -> Option<AppInput> {
+    let binding = active_modifiers.iter().find_map(|modifier| {
+        active_page
+            .and_then(|page| {
+                find_midi_modifier_control_binding(bindings, &input, Some(page), modifier)
+            })
+            .or_else(|| find_midi_modifier_control_binding(bindings, &input, None, modifier))
+    })?;
+    match &binding.action {
+        MidiModifierControlAction::SetLaneOctave {
+            lane_id,
+            minimum,
+            maximum,
+        } => {
+            let width = i16::from(*maximum) - i16::from(*minimum);
+            let octave =
+                i16::from(*minimum) + ((i16::from(input.value.min(127)) * width + 63) / 127);
+            Some(AppInput::SetLaneOctave {
+                lane_id: lane_id.clone(),
+                octave: octave.clamp(i16::from(*minimum), i16::from(*maximum)) as i8,
+            })
+        }
+    }
+}
+
 fn find_midi_control_binding<'a>(
     bindings: &'a [MidiControlBinding],
     input: &MidiControlInput,
@@ -531,6 +615,23 @@ fn find_midi_control_binding<'a>(
 ) -> Option<&'a MidiControlBinding> {
     bindings.iter().find(|binding| {
         binding.device == input.device
+            && binding.page_id.as_deref() == page
+            && binding.cc == input.cc
+            && binding
+                .channel
+                .is_none_or(|channel| channel == input.channel)
+    })
+}
+
+fn find_midi_modifier_control_binding<'a>(
+    bindings: &'a [MidiModifierControlBinding],
+    input: &MidiControlInput,
+    page: Option<&str>,
+    modifier: &str,
+) -> Option<&'a MidiModifierControlBinding> {
+    bindings.iter().find(|binding| {
+        binding.modifier_id == modifier
+            && binding.device == input.device
             && binding.page_id.as_deref() == page
             && binding.cc == input.cc
             && binding
@@ -734,6 +835,7 @@ pub struct AppController {
     performance_launcher: PerformanceLauncher,
     performance_pages: Vec<PerformancePageView>,
     active_performance_page: Option<usize>,
+    performance_modifiers: Vec<PerformanceModifierView>,
     performance_scenes: Vec<SceneId>,
     phrase_patterns: BTreeMap<SceneId, Vec<Pattern>>,
     queued_phrase_variation: Option<(SceneId, usize)>,
@@ -776,6 +878,7 @@ impl AppController {
             performance_launcher: PerformanceLauncher::new(LaunchQuantization::Bar { beats: 4 }),
             performance_pages: Vec::new(),
             active_performance_page: None,
+            performance_modifiers: Vec::new(),
             performance_scenes: Vec::new(),
             phrase_patterns: BTreeMap::new(),
             queued_phrase_variation: None,
@@ -827,6 +930,10 @@ impl AppController {
     pub fn set_performance_pages(&mut self, pages: Vec<PerformancePageView>) {
         self.active_performance_page = if pages.is_empty() { None } else { Some(0) };
         self.performance_pages = pages;
+    }
+
+    pub fn set_performance_modifiers(&mut self, modifiers: Vec<PerformanceModifierView>) {
+        self.performance_modifiers = modifiers;
     }
 
     pub fn select_performance_page(
@@ -938,6 +1045,41 @@ impl AppController {
         Ok(AppCommandResult::LaneSoloToggled {
             lane_id: lane_id.to_owned(),
             soloed,
+        })
+    }
+
+    pub fn set_performance_modifier(
+        &mut self,
+        modifier_id: &str,
+        active: bool,
+    ) -> Result<AppCommandResult, AppCommandError> {
+        let modifier = self
+            .performance_modifiers
+            .iter_mut()
+            .find(|modifier| modifier.id == modifier_id)
+            .ok_or_else(|| AppCommandError::UnknownPerformanceModifier(modifier_id.to_owned()))?;
+        modifier.active = active;
+        Ok(AppCommandResult::PerformanceModifierChanged {
+            modifier_id: modifier_id.to_owned(),
+            active,
+        })
+    }
+
+    pub fn set_lane_octave(
+        &mut self,
+        lane_id: &str,
+        octave: i8,
+    ) -> Result<AppCommandResult, AppCommandError> {
+        let matching = self.performance_strip_indices(lane_id)?;
+        let first = matching[0];
+        let previous = self.performance_pages[first.0].strips[first.1].octave;
+        for (page, strip) in matching {
+            self.performance_pages[page].strips[strip].octave = octave;
+        }
+        Ok(AppCommandResult::LaneOctaveSet {
+            lane_id: lane_id.to_owned(),
+            previous,
+            current: octave,
         })
     }
 
@@ -1297,6 +1439,13 @@ impl AppController {
             AppCommand::SelectLanePatternBank { lane_id, bank_id } => {
                 self.select_lane_pattern_bank(lane_id, bank_id)?
             }
+            AppCommand::SetPerformanceModifier {
+                modifier_id,
+                active,
+            } => self.set_performance_modifier(modifier_id, *active)?,
+            AppCommand::SetLaneOctave { lane_id, octave } => {
+                self.set_lane_octave(lane_id, *octave)?
+            }
             AppCommand::ToggleLaneMute(lane_id) => self.toggle_lane_mute(lane_id)?,
             AppCommand::ToggleLaneSolo(lane_id) => self.toggle_lane_solo(lane_id)?,
             AppCommand::ToggleTrackMute(track) => {
@@ -1404,6 +1553,10 @@ impl AppController {
                     || previous_variation.as_deref() != Some(current_variation.as_str()),
                 Vec::new(),
             ),
+            AppCommandResult::PerformanceModifierChanged { .. } => (true, Vec::new()),
+            AppCommandResult::LaneOctaveSet {
+                previous, current, ..
+            } => (previous != current, Vec::new()),
             AppCommandResult::LaneMuteToggled { .. } | AppCommandResult::LaneSoloToggled { .. } => {
                 (true, Vec::new())
             }
@@ -1584,6 +1737,7 @@ impl AppController {
                 learned_phrase_cues: self.learned_phrase_cues.clone(),
                 pages: self.performance_pages.clone(),
                 active_page: self.active_performance_page,
+                active_modifiers: self.performance_modifiers.clone(),
             },
             pattern_grid: PatternGridView {
                 pattern: pattern.id(),
@@ -1883,6 +2037,16 @@ impl AppController {
             },
             AppInput::SelectLanePatternBank { lane_id, bank_id } => {
                 AppCommand::SelectLanePatternBank { lane_id, bank_id }
+            }
+            AppInput::SetPerformanceModifier {
+                modifier_id,
+                active,
+            } => AppCommand::SetPerformanceModifier {
+                modifier_id,
+                active,
+            },
+            AppInput::SetLaneOctave { lane_id, octave } => {
+                AppCommand::SetLaneOctave { lane_id, octave }
             }
             AppInput::ToggleLaneMute(lane_id) => AppCommand::ToggleLaneMute(lane_id),
             AppInput::ToggleLaneSolo(lane_id) => AppCommand::ToggleLaneSolo(lane_id),
@@ -2389,6 +2553,7 @@ mod tests {
                     soloed: false,
                     active_pattern_bank_id: Some("groove".to_owned()),
                     active_variation_id: Some("pad-a".to_owned()),
+                    octave: 0,
                     variation_ids: vec![
                         "pad-a".to_owned(),
                         "pad-b".to_owned(),
@@ -2417,6 +2582,7 @@ mod tests {
                     soloed: false,
                     active_pattern_bank_id: Some("drums".to_owned()),
                     active_variation_id: Some("kick-a".to_owned()),
+                    octave: 0,
                     variation_ids: vec!["kick-a".to_owned()],
                     pattern_banks: vec![PerformancePatternBankView {
                         id: "drums".to_owned(),
@@ -2479,6 +2645,7 @@ mod tests {
                 soloed: false,
                 active_pattern_bank_id: Some("groove".to_owned()),
                 active_variation_id: Some("pad-a".to_owned()),
+                octave: 0,
                 variation_ids: vec![
                     "pad-a".to_owned(),
                     "pad-b".to_owned(),
@@ -2790,6 +2957,53 @@ mod tests {
             Some(AppInput::SetCuratedControlNormalized {
                 id: "cutoff".to_owned(),
                 value: (4350.0 - 100.0) / (5000.0 - 100.0),
+            })
+        );
+    }
+
+    #[test]
+    fn midi_modifier_controls_override_ccs_only_when_modifier_is_active() {
+        let bindings = vec![MidiModifierControlBinding {
+            modifier_id: "octave-layer".to_owned(),
+            device: "launch-control-xl".to_owned(),
+            page_id: Some("main".to_owned()),
+            channel: Some(9),
+            cc: 77,
+            action: MidiModifierControlAction::SetLaneOctave {
+                lane_id: "rhythm-drum-a".to_owned(),
+                minimum: -2,
+                maximum: 2,
+            },
+        }];
+        let input = MidiControlInput {
+            device: "launch-control-xl".to_owned(),
+            channel: 9,
+            cc: 77,
+            value: 127,
+        };
+        assert_eq!(
+            map_midi_modifier_control_input_for_page(&bindings, input.clone(), Some("main"), &[]),
+            None
+        );
+        assert_eq!(
+            map_midi_modifier_control_input_for_page(
+                &bindings,
+                input.clone(),
+                Some("drums"),
+                &["octave-layer".to_owned()]
+            ),
+            None
+        );
+        assert_eq!(
+            map_midi_modifier_control_input_for_page(
+                &bindings,
+                input,
+                Some("main"),
+                &["octave-layer".to_owned()]
+            ),
+            Some(AppInput::SetLaneOctave {
+                lane_id: "rhythm-drum-a".to_owned(),
+                octave: 2,
             })
         );
     }

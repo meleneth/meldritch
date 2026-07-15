@@ -16,11 +16,12 @@ mod song;
 
 pub use song::{
     ActionControlDefinition, CableDefinition, ControlBindingAction, ControlBindingDefinition,
-    CuratedControlDefinition, DspDefinition, MidiDeviceDefinition, ModuleDefinition, ModuleKind,
-    NoteEventDefinition, NotePatternDefinition, ParameterInterpolation, ParameterLaneDefinition,
-    ParameterOwner, ParameterPatternDefinition, ParameterPointDefinition,
-    ParameterTargetDefinition, PatchInput, PerformanceActionDefinition, PerformanceDefinition,
-    PerformanceLaneDefinition, PerformancePageDefinition, PerformancePageStripDefinition,
+    CuratedControlDefinition, DspDefinition, MidiDeviceDefinition, ModifierControlActionDefinition,
+    ModifierControlDefinition, ModuleDefinition, ModuleKind, NoteEventDefinition,
+    NotePatternDefinition, ParameterInterpolation, ParameterLaneDefinition, ParameterOwner,
+    ParameterPatternDefinition, ParameterPointDefinition, ParameterTargetDefinition, PatchInput,
+    PerformanceActionDefinition, PerformanceDefinition, PerformanceLaneDefinition,
+    PerformanceModifierDefinition, PerformancePageDefinition, PerformancePageStripDefinition,
     PerformancePatternBankDefinition, SampleBankDefinition, SamplePlaybackMode,
     SampleSliceDefinition, SampleSlotDefinition, SamplerDefinition, SamplerPitchEnvelopeDefinition,
     SignalType, SongDiagnostic, SongLoadError, SynthDefinition, TrackDefinition, ValidatedSong,

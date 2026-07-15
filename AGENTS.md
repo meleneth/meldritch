@@ -179,11 +179,14 @@ variations into selectable banks. `tui-song` loads that lane metadata into
 generic app performance-page view state, and performance mode renders an
 ensemble page overview centered on the active page, eight visible controller
 strips, lane role, active variation, mute/solo state, launch quantization,
-pattern-bank names/counts, compact visible control values, and an explicit
-placeholder for modifier/layer state. Generic typed app commands can now
+pattern-bank names/counts, compact visible control values, and actual held
+modifier/layer state. Generic typed app commands can now
 select a lane variation, select a lane pattern bank, toggle lane mute, and
 toggle lane solo against that performance-page state; those results are
-classified for session capture. `.mlperformance` actions can now bind
+classified for session capture. `.mlperformance` modifier declarations can bind
+momentary MIDI inputs and modifier-layer controls; the ensemble currently maps
+the `octave-layer` modifier plus main-page fader 1 to a typed
+`set_lane_octave` command for `rhythm-drum-a`. `.mlperformance` actions can now bind
 LaunchControl MIDI buttons/CCs to those lane commands without hard-coded
 controller policy. Lane variation and pattern-bank selection now rerender the
 currently selected song audio through the song rerender worker. Single-track
@@ -201,18 +204,18 @@ for synth-backed mixed patches. The main and drums pages now map faders to
 distinct lane synth/filter targets; sample-lane faders need explicit sample
 level/pitch/slice targets before they affect sample audio. Audio-affecting
 mute/solo behavior, loop-mode sample playback, live sample level/pitch/slice
-controls, real modifier/layer state, and real pattern-bank runtime semantics
-beyond choosing a lane variation are not implemented yet. `.mlsynth` patches with `polyphony > 1` now
+controls, applying lane octave/transpose state to rendered audio, and real
+pattern-bank runtime semantics beyond choosing a lane variation are not
+implemented yet. `.mlsynth` patches with `polyphony > 1` now
 render overlapping note events as independent voices in the song renderer; the
 ensemble pad uses four voices.
 Build this from examples first, then implement only the required multi-track,
 sample-track playback, poly-synth, pattern-bank runtime, and modifier control
 support.
-Modifier/layer behavior such as “hold button + fader becomes octave pusher”
-must be script-declared, typed, captured, and replayable; do not hard-code
-LaunchControl policy in Rust. LED feedback remains deferred until the ensemble
-control semantics are stable. Full all-parameters inspection remains open after
-that.
+Modifier/layer behavior must remain script-declared, typed, captured, and
+replayable; do not hard-code LaunchControl policy in Rust. LED feedback remains
+deferred until the ensemble control semantics are stable. Full all-parameters
+inspection remains open after that.
 
 ## Important files
 

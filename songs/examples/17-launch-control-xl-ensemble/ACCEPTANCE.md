@@ -73,7 +73,10 @@ envelope, and explicit slice events in their patterns.
 mode renders an ensemble page overview centered on the active page, eight
 visible controller strips, lane role, mute/solo state, active variation,
 launch quantization, pattern-bank names/counts, compact visible control values,
-and an explicit placeholder showing that no modifier layer is active yet.
+and real held modifier state. The example declares an `octave-layer` momentary
+modifier in `.mlperformance`; while that modifier is held, main-page fader 1 is
+mapped to a typed `set_lane_octave` command for the `rhythm-drum-a` lane instead
+of its normal cutoff control.
 Generic typed app commands can
 select lane variations, select lane pattern banks, toggle lane mute, and toggle
 lane solo in that performance-page state, and the results are classified for
@@ -99,4 +102,5 @@ playground. Synths with `polyphony > 1` now render overlapping notes as
 independent voices, and the ensemble pad uses four voices. This ensemble
 skeleton still needs loop-mode sample playback, live sample level/pitch/slice
 controls, full pattern-bank runtime semantics, audio-affecting mute/solo
-behavior, momentary modifier layers, and replayable modifier gestures.
+behavior, applying lane-octave modifier state to rendered audio, and replayable
+modifier gestures.

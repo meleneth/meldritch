@@ -207,11 +207,14 @@ assigned, switched, and rendered deterministically from text definitions.
   selection, lane mute, and lane solo against generic performance-page state
 - [x] Add script-declared actions that bind LaunchControl buttons to the typed
   lane variation/bank/mute/solo commands without hard-coded controller policy
-- [ ] Extend `.mlperformance` controls to support momentary modifiers/layers
+- [x] Extend `.mlperformance` controls to support momentary modifiers/layers
   such as “hold button + move fader” without hard-coded Rust policy
-- [ ] Implement a first modifier example: while a declared modifier button is
+- [x] Implement a first modifier example: while a declared modifier button is
   held, one or more faders send octave/transpose commands instead of their
   normal continuous parameter target
+- [ ] Apply script-declared lane octave/transpose state to the mixed song
+  renderer so modifier-layer octave pushes affect audio, not only typed
+  performance state
 - [x] Make authored lane pattern-bank and variation selections rerender the
   supported song audio path
 - [x] Extend authored lane pattern-bank and variation selections to true
@@ -242,7 +245,7 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Add TUI performance-mode lane overview for the ensemble: active page, 8
   visible controller strips, active variation per lane, mute/solo state, compact
   visible control values, and an explicit modifier-state placeholder
-- [ ] Replace the TUI modifier-state placeholder with real script-declared
+- [x] Replace the TUI modifier-state placeholder with real script-declared
   held/layer state after `.mlperformance` modifier controls exist
 - [ ] Add session-capture tests proving normal controls and modifier-layer
   gestures record as typed inputs and can replay without the LaunchControl

@@ -521,6 +521,29 @@ action = "overdrive"
 normal = 4350.0
 normal_midi = 108
 
+[[modifiers]]
+id = "octave-layer"
+label = "Octave Layer"
+[[modifiers.bindings]]
+type = "midi_note"
+device = "launch-control-xl"
+channel = 9
+note = 108
+
+[[modifier_controls]]
+id = "main-fader-01-octave"
+label = "Rhythm A Octave"
+modifier = "octave-layer"
+action = "set_lane_octave"
+page = "main"
+lane = "rhythm-drum-a"
+range = [-2, 2]
+[[modifier_controls.bindings]]
+type = "midi_cc"
+device = "launch-control-xl"
+channel = 9
+cc = 77
+
 [[actions]]
 id = "select-main-page"
 label = "Track Select Next Main Page"

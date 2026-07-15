@@ -357,8 +357,15 @@ fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
     assert_eq!(song.sample_banks().len(), 1);
     assert_eq!(song.samplers().len(), 1);
     assert_eq!(song.note_patterns().len(), 36);
+    assert_eq!(song.performance().modifiers().len(), 1);
+    assert_eq!(song.performance().modifier_controls().len(), 1);
     assert_eq!(song.synths()["pad"].polyphony(), 4);
     assert_eq!(song.samplers()["raven-slicer"].polyphony(), 6);
+    assert_eq!(song.performance().modifiers()[0].id(), "octave-layer");
+    assert_eq!(
+        song.performance().modifier_controls()[0].id(),
+        "main-fader-01-octave"
+    );
 
     let tracks = song
         .performance()

@@ -553,9 +553,10 @@ fn draw_performance_pages(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
     let mut lines = vec![
         Line::from(format!("Pages: {page_tabs}")),
         Line::from(format!(
-            "Active page: {} · {} visible strips · modifiers none active · Pattern {} · {} steps",
+            "Active page: {} · {} visible strips · modifiers {} · Pattern {} · {} steps",
             page.label,
             page.strips.len(),
+            active_modifier_summary(view),
             view.pattern_grid.pattern.raw(),
             view.pattern_grid.length_steps
         )),
@@ -595,10 +596,11 @@ fn draw_performance_pages(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
         };
         let controls = compact_strip_control_summary(view, strip);
         Line::from(format!(
-            "F{:02} {:<16} {:<17} {status:<10} var {active_variation:<12} bank {active_bank:<8} vars {:<2} q {quantization:<5} ctl {controls} · banks {banks} · track {track}",
+            "F{:02} {:<16} {:<17} {status:<10} oct {:+} var {active_variation:<12} bank {active_bank:<8} vars {:<2} q {quantization:<5} ctl {controls} · banks {banks} · track {track}",
             strip.strip,
             strip.lane_label,
             strip.lane_role,
+            strip.octave,
             strip.variation_ids.len()
         ))
     }));
@@ -697,6 +699,21 @@ fn active_performance_page(view: &AppViewModel) -> Option<&meldritch_app::Perfor
         .pages
         .get(index)
         .or_else(|| view.performance.pages.first())
+}
+
+fn active_modifier_summary(view: &AppViewModel) -> String {
+    let active = view
+        .performance
+        .active_modifiers
+        .iter()
+        .filter(|modifier| modifier.active)
+        .map(|modifier| modifier.label.as_str())
+        .collect::<Vec<_>>();
+    if active.is_empty() {
+        "none active".to_owned()
+    } else {
+        active.join("+")
+    }
 }
 
 fn has_launch_control_strip_surface(view: &AppViewModel) -> bool {
@@ -1379,6 +1396,16 @@ fn command_result_text(result: &AppCommandResult) -> String {
         } => format!(
             "Lane {lane_id} bank: {previous_bank:?} → {current_bank}; variation {previous_variation:?} → {current_variation}"
         ),
+        AppCommandResult::PerformanceModifierChanged {
+            modifier_id,
+            active,
+        } => format!(
+            "Modifier {modifier_id} {}",
+            if *active { "held" } else { "released" }
+        ),
+        AppCommandResult::LaneOctaveSet {
+            lane_id, current, ..
+        } => format!("Lane {lane_id} octave {current:+}"),
         AppCommandResult::LaneMuteToggled { lane_id, muted } => {
             format!("Lane {lane_id} muted: {muted}")
         }
@@ -1472,6 +1499,7 @@ mod tests {
                 learned_phrase_cues: Vec::new(),
                 pages: Vec::new(),
                 active_page: None,
+                active_modifiers: Vec::new(),
             },
             pattern_grid: PatternGridView {
                 pattern: PatternId::new(1),
@@ -1796,6 +1824,7 @@ mod tests {
                     soloed: false,
                     active_pattern_bank_id: Some("groove".to_owned()),
                     active_variation_id: Some("pad-a".to_owned()),
+                    octave: 0,
                     variation_ids: vec![
                         "pad-a".to_owned(),
                         "pad-b".to_owned(),
@@ -1831,6 +1860,7 @@ mod tests {
                     soloed: false,
                     active_pattern_bank_id: Some("drums".to_owned()),
                     active_variation_id: Some("kick-a".to_owned()),
+                    octave: 0,
                     variation_ids: vec!["kick-a".to_owned()],
                     pattern_banks: vec![meldritch_app::PerformancePatternBankView {
                         id: "drums".to_owned(),
@@ -1841,6 +1871,12 @@ mod tests {
                 }],
             },
         ];
+        view.performance.active_modifiers = vec![meldritch_app::PerformanceModifierView {
+            id: "octave-layer".to_owned(),
+            label: "Octave Layer".to_owned(),
+            active: true,
+        }];
+        view.performance.pages[0].strips[0].octave = 2;
         view.curated_controls = vec![meldritch_app::CuratedControlView {
             id: "pad-cutoff".to_owned(),
             label: "Pad Cutoff".to_owned(),
@@ -1874,7 +1910,8 @@ mod tests {
         assert!(content.contains("bank groove"));
         assert!(content.contains("var pad-a"));
         assert!(content.contains("q 1 bar"));
-        assert!(content.contains("modifiers none active"));
+        assert!(content.contains("modifiers Octave Layer"));
+        assert!(content.contains("oct +2"));
         assert!(content.contains("banks Groove:2/Fills:2"));
         assert!(content.contains("Active page Main"));
         assert!(content.contains("1234.000 filter.cutoff_hz"));
