@@ -171,8 +171,9 @@ performance-mode telemetry renders the active page's declared controls. MIDI CC
 control bindings may be scoped to a declared page, so the selected page can
 remap physical controls without hard-coded LaunchControl policy.
 `17-launch-control-xl-ensemble` now parses as a skeleton: nine tracks/lanes,
-two scene-authored pages, four placeholder note variations per lane, and
-page-scoped fader controls. Its lane declarations now carry authored launch
+two scene-authored pages, four note variations per lane, nine distinct
+renderer-compatible synth patches, and page-scoped fader controls. Its lane
+declarations now carry authored launch
 quantization, default mute/solo state, per-lane control IDs, and nested pattern
 banks that group four variations into selectable banks. `tui-song` loads that
 lane metadata into generic app performance-page view state, and performance
@@ -189,12 +190,12 @@ placeholder songs use a compiled mixed-note patch. It also parses
 `.mlsamples` sample-bank metadata and attaches the three sample lanes to a Raven
 voice placeholder bank. Mixed-note rendering accepts script-targeted synth
 filter overrides, so `tui-song` controls can change audio for mixed patches.
-The current ensemble script still points those controls at the same placeholder
-synth/filter; author distinct synth/filter targets before treating the faders as
-true per-lane instrument controls. Audio sample decoding, sample triggering,
-sample rendering, audio-affecting mute/solo behavior, and real pattern-bank
-runtime semantics beyond choosing a lane variation are not implemented yet. The
-skeleton intentionally uses a placeholder synth and shared note patterns until
+The main and drums pages now map faders to distinct lane synth/filter targets,
+giving the hardware a simple but real palette before sample/poly engines land.
+Audio sample decoding, sample triggering, sample rendering, audio-affecting
+mute/solo behavior, and real pattern-bank runtime semantics beyond choosing a
+lane variation are not implemented yet. The skeleton still uses shared note
+patterns and placeholder synth stand-ins for the sample lanes until
 sample-track playback, poly-synth, and full multi-track audio support land.
 Build this from examples first, then implement only the required multi-track,
 sample-track playback, poly-synth, pattern-bank runtime, and modifier control

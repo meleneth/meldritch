@@ -7699,9 +7699,34 @@ mod tests {
         assert_eq!(
             targets.get("main-fader-01"),
             Some(&LiveSongControlTarget::FilterCutoff(SynthFilterTarget {
-                synth_id: "ensemble-placeholder".to_owned(),
+                synth_id: "rhythm-drum-a".to_owned(),
                 module_id: "filter".to_owned(),
             }))
+        );
+        let main_page_synths = (1..=8)
+            .map(|strip| {
+                let id = format!("main-fader-{strip:02}");
+                match targets
+                    .get(&id)
+                    .expect("main fader should target live audio")
+                {
+                    LiveSongControlTarget::FilterCutoff(target) => target.synth_id.clone(),
+                    target => panic!("main fader {id} should target filter cutoff, got {target:?}"),
+                }
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            main_page_synths,
+            BTreeSet::from([
+                "rhythm-drum-a".to_owned(),
+                "rhythm-drum-b".to_owned(),
+                "pad".to_owned(),
+                "bass-a".to_owned(),
+                "bass-b".to_owned(),
+                "sample-a-placeholder".to_owned(),
+                "sample-b-placeholder".to_owned(),
+                "sample-c-placeholder".to_owned(),
+            ])
         );
     }
 

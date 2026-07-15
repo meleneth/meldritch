@@ -3,7 +3,7 @@ kind = "synth"
 version = 1
 
 [synth]
-id = "ensemble-placeholder"
+id = "rhythm-drum-b"
 polyphony = 1
 
 [[inputs]]
@@ -17,15 +17,15 @@ type = "gate"
 [[modules]]
 id = "osc"
 type = "oscillator"
-waveform = "saw"
+waveform = "triangle"
 
 [[modules]]
 id = "env"
 type = "adsr"
-attack = 0.005
-decay = 0.08
-sustain = 0.7
-release = 0.12
+attack = 0.002
+decay = 0.09
+sustain = 0.3
+release = 0.05
 
 [[modules]]
 id = "amp"
@@ -34,8 +34,8 @@ type = "vca"
 [[modules]]
 id = "filter"
 type = "low_pass"
-cutoff_hz = 4350.0
-resonance = 0.2
+cutoff_hz = 1800.0
+resonance = 0.55
 
 [[modules]]
 id = "out"
@@ -65,3 +65,4 @@ to = "filter.audio"
 [[cables]]
 from = "filter.audio"
 to = "out.audio"
+

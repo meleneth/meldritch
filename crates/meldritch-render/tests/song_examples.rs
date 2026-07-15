@@ -351,7 +351,7 @@ fn launch_control_ensemble_mixed_filter_override_changes_the_mix() {
         .render_with_synth_filter_overrides(
             FrameRange::new(0, 96_000).unwrap(),
             &[CompiledSynthFilterOverride::new(
-                "ensemble-placeholder",
+                "rhythm-drum-a",
                 "filter",
                 Some(100.0),
                 None,

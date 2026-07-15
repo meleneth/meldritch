@@ -1,0 +1,68 @@
+[meldritch]
+kind = "synth"
+version = 1
+
+[synth]
+id = "sample-c-placeholder"
+polyphony = 1
+
+[[inputs]]
+id = "pitch"
+type = "pitch"
+
+[[inputs]]
+id = "gate"
+type = "gate"
+
+[[modules]]
+id = "osc"
+type = "oscillator"
+waveform = "saw"
+
+[[modules]]
+id = "env"
+type = "adsr"
+attack = 0.03
+decay = 0.3
+sustain = 0.55
+release = 0.28
+
+[[modules]]
+id = "amp"
+type = "vca"
+
+[[modules]]
+id = "filter"
+type = "low_pass"
+cutoff_hz = 3600.0
+resonance = 0.12
+
+[[modules]]
+id = "out"
+type = "audio_output"
+channels = 1
+
+[[cables]]
+from = "input.pitch"
+to = "osc.pitch"
+
+[[cables]]
+from = "input.gate"
+to = "env.gate"
+
+[[cables]]
+from = "osc.audio"
+to = "amp.audio"
+
+[[cables]]
+from = "env.control"
+to = "amp.level"
+
+[[cables]]
+from = "amp.audio"
+to = "filter.audio"
+
+[[cables]]
+from = "filter.audio"
+to = "out.audio"
+

@@ -1,0 +1,68 @@
+[meldritch]
+kind = "synth"
+version = 1
+
+[synth]
+id = "rhythm-drum-a"
+polyphony = 1
+
+[[inputs]]
+id = "pitch"
+type = "pitch"
+
+[[inputs]]
+id = "gate"
+type = "gate"
+
+[[modules]]
+id = "osc"
+type = "oscillator"
+waveform = "pulse"
+
+[[modules]]
+id = "env"
+type = "adsr"
+attack = 0.001
+decay = 0.055
+sustain = 0.25
+release = 0.03
+
+[[modules]]
+id = "amp"
+type = "vca"
+
+[[modules]]
+id = "filter"
+type = "low_pass"
+cutoff_hz = 2600.0
+resonance = 0.35
+
+[[modules]]
+id = "out"
+type = "audio_output"
+channels = 1
+
+[[cables]]
+from = "input.pitch"
+to = "osc.pitch"
+
+[[cables]]
+from = "input.gate"
+to = "env.gate"
+
+[[cables]]
+from = "osc.audio"
+to = "amp.audio"
+
+[[cables]]
+from = "env.control"
+to = "amp.level"
+
+[[cables]]
+from = "amp.audio"
+to = "filter.audio"
+
+[[cables]]
+from = "filter.audio"
+to = "out.audio"
+

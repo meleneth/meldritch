@@ -217,8 +217,8 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Extend authored lane pattern-bank and variation selections to true
   multi-track playback so the same controller can switch at least four
   variations per lane without requiring 32 dedicated buttons
-- [x] Add render-layer multi-track note compilation/mixing for the current
-  ensemble placeholder synth tracks
+- [x] Add render-layer multi-track note compilation/mixing for the ensemble
+  synth tracks
 - [x] Wire multi-track song compilation into `tui-song` playback and lane
   variation changes
 - [ ] Extend multi-track song playback for the subset needed by the ensemble
@@ -226,8 +226,8 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Route live controls into mixed multi-track patches so script-authored
   per-lane/global parameter changes affect the currently selected ensemble
   tracks, not only the legacy single-track delayed-note patch
-- [ ] Author distinct ensemble synth/filter targets so each visible lane control
-  changes the intended lane/instrument instead of the current shared placeholder
+- [x] Author distinct ensemble synth/filter targets so each visible lane control
+  changes the intended lane/instrument instead of the former shared placeholder
   synth filter
 - [ ] Add sample-track playback support for text-authored sample references,
   sample slots, one-shots/loops, start/end slices, level, pitch, and per-pattern

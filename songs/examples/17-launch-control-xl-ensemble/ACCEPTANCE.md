@@ -60,10 +60,11 @@ Initial example scene page model:
 
 Current implementation status: placeholder mixed playback. This directory now contains a validating
 song skeleton with nine declared tracks/lanes, two scene-authored pages, four
-placeholder note variations per lane, lane-authored launch quantization,
-default mute/solo state, per-lane control IDs, nested pattern banks,
-page-visible controls, page-scoped MIDI fader bindings, and a `.mlsamples`
-Raven voice sample-bank metadata file attached to the three sample lanes.
+note variations per lane, nine distinct renderer-compatible synth patches,
+lane-authored launch quantization, default mute/solo state, per-lane control
+IDs, nested pattern banks, page-visible controls, page-scoped MIDI fader
+bindings, and a `.mlsamples` Raven voice sample-bank metadata file attached to
+the three sample lanes.
 `tui-song` now carries that lane metadata into app view state, and performance
 mode renders visible strips with lane status, active variation, launch
 quantization, and pattern-bank names/counts. Generic typed app commands can
@@ -77,14 +78,14 @@ delayed-note patch path with live override support; this multi-track ensemble
 uses a compiled mixed-note patch, and lane variation selection changes one
 track's selected placeholder pattern inside that mixed audio. Mixed-note
 rendering accepts script-targeted synth filter overrides, so `tui-song`
-controls can change audio for mixed patches. The current ensemble script still
-points those controls at the same placeholder synth/filter; distinct
-per-lane/per-instrument synth targets remain to be authored. The existing
+controls can change audio for mixed patches. The main and drums pages now map
+faders to distinct lane synth/filter targets, so the controller has a simple
+palette of drum, pad, bass, and sample-lane stand-in sounds. The existing
 LaunchControl XL playground proves script-authored LaunchControl input, typed
 actions, live rerendered parameters, authored groove variations, default
 performance mode, and continuous audio publication for a single-synth
-playground. This ensemble skeleton intentionally uses a placeholder synth and
-shared note patterns until this example gains real multi-lane songs, audio
-sample decoding/rendering, per-pattern sample triggering, full pattern-bank
-runtime semantics, audio-affecting mute/solo behavior, polyphonic pad
-rendering, momentary modifier layers, and replayable modifier gestures.
+playground. This ensemble skeleton intentionally keeps shared note patterns and
+synth stand-ins for the sample lanes until this example gains real multi-lane
+songs, audio sample decoding/rendering, per-pattern sample triggering, full
+pattern-bank runtime semantics, audio-affecting mute/solo behavior, polyphonic
+pad rendering, momentary modifier layers, and replayable modifier gestures.
