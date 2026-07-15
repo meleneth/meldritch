@@ -250,6 +250,8 @@ assigned, switched, and rendered deterministically from text definitions.
 - [ ] Add session-capture tests proving normal controls and modifier-layer
   gestures record as typed inputs and can replay without the LaunchControl
   attached
+- [x] Make lane mute/solo state affect mixed-song audio rerenders, not just
+  app/TUI state
 - [ ] Defer LED feedback until after the ensemble control semantics are stable,
   then map LEDs to active variation/mute/modifier state from script-authored
   output declarations

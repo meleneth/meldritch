@@ -3,10 +3,11 @@ use meldritch_dsl::load_song_directory;
 use meldritch_render::song_render::{
     CompiledSynthFilterOverride, compile_automated_delayed_note_song, compile_delayed_note_song,
     compile_delayed_note_song_for_pattern, compile_drone_song, compile_filtered_note_song,
-    compile_mixed_note_song, compile_mixed_note_song_with_lane_transposes,
-    compile_mixed_note_song_with_lane_variation, compile_note_song,
+    compile_mixed_note_song, compile_mixed_note_song_with_lane_state,
+    compile_mixed_note_song_with_lane_transposes, compile_mixed_note_song_with_lane_variation,
+    compile_note_song,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 fn example(name: &str) -> PathBuf {
@@ -368,6 +369,55 @@ fn launch_control_ensemble_lane_transpose_changes_the_mix() {
             .iter()
             .all(|sample| sample.is_finite())
     );
+}
+
+#[test]
+fn launch_control_ensemble_lane_mute_and_solo_change_the_mix() {
+    let song = load_song_directory(example("17-launch-control-xl-ensemble"))
+        .expect("LaunchControl XL ensemble song should load");
+    let initial = compile_mixed_note_song(&song).expect("ensemble mix should compile");
+    let active_variations = song
+        .performance()
+        .lanes()
+        .iter()
+        .filter_map(|lane| Some((lane.id().to_owned(), lane.variation_ids().first()?.clone())))
+        .collect::<BTreeMap<_, _>>();
+    let all_lanes = song
+        .performance()
+        .lanes()
+        .iter()
+        .map(|lane| lane.id().to_owned())
+        .collect::<BTreeSet<_>>();
+    let without_rhythm_a = all_lanes
+        .iter()
+        .filter(|lane| lane.as_str() != "rhythm-drum-a")
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let rhythm_a_solo = BTreeSet::from(["rhythm-drum-a".to_owned()]);
+    let muted = compile_mixed_note_song_with_lane_state(
+        &song,
+        &active_variations,
+        &BTreeMap::new(),
+        &without_rhythm_a,
+    )
+    .expect("muted ensemble mix should compile");
+    let soloed = compile_mixed_note_song_with_lane_state(
+        &song,
+        &active_variations,
+        &BTreeMap::new(),
+        &rhythm_a_solo,
+    )
+    .expect("soloed ensemble mix should compile");
+    let initial_block = initial.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+    let muted_block = muted.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+    let soloed_block = soloed.render(FrameRange::new(0, 96_000).unwrap()).unwrap();
+
+    assert_eq!(muted.track_count(), 8);
+    assert_eq!(soloed.track_count(), 1);
+    assert_ne!(initial_block.samples(), muted_block.samples());
+    assert_ne!(initial_block.samples(), soloed_block.samples());
+    assert!(muted_block.peak_abs() > 0.01);
+    assert!(soloed_block.peak_abs() > 0.01);
 }
 
 #[test]

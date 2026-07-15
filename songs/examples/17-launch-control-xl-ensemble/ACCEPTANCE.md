@@ -81,10 +81,12 @@ transpose in the mixed-song renderer, so the held-layer fader affects audio.
 Generic typed app commands can
 select lane variations, select lane pattern banks, toggle lane mute, and toggle
 lane solo in that performance-page state, and the results are classified for
-session capture. `.mlperformance` actions can bind LaunchControl MIDI buttons
-and CCs to those lane commands without hard-coded controller policy. Lane
-variation and pattern-bank selection now rerender the current song audio
-through the song rerender worker. Single-track songs keep the legacy
+session capture. Lane mute/solo state is applied to mixed-song rerenders:
+muted lanes are excluded, and any soloed lane limits the mix to the solo set.
+`.mlperformance` actions can bind LaunchControl MIDI buttons and CCs to those
+lane commands without hard-coded controller policy. Lane variation and
+pattern-bank selection now rerender the current song audio through the song
+rerender worker. Single-track songs keep the legacy
 delayed-note patch path with live override support; this multi-track ensemble
 uses a compiled mixed-note patch, and lane variation selection changes one
 track's selected placeholder pattern inside that mixed audio. Mixed-note
@@ -102,5 +104,5 @@ performance mode, and continuous audio publication for a single-synth
 playground. Synths with `polyphony > 1` now render overlapping notes as
 independent voices, and the ensemble pad uses four voices. This ensemble
 skeleton still needs loop-mode sample playback, live sample level/pitch/slice
-controls, full pattern-bank runtime semantics, audio-affecting mute/solo
-behavior, and replayable modifier gestures.
+controls, full pattern-bank runtime semantics, and replayable modifier
+gestures.

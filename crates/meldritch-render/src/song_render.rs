@@ -11,6 +11,7 @@ use meldritch_dsl::{
     ValidatedSong,
 };
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1094,10 +1095,11 @@ pub fn compile_mixed_note_song_with_lane_transposes(
     song: &ValidatedSong,
     lane_transpose_semitones: &BTreeMap<String, i8>,
 ) -> Result<CompiledMixedNoteSong, SongRenderError> {
-    compile_mixed_note_song_with_track_patterns_and_transposes(
+    compile_mixed_note_song_with_track_patterns_transposes_and_included_lanes(
         song,
         |track| track.initial_pattern().map(ToOwned::to_owned),
         lane_transpose_semitones,
+        None,
     )
 }
 
@@ -1128,7 +1130,7 @@ pub fn compile_mixed_note_song_with_lane_variation(
         .ok_or_else(|| SongRenderError::MissingLane {
             id: lane_id.to_owned(),
         })?;
-    compile_mixed_note_song_with_track_patterns_and_transposes(
+    compile_mixed_note_song_with_track_patterns_transposes_and_included_lanes(
         song,
         |track| {
             if track.id() == track_id {
@@ -1138,6 +1140,7 @@ pub fn compile_mixed_note_song_with_lane_variation(
             }
         },
         &BTreeMap::new(),
+        None,
     )
 }
 
@@ -1169,7 +1172,7 @@ pub fn compile_mixed_note_song_with_lane_variation_and_transposes(
         .ok_or_else(|| SongRenderError::MissingLane {
             id: lane_id.to_owned(),
         })?;
-    compile_mixed_note_song_with_track_patterns_and_transposes(
+    compile_mixed_note_song_with_track_patterns_transposes_and_included_lanes(
         song,
         |track| {
             if track.id() == track_id {
@@ -1179,6 +1182,7 @@ pub fn compile_mixed_note_song_with_lane_variation_and_transposes(
             }
         },
         lane_transpose_semitones,
+        None,
     )
 }
 
@@ -1186,6 +1190,34 @@ pub fn compile_mixed_note_song_with_lane_variations_and_transposes(
     song: &ValidatedSong,
     lane_variations: &BTreeMap<String, String>,
     lane_transpose_semitones: &BTreeMap<String, i8>,
+) -> Result<CompiledMixedNoteSong, SongRenderError> {
+    compile_mixed_note_song_with_lane_variations_transposes_and_included_lanes(
+        song,
+        lane_variations,
+        lane_transpose_semitones,
+        None,
+    )
+}
+
+pub fn compile_mixed_note_song_with_lane_state(
+    song: &ValidatedSong,
+    lane_variations: &BTreeMap<String, String>,
+    lane_transpose_semitones: &BTreeMap<String, i8>,
+    included_lanes: &BTreeSet<String>,
+) -> Result<CompiledMixedNoteSong, SongRenderError> {
+    compile_mixed_note_song_with_lane_variations_transposes_and_included_lanes(
+        song,
+        lane_variations,
+        lane_transpose_semitones,
+        Some(included_lanes),
+    )
+}
+
+fn compile_mixed_note_song_with_lane_variations_transposes_and_included_lanes(
+    song: &ValidatedSong,
+    lane_variations: &BTreeMap<String, String>,
+    lane_transpose_semitones: &BTreeMap<String, i8>,
+    included_lanes: Option<&BTreeSet<String>>,
 ) -> Result<CompiledMixedNoteSong, SongRenderError> {
     let mut track_patterns = BTreeMap::new();
     for (lane_id, variation_id) in lane_variations {
@@ -1213,7 +1245,7 @@ pub fn compile_mixed_note_song_with_lane_variations_and_transposes(
             })?;
         track_patterns.insert(track_id.to_owned(), variation_id.clone());
     }
-    compile_mixed_note_song_with_track_patterns_and_transposes(
+    compile_mixed_note_song_with_track_patterns_transposes_and_included_lanes(
         song,
         |track| {
             track_patterns
@@ -1222,17 +1254,27 @@ pub fn compile_mixed_note_song_with_lane_variations_and_transposes(
                 .or_else(|| track.initial_pattern().map(ToOwned::to_owned))
         },
         lane_transpose_semitones,
+        included_lanes,
     )
 }
 
-fn compile_mixed_note_song_with_track_patterns_and_transposes(
+fn compile_mixed_note_song_with_track_patterns_transposes_and_included_lanes(
     song: &ValidatedSong,
     pattern_for_track: impl Fn(&TrackDefinition) -> Option<String>,
     lane_transpose_semitones: &BTreeMap<String, i8>,
+    included_lanes: Option<&BTreeSet<String>>,
 ) -> Result<CompiledMixedNoteSong, SongRenderError> {
     let mut tracks = Vec::with_capacity(song.performance().tracks().len());
     let mut channels = None;
     for track in song.performance().tracks() {
+        if let Some(included_lanes) = included_lanes {
+            let Some(lane_id) = track_lane_id(song, track) else {
+                continue;
+            };
+            if !included_lanes.contains(lane_id) {
+                continue;
+            }
+        }
         let pattern_id =
             pattern_for_track(track).ok_or_else(|| SongRenderError::MissingPattern {
                 id: format!("initial pattern for track '{}'", track.id()),
@@ -1270,16 +1312,21 @@ fn compile_mixed_note_song_with_track_patterns_and_transposes(
     })
 }
 
+fn track_lane_id<'a>(song: &'a ValidatedSong, track: &TrackDefinition) -> Option<&'a str> {
+    song.performance()
+        .lanes()
+        .iter()
+        .find(|lane| lane.track_id() == Some(track.id()))
+        .map(|lane| lane.id())
+}
+
 fn track_lane_transpose_semitones(
     song: &ValidatedSong,
     track: &TrackDefinition,
     lane_transpose_semitones: &BTreeMap<String, i8>,
 ) -> i8 {
-    song.performance()
-        .lanes()
-        .iter()
-        .find(|lane| lane.track_id() == Some(track.id()))
-        .and_then(|lane| lane_transpose_semitones.get(lane.id()))
+    track_lane_id(song, track)
+        .and_then(|lane_id| lane_transpose_semitones.get(lane_id))
         .copied()
         .unwrap_or(0)
 }

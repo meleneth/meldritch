@@ -189,8 +189,10 @@ the `octave-layer` modifier plus main-page fader 1 to a typed
 `set_lane_octave` command for `rhythm-drum-a`, and mixed-song rendering applies
 that lane octave state as semitone transpose so it affects audio. `.mlperformance` actions can now bind
 LaunchControl MIDI buttons/CCs to those lane commands without hard-coded
-controller policy. Lane variation and pattern-bank selection now rerender the
-currently selected song audio through the song rerender worker. Single-track
+controller policy. Lane variation, pattern-bank selection, lane mute, and lane
+solo now rerender the currently selected song audio through the song rerender
+worker; muted lanes are excluded and any soloed lane limits the mix to the solo
+set. Single-track
 songs keep the delayed-note patch path with live override support; multi-track
 placeholder songs use a compiled mixed-note patch. It also parses
 `.mlsamples` sample-bank metadata and attaches the three sample lanes to a Raven
@@ -203,10 +205,9 @@ WAV audio from authored slice events. Mixed-note rendering also accepts
 script-targeted synth filter overrides, so `tui-song` controls can change audio
 for synth-backed mixed patches. The main and drums pages now map faders to
 distinct lane synth/filter targets; sample-lane faders need explicit sample
-level/pitch/slice targets before they affect sample audio. Audio-affecting
-mute/solo behavior, loop-mode sample playback, live sample level/pitch/slice
-controls, and real pattern-bank runtime semantics beyond choosing a lane
-variation are not implemented yet. `.mlsynth` patches with `polyphony > 1` now
+level/pitch/slice targets before they affect sample audio. Loop-mode sample
+playback, live sample level/pitch/slice controls, and real pattern-bank runtime
+semantics beyond choosing a lane variation are not implemented yet. `.mlsynth` patches with `polyphony > 1` now
 render overlapping note events as independent voices in the song renderer; the
 ensemble pad uses four voices.
 Build this from examples first, then implement only the required multi-track,

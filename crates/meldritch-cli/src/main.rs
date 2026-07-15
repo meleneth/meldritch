@@ -3636,11 +3636,14 @@ fn tui_song(
                     }
                     overrides.clone()
                 };
-                let active_variations = active_lane_variations(&controller.view_model());
+                let view = controller.view_model();
+                let active_variations = active_lane_variations(&view);
+                let included_lanes = included_lanes_from_view(&view);
                 let patch = match compile_mixed_song_for_active_lanes(
                     &input_song,
                     &active_variations,
                     &overrides.lane_transpose_semitones,
+                    &included_lanes,
                 ) {
                     Ok(patch) => patch,
                     Err(error) => {
@@ -3666,16 +3669,22 @@ fn tui_song(
                     .lock()
                     .expect("song live override lock poisoned")
                     .clone();
-                let patch = if overrides.lane_transpose_semitones.is_empty() {
+                let view = controller.view_model();
+                let included_lanes = included_lanes_from_view(&view);
+                let default_inclusion = default_included_lanes(&input_song);
+                let patch = if overrides.lane_transpose_semitones.is_empty()
+                    && included_lanes == default_inclusion
+                {
                     lane_patches
                         .get(&(lane.clone(), variation.clone()))
                         .cloned()
                 } else {
-                    let active_variations = active_lane_variations(&controller.view_model());
+                    let active_variations = active_lane_variations(&view);
                     match compile_mixed_song_for_active_lanes(
                         &input_song,
                         &active_variations,
                         &overrides.lane_transpose_semitones,
+                        &included_lanes,
                     ) {
                         Ok(patch) => Some(patch),
                         Err(error) => {
@@ -3686,6 +3695,43 @@ fn tui_song(
                 };
                 let Some(patch) = patch else {
                     return;
+                };
+                *input_active_patch
+                    .lock()
+                    .expect("song active patch lock poisoned") = patch.clone();
+                let mut generation = input_generation
+                    .lock()
+                    .expect("song render generation lock poisoned");
+                *generation = generation.saturating_add(1);
+                input_worker
+                    .lock()
+                    .expect("song render worker lock poisoned")
+                    .submit(*generation, patch, overrides);
+                return;
+            }
+            if matches!(
+                result,
+                meldritch_app::AppCommandResult::LaneMuteToggled { .. }
+                    | meldritch_app::AppCommandResult::LaneSoloToggled { .. }
+            ) {
+                let overrides = input_live_overrides
+                    .lock()
+                    .expect("song live override lock poisoned")
+                    .clone();
+                let view = controller.view_model();
+                let active_variations = active_lane_variations(&view);
+                let included_lanes = included_lanes_from_view(&view);
+                let patch = match compile_mixed_song_for_active_lanes(
+                    &input_song,
+                    &active_variations,
+                    &overrides.lane_transpose_semitones,
+                    &included_lanes,
+                ) {
+                    Ok(patch) => patch,
+                    Err(error) => {
+                        eprintln!("{error}");
+                        return;
+                    }
                 };
                 *input_active_patch
                     .lock()
@@ -4172,18 +4218,60 @@ fn active_lane_variations(view: &meldritch_app::AppViewModel) -> BTreeMap<String
         .collect()
 }
 
+fn included_lanes_from_view(view: &meldritch_app::AppViewModel) -> BTreeSet<String> {
+    let strips = view
+        .performance
+        .pages
+        .iter()
+        .flat_map(|page| page.strips.iter())
+        .collect::<Vec<_>>();
+    let soloed = strips
+        .iter()
+        .filter(|strip| strip.soloed)
+        .map(|strip| strip.lane_id.clone())
+        .collect::<BTreeSet<_>>();
+    if !soloed.is_empty() {
+        return soloed;
+    }
+    strips
+        .into_iter()
+        .filter(|strip| !strip.muted)
+        .map(|strip| strip.lane_id.clone())
+        .collect()
+}
+
+fn default_included_lanes(song: &meldritch_dsl::ValidatedSong) -> BTreeSet<String> {
+    let soloed = song
+        .performance()
+        .lanes()
+        .iter()
+        .filter(|lane| lane.default_soloed())
+        .map(|lane| lane.id().to_owned())
+        .collect::<BTreeSet<_>>();
+    if !soloed.is_empty() {
+        return soloed;
+    }
+    song.performance()
+        .lanes()
+        .iter()
+        .filter(|lane| !lane.default_muted())
+        .map(|lane| lane.id().to_owned())
+        .collect()
+}
+
 fn compile_mixed_song_for_active_lanes(
     song: &meldritch_dsl::ValidatedSong,
     active_variations: &BTreeMap<String, String>,
     lane_transpose_semitones: &BTreeMap<String, i8>,
+    included_lanes: &BTreeSet<String>,
 ) -> Result<CompiledSongPatch, String> {
-    let patch =
-        meldritch_render::song_render::compile_mixed_note_song_with_lane_variations_and_transposes(
-            song,
-            active_variations,
-            lane_transpose_semitones,
-        )
-        .map_err(|error| format!("failed to compile active mixed song: {error:?}"))?;
+    let patch = meldritch_render::song_render::compile_mixed_note_song_with_lane_state(
+        song,
+        active_variations,
+        lane_transpose_semitones,
+        included_lanes,
+    )
+    .map_err(|error| format!("failed to compile active mixed song: {error:?}"))?;
     Ok(CompiledSongPatch::Mixed(patch))
 }
 
