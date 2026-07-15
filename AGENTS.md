@@ -181,7 +181,9 @@ ensemble page overview centered on the active page, eight visible controller
 strips, lane role, active variation, mute/solo state, launch quantization,
 pattern-bank names/counts, compact active-variation pattern monitors with
 playhead position, compact visible control values, and actual held modifier/layer
-state. Generic typed app commands can now
+state. Performance UI sections and key hints can be declared under `[ui]` in
+`.mlperformance`; declared UIs choose their section order and may omit the legacy
+single-pattern grid entirely. Generic typed app commands can now
 select a lane variation, select a lane pattern bank, toggle lane mute, and
 toggle lane solo against that performance-page state; those results are
 classified for session capture. `.mlperformance` modifier declarations can bind
@@ -210,8 +212,8 @@ synth and sample lanes, so strip fader minimum silences the lane and the
 normalized fader point is unity. Main-page knobs still provide synth-filter tone
 controls, including placeholder tone controls for sample strips until real live
 sample pitch/slice targets exist. Loop-mode sample playback, live sample
-pitch/slice controls, legacy performance-grid cleanup, and real pattern-bank
-runtime semantics beyond choosing a lane variation are not implemented yet. `.mlsynth` patches with `polyphony > 1`
+pitch/slice controls, and real pattern-bank runtime semantics beyond choosing a
+lane variation are not implemented yet. `.mlsynth` patches with `polyphony > 1`
 now render overlapping note events as independent voices in the song renderer;
 the ensemble pad uses four voices.
 Build this from examples first, then implement only the required multi-track,

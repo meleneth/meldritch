@@ -22,10 +22,11 @@ pub use song::{
     ParameterPatternDefinition, ParameterPointDefinition, ParameterTargetDefinition, PatchInput,
     PerformanceActionDefinition, PerformanceDefinition, PerformanceLaneDefinition,
     PerformanceModifierDefinition, PerformancePageDefinition, PerformancePageStripDefinition,
-    PerformancePatternBankDefinition, SampleBankDefinition, SamplePlaybackMode,
-    SampleSliceDefinition, SampleSlotDefinition, SamplerDefinition, SamplerPitchEnvelopeDefinition,
-    SignalType, SongDiagnostic, SongLoadError, SynthDefinition, TrackDefinition, ValidatedSong,
-    load_song_directory,
+    PerformancePatternBankDefinition, PerformanceUiDefinition, PerformanceUiKeyHintDefinition,
+    PerformanceUiSectionDefinition, PerformanceUiSectionKind, SampleBankDefinition,
+    SamplePlaybackMode, SampleSliceDefinition, SampleSlotDefinition, SamplerDefinition,
+    SamplerPitchEnvelopeDefinition, SignalType, SongDiagnostic, SongLoadError, SynthDefinition,
+    TrackDefinition, ValidatedSong, load_song_directory,
 };
 
 #[derive(Clone, Debug, PartialEq)]

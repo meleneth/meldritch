@@ -3480,6 +3480,10 @@ fn tui_song(
     controller.set_curated_controls(controls);
     controller.set_performance_pages(song_performance_pages_for_view(&song));
     controller.set_performance_modifiers(song_performance_modifiers_for_view(&song));
+    controller.set_performance_ui(
+        song_performance_ui_sections_for_view(&song),
+        song_performance_key_hints_for_view(&song),
+    );
     if let Some(phrase_variations) = scene_bank.phrase_variations.clone() {
         controller
             .configure_phrase_variations(phrase_variations)
@@ -3993,6 +3997,54 @@ fn song_performance_modifiers_for_view(
             id: modifier.id().to_owned(),
             label: modifier.label().to_owned(),
             active: false,
+        })
+        .collect()
+}
+
+fn song_performance_ui_sections_for_view(
+    song: &meldritch_dsl::ValidatedSong,
+) -> Vec<meldritch_app::PerformanceUiSectionView> {
+    song.performance()
+        .ui()
+        .sections()
+        .iter()
+        .map(|section| meldritch_app::PerformanceUiSectionView {
+            kind: match section.kind() {
+                meldritch_dsl::PerformanceUiSectionKind::Transport => {
+                    meldritch_app::PerformanceUiSectionKind::Transport
+                }
+                meldritch_dsl::PerformanceUiSectionKind::PageOverview => {
+                    meldritch_app::PerformanceUiSectionKind::PageOverview
+                }
+                meldritch_dsl::PerformanceUiSectionKind::PatternGrid => {
+                    meldritch_app::PerformanceUiSectionKind::PatternGrid
+                }
+                meldritch_dsl::PerformanceUiSectionKind::VisibleControls => {
+                    meldritch_app::PerformanceUiSectionKind::VisibleControls
+                }
+                meldritch_dsl::PerformanceUiSectionKind::Status => {
+                    meldritch_app::PerformanceUiSectionKind::Status
+                }
+                meldritch_dsl::PerformanceUiSectionKind::KeyHints => {
+                    meldritch_app::PerformanceUiSectionKind::KeyHints
+                }
+            },
+            title: section.title().map(ToOwned::to_owned),
+            height: section.height(),
+        })
+        .collect()
+}
+
+fn song_performance_key_hints_for_view(
+    song: &meldritch_dsl::ValidatedSong,
+) -> Vec<meldritch_app::PerformanceKeyHintView> {
+    song.performance()
+        .ui()
+        .key_hints()
+        .iter()
+        .map(|hint| meldritch_app::PerformanceKeyHintView {
+            keys: hint.keys().to_owned(),
+            label: hint.label().to_owned(),
         })
         .collect()
 }
@@ -8362,6 +8414,16 @@ mod tests {
         assert_eq!(strip.pattern_monitors[0].variation_id, "rhythm-drum-a-a");
         assert_eq!(strip.pattern_monitors[0].length_steps, 16);
         assert!(!strip.pattern_monitors[0].active_steps.is_empty());
+
+        let sections = song_performance_ui_sections_for_view(&ensemble);
+        assert_eq!(sections.len(), 5);
+        assert!(sections
+            .iter()
+            .all(|section| section.kind != meldritch_app::PerformanceUiSectionKind::PatternGrid));
+        assert_eq!(sections[1].title.as_deref(), Some("LaunchControl Ensemble"));
+        let key_hints = song_performance_key_hints_for_view(&ensemble);
+        assert_eq!(key_hints.len(), 4);
+        assert_eq!(key_hints[0].keys, "Ctrl-Tab");
     }
 
     #[test]

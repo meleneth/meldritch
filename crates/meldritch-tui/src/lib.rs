@@ -462,6 +462,10 @@ fn draw_curated_performance_mode(
     view: &AppViewModel,
     status: &StatusMessage,
 ) {
+    if !view.performance.ui_sections.is_empty() {
+        draw_declared_performance_mode(frame, view, status);
+        return;
+    }
     let groovebox_height = if view.performance.pages.is_empty() {
         4
     } else {
@@ -498,9 +502,64 @@ fn draw_curated_performance_mode(
     );
 }
 
+fn draw_declared_performance_mode(
+    frame: &mut ratatui::Frame<'_>,
+    view: &AppViewModel,
+    status: &StatusMessage,
+) {
+    let constraints = view
+        .performance
+        .ui_sections
+        .iter()
+        .map(|section| {
+            section
+                .height
+                .map_or(Constraint::Min(1), Constraint::Length)
+        })
+        .collect::<Vec<_>>();
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(frame.area());
+    for (section, area) in view
+        .performance
+        .ui_sections
+        .iter()
+        .zip(rows.iter().copied())
+    {
+        match section.kind {
+            meldritch_app::PerformanceUiSectionKind::Transport => draw_transport(frame, area, view),
+            meldritch_app::PerformanceUiSectionKind::PageOverview => {
+                draw_groovebox_surface_with_title(frame, area, view, section.title.as_deref())
+            }
+            meldritch_app::PerformanceUiSectionKind::PatternGrid => {
+                draw_grid_with_title(frame, area, view, section.title.as_deref())
+            }
+            meldritch_app::PerformanceUiSectionKind::VisibleControls => {
+                draw_visible_controls(frame, area, view, section.title.as_deref())
+            }
+            meldritch_app::PerformanceUiSectionKind::Status => {
+                draw_status_with_title(frame, area, status, section.title.as_deref())
+            }
+            meldritch_app::PerformanceUiSectionKind::KeyHints => {
+                draw_performance_key_hints(frame, area, view, section.title.as_deref())
+            }
+        }
+    }
+}
+
 fn draw_groovebox_surface(frame: &mut ratatui::Frame<'_>, area: Rect, view: &AppViewModel) {
+    draw_groovebox_surface_with_title(frame, area, view, None);
+}
+
+fn draw_groovebox_surface_with_title(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    view: &AppViewModel,
+    title: Option<&str>,
+) {
     if !view.performance.pages.is_empty() {
-        draw_performance_pages(frame, area, view);
+        draw_performance_pages(frame, area, view, title);
         return;
     }
     let active = view
@@ -521,14 +580,19 @@ fn draw_groovebox_surface(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
     ];
     frame.render_widget(
         panel(
-            "Groovebox Scenes",
+            title.unwrap_or("Groovebox Scenes"),
             Paragraph::new(lines).wrap(Wrap { trim: false }),
         ),
         area,
     );
 }
 
-fn draw_performance_pages(frame: &mut ratatui::Frame<'_>, area: Rect, view: &AppViewModel) {
+fn draw_performance_pages(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    view: &AppViewModel,
+    title: Option<&str>,
+) {
     let active_page_index = view.performance.active_page.unwrap_or(0);
     let page = view
         .performance
@@ -553,12 +617,10 @@ fn draw_performance_pages(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
     let mut lines = vec![
         Line::from(format!("Pages: {page_tabs}")),
         Line::from(format!(
-            "Active page: {} · {} visible strips · modifiers {} · Pattern {} · {} steps",
+            "Active page: {} · {} visible strips · modifiers {}",
             page.label,
             page.strips.len(),
-            active_modifier_summary(view),
-            view.pattern_grid.pattern.raw(),
-            view.pattern_grid.length_steps
+            active_modifier_summary(view)
         )),
     ];
     lines.extend(page.strips.iter().map(|strip| {
@@ -606,9 +668,46 @@ fn draw_performance_pages(frame: &mut ratatui::Frame<'_>, area: Rect, view: &App
     }));
     frame.render_widget(
         panel(
-            "Ensemble Page Overview",
+            title.unwrap_or("Ensemble Page Overview"),
             Paragraph::new(lines).wrap(Wrap { trim: false }),
         ),
+        area,
+    );
+}
+
+fn draw_visible_controls(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    view: &AppViewModel,
+    title: Option<&str>,
+) {
+    frame.render_widget(
+        panel(
+            title.unwrap_or("Visible Control Values · last MIDI/action in status"),
+            Paragraph::new(performance_control_lines(view)).wrap(Wrap { trim: false }),
+        ),
+        area,
+    );
+}
+
+fn draw_performance_key_hints(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    view: &AppViewModel,
+    title: Option<&str>,
+) {
+    let text = if view.performance.key_hints.is_empty() {
+        "Ctrl-Tab all parameters · p play/stop · r rewind · q quit".to_owned()
+    } else {
+        view.performance
+            .key_hints
+            .iter()
+            .map(|hint| format!("{} {}", hint.keys, hint.label))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    };
+    frame.render_widget(
+        panel(title.unwrap_or("Performance Keys"), Paragraph::new(text)),
         area,
     );
 }
@@ -1019,6 +1118,15 @@ fn draw_transform(frame: &mut ratatui::Frame<'_>, area: Rect, view: &AppViewMode
 }
 
 fn draw_grid(frame: &mut ratatui::Frame<'_>, area: Rect, view: &AppViewModel) {
+    draw_grid_with_title(frame, area, view, None);
+}
+
+fn draw_grid_with_title(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    view: &AppViewModel,
+    title: Option<&str>,
+) {
     let available_rows = area.height.saturating_sub(2) as usize;
     let selected_row = view
         .pattern_grid
@@ -1071,13 +1179,10 @@ fn draw_grid(frame: &mut ratatui::Frame<'_>, area: Rect, view: &AppViewModel) {
             Line::from(spans)
         })
         .collect::<Vec<_>>();
-    frame.render_widget(
-        panel(
-            &format!("Pattern {}", view.pattern_grid.pattern.raw()),
-            Paragraph::new(lines),
-        ),
-        area,
-    );
+    let panel_title = title
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("Pattern {}", view.pattern_grid.pattern.raw()));
+    frame.render_widget(panel(&panel_title, Paragraph::new(lines)), area);
 }
 
 fn viewport_offset(selected: usize, visible: usize, total: usize) -> usize {
@@ -1352,13 +1457,25 @@ fn draw_key_legend(frame: &mut ratatui::Frame<'_>, area: Rect) {
 }
 
 fn draw_status(frame: &mut ratatui::Frame<'_>, area: Rect, status: &StatusMessage) {
+    draw_status_with_title(frame, area, status, None);
+}
+
+fn draw_status_with_title(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    status: &StatusMessage,
+    title: Option<&str>,
+) {
     let style = if status.error {
         Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Cyan)
     };
     frame.render_widget(
-        panel("Status", Paragraph::new(status.text.clone()).style(style)),
+        panel(
+            title.unwrap_or("Status"),
+            Paragraph::new(status.text.clone()).style(style),
+        ),
         area,
     );
 }
@@ -1524,6 +1641,8 @@ mod tests {
                 pages: Vec::new(),
                 active_page: None,
                 active_modifiers: Vec::new(),
+                ui_sections: Vec::new(),
+                key_hints: Vec::new(),
             },
             pattern_grid: PatternGridView {
                 pattern: PatternId::new(1),
@@ -1924,6 +2043,43 @@ mod tests {
             value: Some(1234.0),
         }];
         view.performance.active_page = Some(0);
+        view.performance.ui_sections = vec![
+            meldritch_app::PerformanceUiSectionView {
+                kind: meldritch_app::PerformanceUiSectionKind::Transport,
+                title: Some("Transport".to_owned()),
+                height: Some(3),
+            },
+            meldritch_app::PerformanceUiSectionView {
+                kind: meldritch_app::PerformanceUiSectionKind::PageOverview,
+                title: Some("Declared Page Overview".to_owned()),
+                height: Some(12),
+            },
+            meldritch_app::PerformanceUiSectionView {
+                kind: meldritch_app::PerformanceUiSectionKind::VisibleControls,
+                title: Some("Declared Controls".to_owned()),
+                height: Some(5),
+            },
+            meldritch_app::PerformanceUiSectionView {
+                kind: meldritch_app::PerformanceUiSectionKind::Status,
+                title: Some("Declared Status".to_owned()),
+                height: Some(3),
+            },
+            meldritch_app::PerformanceUiSectionView {
+                kind: meldritch_app::PerformanceUiSectionKind::KeyHints,
+                title: Some("Declared Keys".to_owned()),
+                height: Some(3),
+            },
+        ];
+        view.performance.key_hints = vec![
+            meldritch_app::PerformanceKeyHintView {
+                keys: "Ctrl-Tab".to_owned(),
+                label: "all parameters".to_owned(),
+            },
+            meldritch_app::PerformanceKeyHintView {
+                keys: "q".to_owned(),
+                label: "quit".to_owned(),
+            },
+        ];
         let backend = TestBackend::new(180, 34);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| draw(frame, &view)).unwrap();
@@ -1935,7 +2091,9 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
 
-        assert!(content.contains("Ensemble Page Overview"));
+        assert!(content.contains("Declared Page Overview"));
+        assert!(content.contains("Declared Controls"));
+        assert!(content.contains("Declared Keys"));
         assert!(content.contains("[Main]"));
         assert!(content.contains("Drums"));
         assert!(content.contains("F01"));
@@ -1952,7 +2110,9 @@ mod tests {
         assert!(content.contains("banks Groove:2/Fills:2"));
         assert!(content.contains("Active page Main"));
         assert!(content.contains("1234.000 filter.cutoff_hz"));
+        assert!(content.contains("Ctrl-Tab all parameters"));
         assert!(!content.contains("B01-B04 scenes"));
+        assert!(!content.contains("Pattern 1"));
     }
 
     #[test]

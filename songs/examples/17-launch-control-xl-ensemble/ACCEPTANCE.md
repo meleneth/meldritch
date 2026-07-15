@@ -36,6 +36,8 @@ It must:
   patterns, variation selection, and bank/page state
 - show a performance-mode TUI overview centered on musical state, not raw
   parameter telemetry:
+  - section order, titles, key hints, and omission of the legacy pattern grid
+    declared by `[ui]` in `main.mlperformance`
   - active visible bank/page
   - eight visible controller strips
   - lane role and active variation per visible strip
@@ -112,5 +114,4 @@ performance mode, and continuous audio publication for a single-synth
 playground. Synths with `polyphony > 1` now render overlapping notes as
 independent voices, and the ensemble pad uses four voices. This ensemble
 skeleton still needs loop-mode sample playback, live sample pitch/slice
-controls, full pattern-bank runtime semantics, legacy performance-grid cleanup,
-and replayable modifier gestures.
+controls, full pattern-bank runtime semantics, and replayable modifier gestures.

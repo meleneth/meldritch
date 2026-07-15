@@ -295,6 +295,31 @@ pub struct PerformanceView {
     pub pages: Vec<PerformancePageView>,
     pub active_page: Option<usize>,
     pub active_modifiers: Vec<PerformanceModifierView>,
+    pub ui_sections: Vec<PerformanceUiSectionView>,
+    pub key_hints: Vec<PerformanceKeyHintView>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PerformanceUiSectionKind {
+    Transport,
+    PageOverview,
+    PatternGrid,
+    VisibleControls,
+    Status,
+    KeyHints,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerformanceUiSectionView {
+    pub kind: PerformanceUiSectionKind,
+    pub title: Option<String>,
+    pub height: Option<u16>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerformanceKeyHintView {
+    pub keys: String,
+    pub label: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -845,6 +870,8 @@ pub struct AppController {
     performance_pages: Vec<PerformancePageView>,
     active_performance_page: Option<usize>,
     performance_modifiers: Vec<PerformanceModifierView>,
+    performance_ui_sections: Vec<PerformanceUiSectionView>,
+    performance_key_hints: Vec<PerformanceKeyHintView>,
     performance_scenes: Vec<SceneId>,
     phrase_patterns: BTreeMap<SceneId, Vec<Pattern>>,
     queued_phrase_variation: Option<(SceneId, usize)>,
@@ -888,6 +915,8 @@ impl AppController {
             performance_pages: Vec::new(),
             active_performance_page: None,
             performance_modifiers: Vec::new(),
+            performance_ui_sections: Vec::new(),
+            performance_key_hints: Vec::new(),
             performance_scenes: Vec::new(),
             phrase_patterns: BTreeMap::new(),
             queued_phrase_variation: None,
@@ -943,6 +972,15 @@ impl AppController {
 
     pub fn set_performance_modifiers(&mut self, modifiers: Vec<PerformanceModifierView>) {
         self.performance_modifiers = modifiers;
+    }
+
+    pub fn set_performance_ui(
+        &mut self,
+        sections: Vec<PerformanceUiSectionView>,
+        key_hints: Vec<PerformanceKeyHintView>,
+    ) {
+        self.performance_ui_sections = sections;
+        self.performance_key_hints = key_hints;
     }
 
     pub fn select_performance_page(
@@ -1747,6 +1785,8 @@ impl AppController {
                 pages: self.performance_pages.clone(),
                 active_page: self.active_performance_page,
                 active_modifiers: self.performance_modifiers.clone(),
+                ui_sections: self.performance_ui_sections.clone(),
+                key_hints: self.performance_key_hints.clone(),
             },
             pattern_grid: PatternGridView {
                 pattern: pattern.id(),

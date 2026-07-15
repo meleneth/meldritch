@@ -467,6 +467,28 @@ fn launch_control_xl_ensemble_declares_banked_nine_lane_surface() {
         .count();
     assert_eq!(page_scoped_controls, 37);
 
+    let ui = song.performance().ui();
+    assert_eq!(ui.sections().len(), 5);
+    assert_eq!(
+        ui.sections()
+            .iter()
+            .map(|section| section.kind())
+            .collect::<Vec<_>>(),
+        vec![
+            meldritch_dsl::PerformanceUiSectionKind::Transport,
+            meldritch_dsl::PerformanceUiSectionKind::PageOverview,
+            meldritch_dsl::PerformanceUiSectionKind::VisibleControls,
+            meldritch_dsl::PerformanceUiSectionKind::Status,
+            meldritch_dsl::PerformanceUiSectionKind::KeyHints,
+        ]
+    );
+    assert!(
+        !ui.sections()
+            .iter()
+            .any(|section| section.kind() == meldritch_dsl::PerformanceUiSectionKind::PatternGrid)
+    );
+    assert_eq!(ui.key_hints().len(), 4);
+
     let actions = song.performance().actions();
     assert!(actions.iter().any(|action| {
         matches!(

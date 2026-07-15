@@ -505,6 +505,7 @@ pub struct PerformanceDefinition {
     modifiers: Vec<PerformanceModifierDefinition>,
     modifier_controls: Vec<ModifierControlDefinition>,
     actions: Vec<ActionControlDefinition>,
+    ui: PerformanceUiDefinition,
 }
 
 impl PerformanceDefinition {
@@ -566,6 +567,81 @@ impl PerformanceDefinition {
     #[must_use]
     pub fn actions(&self) -> &[ActionControlDefinition] {
         &self.actions
+    }
+
+    #[must_use]
+    pub const fn ui(&self) -> &PerformanceUiDefinition {
+        &self.ui
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PerformanceUiDefinition {
+    sections: Vec<PerformanceUiSectionDefinition>,
+    key_hints: Vec<PerformanceUiKeyHintDefinition>,
+}
+
+impl PerformanceUiDefinition {
+    #[must_use]
+    pub fn sections(&self) -> &[PerformanceUiSectionDefinition] {
+        &self.sections
+    }
+
+    #[must_use]
+    pub fn key_hints(&self) -> &[PerformanceUiKeyHintDefinition] {
+        &self.key_hints
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PerformanceUiSectionKind {
+    Transport,
+    PageOverview,
+    PatternGrid,
+    VisibleControls,
+    Status,
+    KeyHints,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerformanceUiSectionDefinition {
+    kind: PerformanceUiSectionKind,
+    title: Option<String>,
+    height: Option<u16>,
+}
+
+impl PerformanceUiSectionDefinition {
+    #[must_use]
+    pub const fn kind(&self) -> PerformanceUiSectionKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    #[must_use]
+    pub const fn height(&self) -> Option<u16> {
+        self.height
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerformanceUiKeyHintDefinition {
+    keys: String,
+    label: String,
+}
+
+impl PerformanceUiKeyHintDefinition {
+    #[must_use]
+    pub fn keys(&self) -> &str {
+        &self.keys
+    }
+
+    #[must_use]
+    pub fn label(&self) -> &str {
+        &self.label
     }
 }
 
@@ -1272,6 +1348,8 @@ struct RawPerformanceFile {
     modifier_controls: Vec<RawModifierControl>,
     #[serde(default)]
     actions: Vec<RawActionControl>,
+    #[serde(default)]
+    ui: RawPerformanceUi,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1280,6 +1358,27 @@ struct RawPerformance {
     title: String,
     bpm: f64,
     sample_rate: u32,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawPerformanceUi {
+    #[serde(default)]
+    sections: Vec<RawPerformanceUiSection>,
+    #[serde(default)]
+    key_hints: Vec<RawPerformanceUiKeyHint>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPerformanceUiSection {
+    kind: String,
+    title: Option<String>,
+    height: Option<u16>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPerformanceUiKeyHint {
+    keys: String,
+    label: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2965,6 +3064,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         });
     }
 
+    let ui = parse_performance_ui(&entry, raw_performance.ui)?;
     let performance = PerformanceDefinition {
         id: raw_performance.performance.id,
         title: raw_performance.performance.title,
@@ -2978,6 +3078,7 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         modifiers,
         modifier_controls,
         actions,
+        ui,
     };
     let fingerprint = fingerprint_song(
         &performance,
@@ -3980,6 +4081,59 @@ fn parse_global_parameter_target(
     })
 }
 
+fn parse_performance_ui(
+    path: &Path,
+    raw: RawPerformanceUi,
+) -> Result<PerformanceUiDefinition, SongLoadError> {
+    let mut sections = Vec::with_capacity(raw.sections.len());
+    for section in raw.sections {
+        let kind = match section.kind.as_str() {
+            "transport" => PerformanceUiSectionKind::Transport,
+            "page_overview" => PerformanceUiSectionKind::PageOverview,
+            "pattern_grid" => PerformanceUiSectionKind::PatternGrid,
+            "visible_controls" => PerformanceUiSectionKind::VisibleControls,
+            "status" => PerformanceUiSectionKind::Status,
+            "key_hints" => PerformanceUiSectionKind::KeyHints,
+            value => {
+                return Err(SongLoadError::one(
+                    path,
+                    format!("unknown performance UI section kind '{value}'"),
+                ));
+            }
+        };
+        if section.height == Some(0) {
+            return Err(SongLoadError::one(
+                path,
+                "performance UI section height must be greater than zero",
+            ));
+        }
+        sections.push(PerformanceUiSectionDefinition {
+            kind,
+            title: section.title,
+            height: section.height,
+        });
+    }
+
+    let mut key_hints = Vec::with_capacity(raw.key_hints.len());
+    for hint in raw.key_hints {
+        if hint.keys.trim().is_empty() || hint.label.trim().is_empty() {
+            return Err(SongLoadError::one(
+                path,
+                "performance UI key hints require non-empty keys and label",
+            ));
+        }
+        key_hints.push(PerformanceUiKeyHintDefinition {
+            keys: hint.keys,
+            label: hint.label,
+        });
+    }
+
+    Ok(PerformanceUiDefinition {
+        sections,
+        key_hints,
+    })
+}
+
 fn validate_parameter_value(
     path: &Path,
     target: &ParameterTargetDefinition,
@@ -4419,6 +4573,15 @@ fn fingerprint_song(
                 }
             }
         }
+    }
+    for section in performance.ui.sections() {
+        fingerprint.u64(section.kind() as u64);
+        fingerprint.optional_string(section.title());
+        fingerprint.u64(u64::from(section.height().unwrap_or(0)));
+    }
+    for hint in performance.ui.key_hints() {
+        fingerprint.string(hint.keys());
+        fingerprint.string(hint.label());
     }
     for synth in synths.values() {
         fingerprint.string(&synth.id);

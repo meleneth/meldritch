@@ -68,7 +68,8 @@ It must:
   upcoming song-publication peak while debugging device/output silence
 - show the authored groovebox surface in default performance mode: B-row scene
   and fill mapping, queued/active state, the actual authored note pattern grid,
-  and compact LaunchControl value telemetry
+  and compact LaunchControl value telemetry, with the performance sections
+  declared under `[ui]` in `main.mlperformance`
 
 Current implementation status: the format can declare every MIDI CC binding and
 script action bindings for MIDI CCs or MIDI notes. The runtime derives MIDI

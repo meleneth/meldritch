@@ -245,8 +245,8 @@ assigned, switched, and rendered deterministically from text definitions.
 - [x] Add active page/lane pattern monitors to performance mode from authored
   `.mlpattern` data so each visible strip shows the selected variation and a
   compact step activity/playhead monitor
-- [ ] Replace or demote the remaining legacy single-pattern grid in performance
-  mode now that the page/lane monitor carries the useful ensemble state
+- [x] Add script-declared performance UI sections/key hints and let declared
+  performance UIs omit the legacy single-pattern grid entirely
 - [x] Add sample-track playback v1 for mixed songs: load text-authored sample
   references, trigger the first slot/first slice as deterministic one-shots from
   sample-bank track note patterns, and include them in range-identical mixes

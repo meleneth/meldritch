@@ -8,6 +8,52 @@ title = "LaunchControl XL Playground"
 bpm = 118.0
 sample_rate = 48000
 
+[ui]
+[[ui.sections]]
+kind = "transport"
+title = "Transport"
+height = 3
+
+[[ui.sections]]
+kind = "page_overview"
+title = "LaunchControl Playground"
+height = 12
+
+[[ui.sections]]
+kind = "pattern_grid"
+title = "Pattern Grid"
+
+[[ui.sections]]
+kind = "visible_controls"
+title = "Visible Control Values · last MIDI/action in status"
+height = 5
+
+[[ui.sections]]
+kind = "status"
+title = "Status"
+height = 3
+
+[[ui.sections]]
+kind = "key_hints"
+title = "Performance Keys"
+height = 3
+
+[[ui.key_hints]]
+keys = "Ctrl-Tab"
+label = "all parameters"
+
+[[ui.key_hints]]
+keys = "p"
+label = "play/stop"
+
+[[ui.key_hints]]
+keys = "r"
+label = "rewind"
+
+[[ui.key_hints]]
+keys = "q"
+label = "quit"
+
 [[midi_devices]]
 id = "launch-control-xl"
 name_contains = "Launch Control XL"
