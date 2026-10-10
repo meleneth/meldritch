@@ -353,6 +353,65 @@ song material without opaque JSON-only state or mutation of the source session.
 Done when one existing showcase is driven by `.ml*` files, plays interactively,
 records a session, and replays it deterministically under the standard checks.
 
+### 19.9 Lua control-plane vertical slice
+
+Progress checkpoint (2026-10-10): example 18 is accepted for its documented
+headless scope. The implementation has 11 acceptance tests and 2 independent
+compatibility tests; the workspace suite passed 312 test executions. The
+headless runner demonstrates typed commands, hierarchical page changes,
+cross-surface synchronization, reconnect restoration and timestamped session
+writing. Production Lua song playback and physical controller support are not
+complete. Exact commands, results and known limitations are in
+[CONTROL_PLANE.md](CONTROL_PLANE.md#verification-record).
+
+- [x] Audit existing app/DSL/render/audio/MIDI/TUI/capture ownership and document
+  reusable boundaries and private CLI host integration gaps
+- [x] Add constrained vendored Lua 5.4 composition through the existing typed
+  song loader; preserve authored TOML entrypoints and historical fixtures
+- [x] Add bounded deterministic dispatch, command acceptance/rejection tracing,
+  causal follow-ups and a bounded lossless accepted-command outbox
+- [x] Add a Lua-authored hierarchical presentation-page machine with guards,
+  parent bubbling, ordered lifecycle actions and explicit rejection
+- [x] Exercise one reusable mode widget on simulated APC, Stream Deck and TUI
+  surfaces; test cross-surface coherence and disconnect/reconnect restoration
+- [x] Add typed u64-frame journals, unique timestamped session writing and
+  headless command replay; deterministic Lua-definition save/restore
+- [x] Independently load/compile/render the pinned supported historical corpus
+- [x] Add documented APC RGB/input codecs, generic expressive keyboard decoding
+  and resettable soft-takeover foundation without claiming hardware acceptance
+- [ ] Extract reusable song-host rerender/publication adapters from the CLI,
+  then connect accepted Lua lane/control commands to the existing song worker
+- [ ] Wire Lua surface projections and inputs into production song playback/TUI
+  without adding a second app state or changing the LaunchControl path
+- [ ] Unify CLI and Lua session capture through a reusable typed recorder;
+  preserve historical session inputs and replace debug-string/u32 limitations
+- [ ] Add automatic crash-tolerant checkpoints and exhaustive accepted-action
+  capture, including page/lifecycle behavior and equivalent starting app state
+- [ ] Add an authoritative pattern-launch widget with idle/queued/playing/
+  unavailable presentations on multiple surfaces
+- [ ] Add frame-scheduled and quantized musical replay with sample-identical
+  acceptance tests, plus HSM runtime-state persistence
+- [ ] Wire page-aware soft takeover to real faders and script bindings
+- [ ] Add Stream Deck discovery/HID/image transport and real reconnect lifecycle
+- [ ] Add live MicroLab voice input and physical APC output/input integration
+- [ ] Hardware-test the new transports; retain LaunchControl support
+- [ ] Add a Rust-owned hierarchical transport lifecycle when discovery,
+  reconnect/backoff and device failures require it; test statig against those
+  concrete cases before adopting a dependency
+- [ ] Measure render throughput, worker utilization and deadline compliance
+  before implementing independent track/voice parallelism or DSP checkpoints
+
+Next implementation slice: extract the existing CLI song-host boundary and
+prove one Lua lane/control gesture schedules a rerender and publishes changed
+audio while all simulated surfaces remain coherent. Follow with shared typed
+session capture and the authoritative pattern-launch widget before adding real
+controller transports. Keep adding immutable compatibility fixtures as each
+new persistence or runtime capability becomes supported.
+
+Example 18's `accept` status covers only its explicit headless acceptance file.
+Hardware protocols and transport gaps, statig evaluation, API details and actual
+multicore bottlenecks are recorded in `CONTROL_PLANE.md`.
+
 ## Completed showcase milestones
 
 The following work formed the previous implementation queue for the long-form

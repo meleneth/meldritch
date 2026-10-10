@@ -1,5 +1,10 @@
 # Architecture
 
+The current Lua/control-plane reuse boundaries, API and implementation limits
+are documented in [CONTROL_PLANE.md](CONTROL_PLANE.md). Lua composes the existing
+validated song model and dispatches existing app commands on a control thread;
+audio publication and realtime ownership remain unchanged.
+
 ## Workspace shape
 
 Initial Rust workspace:

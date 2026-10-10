@@ -4,6 +4,7 @@ members = [
     "crates/meldritch-audio",
     "crates/meldritch-cli",
     "crates/meldritch-core",
+    "crates/meldritch-control",
     "crates/meldritch-dsl",
     "crates/meldritch-render",
     "crates/meldritch-tui",

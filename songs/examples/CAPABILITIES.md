@@ -20,6 +20,7 @@ Status values:
 | `15-launch-control-xl-input` | LaunchControl XL faders/buttons drive curated controls | compile |
 | `16-launch-control-xl-playground` | Full LaunchControl XL MIDI surface with playable groove scenes | play |
 | `17-launch-control-xl-ensemble` | Banked multi-lane LaunchControl XL groovebox ensemble with lane/pattern-bank/sample metadata | parse |
+| `18-lua-control-plane` | Constrained Lua composition, hierarchical pages, reusable mode widget, coherent simulated surfaces, typed journal and historical compatibility (headless scope in ACCEPTANCE.md) | accept |
 
 An implementation may advance a row only when all earlier statuses for that row
 are satisfied. New schema or runtime behavior requires a new row or an explicit

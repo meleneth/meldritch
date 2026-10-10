@@ -46,6 +46,12 @@ inside resolved files; filenames are organization, not identity.
 The authored entry point is `main.mlperformance`. Captured sessions are written
 under `performances/` and are never considered entry-point candidates.
 
+Lua API v1 adds an explicit composition adapter, without changing the authored
+TOML entrypoint or migrating historical songs. `main.lua` chooses a confined
+existing song and defines headless control behavior. Saved Lua envelopes retain
+source text, stable project identity and song fingerprint; they revalidate the
+same typed song on restore. See [CONTROL_PLANE.md](CONTROL_PLANE.md).
+
 ## Time
 
 Authored patterns use musical time. Initial examples use:
