@@ -103,8 +103,8 @@ observation, listening or automatic reconnection acceptance is claimed.
 
 ## Physical fader pickup
 
-`tui-song --soft-takeover` opts existing TOML projects into the bounded
-control-thread MIDI path; `--lua` enables it automatically. The legacy TOML
+`tui-song` uses the bounded control-thread MIDI path. `--soft-takeover` opts
+TOML projects into pickup; `--lua` enables pickup automatically. The legacy TOML
 default remains direct. The MIDI callback copies only complete three-byte
 channel observations into one 64-slot FIFO; no Lua, domain mutation or pickup
 evaluation runs there. Unsupported diagnostic packets retain the existing path.
@@ -130,11 +130,56 @@ stay unavailable rather than guessing. This is a static-control projection;
 audio-clock automation telemetry is not introduced. The headless contract in
 example 22 verifies pickup plus actual app/render/publication/capture machinery,
 curves, layer routing, FIFO order, registry bounds and invalid observations.
-Physical pickup interaction/listening and automatic USB reconnect remain open.
+Physical pickup interaction/listening remains open.
 The production owner uses the existing 50ms TUI poll cadence plus processing
 time; no new latency/throughput measurement is claimed. Example 22's stopped
 hardware smoke opened APC Control input/output and exited cleanly via `q` with
 a saved session. This does not establish physical pickup or musical acceptance.
+
+## MIDI connection recovery
+
+Example 23 adds a transport scenario using example 22's immutable musical
+project. `reconnect::Connection` owns one transport and probes or opens it at
+most once per second, using monotonic control-owner time. Missing devices,
+initialization/open/probe errors and feedback write failures remain recoverable;
+they do not stop the musical engine. Input and output recover independently.
+Matching multiple input/output ports is diagnosed rather than choosing an
+ambiguous device. Discovery uses the authored name match; probes check the
+connected port's exact `midir` id and name.
+
+Closing an input invalidates its shared observation lease before transport
+cleanup. Queued observations retain that lease and are rejected as stale on
+the control owner, with a count; other devices retain FIFO ordering. All
+`tui-song` MIDI channel input now uses that queue, including direct-mode TOML
+projects, preserving their mapping/value policy. This moves legacy input
+mapping to the TUI owner and gives it the same 64-observation burst bound and
+50ms poll cadence as the Lua host. Unsupported diagnostic packets retain the
+legacy diagnostic path. This is a scheduling/backpressure change, not a
+measured latency guarantee.
+
+Loss of input removes its logical surface through the existing dispatcher,
+releases its pickup ownership, and releases its declared held modifiers with
+typed commands and the shared recording hook. No lost note-off may leave a
+layer stuck. Modifier booleans currently have no per-source reference count:
+disconnect safely releases the declared shared layer, even if another device
+also declared that modifier. Other transport/page/parameter/song state persists.
+Reconnection rebuilds the projection from current state and forces the complete
+owned APC RGB frame; successful reconnect does not rerun Lua entry actions or
+reset the HSM. Feedback caches commit only after the whole frame sends.
+Lifecycle observations retain the observed playhead frame even after rewind;
+they do not lower the dispatcher's musical-input frame watermark. A connection
+pump keeps the normal render/session observer for any pending causal work.
+The existing monotonic-frame restriction for musical Lua input is unchanged;
+general rewind/loop-aware input timing needs a separate clock/epoch change.
+
+Polling, opening, connection destruction (including `midir` callback-thread
+join), image/presentation work and Lua stay on the control owner, outside audio.
+These operations may delay TUI responsiveness; no realtime callback changes or
+transport latency benchmark are claimed. A detach/reattach entirely between
+polls with the same port identity can escape detection. USB serial discovery,
+event-driven hotplug notifications and physical cable/color/listening acceptance
+remain future work. The separate standalone color diagnostic does not inherit
+the `tui-song` reconnect lifecycle.
 
 ## Minimal Lua API
 
@@ -293,10 +338,14 @@ The existing app launcher already owns quantized musical transitions; replacing
 it would discard functioning semantics. Flat match/enum handling remains enough
 for this slice's two-state connection observation. The bounded runtime page
 interpreter implements only the validated example-required Lua hierarchy.
-Statig is not added as an unused dependency, and no other FSM framework is
-introduced. A future reconnect/discovery/backoff lifecycle should evaluate
-statig with executable transport failure cases rather than turn every scalar
-and toggle into a machine.
+The reconnect failure tests now require one live connection or a paced retry
+deadline, with explicit connect/disconnect/error results. `statig` could model
+those states, but this lifecycle has no nested operational substates or parent
+handlers requiring a second HSM interpreter. The small Rust-owned lifecycle
+retains deterministic ordering and bounded attempts directly; no new framework
+is added for a two-state machine. The Lua hierarchy remains the compositional
+HSM boundary. Reevaluate statig when transport negotiation/handshake substates
+introduce actual hierarchical behavior.
 
 ## Hardware evidence and deliberately missing transports
 

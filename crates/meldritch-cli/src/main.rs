@@ -1773,6 +1773,42 @@ fn validate_song(path: PathBuf) -> Result<(), String> {
 
 struct MidiControlInputConnection {
     _connection: midir::MidiInputConnection<()>,
+    port_id: String,
+    port_name: String,
+    route: Option<meldritch_control::devices::MidiInputRoute>,
+}
+impl Drop for MidiControlInputConnection {
+    fn drop(&mut self) {
+        if let Some(route) = &self.route {
+            route.invalidate();
+        }
+    }
+}
+
+struct MidiFeedbackConnection {
+    connection: midir::MidiOutputConnection,
+    port_id: String,
+    port_name: String,
+}
+
+fn midi_input_present(connection: &MidiControlInputConnection) -> Result<bool, String> {
+    let midi = midir::MidiInput::new("meldritch-input-probe").map_err(|e| e.to_string())?;
+    Ok(midi.ports().iter().any(|port| {
+        port.id() == connection.port_id
+            && midi
+                .port_name(port)
+                .is_ok_and(|name| name == connection.port_name)
+    }))
+}
+
+fn midi_output_present(connection: &MidiFeedbackConnection) -> Result<bool, String> {
+    let midi = midir::MidiOutput::new("meldritch-output-probe").map_err(|e| e.to_string())?;
+    Ok(midi.ports().iter().any(|port| {
+        port.id() == connection.port_id
+            && midi
+                .port_name(port)
+                .is_ok_and(|name| name == connection.port_name)
+    }))
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2028,17 +2064,26 @@ fn connect_midi_control_input(
     let mut midi_input = midir::MidiInput::new(&format!("meldritch-midi-{}", device.id()))
         .map_err(|error| midi_input_client_error("failed to create MIDI input client", &error))?;
     midi_input.ignore(midir::Ignore::None);
-    let Some((port, name)) = midi_input
+    let ports = midi_input
         .ports()
         .into_iter()
         .filter_map(|port| {
             let name = midi_input.port_name(&port).ok()?;
             midi_port_name_matches(&name, device.name_contains()).then_some((port, name))
         })
-        .next()
-    else {
+        .collect::<Vec<_>>();
+    if ports.is_empty() {
         return Ok(None);
-    };
+    }
+    if ports.len() != 1 {
+        return Err(format!(
+            "MIDI input '{}' has ambiguous matching ports",
+            device.id()
+        ));
+    }
+    let (port, name) = ports.into_iter().next().unwrap();
+    let port_id = port.id();
+    let route = control_route.clone();
     let device_id = device.id().to_owned();
     let connection = midi_input
         .connect(
@@ -2118,6 +2163,9 @@ fn connect_midi_control_input(
     eprintln!("MIDI control input '{}' connected: {name}", device.id());
     Ok(Some(MidiControlInputConnection {
         _connection: connection,
+        port_id,
+        port_name: name,
+        route,
     }))
 }
 
@@ -2201,6 +2249,9 @@ fn connect_midi_control_diagnostic(
     println!("  opened '{}' on port '{port_name}'", device_id);
     Ok(Some(MidiControlInputConnection {
         _connection: connection,
+        port_id: port.id(),
+        port_name,
+        route: None,
     }))
 }
 
@@ -2506,6 +2557,7 @@ fn app_input_for_performance_action(
 }
 
 struct ScriptMidiMapper {
+    takeover: bool,
     controls: Vec<meldritch_app::MidiControlBinding>,
     modifier_controls: Vec<meldritch_app::MidiModifierControlBinding>,
     modifiers: Vec<MidiModifierBinding>,
@@ -2518,9 +2570,37 @@ enum MidiMappedOutcome {
     Unmapped,
 }
 
+fn disconnected_modifier_inputs(
+    device: &str,
+    bindings: &[MidiModifierBinding],
+    view: &meldritch_app::AppViewModel,
+) -> Vec<meldritch_app::AppInput> {
+    bindings
+        .iter()
+        .filter(|binding| {
+            binding.device == device
+                && view
+                    .performance
+                    .active_modifiers
+                    .iter()
+                    .any(|modifier| modifier.id == binding.modifier_id && modifier.active)
+        })
+        .map(|binding| binding.modifier_id.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(
+            |modifier_id| meldritch_app::AppInput::SetPerformanceModifier {
+                modifier_id,
+                active: false,
+            },
+        )
+        .collect()
+}
+
 impl ScriptMidiMapper {
     fn for_song(song: &meldritch_dsl::ValidatedSong) -> Self {
         Self {
+            takeover: true,
             controls: midi_control_bindings_for_song(song),
             modifier_controls: midi_modifier_control_bindings_for_song(song),
             modifiers: midi_modifier_bindings_for_song(song),
@@ -2563,7 +2643,8 @@ impl ScriptMidiMapper {
                 value,
             }
         });
-        if let Some(physical) = &physical
+        if self.takeover
+            && let Some(physical) = &physical
             && !pickup.observe(physical, &mapped.input, &view)?
         {
             return Ok(MidiMappedOutcome::Waiting(format!(
@@ -2833,7 +2914,7 @@ fn load_lua_controls(
 
 fn connect_apc_feedback(
     device: &meldritch_dsl::MidiDeviceDefinition,
-) -> Result<Option<midir::MidiOutputConnection>, String> {
+) -> Result<Option<MidiFeedbackConnection>, String> {
     let midi = midir::MidiOutput::new("meldritch-lua-feedback").map_err(|e| e.to_string())?;
     let ports = midi
         .ports()
@@ -2850,11 +2931,16 @@ fn connect_apc_feedback(
         return Err("Lua APC output requires one matching Session Control port".into());
     }
     let (port, name) = ports.into_iter().next().unwrap();
+    let port_id = port.id();
     let connection = midi
         .connect(&port, "meldritch-lua-feedback")
         .map_err(|e| e.to_string())?;
     eprintln!("Lua APC feedback connected: {name}");
-    Ok(Some(connection))
+    Ok(Some(MidiFeedbackConnection {
+        connection,
+        port_id,
+        port_name: name,
+    }))
 }
 
 fn tui_song(
@@ -2993,7 +3079,7 @@ fn tui_song(
             .transpose()?,
     ));
     let input_lua_performance = Rc::clone(&lua_performance);
-    let mut lua_output = if midi_controls {
+    let lua_output_device = if midi_controls {
         lua_surface
             .as_deref()
             .and_then(|surface| {
@@ -3002,16 +3088,11 @@ fn tui_song(
                     .iter()
                     .find(|device| device.id() == surface)
             })
-            .and_then(|device| match connect_apc_feedback(device) {
-                Ok(output) => output,
-                Err(error) => {
-                    eprintln!("Lua APC feedback unavailable: {error}");
-                    None
-                }
-            })
+            .cloned()
     } else {
         None
     };
+    let mut lua_output = meldritch_control::reconnect::Connection::default();
     let mut lua_feedback = meldritch_control::devices::ApcFeedback::default();
     let (external_input_sender, external_input_receiver) = mpsc::channel();
     let control_queue = meldritch_control::devices::MidiInputQueue::default();
@@ -3021,7 +3102,7 @@ fn tui_song(
     let midi_action_bindings = midi_action_bindings_for_song(&song);
     let midi_active_page = Arc::new(Mutex::new(active_page_id(&controller.view_model())));
     let midi_active_modifiers = Arc::new(Mutex::new(Vec::<String>::new()));
-    let _midi_inputs = if midi_controls {
+    let mut midi_inputs = if midi_controls {
         let mut connections = Vec::new();
         for device in song.performance().midi_devices() {
             let bindings = midi_control_bindings_for_device(&midi_control_bindings, device.id());
@@ -3041,27 +3122,10 @@ fn tui_song(
             {
                 continue;
             }
-            match connect_midi_control_input(
-                device,
-                external_input_sender.clone(),
-                bindings,
-                modifier_control_bindings,
-                modifier_bindings,
-                action_bindings,
-                Arc::clone(&midi_active_page),
-                Arc::clone(&midi_active_modifiers),
-                midi_debug,
-                (lua_surface.as_deref() == Some(device.id())).then(|| lua_route.clone()),
-                soft_takeover.then(|| control_queue.route(device.id())),
-            )? {
-                Some(connection) => connections.push(connection),
-                None => {
-                    eprintln!(
-                        "MIDI control input '{}' not found; continuing without that device",
-                        device.id()
-                    );
-                }
-            }
+            connections.push((
+                device.clone(),
+                meldritch_control::reconnect::Connection::default(),
+            ));
         }
         connections
     } else {
@@ -3098,7 +3162,9 @@ fn tui_song(
     let input_capture = Arc::clone(&capture);
     let tick_capture = Arc::clone(&capture);
     let input_midi_active_page = Arc::clone(&midi_active_page);
-    let mapper = ScriptMidiMapper::for_song(&song);
+    let mut mapper = ScriptMidiMapper::for_song(&song);
+    mapper.takeover = soft_takeover;
+    let midi_clock = Instant::now();
     let mut pickup = meldritch_control::devices::MidiPickup::default();
     let accepted = Rc::new(RefCell::new(
         move |controller: &meldritch_app::AppController,
@@ -3139,12 +3205,89 @@ fn tui_song(
         &mut controller,
         Step::new(36),
         move |controller| {
+            use meldritch_control::reconnect::Change;
             let mut message = None;
+            let now = midi_clock.elapsed();
+            for (device, connection) in &mut midi_inputs {
+                let was_connected = connection.get_mut().is_some();
+                let change = connection.poll(now, midi_input_present, || {
+                    connect_midi_control_input(
+                        device,
+                        external_input_sender.clone(),
+                        midi_control_bindings_for_device(&midi_control_bindings, device.id()),
+                        midi_modifier_control_bindings_for_device(
+                            &midi_modifier_control_bindings,
+                            device.id(),
+                        ),
+                        midi_modifier_bindings_for_device(&midi_modifier_bindings, device.id()),
+                        midi_action_bindings_for_device(&midi_action_bindings, device.id()),
+                        Arc::clone(&midi_active_page),
+                        Arc::clone(&midi_active_modifiers),
+                        midi_debug,
+                        None,
+                        Some(control_queue.route(device.id())),
+                    )
+                });
+                let connected = connection.get_mut().is_some();
+                if !matches!(change, Change::Unchanged) {
+                    message = Some(format!("MIDI {}: {change:?}", device.id()));
+                    if !connected {
+                        pickup.disconnect(device.id());
+                    }
+                    if lua_surface.as_deref() == Some(device.id())
+                        && let Some(performance) = lua_performance.borrow_mut().as_mut()
+                    {
+                        if connected {
+                            lua_feedback.invalidate();
+                        }
+                        if let Err(error) = performance.connection(
+                            device.id(),
+                            connected,
+                            controller,
+                            &mut host.lock().expect("song host lock poisoned"),
+                            &mut tick_capture.lock().expect("capture lock poisoned"),
+                        ) {
+                            message = Some(error);
+                        }
+                    }
+                }
+                // A lost note-off must not leave a physical momentary layer held.
+                // Release via the same accepted command/capture hook as input.
+                if was_connected && !connected {
+                    for input in disconnected_modifier_inputs(
+                        device.id(),
+                        &midi_modifier_bindings,
+                        &controller.view_model(),
+                    ) {
+                        match controller.handle_input(input.clone()) {
+                            Ok(result) => tick_accepted.borrow_mut()(controller, &input, &result),
+                            Err(error) => {
+                                message = Some(format!("MIDI disconnect release: {error:?}"))
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(device) = &lua_output_device {
+                let change =
+                    lua_output.poll(now, midi_output_present, || connect_apc_feedback(device));
+                if change == Change::Connected {
+                    lua_feedback.invalidate();
+                }
+                if !matches!(change, Change::Unchanged) {
+                    message = Some(format!("APC feedback: {change:?}"));
+                }
+            }
             let dropped_control = control_queue.take_dropped();
+            let mut stale_control = 0;
             for _ in 0..meldritch_control::QUEUE_CAPACITY {
                 let Some(observed) = control_queue.next() else {
                     break;
                 };
+                if !observed.is_current() {
+                    stale_control += 1;
+                    continue;
+                }
                 if lua_surface.as_deref() == Some(observed.device.as_ref())
                     && let Some(meldritch_control::devices::ApcInput::Grid { cell, pressed }) =
                         meldritch_control::devices::decode_apc(0, &observed.bytes)
@@ -3206,11 +3349,14 @@ fn tui_song(
                 if let Err(error) = performance.plane.refresh(controller) {
                     message = Some(format!("Lua presentation: {error}"));
                 }
-                if let Some(output) = lua_output.as_mut()
+                if let Some(output) = lua_output.get_mut()
                     && let Some(frame) = performance.plane.output(lua_surface.as_deref().unwrap())
-                    && let Err(error) = lua_feedback
-                        .update(frame, |bytes| output.send(bytes).map_err(|e| e.to_string()))
+                    && let Err(error) = lua_feedback.update(frame, |bytes| {
+                        output.connection.send(bytes).map_err(|e| e.to_string())
+                    })
                 {
+                    lua_output.fail(now);
+                    lua_feedback.invalidate();
                     message = Some(format!("Lua APC feedback: {error}"));
                 }
             }
@@ -3223,9 +3369,9 @@ fn tui_song(
                 }
                 Ok(None) => {}
             }
-            if dropped_control != 0 || dropped_lua != 0 {
+            if dropped_control != 0 || dropped_lua != 0 || stale_control != 0 {
                 message = Some(format!(
-                    "Input overflow: {dropped_control} MIDI observations, {dropped_lua} Lua presses dropped; {}",
+                    "Input: {dropped_control} MIDI overflow, {dropped_lua} Lua overflow, {stale_control} stale observations discarded; {}",
                     message.unwrap_or_default()
                 ));
             }
@@ -6968,6 +7114,38 @@ mod tests {
                 },
                 _
             )
+        ));
+        // Losing a note-off releases only this device's active layer, once.
+        app.handle_input(meldritch_app::AppInput::SetPerformanceModifier {
+            modifier_id: "octave-layer".into(),
+            active: true,
+        })
+        .unwrap();
+        assert!(
+            disconnected_modifier_inputs("other", &mapper.modifiers, &app.view_model()).is_empty()
+        );
+        let releases =
+            disconnected_modifier_inputs("apc-mini", &mapper.modifiers, &app.view_model());
+        assert_eq!(releases.len(), 1);
+        app.handle_input(releases[0].clone()).unwrap();
+        assert!(
+            disconnected_modifier_inputs("apc-mini", &mapper.modifiers, &app.view_model())
+                .is_empty()
+        );
+        // Legacy direct mode still applies a distant absolute fader observation.
+        mapper.takeover = false;
+        mapper
+            .controls
+            .iter_mut()
+            .find(|binding| binding.control_id == "b-level")
+            .unwrap()
+            .action = meldritch_app::MidiControlAction::Absolute;
+        route.observe(&[0xb0, 48, 0]);
+        assert!(matches!(
+            mapper
+                .apply(&queue.next().unwrap(), &mut app, &mut pickup)
+                .unwrap(),
+            MidiMappedOutcome::Applied(_, _)
         ));
         let direct = Cli::try_parse_from([
             "meldritch",

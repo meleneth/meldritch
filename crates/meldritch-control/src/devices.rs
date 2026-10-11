@@ -8,6 +8,12 @@ use crate::{ControlPlane, Input, Result, SurfaceFrame};
 pub struct ObservedMidi {
     pub device: std::sync::Arc<str>,
     pub bytes: [u8; 3],
+    current: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+impl ObservedMidi {
+    pub fn is_current(&self) -> bool {
+        self.current.load(std::sync::atomic::Ordering::Acquire)
+    }
 }
 
 pub struct MidiInputQueue {
@@ -31,6 +37,7 @@ impl MidiInputQueue {
             device: device.into(),
             sender: self.sender.clone(),
             dropped: self.dropped.clone(),
+            current: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
         }
     }
     pub fn next(&self) -> Option<ObservedMidi> {
@@ -46,8 +53,15 @@ pub struct MidiInputRoute {
     device: std::sync::Arc<str>,
     sender: std::sync::mpsc::SyncSender<ObservedMidi>,
     dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    current: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 impl MidiInputRoute {
+    /// Invalidate every queued observation from this connection, without
+    /// disturbing another connection's FIFO entries or accepted domain facts.
+    pub fn invalidate(&self) {
+        self.current
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
     pub fn observe(&self, bytes: &[u8]) -> bool {
         if decode_midi(bytes).is_none() {
             return false;
@@ -58,6 +72,7 @@ impl MidiInputRoute {
             .try_send(ObservedMidi {
                 device: self.device.clone(),
                 bytes,
+                current: self.current.clone(),
             })
             .is_err()
         {

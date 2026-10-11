@@ -547,8 +547,8 @@ Remaining implementation and acceptance work:
 - [ ] Audible-generation/queued widget states tied to actual publication and
   device-clock acknowledgement; green currently means selected/global playing
 - [x] Wire page/context fader soft takeover into the production MIDI path (19.13)
-- [ ] Automatic physical disconnect/reconnect and feedback restoration; logical
-  reconstruction and failed-send retry are tested, USB lifecycle remains open
+- [x] Production MIDI disconnect/reconnect and feedback restoration (19.14),
+  accepted with simulated failures; actual cable acceptance remains open
 - [ ] Real Stream Deck HID discovery/images and MicroLab live voice integration
 - [ ] Shared typed, `u64` session migration, exhaustive capture, exact/quantized
   replay and crash recovery; legacy v1 still uses debug strings and retained events
@@ -605,11 +605,67 @@ static projections are not audio-clock automation telemetry.
 Remaining implementation and hardware acceptance:
 
 - [ ] Physical fader pickup/page/layer interaction and listening acceptance
-- [ ] Automatic physical reconnect, including fresh pickup ownership on reconnect
+- [x] Automatic physical reconnect and fresh pickup ownership (19.14 headless);
+  physical cable acceptance remains open
 - [ ] Audio-clock automation telemetry and queued/audible widget states
 - [ ] Typed session migration/replay and render scheduling work from 19.12
 
 Nothing is stable yet. GitHub Pages setup remains open in 19.11.
+
+### 19.14 MIDI connection recovery (headless acceptance complete)
+
+- [x] Audit MIDI ownership, port discovery, feedback cache and pickup lifetimes
+- [x] Write example 23's reconnect/failure acceptance before implementation
+- [x] Add failing lifecycle and composed reconnect tests
+- [x] Implement paced reconnect, stale-input rejection and device pickup reset
+- [x] Connect physical input/output recovery and current-feedback restoration
+- [x] Verify compatibility, workspace tests, lint and documentation build
+- [x] Record results/remaining limitations and prepare the verified checkpoint
+
+Production `tui-song` now retries missing/failed input and Lua APC output on a
+one-second monotonic cadence. Connected port identity is probed; losing input
+invalidates its queued observation lease, releases its pickup and uses typed,
+captured commands to release held layers. Lua availability uses the existing
+dispatcher and preserves the HSM; reconnection reconstructs the current RGB
+frame. Write failures close output and delay retry. Lifecycle pumps retain the
+render/capture observer for pending causal work. Availability still works after
+a rewound playhead, without weakening musical-input ordering validation.
+
+Verification commands and actual results:
+
+- `cargo test --workspace`: 336 executions passed, zero failures, including
+  the unchanged historical loader/compiler/range-identical render corpus
+- `cargo test -p meldritch-control --test live_performance`: 11 passed;
+  includes paced negative fixtures, cleanup, stale input, device-scoped pickup,
+  unchanged musical facts/audio and real widget/observer recovery
+- `cargo test -p meldritch-cli control_thread_mapper`: 1 passed; includes
+  lost-note-off layer release and the historical direct absolute-input policy
+- `cargo clippy -p meldritch-control -p meldritch-render --lib --no-deps -- -D warnings`: passed
+- `cargo clippy -p meldritch-cli -p meldritch-control --all-targets --no-deps -- -D warnings -A clippy::too_many_arguments`: passed; existing CLI allowance
+- `cargo fmt --all -- --check`, `git diff --check`, `npm run docs:build`: passed
+- `cargo run -q -- validate-song songs/examples/09-curated-performance-controls`
+  and `cargo run -q -- validate-song songs/examples/22-midi-soft-takeover`: passed
+- `cargo run -q -- tui-song songs/examples/22-midi-soft-takeover --lua main.lua --no-autoplay --midi-debug`:
+  APC Control input/output opened and remained connected through repeated probes;
+  stopped transport reported zero underruns/misses, `q` exited 0 and saved
+  `performances/session-20261011T034929Z.mlperformance`
+
+No historical fixtures, audio callbacks, persistence format or render scheduler
+changed. No functional compatibility regressions were observed. Legacy TOML
+MIDI mapping now runs on the control owner with the same 64-observation FIFO and
+50ms poll cadence as Lua; direct value semantics remain supported. Discovery,
+open and transport destruction may delay UI processing, never the audio callback.
+No latency benchmark or physical reconnect/listening acceptance is claimed.
+This example adds a persistent transport scenario, not another authored format.
+
+Remaining: physical cable/fader/color/listening acceptance, audio-clock widget
+states, rewind/loop-aware Lua input clock epochs, typed replay, render scheduling
+and GitHub Pages setup in 19.11. USB serial identity/event hotplug is deferred;
+same-identity detach/reattach between polls may escape detection. Shared modifier
+booleans lack per-device reference counts, so loss releases the declared shared
+layer safely. Stream Deck HID and the standalone color demo do not acquire this
+`tui-song` recovery lifecycle.
+Nothing is stable yet.
 
 ## Completed showcase milestones
 

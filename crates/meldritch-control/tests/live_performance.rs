@@ -71,6 +71,262 @@ fn wait(host: &mut SongAudioHost) {
 }
 
 #[test]
+fn reconnect_is_paced_and_restores_real_surface_without_musical_mutation() {
+    use meldritch_control::reconnect::{Change, Connection};
+    let source = std::fs::read_to_string(root().join("main.lua")).unwrap();
+    let project = LuaProject::load(root(), &source).unwrap();
+    let song = project.song.clone();
+    let patch = CompiledSongPatch::compile_initial(&song).unwrap();
+    let initial = patch
+        .render_default(FrameRange::new(0, 24000).unwrap())
+        .unwrap();
+    let (publisher, reader) =
+        audio_publication(PublishedAudio::from_block(&initial, 1024).unwrap());
+    let (mut app, _engine) = controller();
+    app.set_performance_pages(song_performance_pages_for_view(&song));
+    app.set_curated_controls(song_controls_for_view(&song, None, None, None, None));
+    let mut live = LuaPerformance::new(project, &app, Tempo::new(120.0, 48000).unwrap()).unwrap();
+    let mut audio = SongAudioHost::new(song.clone(), patch, publisher, 24000, 1024);
+    let scratch = std::env::temp_dir().join(format!("meldritch-reconnect-{}", std::process::id()));
+    let mut capture =
+        PerformanceSessionCapture::create_at(&scratch, &song, 24000, "20261011T000000Z").unwrap();
+    live.press("deck", 1, 40, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    assert_eq!(capture.events.len(), 1);
+    wait(&mut audio);
+    let retained = reader.snapshot();
+    app.dispatch(AppCommand::Play).unwrap();
+    live.plane.refresh(&app).unwrap();
+    let before = app.view_model();
+    let history = app.history().len();
+    let expected = live.plane.output("apc-mini").unwrap().clone();
+    let mut feedback = ApcFeedback::default();
+    let mut connection = Connection::default();
+    let mut attempts = 0;
+    assert_eq!(
+        connection.poll(
+            Duration::ZERO,
+            |_| Ok(true),
+            || {
+                attempts += 1;
+                Err("init error".into())
+            }
+        ),
+        Change::Failed("init error".into())
+    );
+    assert_eq!(
+        connection.poll(Duration::from_millis(999), |_| panic!(), || panic!()),
+        Change::Unchanged
+    );
+    assert_eq!(attempts, 1);
+    assert_eq!(
+        connection.poll(Duration::from_secs(1), |_| panic!(), || Ok(None::<()>)),
+        Change::Unavailable
+    );
+    assert_eq!(
+        connection.poll(Duration::from_secs(2), |_| panic!(), || Ok(Some(()))),
+        Change::Connected
+    );
+    assert_eq!(
+        feedback.update(&expected, |_| Ok(())).unwrap(),
+        expected.cells.len()
+    );
+    assert_eq!(feedback.update(&expected, |_| panic!()).unwrap(), 0);
+    assert_eq!(
+        connection.poll(Duration::from_secs(3), |_| Ok(false), || panic!()),
+        Change::Disconnected
+    );
+    live.connection("apc-mini", false, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    assert!(live.plane.output("apc-mini").is_none());
+    assert_eq!(
+        connection.poll(Duration::from_millis(3999), |_| panic!(), || panic!()),
+        Change::Unchanged
+    );
+    assert_eq!(
+        connection.poll(Duration::from_secs(4), |_| panic!(), || Ok(Some(()))),
+        Change::Connected
+    );
+    live.connection("apc-mini", true, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    assert_eq!(live.plane.output("apc-mini").unwrap().cells, expected.cells);
+    assert_eq!(live.plane.output("apc-mini").unwrap().page, expected.page);
+    feedback.invalidate();
+    assert_eq!(
+        feedback.update(&expected, |_| Ok(())).unwrap(),
+        expected.cells.len()
+    );
+    assert!(
+        feedback
+            .update(&expected, |_| Err("write failed".into()))
+            .is_ok()
+    ); // unchanged suppressed
+    feedback.invalidate();
+    assert!(
+        feedback
+            .update(&expected, |_| Err("write failed".into()))
+            .is_err()
+    );
+    connection.fail(Duration::from_secs(4));
+    assert!(connection.get_mut().is_none());
+    assert_eq!(
+        connection.poll(Duration::from_millis(4999), |_| panic!(), || panic!()),
+        Change::Unchanged
+    );
+    assert_eq!(
+        connection.poll(Duration::from_secs(5), |_| panic!(), || Ok(Some(()))),
+        Change::Connected
+    );
+    assert_eq!(
+        connection.poll(
+            Duration::from_secs(6),
+            |_| Err("probe failed".into()),
+            || panic!()
+        ),
+        Change::Failed("probe failed".into())
+    );
+    assert!(connection.get_mut().is_none());
+    assert_eq!(app.history().len(), history);
+    assert_eq!(app.view_model().performance, before.performance);
+    assert_eq!(app.view_model().transport, before.transport);
+    assert!(Arc::ptr_eq(&retained, &reader.snapshot()));
+    assert_eq!(capture.events.len(), 1);
+    assert!(audio.poll_publish().unwrap().is_none());
+    assert_eq!(live.plane.active_state(), "perform");
+    assert_eq!(
+        live.plane
+            .trace()
+            .iter()
+            .filter(|row| matches!(row.phase, Phase::Entry | Phase::Exit))
+            .count(),
+        2
+    );
+    assert!(
+        live.plane
+            .enqueue("deck", 39, Input::Press(2))
+            .unwrap_err()
+            .contains("backwards")
+    );
+    // A lifecycle pump cannot bypass the production observer for queued work.
+    live.plane.enqueue("deck", 44, Input::Press(2)).unwrap();
+    live.connection("apc-mini", false, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    assert_eq!(capture.events.len(), 2);
+    assert_eq!(app.history().len(), history + 1);
+    wait(&mut audio);
+    capture.finish_clean(&app).unwrap();
+}
+
+#[test]
+fn disconnect_invalidates_queued_input_and_rearms_only_its_pickup() {
+    let queue = MidiInputQueue::default();
+    let old = queue.route("apc-mini");
+    let other = queue.route("other");
+    old.observe(&[0x90, 0, 127]);
+    other.observe(&[0xb0, 48, 127]);
+    old.invalidate();
+    assert!(!queue.next().unwrap().is_current());
+    assert!(queue.next().unwrap().is_current());
+    let fresh = queue.route("apc-mini");
+    fresh.observe(&[0xb0, 48, 0]);
+    assert!(queue.next().unwrap().is_current());
+    let path = root().with_file_name("22-midi-soft-takeover");
+    let song = meldritch_dsl::load_song_directory(path).unwrap();
+    let (mut app, _engine) = controller();
+    let mut controls = song_controls_for_view(&song, None, None, None, None);
+    initialize_pickup_controls(&song, &mut controls);
+    app.set_curated_controls(controls);
+    let mut pickup = MidiPickup::default();
+    let input = |value| meldritch_app::AppInput::SetCuratedControlNormalized {
+        id: "a-level".into(),
+        value,
+    };
+    let physical = |device: &str| meldritch_app::MidiControlInput {
+        device: device.into(),
+        channel: 1,
+        cc: 48,
+        value: 127,
+    };
+    for device in ["apc-mini", "other"] {
+        assert!(
+            pickup
+                .observe(&physical(device), &input(1.0), &app.view_model())
+                .unwrap()
+        );
+    }
+    pickup.disconnect("apc-mini");
+    assert!(
+        !pickup
+            .observe(&physical("apc-mini"), &input(0.0), &app.view_model())
+            .unwrap()
+    );
+    assert!(
+        pickup
+            .observe(&physical("other"), &input(0.0), &app.view_model())
+            .unwrap()
+    );
+    assert!(app.history().is_empty());
+}
+
+#[test]
+fn negative_reconnect_fixture_bounds_failures_and_cleanup() {
+    use meldritch_control::reconnect::{Change, Connection};
+    use std::cell::Cell;
+    let path = root()
+        .with_file_name("23-midi-reconnect")
+        .join("invalid/retries.toml");
+    let fixture: toml::Value = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let attempts = Cell::new(0);
+    let dropped = Cell::new(0);
+    struct Lease<'a>(&'a Cell<usize>);
+    impl Drop for Lease<'_> {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+    let mut connection = Connection::default();
+    for case in fixture["cases"].as_array().unwrap() {
+        let at = Duration::from_millis(case["at"].as_integer().unwrap().try_into().unwrap());
+        let event = case["event"].as_str().unwrap();
+        let change = connection.poll(
+            at,
+            |_| {
+                attempts.set(attempts.get() + 1);
+                match event {
+                    "probe_error" => Err("probe failed".into()),
+                    "disappeared" => Ok(false),
+                    _ => panic!("unexpected probe {event}"),
+                }
+            },
+            || {
+                attempts.set(attempts.get() + 1);
+                match event {
+                    "open_error" => Err("open failed".into()),
+                    "missing" => Ok(None),
+                    "open" => Ok(Some(Lease(&dropped))),
+                    _ => panic!("unexpected open {event}"),
+                }
+            },
+        );
+        let tag = match change {
+            Change::Unchanged => "unchanged",
+            Change::Connected => "connected",
+            Change::Disconnected => "disconnected",
+            Change::Unavailable => "unavailable",
+            Change::Failed(message) => {
+                assert!(message.contains("failed"));
+                "failed"
+            }
+        };
+        assert_eq!(tag, case["result"].as_str().unwrap(), "at {at:?}");
+    }
+    assert_eq!(attempts.get(), 8);
+    assert_eq!(dropped.get(), 2);
+    drop(connection);
+    assert_eq!(dropped.get(), 3);
+}
+
+#[test]
 fn lua_apc_commands_compose_audio_surfaces_and_shared_session() {
     let source = std::fs::read_to_string(root().join("main.lua")).unwrap();
     let project = LuaProject::load(root(), &source).unwrap();

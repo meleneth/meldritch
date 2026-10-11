@@ -31,6 +31,15 @@ impl LuaPerformance {
         u32::try_from(frame)
             .map_err(|_| "legacy session frame exceeds u32::MAX; input rejected before mutation")?;
         self.plane.enqueue(source, frame, Input::Press(cell))?;
+        self.pump(app, audio, capture)
+    }
+
+    fn pump(
+        &mut self,
+        app: &mut AppController,
+        audio: &mut SongAudioHost,
+        capture: &mut PerformanceSessionCapture,
+    ) -> Result<usize> {
         let processed =
             self.plane
                 .pump_with_observer(app, |app, request, result, source, frame| {
@@ -57,5 +66,22 @@ impl LuaPerformance {
         _result: &AppCommandResult,
     ) -> Result<()> {
         self.plane.refresh(app)
+    }
+
+    pub fn connection(
+        &mut self,
+        source: &str,
+        connected: bool,
+        app: &mut AppController,
+        audio: &mut SongAudioHost,
+        capture: &mut PerformanceSessionCapture,
+    ) -> Result<()> {
+        let frame = u64::from(app.view_model().transport.position);
+        self.plane
+            .enqueue(source, frame, Input::Connection(connected))?;
+        // Pending causal work must keep its recording/render observer even
+        // when the next dispatch is a connection lifecycle observation.
+        self.pump(app, audio, capture)?;
+        Ok(())
     }
 }

@@ -21,6 +21,7 @@ export default defineConfig({
         { text: 'Lua APC color demo', link: '/examples/apc-colors' },
         { text: 'Lua APC performance widgets', link: '/examples/lua-apc-performance' },
         { text: 'MIDI fader soft takeover', link: '/examples/midi-soft-takeover' },
+        { text: 'MIDI connection recovery', link: '/examples/midi-reconnect' },
         { text: 'Example capabilities', link: '/examples/capabilities' },
         { text: 'Lua acceptance example', link: '/examples/lua-control-plane' },
       ] },

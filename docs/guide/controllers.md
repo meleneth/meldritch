@@ -13,7 +13,10 @@ application; a controller is an input and presentation surface.
 
 The [Lua example](../examples/lua-control-plane) proves shared authoritative
 state on simulated surfaces, including reconnect restoration. This does not
-establish physical reconnect behavior in the production MIDI host.
+establish hardware-tested reconnect behavior. The production MIDI host now
+includes [paced input/output recovery](../examples/midi-reconnect), stale-input
+rejection, pickup rearming and RGB restoration, accepted with simulated failures.
+Physical unplug/replug and color/listening confirmation remain open.
 
 The Lua performance example wires live APC RGB feedback and enables
 [fader pickup](../examples/midi-soft-takeover). Existing TOML projects can opt

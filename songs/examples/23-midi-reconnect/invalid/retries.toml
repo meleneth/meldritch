@@ -1,0 +1,53 @@
+# Deterministic monotonic milliseconds; errors are recoverable observations.
+[[cases]]
+at = 0
+event = "open_error"
+result = "failed"
+[[cases]]
+at = 999
+event = "open_error"
+result = "unchanged"
+[[cases]]
+at = 1000
+event = "missing"
+result = "unavailable"
+[[cases]]
+at = 1999
+event = "missing"
+result = "unchanged"
+[[cases]]
+at = 2000
+event = "open"
+result = "connected"
+[[cases]]
+at = 2500
+event = "probe_error"
+result = "unchanged"
+[[cases]]
+at = 3000
+event = "probe_error"
+result = "failed"
+[[cases]]
+at = 3500
+event = "open_error"
+result = "unchanged"
+[[cases]]
+at = 4000
+event = "open_error"
+result = "failed"
+[[cases]]
+at = 4500
+event = "open_error"
+result = "unchanged"
+[[cases]]
+at = 5000
+event = "open"
+result = "connected"
+[[cases]]
+at = 6000
+event = "disappeared"
+result = "disconnected"
+[[cases]]
+at = 7000
+event = "open"
+result = "connected"

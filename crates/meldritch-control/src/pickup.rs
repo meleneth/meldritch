@@ -42,6 +42,10 @@ fn target(view: &AppViewModel, id: &str) -> Result<f64> {
 }
 
 impl MidiPickup {
+    /// Release physical ownership without touching authoritative control values.
+    pub fn disconnect(&mut self, device: &str) {
+        self.states.retain(|physical, _| physical.0 != device);
+    }
     fn synchronize(&mut self, view: &AppViewModel, own: Option<&Physical>) {
         // Inspect bounded typed history so away-and-back page/parameter changes
         // cannot disappear between physical observations. A history gap rearms all.

@@ -14,6 +14,7 @@ pub type Result<T> = std::result::Result<T, String>;
 pub mod led_demo;
 pub mod performance;
 pub mod pickup;
+pub mod reconnect;
 pub mod session;
 pub mod song_host;
 const MAX_DEFINITIONS: usize = 64;
@@ -812,10 +813,12 @@ impl ControlPlane {
         if self.queue.len() >= QUEUE_CAPACITY {
             return Err("control input queue full; retry required".into());
         }
-        if frame < self.last_frame {
+        // Availability is not a scheduled musical action. A rewound/stopped
+        // playhead must not prevent a disconnect from removing its surface.
+        if frame < self.last_frame && !matches!(&input, Input::Connection(_)) {
             return Err("input frame moved backwards".into());
         }
-        self.last_frame = frame;
+        self.last_frame = self.last_frame.max(frame);
         self.queue.push_back(Event {
             source: source.into(),
             frame,
