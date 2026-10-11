@@ -92,7 +92,12 @@ editor and versioned instrument Lua exports are documented in
 `INSTRUMENT_EDITOR.md`. Examples 26/27 now have automated headless `accept`
 status for Lua piano-roll gestures, typed note edits, publication and independent
 Lua pattern reload; read `PIANO_ROLL.md`. Physical APC gesture/LED/listening
-acceptance remains pending. Examples 28 and 30 remain `design`.
+acceptance remains pending. Example 28 accepts fader/mixer authoring headlessly; example 30 remains `design`.
+Example 32 integrates the pinned mi-plaits-dsp crate's FM/harmonic module with
+headless editor/publication/persistence and port-reference/allocation tests.
+Read `PLAITS.md`: native f32 and Plaits RNG are authorized exceptions; the global
+preferred/default omitted sample rate is 48 kHz. Other Plaits engines and physical
+listening remain unsupported/unverified.
 Example 31 adds headless drum-editor acceptance using the existing one-shot
 sampler and explicit sample-slot note commands; read `DRUM_EDITOR.md`. Its kit
 is generated and 909-inspired, not a native TR-909 synthesis engine.

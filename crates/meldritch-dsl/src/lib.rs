@@ -27,9 +27,10 @@ pub use song::{
     PerformanceLaneDefinition, PerformanceModifierDefinition, PerformancePageDefinition,
     PerformancePageStripDefinition, PerformancePatternBankDefinition, PerformanceUiDefinition,
     PerformanceUiKeyHintDefinition, PerformanceUiSectionDefinition, PerformanceUiSectionKind,
-    SampleBankDefinition, SamplePlaybackMode, SampleSliceDefinition, SampleSlotDefinition,
-    SamplerDefinition, SamplerPitchEnvelopeDefinition, SignalType, SongDiagnostic, SongLoadError,
-    SynthDefinition, TrackDefinition, ValidatedSong, load_song_directory, note_name,
+    PlaitsModel, PlaitsSettings, SampleBankDefinition, SamplePlaybackMode, SampleSliceDefinition,
+    SampleSlotDefinition, SamplerDefinition, SamplerPitchEnvelopeDefinition, SignalType,
+    SongDiagnostic, SongLoadError, SynthDefinition, TrackDefinition, ValidatedSong,
+    load_song_directory, note_name,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -962,6 +963,7 @@ struct RawProject {
 struct RawProjectMeta {
     name: String,
     bpm: f64,
+    #[serde(default = "meldritch_core::default_sample_rate")]
     sample_rate: SampleRate,
     seed: Option<u64>,
 }

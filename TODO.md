@@ -14,7 +14,8 @@ has automated headless acceptance; example 29 has its instrument persistence
 foundation, with composed musical authoring still unfinished. The
 [Lua piano roll](PIANO_ROLL.md) now accepts examples 26/27 headlessly; examples
 28 now accepts [editable faders and mixer](CONTROL_ASSIGNMENTS.md) headlessly;
-30 remains a design contract. No new synthesis dependency is required.
+30 remains a design contract. Example 32 adds the pinned Plaits crate subset;
+see [PLAITS.md](PLAITS.md).
 
 - [x] Inventory actual synthesis/compiler, notes/commands, MIDI, Lua, mixer and
   publication boundaries; verify Plaits absence and audit the proposed port
@@ -41,6 +42,9 @@ foundation, with composed musical authoring still unfinished. The
   cutoff/resonance, track volume/pan and single-track delay mix/feedback;
   shared Lua/TUI inspection, pickup rearming, audible source edits and versioned
   Lua mapping/value save/reload with unchanged TOML and journals
+- [x] Example 32: pinned crate FM/harmonic typed module, editor, Lua persistence,
+  source/publication tests, direct port-reference blocks and allocation checks;
+  authorized native f32/RNG exceptions, global omitted-rate default 48 kHz
 - [ ] Example 30: compose the supported oscillator/ADSR/VCA/low-pass patch;
   inspect typed cables, reject invalid/unsupported graphs and export/reload
 - [ ] Example 29: complete composed round-trip across patterns, synths, cables,
@@ -85,10 +89,17 @@ example 09 still validates. Formatting, diff checks, the documentation build
 and workspace Clippy pass with the existing allowances above. Physical
 faders/LEDs/listening and composed example 29 persistence remain open.
 
+Plaits verification: the full workspace suite passed (384 tests before the two
+additional focused loader/keyboard tests, which also pass). Workspace Clippy,
+formatting and diff checks pass with the existing allowances. Direct pinned-port
+main/aux comparison and zero-allocation construction/processing are headless
+checks, not independent firmware/hardware certification. Physical listening and
+additional engines remain open.
+
 Done when a musician can create/edit these example instruments, patterns,
 patches, mappings and lane levels, save readable Lua, and reload equivalent
 music without hardware or replaying a session. Existing-module authoring comes
-before Plaits integration, a generalized editor, bus routing, full runtime
+before a generalized editor, bus routing, full runtime
 replay or scheduler work. Necessary authoring clock/capture correctness remains
 part of each slice. Physical acceptance stays pending until actually tested.
 

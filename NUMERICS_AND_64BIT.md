@@ -113,6 +113,15 @@ Use `u64` for:
 - artifact ranges
 - deterministic scheduling
 
+The pinned Plaits crate is an explicitly authorized external DSP exception:
+its engine state and blocks use f32, converted once at the module's f64 output.
+Authored parameters and the rest of the render graph retain f64. No claim is
+made that conversion gives Plaits f64 internals. See [PLAITS.md](PLAITS.md).
+
+The global preferred sample rate is 48,000 Hz (`DEFAULT_SAMPLE_RATE`). Omitted
+song/project rates use it; explicit rates remain authored values. Device output
+requests the authored rate and reports unsupported hardware rates.
+
 Use `f32` only for:
 - device APIs that require it
 - optional low-memory/performance build profiles

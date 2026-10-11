@@ -214,6 +214,14 @@ impl AppController {
                 };
                 InstrumentValue::Number(value + step * f64::from(delta))
             }
+            InstrumentValue::Model(value) => InstrumentValue::Model(if delta.rem_euclid(2) == 0 {
+                value
+            } else {
+                match value {
+                    meldritch_dsl::PlaitsModel::Fm => meldritch_dsl::PlaitsModel::Harmonic,
+                    meldritch_dsl::PlaitsModel::Harmonic => meldritch_dsl::PlaitsModel::Fm,
+                }
+            }),
             InstrumentValue::Waveform(value) => {
                 let choices = [
                     InstrumentWaveform::Sine,

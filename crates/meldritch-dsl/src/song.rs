@@ -4,6 +4,9 @@ use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+mod plaits;
+use plaits::validate_plaits;
+pub use plaits::*;
 mod instrument;
 pub use instrument::*;
 mod notes;
@@ -27,6 +30,7 @@ pub enum ModuleKind {
     LowPass,
     TempoDelay,
     AudioOutput,
+    Plaits,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -51,6 +55,7 @@ impl PatchInput {
 pub struct ModuleDefinition {
     id: String,
     kind: ModuleKind,
+    plaits: Option<PlaitsSettings>,
     waveform: Option<String>,
     frequency_hz: Option<f64>,
     channels: Option<u16>,
@@ -74,6 +79,11 @@ impl ModuleDefinition {
     #[must_use]
     pub const fn kind(&self) -> ModuleKind {
         self.kind
+    }
+
+    #[must_use]
+    pub const fn plaits(&self) -> Option<PlaitsSettings> {
+        self.plaits
     }
 
     #[must_use]
@@ -1379,6 +1389,7 @@ struct RawPerformance {
     id: String,
     title: String,
     bpm: f64,
+    #[serde(default = "meldritch_core::default_sample_rate")]
     sample_rate: u32,
 }
 
@@ -1635,6 +1646,10 @@ struct RawModule {
     id: String,
     #[serde(rename = "type")]
     kind: String,
+    model: Option<PlaitsModel>,
+    harmonics: Option<f64>,
+    timbre: Option<f64>,
+    morph: Option<f64>,
     waveform: Option<String>,
     frequency_hz: Option<f64>,
     channels: Option<u16>,
@@ -3182,6 +3197,7 @@ fn load_synth(path: &Path) -> Result<SynthDefinition, SongLoadError> {
         }
         let kind = match module.kind.as_str() {
             "oscillator" => ModuleKind::Oscillator,
+            "plaits" => ModuleKind::Plaits,
             "adsr" => ModuleKind::Adsr,
             "vca" => ModuleKind::Vca,
             "low_pass" => ModuleKind::LowPass,
@@ -3262,6 +3278,7 @@ fn load_synth(path: &Path) -> Result<SynthDefinition, SongLoadError> {
             }
         }
         modules.push(ModuleDefinition {
+            plaits: validate_plaits(path, kind, &module)?,
             id: module.id,
             kind,
             waveform: module.waveform,
@@ -3396,6 +3413,7 @@ fn load_dsp(path: &Path) -> Result<DspDefinition, SongLoadError> {
             }
         }
         modules.push(ModuleDefinition {
+            plaits: validate_plaits(path, kind, &module)?,
             id: module.id,
             kind,
             waveform: module.waveform,
@@ -3715,12 +3733,16 @@ fn resolve_port(
         )
     })?;
     let signal = match (*kind, direction, port) {
-        (ModuleKind::Oscillator, PortDirection::Output, "audio")
+        (ModuleKind::Plaits, PortDirection::Output, "audio")
+        | (ModuleKind::Plaits, PortDirection::Output, "aux")
+        | (ModuleKind::Oscillator, PortDirection::Output, "audio")
         | (ModuleKind::Vca, PortDirection::Output, "audio")
         | (ModuleKind::LowPass, PortDirection::Output, "audio")
         | (ModuleKind::TempoDelay, PortDirection::Output, "audio")
         | (ModuleKind::AudioOutput, PortDirection::Input, "audio") => SignalType::Audio,
-        (ModuleKind::Oscillator, PortDirection::Input, "pitch") => SignalType::Pitch,
+        (ModuleKind::Oscillator | ModuleKind::Plaits, PortDirection::Input, "pitch") => {
+            SignalType::Pitch
+        }
         (ModuleKind::Adsr, PortDirection::Input, "gate") => SignalType::Gate,
         (ModuleKind::Adsr, PortDirection::Output, "control")
         | (ModuleKind::Vca, PortDirection::Input, "level") => SignalType::Control,
@@ -4642,6 +4664,12 @@ fn fingerprint_song(
         for module in &synth.modules {
             fingerprint.string(&module.id);
             fingerprint.u64(module.kind as u64);
+            if let Some(p) = module.plaits {
+                fingerprint.string(p.model.name());
+                fingerprint.u64(p.harmonics.to_bits());
+                fingerprint.u64(p.timbre.to_bits());
+                fingerprint.u64(p.morph.to_bits());
+            }
             fingerprint.optional_string(module.waveform.as_deref());
             fingerprint.u64(module.frequency_hz.map_or(0, f64::to_bits));
             fingerprint.u64(u64::from(module.channels.unwrap_or(0)));

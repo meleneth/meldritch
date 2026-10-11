@@ -30,6 +30,12 @@ definition using optional `slot` metadata and a typed `insert_sample` command.
 Synth exports are unchanged; unsupported slice/root/transpose edits reject.
 See [DRUM_EDITOR.md](DRUM_EDITOR.md) for its generated kit and persistence limits.
 
+Example 32 adds the [Plaits typed module](PLAITS.md): `type="plaits"`, named
+`model="fm"` or `"harmonic"`, and `harmonics`, `timbre`, `morph` in 0..1.
+It uses the existing instrument Lua export and explicit pitch/main/aux ports.
+Omitted performance/project sample rates now default to 48 kHz; explicit rates
+remain authored, while this initial Plaits subset requires 48 kHz.
+
 ## Example-first rule
 
 For every capability:

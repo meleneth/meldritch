@@ -309,6 +309,7 @@ pub struct CompiledNotePatch {
     sample_rate: u32,
     channels: u16,
     polyphony: u16,
+    plaits: Option<(meldritch_dsl::PlaitsSettings, bool)>,
     waveform: Waveform,
     envelope: AdsrSettings,
     filter: Option<CompiledNoteFilter>,
@@ -735,7 +736,7 @@ impl CompiledNotePatch {
             frames: frame_count,
         })?;
         let mut block = AudioBlock::silent(self.channels, frames);
-        let mut oscillator = Oscillator::new(self.waveform);
+        let mut oscillator = NoteOscillator::new(self.waveform, self.plaits);
         let mut envelope = AdsrEnvelope::new(self.envelope, self.sample_rate);
         let mut filter = StateVariableFilter::new();
         let mut frequency = 440.0;
@@ -839,7 +840,7 @@ impl CompiledNotePatch {
                 let mut envelope = AdsrEnvelope::new(self.envelope, self.sample_rate);
                 envelope.note_on();
                 voices.push(CompiledNoteVoice {
-                    oscillator: Oscillator::new(self.waveform),
+                    oscillator: NoteOscillator::new(self.waveform, self.plaits),
                     envelope,
                     filter: StateVariableFilter::new(),
                     frequency: midi_frequency(event.note),
@@ -878,8 +879,27 @@ impl CompiledNotePatch {
     }
 }
 
-struct CompiledNoteVoice {
+struct NoteOscillator {
     oscillator: Oscillator,
+    plaits: Option<crate::plaits::PlaitsSource>,
+}
+impl NoteOscillator {
+    fn new(waveform: Waveform, settings: Option<(meldritch_dsl::PlaitsSettings, bool)>) -> Self {
+        Self {
+            oscillator: Oscillator::new(waveform),
+            plaits: settings.map(|(p, aux)| crate::plaits::PlaitsSource::new(p, aux)),
+        }
+    }
+    fn next(&mut self, frequency: f64, sample_rate: u32) -> f64 {
+        match &mut self.plaits {
+            Some(p) => p.next(frequency),
+            None => self.oscillator.next(frequency, sample_rate),
+        }
+    }
+}
+
+struct CompiledNoteVoice {
+    oscillator: NoteOscillator,
     envelope: AdsrEnvelope,
     filter: StateVariableFilter,
     frequency: f64,
@@ -1128,7 +1148,30 @@ fn compile_note_track_for_pattern(
             .ok_or_else(|| SongRenderError::MissingSynth {
                 id: track.synth_id().to_owned(),
             })?;
-    let oscillator = exactly_one_module(synth.modules(), ModuleKind::Oscillator)?;
+    let sources = synth
+        .modules()
+        .iter()
+        .filter(|m| matches!(m.kind(), ModuleKind::Oscillator | ModuleKind::Plaits))
+        .collect::<Vec<_>>();
+    let oscillator = match sources.as_slice() {
+        [source] => *source,
+        [] => {
+            return Err(SongRenderError::MissingModule {
+                kind: ModuleKind::Oscillator,
+            });
+        }
+        _ => {
+            return Err(SongRenderError::MultipleModules {
+                kind: ModuleKind::Oscillator,
+            });
+        }
+    };
+    if oscillator.kind() == ModuleKind::Plaits && song.performance().sample_rate() != 48_000 {
+        return Err(SongRenderError::UnsupportedSampleRate {
+            found: song.performance().sample_rate(),
+            expected: 48_000,
+        });
+    }
     let envelope = exactly_one_module(synth.modules(), ModuleKind::Adsr)?;
     let amplifier = exactly_one_module(synth.modules(), ModuleKind::Vca)?;
     let output = exactly_one_module(synth.modules(), ModuleKind::AudioOutput)?;
@@ -1140,7 +1183,21 @@ fn compile_note_track_for_pattern(
         ),
         ("input.gate".to_owned(), format!("{}.gate", envelope.id())),
         (
-            format!("{}.audio", oscillator.id()),
+            format!(
+                "{}.{}",
+                oscillator.id(),
+                if oscillator.kind() == ModuleKind::Plaits
+                    && synth
+                        .cables()
+                        .iter()
+                        .any(|c| c.from() == format!("{}.aux", oscillator.id())
+                            && c.to() == format!("{}.audio", amplifier.id()))
+                {
+                    "aux"
+                } else {
+                    "audio"
+                }
+            ),
             format!("{}.audio", amplifier.id()),
         ),
         (
@@ -1190,6 +1247,15 @@ fn compile_note_track_for_pattern(
         sample_rate: song.performance().sample_rate(),
         channels: output.channels().unwrap_or(1),
         polyphony: synth.polyphony(),
+        plaits: oscillator.plaits().map(|settings| {
+            (
+                settings,
+                synth.cables().iter().any(|c| {
+                    c.from() == format!("{}.aux", oscillator.id())
+                        && c.to() == format!("{}.audio", amplifier.id())
+                }),
+            )
+        }),
         waveform,
         envelope: AdsrSettings {
             attack_seconds: envelope.attack().unwrap_or(0.0),

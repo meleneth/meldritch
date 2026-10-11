@@ -21,6 +21,10 @@ pub enum InstrumentParameter {
     Release,
     CutoffHz,
     Resonance,
+    Model,
+    Harmonics,
+    Timbre,
+    Morph,
 }
 
 impl InstrumentParameter {
@@ -33,6 +37,10 @@ impl InstrumentParameter {
             Self::Release => "release",
             Self::CutoffHz => "cutoff_hz",
             Self::Resonance => "resonance",
+            Self::Model => "model",
+            Self::Harmonics => "harmonics",
+            Self::Timbre => "timbre",
+            Self::Morph => "morph",
         }
     }
 }
@@ -64,6 +72,7 @@ impl InstrumentWaveform {
 pub enum InstrumentValue {
     Number(f64),
     Waveform(InstrumentWaveform),
+    Model(PlaitsModel),
 }
 
 impl InstrumentValue {
@@ -104,6 +113,7 @@ pub enum InstrumentRange {
         minimum_inclusive: bool,
     },
     Waveform,
+    Model,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -150,6 +160,46 @@ impl ValidatedSong {
                             None,
                             true,
                         )],
+                    )
+                }
+                ModuleKind::Plaits => {
+                    let p = module.plaits.unwrap();
+                    (
+                        "plaits",
+                        vec![
+                            (
+                                InstrumentParameter::Model,
+                                InstrumentValue::Model(p.model),
+                                "choice",
+                                0.0,
+                                None,
+                                true,
+                            ),
+                            (
+                                InstrumentParameter::Harmonics,
+                                InstrumentValue::Number(p.harmonics),
+                                "normalized",
+                                0.0,
+                                Some(1.0),
+                                true,
+                            ),
+                            (
+                                InstrumentParameter::Timbre,
+                                InstrumentValue::Number(p.timbre),
+                                "normalized",
+                                0.0,
+                                Some(1.0),
+                                true,
+                            ),
+                            (
+                                InstrumentParameter::Morph,
+                                InstrumentValue::Number(p.morph),
+                                "normalized",
+                                0.0,
+                                Some(1.0),
+                                true,
+                            ),
+                        ],
                     )
                 }
                 ModuleKind::Adsr => (
@@ -215,6 +265,8 @@ impl ValidatedSong {
             for (parameter, value, unit, minimum, maximum, minimum_inclusive) in parameters {
                 let range = if parameter == InstrumentParameter::Waveform {
                     InstrumentRange::Waveform
+                } else if parameter == InstrumentParameter::Model {
+                    InstrumentRange::Model
                 } else {
                     InstrumentRange::Number {
                         minimum,
@@ -271,6 +323,7 @@ impl ValidatedSong {
             })?;
         match (&descriptor.range, &edit.value) {
             (InstrumentRange::Waveform, InstrumentValue::Waveform(_)) => {}
+            (InstrumentRange::Model, InstrumentValue::Model(_)) => {}
             (
                 InstrumentRange::Number {
                     minimum,
@@ -314,6 +367,9 @@ impl ValidatedSong {
             (InstrumentParameter::Waveform, InstrumentValue::Waveform(value)) => {
                 module.waveform = Some(value.name().to_owned())
             }
+            (InstrumentParameter::Model, InstrumentValue::Model(value)) => {
+                module.plaits.as_mut().unwrap().model = *value
+            }
             (parameter, InstrumentValue::Number(value)) => match parameter {
                 InstrumentParameter::Attack => module.attack = Some(*value),
                 InstrumentParameter::Decay => module.decay = Some(*value),
@@ -321,6 +377,11 @@ impl ValidatedSong {
                 InstrumentParameter::Release => module.release = Some(*value),
                 InstrumentParameter::CutoffHz => module.cutoff_hz = Some(*value),
                 InstrumentParameter::Resonance => module.resonance = Some(*value),
+                InstrumentParameter::Harmonics => {
+                    module.plaits.as_mut().unwrap().harmonics = *value
+                }
+                InstrumentParameter::Timbre => module.plaits.as_mut().unwrap().timbre = *value,
+                InstrumentParameter::Morph => module.plaits.as_mut().unwrap().morph = *value,
                 _ => unreachable!(),
             },
             _ => unreachable!(),

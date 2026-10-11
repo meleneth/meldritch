@@ -585,6 +585,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dyn-clone"
+version = "1.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
 name = "either"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1173,6 +1179,7 @@ dependencies = [
  "meldritch-audio",
  "meldritch-core",
  "meldritch-dsl",
+ "mi-plaits-dsp",
 ]
 
 [[package]]
@@ -1206,6 +1213,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "mi-plaits-dsp"
+version = "0.1.0"
+source = "git+https://github.com/sourcebox/mi-plaits-dsp-rs?rev=effe9864bb67d23aaf5724722ac1ce165d4e7c9f#effe9864bb67d23aaf5724722ac1ce165d4e7c9f"
+dependencies = [
+ "dyn-clone",
+ "num-traits",
+ "spin",
 ]
 
 [[package]]
@@ -1355,6 +1372,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -2070,6 +2088,15 @@ name = "smallvec"
 version = "1.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
+
+[[package]]
+name = "spin"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0134f9043ed38b087ac4f7d4af44c79e2c9e5094421fe3164f435ce585953b10"
+dependencies = [
+ "lock_api",
+]
 
 [[package]]
 name = "static_assertions"

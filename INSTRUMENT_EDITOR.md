@@ -4,8 +4,9 @@ The first authoring slice edits existing oscillator, ADSR and low-pass parameter
 in a validated `.mlsynth`. Rust owns the song source; keyboard and Lua commands
 both change that source through the same typed validation and existing compiler.
 TOML songs remain loadable. [The Lua piano roll](PIANO_ROLL.md) now edits the
-initial note-pattern subset. Patch construction, mapping editing and Plaits
-integration remain future work.
+initial note-pattern subset. [Fader/mixer assignments](CONTROL_ASSIGNMENTS.md)
+and the [Plaits FM/harmonic module](PLAITS.md) are implemented; patch construction
+is the next slice.
 
 Start the small supported bass patch without a physical controller:
 
@@ -24,6 +25,8 @@ Ctrl-Tab retains the existing cockpit mode command.
 
 | Module | Editable parameter | Authored type and range |
 | --- | --- | --- |
+| plaits | model | `fm`, `harmonic` |
+| plaits | harmonics, timbre, morph | finite normalized values, 0 through 1 |
 | oscillator | waveform | `sine`, `triangle`, `saw`, `pulse`, `square` |
 | ADSR | attack, decay, release | finite seconds, >= 0 |
 | ADSR | sustain | finite level, 0 through 1 |

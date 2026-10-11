@@ -13,6 +13,12 @@ pub type Frame = u64;
 pub type Frames = u32;
 pub type SampleRate = u32;
 
+/// Project-wide preferred rate. Explicit authored rates remain supported.
+pub const DEFAULT_SAMPLE_RATE: SampleRate = 48_000;
+pub const fn default_sample_rate() -> SampleRate {
+    DEFAULT_SAMPLE_RATE
+}
+
 macro_rules! id_type {
     ($name:ident) => {
         #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

@@ -7,6 +7,8 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+// Worker-owned compiled plans retain inline values; no callback dispatch here.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum CompiledSongPatch {
     Delayed(crate::song_render::CompiledDelayedNotePatch),

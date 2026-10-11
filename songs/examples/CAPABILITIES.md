@@ -33,6 +33,7 @@ Status values:
 | `28-author-fader-mappings` | Lua/TUI fader assignments, source-owned cutoff/resonance, track volume/stereo balance and single-track delay mix/feedback; pickup, typed edits, dirty ranges, publication, projections and deterministic Lua reload/render accepted headlessly; physical faders/LEDs/listening pending | accept |
 | `29-lua-authored-roundtrip` | Separate instrument and note-pattern v1 Lua export/reload, confined base validation and atomic saves accepted via examples 25/26; composed patterns/instruments/cables/mappings/mixer export unimplemented | compile |
 | `30-compose-typed-patch` | Existing oscillator/ADSR/VCA/low-pass graph composition, inspection and Lua persistence contract; unimplemented | design |
+| `32-plaits-module` | Pinned crate FM/harmonic module, typed editor/Lua parameters, worker publication, exact Lua round-trip, main/aux port-reference and allocation tests; physical listening pending | accept |
 | `31-apc-drum-editor` | Lua drum rows, one-shot slot note commands, tap toggles/velocity/pages, generated 909-inspired kit, TUI/publication and independent Lua reload/render accepted headlessly; native TR-909 engine and physical acceptance pending | accept |
 
 An implementation may advance a row only when all earlier statuses for that row

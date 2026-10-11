@@ -139,6 +139,11 @@ authoring accepts lane level; pan/bus authoring needs its own later example.
 
 ## Plaits dependency investigation
 
+This section records the earlier inventory. Current integration supersedes the
+old defer decision below: [PLAITS.md](PLAITS.md) documents the pinned crate,
+verified FM/harmonic subset and authorized f32/RNG exceptions. Other upstream
+engines remain unsupported.
+
 All repository files/manifests, Cargo.lock and `cargo tree --locked --offline`
 were inspected: no Plaits dependency, vendored implementation or Rust clone is
 present. SyncFold and the polyphonic voice bank are MELDRITCH implementations,

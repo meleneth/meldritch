@@ -2,6 +2,11 @@
 
 These are non-negotiable. If an implementation choice violates one of these, the choice loses.
 
+Authorized Plaits exception: the pinned upstream crate retains its native f32
+DSP behind an explicit f64 module boundary. Plaits RNG is exempt from exact
+sample determinism; authored source fingerprints and all other engines remain
+deterministic. The first FM/harmonic subset uses no RNG. See [PLAITS.md](PLAITS.md).
+
 ## 1. The audio callback is sacred
 
 The realtime audio callback must not:

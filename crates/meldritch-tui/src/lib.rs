@@ -536,6 +536,7 @@ fn draw_instrument_editor(
         let value = match &parameter.value {
             InstrumentValue::Number(n) => format!("{n:.5}"),
             InstrumentValue::Waveform(w) => w.name().to_owned(),
+            InstrumentValue::Model(m) => m.name().to_owned(),
         };
         let range = match &parameter.range {
             InstrumentRange::Number {
@@ -549,6 +550,7 @@ fn draw_instrument_editor(
                 maximum.map_or_else(|| "inf".into(), |n| n.to_string())
             ),
             InstrumentRange::Waveform => "sine/triangle/saw/pulse/square".into(),
+            InstrumentRange::Model => "fm/harmonic".into(),
         };
         lines.push(format!(
             "{} {}.{:?} = {} {} [{}]",

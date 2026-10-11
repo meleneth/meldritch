@@ -55,6 +55,7 @@ pub fn encode_instrument(view: &InstrumentEditorView) -> Result<String> {
         let value = match parameter.value {
             InstrumentValue::Number(number) if number.is_finite() => format!("{number:?}"),
             InstrumentValue::Waveform(waveform) => quote(waveform.name()),
+            InstrumentValue::Model(model) => quote(model.name()),
             _ => return Err("cannot export nonfinite instrument value".into()),
         };
         text.push_str(&format!(
