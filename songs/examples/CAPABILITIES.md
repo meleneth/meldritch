@@ -10,7 +10,7 @@ Status values:
 
 | Example | Capability | Status |
 | --- | --- | --- |
-| `34-empty-project-patch` | Empty/legacy opening, app-owned source, native mono-patch editing and independent note-pattern authoring checked headlessly; composition bindings/playback and self-contained save/reopen unfinished | design |
+| `34-empty-project-patch` | Empty/legacy opening, app-owned source, native patch/pattern authoring and independent mono pitch/gate bindings checked headlessly through worker/publication/callback; native device playback, runtime overlay/capture and self-contained save/reopen unfinished | design |
 | `00-minimal-synth` | Explicit oscillator-to-output patch | accept |
 | `01-synth-note-pattern` | Note pattern drives pitch and gate | accept |
 | `02-synth-parameter-pattern` | Pattern drives a synth parameter port | accept |

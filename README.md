@@ -17,9 +17,13 @@ palette definition with inspectable pitch/gate inputs, modules and cables.
 **Ctrl-E** opens parameters and **Ctrl-G** opens typed patch drafts. **c** creates
 an independent one-bar pattern; arrows move its cursor, Enter inserts/selects
 notes, **[ ]** change duration, **- +** change velocity, and Delete removes notes.
-Esc closes an editor; **Ctrl-N** reopens the pattern. Construction is currently
-in memory only; quitting discards it. Routing, playback/save from empty and stateful graph transitions remain
-proposed. Existing commands remain valid.
+Esc closes an editor; **Ctrl-N** reopens the pattern. With a patch and pattern
+selected, **v** creates an unbound mono instance; **p** and **g** separately
+connect/disconnect pattern pitch and gate. Its inspector shows pitch's C3 fallback
+and gate's low fallback. These bindings render headlessly through the existing
+engine; device playback from this cockpit remains unfinished. Construction is
+in memory only; quitting discards it. Runtime controls, save/reopen and stateful
+graph transitions remain proposed. Existing commands remain valid.
 Git is allowed as a required installed dependency; opening needs no repository
 or initialization. Empty opening creates no files or audio/MIDI streams.
 

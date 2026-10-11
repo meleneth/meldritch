@@ -1,0 +1,9 @@
+# Valid typed request syntax; reject because pattern-1 is a looping 3840-tick source.
+id = "voice-instance-1"
+synth = "voice-1"
+length_ticks = 1920
+looped = true
+initial_pitch = 48
+level = 0.8
+pitch_pattern = "pattern-1"
+gate_pattern = "pattern-1"

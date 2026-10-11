@@ -1,0 +1,10 @@
+# Typed composition request fixture, not a project save format.
+# Each input binding is independent; an omitted binding resolves to its fallback.
+id = "voice-instance-1"
+synth = "voice-1"
+length_ticks = 3840
+looped = true
+initial_pitch = 48
+level = 0.8
+pitch_pattern = "pattern-1"
+gate_pattern = "pattern-1"

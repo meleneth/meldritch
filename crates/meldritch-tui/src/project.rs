@@ -1,8 +1,60 @@
 //! Silent project palette construction through the existing typed dispatcher.
 use super::*;
 use meldritch_app::{
-    AppCommand, AppController, PatchCreation, ProjectDirectory, ProjectOverview, ValidatedSong,
+    AppCommand, AppController, PatchCreation, PatternSignal, PatternVoiceDefinition,
+    ProjectDirectory, ProjectOverview, ValidatedSong,
 };
+
+/// Composition relationships are deliberate typed actions, separate from creation.
+pub fn project_binding_command(
+    key: KeyEvent,
+    view: &AppViewModel,
+    source: &ValidatedSong,
+) -> Option<AppCommand> {
+    if key.kind != KeyEventKind::Press
+        || key.modifiers != KeyModifiers::NONE
+        || view
+            .instrument_editor
+            .as_ref()
+            .is_some_and(|editor| editor.visible)
+        || view
+            .palette_pattern_editor
+            .as_ref()
+            .is_some_and(|editor| editor.visible)
+    {
+        return None;
+    }
+    let synth = &view.instrument_editor.as_ref()?.synth;
+    let pattern = &view.palette_pattern_editor.as_ref()?.pattern;
+    let id = format!("{synth}-instance");
+    if key.code == KeyCode::Char('v') {
+        return Some(AppCommand::CreatePatternVoice(PatternVoiceDefinition {
+            id,
+            synth: synth.clone(),
+            length_ticks: pattern.length_ticks,
+            looped: pattern.looped,
+            initial_pitch: 48,
+            level: 0.8,
+            pitch_pattern: None,
+            gate_pattern: None,
+        }));
+    }
+    let voice = source.pattern_voices().get(&id)?;
+    let (signal, binding) = match key.code {
+        KeyCode::Char('p') => (PatternSignal::Pitch, &voice.pitch_pattern),
+        KeyCode::Char('g') => (PatternSignal::Gate, &voice.gate_pattern),
+        _ => return None,
+    };
+    Some(AppCommand::BindPatternVoice {
+        voice: id,
+        signal,
+        pattern: if binding.as_deref() == Some(&pattern.id) {
+            None
+        } else {
+            Some(pattern.id.clone())
+        },
+    })
+}
 
 /// Only a deliberate key press creates a definition; repeats/releases do not.
 pub fn project_construction_command(key: KeyEvent, source: &ValidatedSong) -> Option<AppCommand> {
@@ -139,7 +191,7 @@ pub fn draw_project_pattern(
             "Pattern {} · {} ticks · loop {}",
             editor.pattern.id, editor.pattern.length_ticks, editor.pattern.looped
         )),
-        Line::from("Outputs: pitch : Pitch    gate : Gate (unconnected)"),
+        Line::from("Outputs: pitch : Pitch    gate : Gate (independent bindings)"),
         Line::from(format!(
             "Cursor: tick {} · {}   Selected: {}",
             editor.cursor_tick,
@@ -148,7 +200,16 @@ pub fn draw_project_pattern(
         )),
         Line::from("Arrows cursor · Enter insert/select · [ ] duration · - + velocity"),
         Line::from("Delete note · Esc/Ctrl-N close · Ctrl-E patch parameters"),
-        Line::from("Unsaved project; no composition bindings or playback yet"),
+        Line::from(
+            if editor.source.pattern_voices().values().any(|voice| {
+                voice.pitch_pattern.as_deref() == Some(&editor.pattern.id)
+                    || voice.gate_pattern.as_deref() == Some(&editor.pattern.id)
+            }) {
+                "Unsaved project · Bindings at overview · Device playback pending"
+            } else {
+                "Unsaved source: no composition bindings · Device playback pending"
+            },
+        ),
         Line::from(status.to_owned()),
     ];
     for note in &editor.pattern.notes {
@@ -265,14 +326,39 @@ fn draw_project_construction_selected(
     let mut lines = vec![
         Line::from(view.root.display().to_string()),
         Line::from(format!(
-            "Instruments: {}    Patterns: {}    No composition loaded",
+            "Instruments: {}    Patterns: {}    Voices: {}",
             source.synths().len(),
-            source.note_patterns().len()
+            source.note_patterns().len(),
+            source.pattern_voices().len(),
         )),
         Line::from("n: voice · c: pattern · Ctrl-E/N: editors · q/Esc: quit"),
         Line::from("Unsaved construction: quitting discards it"),
         Line::from(status.to_owned()),
     ];
+    if !source.pattern_voices().is_empty() {
+        lines.push(Line::from(
+            "v: instance · p/g: connect/disconnect selected pattern pitch/gate",
+        ));
+        for voice in source.pattern_voices().values() {
+            lines.push(Line::from(format!(
+                "{} ({}) · level {:.2}",
+                voice.id, voice.synth, voice.level
+            )));
+            lines.push(Line::from(format!(
+                "  pitch: {}.pitch -> input.pitch (fallback {})",
+                voice.pitch_pattern.as_deref().unwrap_or("unbound"),
+                meldritch_app::note_name(voice.initial_pitch)
+            )));
+            lines.push(Line::from(format!(
+                "  gate: {}.gate -> input.gate (fallback low)",
+                voice.gate_pattern.as_deref().unwrap_or("unbound")
+            )));
+        }
+    } else {
+        lines.push(Line::from(
+            "v: create unbound instance after selecting a patch and pattern",
+        ));
+    }
     let graph = selected.and_then(|id| source.synths().get(id)).or_else(|| {
         source.synths().values().max_by_key(|g| {
             g.id()
@@ -375,13 +461,23 @@ pub fn run_empty_project(project: &ProjectDirectory) -> io::Result<()> {
                     return Ok(());
                 }
                 if let Some(command) =
+                    project_binding_command(key, &model, &app.authored_source().unwrap())
+                {
+                    status = match app.dispatch(command) {
+                        Ok(result) => format!(
+                            "{} · Device playback is not implemented",
+                            command_result_text(&result)
+                        ),
+                        Err(e) => format!("Binding rejected; source retained: {e:?}"),
+                    };
+                } else if let Some(command) =
                     project_pattern_command(key, &model, &app.authored_source().unwrap())
                 {
                     status = match app.dispatch(command) {
                         Ok(AppCommandResult::PatternSaveRequested) => {
                             "New-project saving is not implemented; edits retained in memory".into()
                         }
-                        Ok(_) => "Accepted pattern action; no composition bindings yet".into(),
+                        Ok(_) => "Accepted pattern action; project remains unsaved".into(),
                         Err(e) => format!("Note rejected; source retained: {e:?}"),
                     };
                 } else if !editing
@@ -428,6 +524,105 @@ pub fn run_empty_project(project: &ProjectDirectory) -> io::Result<()> {
 mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
+
+    #[test]
+    fn native_composition_bindings_are_deliberate_independent_and_inspectable() {
+        let project = meldritch_dsl::load_project_directory(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../songs/examples/34-empty-project-patch"),
+        )
+        .unwrap();
+        let (mut app, _engine) = AppController::new_empty_project(&project).unwrap();
+        app.dispatch(AppCommand::CreatePatch(PatchCreation::mono_voice(
+            "voice-1",
+        )))
+        .unwrap();
+        app.dispatch(AppCommand::SelectInstrument("voice-1".into()))
+            .unwrap();
+        app.dispatch(AppCommand::CreatePalettePattern {
+            id: "pattern-1".into(),
+            length_ticks: 3840,
+            looped: true,
+        })
+        .unwrap();
+        let press = |key| KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE);
+        assert!(
+            project_binding_command(
+                press('v'),
+                &app.view_model(),
+                &app.authored_source().unwrap()
+            )
+            .is_none()
+        );
+        app.dispatch(AppCommand::TogglePatternEditor).unwrap();
+        for key in ['v', 'p', 'g'] {
+            let command = project_binding_command(
+                press(key),
+                &app.view_model(),
+                &app.authored_source().unwrap(),
+            )
+            .unwrap();
+            app.dispatch(command).unwrap();
+        }
+        let accepted = app.authored_source().unwrap();
+        let voice = &accepted.pattern_voices()["voice-1-instance"];
+        assert_eq!(voice.pitch_pattern.as_deref(), Some("pattern-1"));
+        assert_eq!(voice.gate_pattern.as_deref(), Some("pattern-1"));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_project_construction(
+                    frame,
+                    &ProjectOverview::from_project(&project),
+                    &accepted,
+                    "",
+                )
+            })
+            .unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        for expected in [
+            "voice-1-instance",
+            "pattern-1.pitch -> input.pitch",
+            "pattern-1.gate -> input.gate",
+            "fallback low",
+            "fallback C3",
+            "amp.audio -> out.audio",
+        ] {
+            assert!(screen.contains(expected), "missing {expected} in {screen}");
+        }
+        let gate = project_binding_command(press('g'), &app.view_model(), &accepted).unwrap();
+        app.dispatch(gate).unwrap();
+        let next = app.authored_source().unwrap();
+        assert_eq!(
+            next.pattern_voices()["voice-1-instance"].pitch_pattern,
+            voice.pitch_pattern
+        );
+        assert!(
+            next.pattern_voices()["voice-1-instance"]
+                .gate_pattern
+                .is_none()
+        );
+        assert!(
+            project_binding_command(
+                KeyEvent::new_with_kind(
+                    KeyCode::Char('g'),
+                    KeyModifiers::NONE,
+                    KeyEventKind::Repeat
+                ),
+                &app.view_model(),
+                &next
+            )
+            .is_none()
+        );
+        app.dispatch(AppCommand::TogglePatternEditor).unwrap();
+        assert!(app.view_model().palette_pattern_editor.unwrap().visible);
+    }
 
     #[test]
     fn native_palette_pattern_notes_need_no_instrument_or_track_and_preserve_ids() {

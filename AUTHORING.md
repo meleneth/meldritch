@@ -20,8 +20,13 @@ Native `c` creates an independent pattern; cursor/insert/duration/velocity/delet
 gestures dispatch the existing NoteEdit. `PatternMaterial` is a detached view of
 the same NotePatternDefinition, not a new event engine or filesystem format.
 Legacy AuthoredPattern projections still require one track for existing exports.
-This remains silent, in-memory construction. Next: independent composition
-bindings/playback and standalone saves.
+`PatternVoiceDefinition` adds bounded mono instances to the accepted source,
+with separate pitch/gate bindings, explicit clock/initial pitch/output level and
+visible unbound fallbacks. Native v/p/g author these relationships. Their audio
+uses ordinary voice lowering, rerender worker and immutable callback publication
+in headless tests. Pattern velocity does not implicitly travel through pitch or
+gate; this subset has an explicit instance output level. Native device playback,
+runtime overlays and standalone saves remain next. Everything stays in memory.
 The full example retains `design` status.
 
 ## Recommended immediate implementation prompt

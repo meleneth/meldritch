@@ -35,7 +35,7 @@ impl AppController {
         ranges: &[FrameRange],
     ) -> Vec<DirtyRange> {
         let owner = self.project_source.as_ref().unwrap();
-        owner
+        let mut dirty: Vec<_> = owner
             .source
             .performance()
             .tracks()
@@ -47,7 +47,21 @@ impl AppController {
                     DirtyRange::new(EntityId::Track(TrackId::new(index as u64 + 1)), *range)
                 })
             })
-            .collect()
+            .collect();
+        let offset = owner.source.performance().tracks().len();
+        for (index, voice) in owner.source.pattern_voices().values().enumerate() {
+            if voice.pitch_pattern.as_deref() == Some(pattern)
+                || voice.gate_pattern.as_deref() == Some(pattern)
+            {
+                dirty.extend(ranges.iter().map(|range| {
+                    DirtyRange::new(
+                        EntityId::Track(TrackId::new((offset + index + 1) as u64)),
+                        *range,
+                    )
+                }));
+            }
+        }
+        dirty
     }
 
     pub fn enable_pattern_editor(&mut self, pattern: &str) -> Result<(), String> {

@@ -2109,6 +2109,9 @@ fn draw_status_with_title(
 
 fn command_result_text(result: &AppCommandResult) -> String {
     match result {
+        AppCommandResult::PatternVoiceEdited { voice, changed } => {
+            format!("Pattern voice {voice} bindings edited (changed: {changed})")
+        }
         AppCommandResult::ParameterEdited { target, changed } => {
             format!("{} edited (changed: {changed})", target.identity())
         }

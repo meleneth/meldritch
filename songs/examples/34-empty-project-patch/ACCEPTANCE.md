@@ -4,8 +4,9 @@ Status: **design for the complete workflow**. The read-only opening checkpoint
 is implemented: DSL `project_directory`, CLI project-opening tests and native TUI
 tests cover empty/legacy roots, diagnostics and presentation. `opening.txt` and
 `invalid/malformed-entry.toml` specify that checkpoint. Native patch and independent
-note authoring checkpoints are implemented; bindings, composition playback and
-self-contained save/reopen remain unimplemented.
+note authoring and independent mono binding checkpoints are implemented.
+Bindings render through the existing worker and production callback headlessly;
+native device playback, runtime controls and self-contained save/reopen remain unimplemented.
 An additional
 ownership checkpoint moves accepted definitions/provenance into app-owned
 `ProjectSource`. Headless commands create/edit a pattern and edit a patch without
@@ -72,7 +73,30 @@ movement/repeats cannot accidentally duplicate notes. The existing version-1
 track-owned pattern exports, Lua projections and tests retain their behavior;
 new unconnected material must reject those legacy exports instead of inventing
 an owner. All this material is still in-memory and silent, with bindings and
-persistence acceptance unfinished.
+persistence acceptance unfinished. Independent composition binding acceptance
+is described below.
+
+Binding checkpoint: `independent-voice.toml` is a typed request fixture, not a save
+format. `keyboard-bindings.txt` specifies native v/p/g. Instances are separate
+from palette definitions; v creates neither binding, p/g author them individually.
+Clock length/loop, initial C3 and output level 0.8 are explicit. Pitch holds until
+another start, including across loop boundaries. Gate ends are exclusive; ends
+and loop gate reset precede pitch updates, then gate rises. Gate carries no
+implicit velocity or pitch. Unbound pitch holds initial pitch, unbound gate is low.
+This bounded subset rejects overlapping gates, simultaneous pitch starts,
+sample translations, clock mismatch and non-mono patches. App acceptance compiles
+before replacing source; rejected edits preserve source/provenance/history. Note
+edits invalidate instances that explicitly bind that source; adding an instance
+invalidates all mixed lanes because existing mix normalization uses source count.
+
+Run `cargo test -p meldritch-render --test independent_pattern_voice`,
+`cargo test -p meldritch-app --test pattern_voice`,
+`cargo test -p meldritch-tui native_composition`, and the DSL project-directory
+suite. Tests prove pitch changes under a held gate, exact split/full rendering,
+independent disconnect/reconnect, native inspection, typed in-memory replay and
+worker publication consumed by the production callback without transport reset.
+This evidence does not open a physical device or establish DSP-state migration.
+The native cockpit still reports unfinished device playback and unsupported save.
 
 1. In a temporary empty directory execute `meldritch` with no subcommand. Open
    a silent valid project in a usable TUI without writing files or initializing

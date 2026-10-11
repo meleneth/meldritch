@@ -54,6 +54,7 @@ impl ProjectDirectory {
             note_patterns: BTreeMap::new(),
             parameter_patterns: BTreeMap::new(),
             dsps: BTreeMap::new(),
+            pattern_voices: BTreeMap::new(),
             fingerprint: 0,
         };
         source.refresh_authoring_fingerprint();

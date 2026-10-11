@@ -4,14 +4,14 @@
 
 This sequence supersedes the original phases below as the active direction.
 All full slices here remain **proposed/unimplemented**. Slice 1's empty/legacy
-opening, ownership and silent palette-creation checkpoints are implemented,
+opening, ownership, palette/native authoring and independent mono binding checkpoints are implemented,
 without accepting its complete workflow. Historical examples 25–33 remain
 accepted within their scopes. Requirements live in [FEATURES.md](FEATURES.md),
 the code/reuse audit in [ARCHITECTURE.md](ARCHITECTURE.md), and the active queue
 in [TODO.md](TODO.md). Each slice starts with a readable scenario and invalid
 neighbors, then binds acceptance to actual app/compiler/host boundaries.
 
-Example 34 has opening/creation requests, invalid neighbors and scoped tests.
+Example 34 has opening/creation/binding requests, invalid neighbors and scoped tests.
 Its full construction/persistence contract remains design. Names 35–41 below are
 reserved planning names, not existing files, schema or capability claims.
 No slice requires rewriting working examples or introducing another engine.

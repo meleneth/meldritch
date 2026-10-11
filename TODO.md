@@ -34,8 +34,11 @@ an empty project requires no Git repository or initialization.
   Ctrl-E/G parameter/atomic patch editing over newly created definitions;
   independent palette patterns and native cursor/insert/select/duration/velocity/
   delete via existing NoteEdit, with unchanged legacy exports/projections
-- [ ] Slice 1 next: explicit independent pitch/gate composition bindings,
-  host playback/runtime overlay, self-contained save/fresh reload
+- [x] Slice 1 binding checkpoint: independent mono pattern pitch/gate relationships,
+  native v/p/g inspection, shared voice rendering, worker/publication/callback
+  headless checks; explicit held pitch and end-exclusive gate fallbacks
+- [ ] Slice 1 next: native device playback/runtime overlay and mode transitions,
+  self-contained save/fresh reload and capture
 - [ ] Slice 2: shared palette, two compositions and independent pattern sources
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
@@ -103,6 +106,16 @@ retain the accepted revision. Unsupported new-project saving reports retained
 in-memory edits. Full workflow status remains design pending bindings, playback,
 runtime control and self-contained save/reopen. Remote pushes are batched at
 larger milestones; verified intermediate commits remain local.
+
+Independent binding checkpoint verification: the workspace suite passes; final
+app/TUI and focused DSL/render suites check source-owned separate bindings,
+reject ambiguous pitch/gates and clock mismatch, preserve rejected source/history,
+and replay accepted typed commands in memory. Raw f64 full/split renders agree;
+held pitch, explicit initial pitch, adjacent retriggers and release tails follow
+the declared order. The existing worker publishes audible/disconnected/reconnected
+PCM consumed by the production callback without resetting transport. Native
+v/p/g inspect both bindings and fallbacks; device playback and capture/save remain
+unfinished. No historical example/format or callback implementation is changed.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

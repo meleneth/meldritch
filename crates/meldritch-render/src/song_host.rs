@@ -17,6 +17,11 @@ pub enum CompiledSongPatch {
 
 impl CompiledSongPatch {
     pub fn compile_initial(song: &meldritch_dsl::ValidatedSong) -> Result<Self, String> {
+        if !song.pattern_voices().is_empty() {
+            return crate::song_render::compile_mixed_note_song(song)
+                .map(Self::Mixed)
+                .map_err(|error| error.to_string());
+        }
         match crate::song_render::compile_delayed_note_song(song) {
             Ok(patch) => Ok(Self::Delayed(patch)),
             Err(delayed_error) => {

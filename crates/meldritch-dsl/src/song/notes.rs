@@ -453,6 +453,7 @@ impl ValidatedSong {
             &self.dsps,
             &self.sample_banks,
         );
+        self.fingerprint_pattern_voices();
     }
 }
 

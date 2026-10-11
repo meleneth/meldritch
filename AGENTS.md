@@ -11,8 +11,9 @@ inspired by Eurorack. Coherence under composition governs its next architecture;
 see FEATURES.md, ARCHITECTURE.md, INVARIANTS.md and ROADMAP.md. Projects own a
 palette and compositions. Empty-directory opening and typed silent mono-patch
 palette creation, native patch editing and independent native note-pattern
-authoring are implemented. Routing/playback from empty and self-contained
-persistence remain future work.
+authoring are implemented. Independent mono pitch/gate composition bindings
+render headlessly through the existing voice/worker/callback. Native device
+playback, runtime controls and self-contained persistence remain future work.
 Git is permitted as a required installed dependency, but opening a project must
 not require a Git repository or initialization.
 

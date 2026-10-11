@@ -1,0 +1,8 @@
+# After creating voice-1 and pattern-1, close editors with Esc.
+# v creates voice-1-instance with an explicit one-bar clock, C3 fallback and level 0.8.
+# It does not bind either musical signal.
+# p connects pattern-1.pitch -> voice-1-instance/input.pitch.
+# g connects pattern-1.gate -> voice-1-instance/input.gate.
+# g again disconnects only gate (low fallback); p again disconnects only pitch (C3 fallback).
+# Controls inspect the selected instrument's native instance; Ctrl-N still edits its palette pattern.
+# Device playback, runtime controls, disk capture and save/reopen remain unfinished.

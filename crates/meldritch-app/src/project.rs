@@ -1,6 +1,7 @@
 //! Detached project-root presentation, derived from the existing source model.
 pub use meldritch_dsl::ProjectDirectory;
 use meldritch_dsl::ValidatedSong;
+pub use meldritch_dsl::{PatternSignal, PatternVoiceDefinition};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -12,6 +13,81 @@ pub(crate) struct ProjectSource {
 }
 
 impl super::AppController {
+    pub(crate) fn synth_dirty_tracks(
+        &self,
+        synth: &str,
+        include_legacy: bool,
+    ) -> Vec<super::DirtyRange> {
+        use meldritch_core::{DirtyRange, EntityId, FrameRange, TrackId};
+        let source = &self.project_source.as_ref().unwrap().source;
+        let mut indices = Vec::new();
+        if include_legacy {
+            indices.extend(
+                source
+                    .performance()
+                    .tracks()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, track)| track.synth_id() == synth)
+                    .map(|(index, _)| index),
+            );
+        }
+        let offset = source.performance().tracks().len();
+        indices.extend(
+            source
+                .pattern_voices()
+                .values()
+                .enumerate()
+                .filter(|(_, voice)| voice.synth == synth)
+                .map(|(index, _)| offset + index),
+        );
+        indices
+            .into_iter()
+            .map(|index| {
+                DirtyRange::new(
+                    EntityId::Track(TrackId::new(index as u64 + 1)),
+                    FrameRange::new(0, self.editor.timeline_frames()).unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    pub(crate) fn pattern_voice_command(
+        &mut self,
+        command: &super::AppCommand,
+    ) -> Result<super::AppCommandResult, super::AppCommandError> {
+        use super::{AppCommand, AppCommandError, AppCommandResult};
+        let owner = self
+            .project_source
+            .as_ref()
+            .ok_or_else(|| AppCommandError::Instrument("no authored project source".into()))?;
+        let (id, next) = match command {
+            AppCommand::CreatePatternVoice(definition) => (
+                definition.id.clone(),
+                owner.source.create_pattern_voice(definition.clone()),
+            ),
+            AppCommand::BindPatternVoice {
+                voice,
+                signal,
+                pattern,
+            } => (
+                voice.clone(),
+                owner
+                    .source
+                    .bind_pattern_voice(voice, *signal, pattern.clone()),
+            ),
+            _ => unreachable!(),
+        };
+        let next = next.map_err(AppCommandError::Instrument)?;
+        meldritch_render::song_host::CompiledSongPatch::compile_initial(&next)
+            .map_err(AppCommandError::Instrument)?;
+        let changed = next.fingerprint() != owner.source.fingerprint();
+        if changed {
+            self.project_source.as_mut().unwrap().source = Arc::new(next);
+        }
+        Ok(AppCommandResult::PatternVoiceEdited { voice: id, changed })
+    }
+
     /// File-free empty-project cockpit using the existing command dispatcher.
     /// The empty coordinator is scheduling scaffolding, not an authored pattern.
     /// No audio/MIDI device is opened and no samples or seed definitions exist.

@@ -316,6 +316,14 @@ pub struct CompiledNotePatch {
     pattern_length: u64,
     looped: bool,
     events: Vec<CompiledNoteEvent>,
+    independent_signals: Option<CompiledPatternSignals>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CompiledPatternSignals {
+    initial_pitch: u8,
+    pitch: Vec<CompiledNoteEvent>,
+    gate: Vec<CompiledNoteEvent>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -739,8 +747,15 @@ impl CompiledNotePatch {
         let mut oscillator = NoteOscillator::new(self.waveform, self.plaits);
         let mut envelope = AdsrEnvelope::new(self.envelope, self.sample_rate);
         let mut filter = StateVariableFilter::new();
-        let mut frequency = 440.0;
-        let mut velocity = 0.0;
+        let mut frequency = self
+            .independent_signals
+            .as_ref()
+            .map_or(440.0, |signals| midi_frequency(signals.initial_pitch));
+        let mut velocity = if self.independent_signals.is_some() {
+            1.0
+        } else {
+            0.0
+        };
         let mut active_end = None;
         for absolute_frame in 0..range.end() {
             if active_end == Some(absolute_frame) {
@@ -758,16 +773,37 @@ impl CompiledNotePatch {
                 oscillator.note_off();
                 active_end = None;
             }
-            for event in self
-                .events
-                .iter()
-                .filter(|event| event.start == pattern_frame)
-            {
-                frequency = midi_frequency(event.note);
-                velocity = event.velocity;
-                envelope.note_on();
-                oscillator.note_on(velocity);
-                active_end = Some(absolute_frame + (event.end - event.start));
+            if let Some(signals) = &self.independent_signals {
+                // Ends/reset precede pitch updates, which precede gate rises.
+                // Pitch holds across note ends and loop boundaries.
+                for event in signals
+                    .pitch
+                    .iter()
+                    .filter(|event| event.start == pattern_frame)
+                {
+                    frequency = midi_frequency(event.note);
+                }
+                for event in signals
+                    .gate
+                    .iter()
+                    .filter(|event| event.start == pattern_frame)
+                {
+                    envelope.note_on();
+                    oscillator.note_on(1.0);
+                    active_end = Some(absolute_frame + (event.end - event.start));
+                }
+            } else {
+                for event in self
+                    .events
+                    .iter()
+                    .filter(|event| event.start == pattern_frame)
+                {
+                    frequency = midi_frequency(event.note);
+                    velocity = event.velocity;
+                    envelope.note_on();
+                    oscillator.note_on(velocity);
+                    active_end = Some(absolute_frame + (event.end - event.start));
+                }
             }
             // The compiled cables route VCA into the optional filter.
             let mut sample =
@@ -1010,6 +1046,7 @@ pub enum SongRenderError {
     InvalidLaneLevelOverride,
     InvalidSamplePitch,
     IncompatibleTrackRender,
+    InvalidPatternVoice(String),
     RangeTooLong { frames: u64 },
 }
 
@@ -1132,6 +1169,9 @@ impl fmt::Display for SongRenderError {
             }
             Self::IncompatibleTrackRender => {
                 write!(formatter, "compiled track rendered incompatible audio")
+            }
+            Self::InvalidPatternVoice(message) => {
+                write!(formatter, "invalid pattern voice: {message}")
             }
             Self::RangeTooLong { frames } => write!(
                 formatter,
@@ -1333,7 +1373,42 @@ fn compile_note_definition(
                 velocity: event.velocity(),
             })
             .collect(),
+        independent_signals: None,
     })
+}
+
+/// Lower separate typed source relationships into the ordinary mono voice loop.
+pub fn compile_pattern_voice(
+    song: &ValidatedSong,
+    voice: &meldritch_dsl::PatternVoiceDefinition,
+) -> Result<CompiledNotePatch, SongRenderError> {
+    song.validate_pattern_voice(voice)
+        .map_err(SongRenderError::InvalidPatternVoice)?;
+    song.validate_executable_patch(&voice.synth)
+        .map_err(SongRenderError::InvalidPatternVoice)?;
+    let mut patch = compile_note_definition(song, &voice.synth, None, 0)?;
+    patch.pattern_length = song
+        .authoring_frame(voice.length_ticks)
+        .map_err(SongRenderError::InvalidPatternVoice)?;
+    patch.looped = voice.looped;
+    let events = |id: &Option<String>| {
+        id.as_ref()
+            .into_iter()
+            .flat_map(|id| song.note_patterns()[id].events())
+            .map(|event| CompiledNoteEvent {
+                start: event.start_frame(),
+                end: event.start_frame() + event.duration_frames(),
+                note: event.note(),
+                velocity: 1.0,
+            })
+            .collect()
+    };
+    patch.independent_signals = Some(CompiledPatternSignals {
+        initial_pitch: voice.initial_pitch,
+        pitch: events(&voice.pitch_pattern),
+        gate: events(&voice.gate_pattern),
+    });
+    Ok(patch)
 }
 
 fn transposed_midi_note(note: u8, transpose_semitones: i8) -> u8 {
@@ -1559,6 +1634,20 @@ fn compile_mixed_note_song_with_track_patterns_transposes_and_included_lanes(
         channels = Some(channels.unwrap_or(0).max(patch.channels()));
         tracks.push(patch);
         mixers.push((track.volume(), track.pan()));
+    }
+    for voice in song.pattern_voices().values() {
+        let patch = compile_pattern_voice(song, voice)?;
+        if channels.is_some_and(|channels| {
+            patch.channels != channels && !(patch.channels <= 2 && channels <= 2)
+        }) {
+            return Err(SongRenderError::IncompatibleTrackRender);
+        }
+        channels = Some(channels.unwrap_or(0).max(patch.channels));
+        tracks.push(CompiledMixedTrack::Note {
+            lane_id: None,
+            patch,
+        });
+        mixers.push((voice.level, None));
     }
     Ok(CompiledMixedNoteSong {
         channels: if mixers.iter().any(|(_, pan)| pan.is_some()) {

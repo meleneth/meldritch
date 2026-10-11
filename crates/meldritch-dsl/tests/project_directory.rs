@@ -29,6 +29,52 @@ fn example(name: &str) -> PathBuf {
 }
 
 #[test]
+fn independent_voice_fixture_has_separate_bindings_and_no_track_ownership() {
+    use meldritch_dsl::{PatchCreation, PatternSignal, PatternVoiceDefinition};
+    let directory = Directory::new();
+    let source = load_project_directory(&directory.0)
+        .unwrap()
+        .authoring_source()
+        .create_patch(&PatchCreation::mono_voice("voice-1"))
+        .unwrap()
+        .create_palette_pattern("pattern-1", 3840, true)
+        .unwrap();
+    let fixture =
+        fs::read_to_string(example("34-empty-project-patch/independent-voice.toml")).unwrap();
+    let voice: PatternVoiceDefinition = toml::from_str(&fixture).unwrap();
+    let incompatible: PatternVoiceDefinition = toml::from_str(
+        &fs::read_to_string(example(
+            "34-empty-project-patch/invalid/incompatible-voice.toml",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        source
+            .create_pattern_voice(incompatible)
+            .unwrap_err()
+            .contains("length")
+    );
+    assert_eq!(voice.initial_pitch, 48);
+    assert_eq!(voice.level, 0.8);
+    let source = source.create_pattern_voice(voice).unwrap();
+    assert!(source.performance().tracks().is_empty());
+    assert!(source.authored_pattern("pattern-1").is_err());
+    let disconnected = source
+        .bind_pattern_voice("voice-instance-1", PatternSignal::Gate, None)
+        .unwrap();
+    assert_eq!(
+        disconnected.pattern_voices()["voice-instance-1"].pitch_pattern,
+        Some("pattern-1".into())
+    );
+    assert_ne!(source.fingerprint(), disconnected.fingerprint());
+    assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
+    assert!(
+        toml::from_str::<PatternVoiceDefinition>(&format!("{fixture}\nunknown = true\n")).is_err()
+    );
+}
+
+#[test]
 fn empty_directory_is_a_valid_read_only_project_without_manifest_or_git() {
     let directory = Directory::new();
     let project = load_project_directory(&directory.0).unwrap();

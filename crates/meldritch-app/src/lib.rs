@@ -66,6 +66,12 @@ impl CockpitMode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommand {
+    CreatePatternVoice(PatternVoiceDefinition),
+    BindPatternVoice {
+        voice: String,
+        signal: PatternSignal,
+        pattern: Option<String>,
+    },
     CreatePalettePattern {
         id: String,
         length_ticks: u64,
@@ -175,6 +181,10 @@ pub struct CommandRecord {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommandResult {
+    PatternVoiceEdited {
+        voice: String,
+        changed: bool,
+    },
     ParameterEdited {
         target: EditableTarget,
         changed: bool,
@@ -1469,6 +1479,9 @@ impl AppController {
             return self.dispatch(edit);
         }
         let result = match &command {
+            AppCommand::CreatePatternVoice(_) | AppCommand::BindPatternVoice { .. } => {
+                self.pattern_voice_command(&command)?
+            }
             AppCommand::CreatePalettePattern {
                 id,
                 length_ticks,
@@ -1868,118 +1881,146 @@ impl AppController {
                 }
             }
         };
-        let (changed, dirty_ranges) =
-            match &result {
-                AppCommandResult::ParameterEdited { target, changed } => (
+        let (changed, dirty_ranges) = match &result {
+            AppCommandResult::ParameterEdited { target, changed } => (
+                *changed,
+                if *changed {
+                    self.project_source
+                        .as_ref()
+                        .unwrap()
+                        .source
+                        .performance()
+                        .tracks()
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, t)| match target {
+                            EditableTarget::Synth { id, .. } => t.synth_id() == id,
+                            EditableTarget::Dsp { id, .. } => t.dsp_ids().contains(id),
+                            EditableTarget::Track { id, .. } => t.id() == id,
+                        })
+                        .map(|(i, _)| {
+                            DirtyRange::new(
+                                EntityId::Track(TrackId::new(i as u64 + 1)),
+                                FrameRange::new(0, self.editor.timeline_frames()).unwrap(),
+                            )
+                        })
+                        .chain(match target {
+                            EditableTarget::Synth { id, .. } => self.synth_dirty_tracks(id, false),
+                            _ => vec![],
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                },
+            ),
+            AppCommandResult::AssignmentsChanged { changed } => (*changed, vec![]),
+            AppCommandResult::PatternVoiceEdited { voice, changed } => {
+                let source = &self.project_source.as_ref().unwrap().source;
+                let index = source
+                    .pattern_voices()
+                    .keys()
+                    .position(|id| id == voice)
+                    .unwrap();
+                (
                     *changed,
-                    if *changed {
-                        self.project_source
-                            .as_ref()
-                            .unwrap()
-                            .source
-                            .performance()
-                            .tracks()
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, t)| match target {
-                                EditableTarget::Synth { id, .. } => t.synth_id() == id,
-                                EditableTarget::Dsp { id, .. } => t.dsp_ids().contains(id),
-                                EditableTarget::Track { id, .. } => t.id() == id,
-                            })
-                            .map(|(i, _)| {
-                                DirtyRange::new(
-                                    EntityId::Track(TrackId::new(i as u64 + 1)),
-                                    FrameRange::new(0, self.editor.timeline_frames()).unwrap(),
-                                )
-                            })
-                            .collect()
-                    } else {
-                        vec![]
-                    },
-                ),
-                AppCommandResult::AssignmentsChanged { changed } => (*changed, vec![]),
-                AppCommandResult::AssignmentSaveRequested => (false, vec![]),
-                AppCommandResult::PatternEdited {
-                    pattern,
-                    changed,
-                    dirty_ranges,
-                    ..
-                } => {
-                    let ranges = self.pattern_dirty_tracks(pattern, dirty_ranges);
-                    (*changed, ranges)
-                }
-                AppCommandResult::PatternSelectionChanged
-                | AppCommandResult::PatternSaveRequested => (false, Vec::new()),
-                AppCommandResult::InstrumentEdited { changed, .. } => (*changed, Vec::new()),
-                AppCommandResult::PatchEdited { synth, changed, .. } => (
-                    *changed,
-                    if *changed {
-                        self.project_source
-                            .as_ref()
-                            .unwrap()
-                            .source
-                            .performance()
-                            .tracks()
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, t)| t.synth_id() == synth)
-                            .map(|(index, _)| {
+                    if *changed && matches!(&command, AppCommand::CreatePatternVoice(_)) {
+                        // Existing mix normalization depends on source count.
+                        (0..source.performance().tracks().len() + source.pattern_voices().len())
+                            .map(|index| {
                                 DirtyRange::new(
                                     EntityId::Track(TrackId::new(index as u64 + 1)),
                                     FrameRange::new(0, self.editor.timeline_frames()).unwrap(),
                                 )
                             })
                             .collect()
+                    } else if *changed {
+                        vec![DirtyRange::new(
+                            EntityId::Track(TrackId::new(
+                                (source.performance().tracks().len() + index + 1) as u64,
+                            )),
+                            FrameRange::new(0, self.editor.timeline_frames()).unwrap(),
+                        )]
                     } else {
                         vec![]
                     },
-                ),
-                AppCommandResult::InstrumentEditorChanged
-                | AppCommandResult::InstrumentSaveRequested
-                | AppCommandResult::ProjectSaveRequested => (false, Vec::new()),
-                AppCommandResult::TransportQueued => (true, Vec::new()),
-                AppCommandResult::SelectionChanged { previous, current } => {
-                    (previous != current, Vec::new())
-                }
-                AppCommandResult::Edit(edit) => (edit.changed, edit.dirty_ranges.clone()),
-                AppCommandResult::SynthUpdated { invalidated_chunks } => {
-                    (*invalidated_chunks != 0, Vec::new())
-                }
-                AppCommandResult::PerformanceFxUpdated(_) => (true, Vec::new()),
-                AppCommandResult::TransformCreated { .. } => (true, Vec::new()),
-                AppCommandResult::AudioSourceSwitched { .. } => (true, Vec::new()),
-                AppCommandResult::PerformanceQueued(_) => (true, Vec::new()),
-                AppCommandResult::PerformancePageSelected { previous, current } => {
-                    (previous != &Some(*current), Vec::new())
-                }
-                AppCommandResult::LaneVariationSelected {
-                    previous, current, ..
-                } => (previous.as_deref() != Some(current.as_str()), Vec::new()),
-                AppCommandResult::LanePatternBankSelected {
-                    previous_bank,
-                    current_bank,
-                    previous_variation,
-                    current_variation,
-                    ..
-                } => (
-                    previous_bank.as_deref() != Some(current_bank.as_str())
-                        || previous_variation.as_deref() != Some(current_variation.as_str()),
-                    Vec::new(),
-                ),
-                AppCommandResult::PerformanceModifierChanged { .. } => (true, Vec::new()),
-                AppCommandResult::LaneOctaveSet {
-                    previous, current, ..
-                } => (previous != current, Vec::new()),
-                AppCommandResult::LaneMuteToggled { .. }
-                | AppCommandResult::LaneSoloToggled { .. } => (true, Vec::new()),
-                AppCommandResult::PerformanceCancelled(queued) => (queued.is_some(), Vec::new()),
-                AppCommandResult::CockpitModeChanged { previous, current } => {
-                    (previous != current, Vec::new())
-                }
-                AppCommandResult::CuratedControlAdjusted {
-                    previous, current, ..
-                } => (previous != current, Vec::new()),
-            };
+                )
+            }
+            AppCommandResult::AssignmentSaveRequested => (false, vec![]),
+            AppCommandResult::PatternEdited {
+                pattern,
+                changed,
+                dirty_ranges,
+                ..
+            } => {
+                let ranges = self.pattern_dirty_tracks(pattern, dirty_ranges);
+                (*changed, ranges)
+            }
+            AppCommandResult::PatternSelectionChanged | AppCommandResult::PatternSaveRequested => {
+                (false, Vec::new())
+            }
+            AppCommandResult::InstrumentEdited { edit, changed, .. } => (
+                *changed,
+                if *changed {
+                    self.synth_dirty_tracks(&edit.target.synth, false)
+                } else {
+                    vec![]
+                },
+            ),
+            AppCommandResult::PatchEdited { synth, changed, .. } => (
+                *changed,
+                if *changed {
+                    self.synth_dirty_tracks(synth, true)
+                } else {
+                    vec![]
+                },
+            ),
+            AppCommandResult::InstrumentEditorChanged
+            | AppCommandResult::InstrumentSaveRequested
+            | AppCommandResult::ProjectSaveRequested => (false, Vec::new()),
+            AppCommandResult::TransportQueued => (true, Vec::new()),
+            AppCommandResult::SelectionChanged { previous, current } => {
+                (previous != current, Vec::new())
+            }
+            AppCommandResult::Edit(edit) => (edit.changed, edit.dirty_ranges.clone()),
+            AppCommandResult::SynthUpdated { invalidated_chunks } => {
+                (*invalidated_chunks != 0, Vec::new())
+            }
+            AppCommandResult::PerformanceFxUpdated(_) => (true, Vec::new()),
+            AppCommandResult::TransformCreated { .. } => (true, Vec::new()),
+            AppCommandResult::AudioSourceSwitched { .. } => (true, Vec::new()),
+            AppCommandResult::PerformanceQueued(_) => (true, Vec::new()),
+            AppCommandResult::PerformancePageSelected { previous, current } => {
+                (previous != &Some(*current), Vec::new())
+            }
+            AppCommandResult::LaneVariationSelected {
+                previous, current, ..
+            } => (previous.as_deref() != Some(current.as_str()), Vec::new()),
+            AppCommandResult::LanePatternBankSelected {
+                previous_bank,
+                current_bank,
+                previous_variation,
+                current_variation,
+                ..
+            } => (
+                previous_bank.as_deref() != Some(current_bank.as_str())
+                    || previous_variation.as_deref() != Some(current_variation.as_str()),
+                Vec::new(),
+            ),
+            AppCommandResult::PerformanceModifierChanged { .. } => (true, Vec::new()),
+            AppCommandResult::LaneOctaveSet {
+                previous, current, ..
+            } => (previous != current, Vec::new()),
+            AppCommandResult::LaneMuteToggled { .. } | AppCommandResult::LaneSoloToggled { .. } => {
+                (true, Vec::new())
+            }
+            AppCommandResult::PerformanceCancelled(queued) => (queued.is_some(), Vec::new()),
+            AppCommandResult::CockpitModeChanged { previous, current } => {
+                (previous != current, Vec::new())
+            }
+            AppCommandResult::CuratedControlAdjusted {
+                previous, current, ..
+            } => (previous != current, Vec::new()),
+        };
         self.record(command, changed, dirty_ranges);
         Ok(result)
     }

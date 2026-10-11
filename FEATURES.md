@@ -22,7 +22,9 @@ vertical slices are planned in [ROADMAP.md](ROADMAP.md).
 - `mkdir black-cathedral; cd black-cathedral; meldritch` must open an empty
   project without initialization, mandatory manifest/database/template or Git
   repository. Empty opening and silent mono-patch palette creation are implemented;
-  native patch editing and unconnected pattern authoring are also implemented.
+  native patch editing, independent pattern authoring and separate mono pitch/gate
+  bindings are also implemented. Binding audio is accepted headlessly; native
+  device playback, runtime controls and standalone persistence remain unfinished.
   Routing/playback construction from empty and standalone
   save/reopen remain unimplemented. Git is allowed as an external
   dependency and may be required installed; a repository, commit or network

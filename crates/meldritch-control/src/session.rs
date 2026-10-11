@@ -391,6 +391,12 @@ pub fn session_result_fields(
     result: &meldritch_app::AppCommandResult,
 ) -> (String, Option<String>, Option<String>, Option<String>) {
     match result {
+        meldritch_app::AppCommandResult::PatternVoiceEdited { voice, .. } => (
+            "pattern_voice_definition".into(),
+            Some(voice.clone()),
+            None,
+            None,
+        ),
         meldritch_app::AppCommandResult::ParameterEdited { target, .. } => (
             "authored_parameter".into(),
             Some(target.identity()),
