@@ -477,6 +477,13 @@ The public Pages metadata endpoint currently returns 404. Local verification
 does not claim the site is deployed. Setup and local commands are documented in
 `docs/guide/contributing.md`.
 
+First remote verification: [workflow run 38104433773](https://github.com/meleneth/meldritch/actions/runs/38104433773)
+for `58cc7c8` passed checkout, Node setup, `npm ci`, `npm run docs:build` and
+Pages artifact upload. Deployment failed at `configure-pages` with “Get Pages
+site failed” / HTTP 404 because the repository has not enabled Pages. Enable
+the GitHub Actions Pages source, then rerun the failed deployment job. This is
+an outstanding repository setup step; no public deployment is claimed.
+
 ## Completed showcase milestones
 
 The following work formed the previous implementation queue for the long-form

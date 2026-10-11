@@ -43,3 +43,10 @@ Expected URL after a successful deployment:
 [meleneth.github.io/meldritch/](https://meleneth.github.io/meldritch/).
 If the repository is renamed or a custom domain is introduced, update `base` in
 the VitePress config. A local build does not prove GitHub Pages is enabled.
+
+The [first workflow run](https://github.com/meleneth/meldritch/actions/runs/38104433773)
+built and uploaded the site successfully. Deployment stopped at Pages discovery
+with HTTP 404. Enable the GitHub Actions source in
+[repository Pages settings](https://github.com/meleneth/meldritch/settings/pages),
+then rerun the failed deployment job. The default workflow token cannot enable
+Pages itself; no separate administrative credential is stored in this project.
