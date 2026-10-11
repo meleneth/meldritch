@@ -12,5 +12,6 @@ meldritch-core = { path = "../meldritch-core" }
 ratatui.workspace = true
 
 [dev-dependencies]
+meldritch-dsl = { path = "../meldritch-dsl" }
 meldritch-audio = { path = "../meldritch-audio" }
 meldritch-render = { path = "../meldritch-render" }

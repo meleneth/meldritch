@@ -1,6 +1,30 @@
 use super::*;
 use meldritch_dsl::{DependentCables, ModuleKind, PatchEdit, PatchOperation, PlaitsModel};
 impl AppController {
+    pub(crate) fn create_patch(
+        &mut self,
+        creation: &PatchCreation,
+    ) -> Result<AppCommandResult, AppCommandError> {
+        let owner = self
+            .project_source
+            .as_ref()
+            .ok_or_else(|| AppCommandError::Instrument("no authored project source".into()))?;
+        let next = owner
+            .source
+            .create_patch(creation)
+            .map_err(AppCommandError::Instrument)?;
+        meldritch_render::song_render::validate_palette_synth(&next, &creation.edit.synth)
+            .map_err(|e| AppCommandError::Instrument(e.to_string()))?;
+        meldritch_render::song_host::CompiledSongPatch::compile_initial(&next)
+            .map_err(AppCommandError::Instrument)?;
+        self.project_source.as_mut().unwrap().source = Arc::new(next);
+        Ok(AppCommandResult::PatchEdited {
+            synth: creation.edit.synth.clone(),
+            operations: creation.edit.operations.clone(),
+            changed: true,
+        })
+    }
+
     pub(crate) fn edit_patch(
         &mut self,
         edit: &PatchEdit,
@@ -18,6 +42,8 @@ impl AppController {
             .map_err(AppCommandError::Instrument)?;
         next.validate_executable_patch(&edit.synth)
             .map_err(AppCommandError::Instrument)?;
+        meldritch_render::song_render::validate_palette_synth(&next, &edit.synth)
+            .map_err(|e| AppCommandError::Instrument(e.to_string()))?;
         // Existing source parameter references and assignments cannot become dangling.
         if let Some(assignments) = self.assignment_view() {
             for target in &assignments.definition.targets {

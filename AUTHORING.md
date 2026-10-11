@@ -13,8 +13,10 @@ Example 34's first checkpoint implements read-only empty-directory startup and
 legacy entrypoint adaptation, with no created files/devices. The ownership
 checkpoint now moves accepted definitions/provenance to `AppController`;
 pattern, parameter and patch mutations no longer require an instrument panel.
-Next: empty editable definitions, patch/pattern creation, independent bindings
-and standalone saves.
+Empty editable definitions and typed mono-patch creation now work: native `n`
+shows the recipe's modules, cables and independent inputs without making a track
+or pattern. This remains silent, in-memory construction. Next: native patch/note
+editing, composition bindings/playback and standalone saves.
 The full example retains `design` status.
 
 ## Recommended immediate implementation prompt

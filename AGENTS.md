@@ -9,8 +9,9 @@ do not infer that work is finished from the older completed showcase milestones.
 MELDRITCH is a Rust, TUI-first project-oriented patchable musical environment
 inspired by Eurorack. Coherence under composition governs its next architecture;
 see FEATURES.md, ARCHITECTURE.md, INVARIANTS.md and ROADMAP.md. Projects own a
-palette and compositions. Read-only empty-directory opening is implemented;
-construction and self-contained persistence remain future work.
+palette and compositions. Empty-directory opening and typed silent mono-patch
+palette creation are implemented; pattern/routing/playback construction from
+empty and self-contained persistence remain future work.
 Git is permitted as a required installed dependency, but opening a project must
 not require a Git repository or initialization.
 
@@ -91,7 +92,8 @@ Preserve `INVARIANTS.md`. In particular:
 ## Current `.ml*` implementation state
 
 The immediate priority is section 21 of `TODO.md` and example 34's unfinished
-empty-project contract. Its read-only opening checkpoint is implemented.
+empty-project contract. Its opening, source ownership and silent palette-creation
+checkpoints are implemented; full workflow acceptance remains open.
 Read the architecture, roadmap, AUTHORING.md and accepted
 examples 25–33 before implementation. Section 20 retains accepted authoring and
 unfinished work. Example 25 has headless `accept` status; example 29 now has

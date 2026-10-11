@@ -1,8 +1,8 @@
 use super::*;
 pub use meldritch_dsl::{
     InstrumentEdit, InstrumentParameter, InstrumentParameterDefinition, InstrumentParameterId,
-    InstrumentRange, InstrumentValue, InstrumentWaveform, PatchEdit, PatchOperation, PlaitsModel,
-    ValidatedSong,
+    InstrumentRange, InstrumentValue, InstrumentWaveform, PatchCreation, PatchEdit, PatchOperation,
+    PlaitsModel, ValidatedSong,
 };
 
 /// Selection, presentation and staged patch operations only.

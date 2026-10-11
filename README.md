@@ -10,10 +10,13 @@ built from explicit typed relationships, with the machine itself as a playable
 compositional instrument. **Coherence under composition** governs design. See
 [requirements](FEATURES.md), [architecture/code audit](ARCHITECTURE.md) and
 [next roadmap](ROADMAP.md). `meldritch` now opens the current directory: an empty
-root shows a read-only project overview, while `main.mlperformance` roots use the
+root shows a project overview, while `main.mlperformance` roots use the
 existing song cockpit. `meldritch open-project PATH --check` validates opening
-without terminal/audio/MIDI. Creation from empty, patchable pattern routing and
-stateful graph transitions remain proposed. Existing commands remain valid.
+without terminal/audio/MIDI. In an empty root, **n** creates a silent mono-voice
+palette definition with inspectable pitch/gate inputs, modules and cables.
+Construction is currently in memory only; quitting discards it. Native pattern
+creation, routing, playback/save from empty and stateful graph transitions remain
+proposed. Existing commands remain valid.
 Git is allowed as a required installed dependency; opening needs no repository
 or initialization. Empty opening creates no files or audio/MIDI streams.
 

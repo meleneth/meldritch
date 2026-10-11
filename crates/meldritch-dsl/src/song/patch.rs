@@ -39,6 +39,63 @@ pub struct PatchEdit {
     pub operations: Vec<PatchOperation>,
 }
 
+/// Create one mono palette definition with explicit external inputs and the
+/// existing typed operation batch. It does not create a track or timed material.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatchCreation {
+    #[serde(default)]
+    pub inputs: Vec<PatchInput>,
+    pub edit: PatchEdit,
+}
+
+impl PatchCreation {
+    /// Convenience wiring expands entirely into ordinary inspectable operations.
+    #[must_use]
+    pub fn mono_voice(id: impl Into<String>) -> Self {
+        let mut operations = vec![];
+        for (id, kind) in [
+            ("osc", ModuleKind::Oscillator),
+            ("env", ModuleKind::Adsr),
+            ("amp", ModuleKind::Vca),
+            ("out", ModuleKind::AudioOutput),
+        ] {
+            operations.push(PatchOperation::Instantiate {
+                id: id.into(),
+                kind,
+            });
+        }
+        for (from, to) in [
+            ("input.pitch", "osc.pitch"),
+            ("input.gate", "env.gate"),
+            ("osc.audio", "amp.audio"),
+            ("env.control", "amp.level"),
+            ("amp.audio", "out.audio"),
+        ] {
+            operations.push(PatchOperation::Connect {
+                from: from.into(),
+                to: to.into(),
+            });
+        }
+        Self {
+            inputs: vec![
+                PatchInput {
+                    id: "pitch".into(),
+                    signal: SignalType::Pitch,
+                },
+                PatchInput {
+                    id: "gate".into(),
+                    signal: SignalType::Gate,
+                },
+            ],
+            edit: PatchEdit {
+                synth: id.into(),
+                operations,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ModulePort {
     pub endpoint: String,
@@ -122,6 +179,37 @@ fn instantiate(id: &str, kind: ModuleKind) -> Result<ModuleDefinition, String> {
     })
 }
 impl ValidatedSong {
+    /// Build on a clone and reuse operation/importer validation; intermediate
+    /// drafts remain private. Executable compilation belongs to the app boundary.
+    pub fn create_patch(&self, creation: &PatchCreation) -> Result<Self, String> {
+        let id = &creation.edit.synth;
+        if !valid_id(id) {
+            return Err(
+                "synth id must be 1..64 ASCII letters/digits/-/_ and cannot be input".into(),
+            );
+        }
+        if self.synths.contains_key(id) || self.samplers.contains_key(id) {
+            return Err(format!("duplicate instrument id '{id}'"));
+        }
+        if self.synths.len() + self.samplers.len() >= 32 || creation.inputs.len() > 32 {
+            return Err("construction exceeds 32 instruments or inputs".into());
+        }
+        let mut next = self.clone();
+        next.synths.insert(
+            id.clone(),
+            SynthDefinition {
+                id: id.clone(),
+                polyphony: 1,
+                inputs: creation.inputs.clone(),
+                modules: vec![],
+                cables: vec![],
+            },
+        );
+        let candidate = next.preview_patch(&creation.edit)?;
+        let next = candidate.replace_patch(candidate.synths[id].clone())?;
+        next.validate_executable_patch(id)?;
+        Ok(next)
+    }
     /// Structural subset used in addition to ordinary executable lowering.
     pub fn validate_executable_patch(&self, synth: &str) -> Result<(), String> {
         let graph = self

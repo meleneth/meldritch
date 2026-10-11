@@ -27,6 +27,11 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 1 ownership checkpoint: app-owned provenance/accepted source,
   source-only loading, typed pattern/parameter/patch commands independent of an
   instrument panel; existing detached views and save/reload formats preserved
+- [x] Slice 1 palette checkpoint: file-free empty source, typed bounded mono
+  patch creation reusing existing batch/importer/voice lowering, native `n`,
+  visible independent inputs/modules/cables, silence without tracks/patterns
+- [ ] Slice 1 next: native patch/note editing and explicit composition bindings,
+  host playback/runtime overlay, self-contained save/fresh reload
 - [ ] Slice 2: shared palette, two compositions and independent pattern sources
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
@@ -74,6 +79,17 @@ app all-targets Clippy with the existing allowances and docs build pass. This
 does not yet provide empty editable definitions or construction in the empty
 cockpit; those and explicit bindings/standalone saves remain open. No formats,
 historical examples, rendering algorithms or callback code changed.
+
+Palette checkpoint verification: workspace tests pass, including the new DSL
+request/negative fixtures, app atomic rejection/silence/32-definition bound and
+typed in-memory history replay, and native TUI gesture/complete 80×24 graph
+inspection tests. A real no-subcommand PTY opens a temporary empty directory,
+accepts two `n` presses, displays voice-2 and all typed cables/unsaved notice,
+quits and restores the alternate screen without creating files. Formatting,
+diff checks, affected-crate all-targets Clippy (existing allowances) and docs
+build pass. Legacy 09/29 fingerprints remain `41472b38b65b60ed` and
+`54745c74a42665cf`. This is silent in-memory palette creation only, with no
+physical device/listening, disk replay, saved project or performance claim.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

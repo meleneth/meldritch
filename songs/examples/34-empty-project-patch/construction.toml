@@ -1,0 +1,47 @@
+# A typed creation request, not a new project file format or loader entrypoint.
+# The native `n` gesture expands to this inspectable mono-voice recipe.
+[[inputs]]
+id = "pitch"
+signal = "pitch"
+[[inputs]]
+id = "gate"
+signal = "gate"
+
+[edit]
+synth = "voice-1"
+[[edit.operations]]
+operation = "instantiate"
+id = "osc"
+kind = "oscillator"
+[[edit.operations]]
+operation = "instantiate"
+id = "env"
+kind = "adsr"
+[[edit.operations]]
+operation = "instantiate"
+id = "amp"
+kind = "vca"
+[[edit.operations]]
+operation = "instantiate"
+id = "out"
+kind = "audio_output"
+[[edit.operations]]
+operation = "connect"
+from = "input.pitch"
+to = "osc.pitch"
+[[edit.operations]]
+operation = "connect"
+from = "input.gate"
+to = "env.gate"
+[[edit.operations]]
+operation = "connect"
+from = "osc.audio"
+to = "amp.audio"
+[[edit.operations]]
+operation = "connect"
+from = "env.control"
+to = "amp.level"
+[[edit.operations]]
+operation = "connect"
+from = "amp.audio"
+to = "out.audio"

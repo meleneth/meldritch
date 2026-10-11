@@ -1,0 +1,7 @@
+# Complete requests must reject without changing the accepted palette.
+[edit]
+synth = "unfinished"
+[[edit.operations]]
+operation = "instantiate"
+id = "osc"
+kind = "oscillator"

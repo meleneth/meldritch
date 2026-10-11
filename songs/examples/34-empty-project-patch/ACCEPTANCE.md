@@ -3,15 +3,18 @@
 Status: **design for the complete workflow**. The read-only opening checkpoint
 is implemented: DSL `project_directory`, CLI project-opening tests and native TUI
 tests cover empty/legacy roots, diagnostics and presentation. `opening.txt` and
-`invalid/malformed-entry.toml` specify that checkpoint. Construction, bindings,
-playback and self-contained save/reopen remain unimplemented. An additional
+`invalid/malformed-entry.toml` specify that checkpoint. Native note authoring,
+bindings, composition playback and self-contained save/reopen remain unimplemented.
+An additional
 ownership checkpoint moves accepted definitions/provenance into app-owned
 `ProjectSource`. Headless commands create/edit a pattern and edit a patch without
 an instrument panel; their views observe the same accepted revision, rejected
 commands preserve it, and immutable provenance stays unchanged. Run
 `cargo test -p meldritch-app project_source` for this checkpoint. It uses legacy
-example 09 as import provenance, not as an empty-project seed. No new authored
-format exists; add readable authored fixtures before extending its schema. See
+example 09 as import provenance, not as an empty-project seed. Typed silent palette
+creation is also implemented, as specified by the construction checkpoint below.
+No new authored format exists; add readable authored fixtures before extending
+its schema. See
 [the roadmap](../../../ROADMAP.md) and
 [implementation prompt](../../../AUTHORING.md#recommended-immediate-implementation-prompt).
 
@@ -21,7 +24,26 @@ Opening checks: `cargo test -p meldritch-dsl --test project_directory`,
 draw/quit and alternate-screen restoration smoke also passes without files.
 This evidence accepts only opening; it does not accept construction or music.
 
+Palette checks: the same DSL suite plus `cargo test -p meldritch-app empty_project`
+and `cargo test -p meldritch-tui native_creation`. They cover typed recipe equality,
+invalid inputs/IDs, incomplete and unsupported wiring, deterministic in-memory
+command replay, the construction bound, silence and full 80×24 inspection.
+A no-subcommand PTY smoke also accepts two `n` presses and clean quit/restoration
+without files. There is no disk capture/replay, persistence or physical-audio
+acceptance for this new cockpit yet.
+
 ## Scenario and observable behavior
+
+Construction checkpoint: `construction.toml` is a typed request fixture,
+not a save format. From a file-free empty root, native `n` dispatches creation of
+`voice-1` with the fixture's pitch/gate inputs, four modules and five cables.
+Subsequent `n` creates a distinct definition; no track, pattern or composition
+binding is created. The palette stays silent. The screen shows independent typed
+inputs and every module/cable. No files or devices are opened. Invalid/incomplete
+requests, duplicate identities and unsupported executable wiring leave source,
+history and publication unchanged. Existing patch edits act on the same source.
+Definitions remain in memory only; quitting loses unsaved construction and the
+screen must say so. This partial checkpoint does not accept playback/save/reopen.
 
 1. In a temporary empty directory execute `meldritch` with no subcommand. Open
    a silent valid project in a usable TUI without writing files or initializing

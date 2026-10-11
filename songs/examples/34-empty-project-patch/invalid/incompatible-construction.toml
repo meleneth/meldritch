@@ -1,0 +1,13 @@
+[[inputs]]
+id = "gate"
+signal = "gate"
+[edit]
+synth = "wrong-family"
+[[edit.operations]]
+operation = "instantiate"
+id = "osc"
+kind = "oscillator"
+[[edit.operations]]
+operation = "connect"
+from = "input.gate"
+to = "osc.pitch"

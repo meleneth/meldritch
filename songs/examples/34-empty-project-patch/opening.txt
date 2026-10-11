@@ -1,7 +1,9 @@
-# First checkpoint only. No fixture seed or project initialization.
+# Opening and silent palette checkpoint. No fixture seed or initialization.
 mkdir black-cathedral
 cd black-cathedral
 meldritch open-project --check
 meldritch
-# Inspect the empty project, then press q. No files should have been created.
+# Inspect the empty project; n creates voice-1 and displays its typed graph.
+# Another n creates voice-2. No track/pattern or audible material exists yet.
+# Press q. Construction is unsaved; no files should have been created.
 # Existing main.mlperformance directories open through the current song loader.

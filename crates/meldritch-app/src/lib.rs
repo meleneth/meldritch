@@ -95,6 +95,7 @@ pub enum AppCommand {
     SavePattern,
     TogglePatternEditor,
     EditPatch(meldritch_dsl::PatchEdit),
+    CreatePatch(meldritch_dsl::PatchCreation),
     TogglePatchEditor,
     PatchCharacter(char),
     PatchBackspace,
@@ -1495,6 +1496,7 @@ impl AppController {
                 AppCommandResult::PatternSaveRequested
             }
             AppCommand::EditPatch(edit) => self.edit_patch(edit)?,
+            AppCommand::CreatePatch(creation) => self.create_patch(creation)?,
             AppCommand::TogglePatchEditor => {
                 let e = self
                     .instrument_editor
@@ -2817,6 +2819,85 @@ mod tests {
             ),
             engine,
         )
+    }
+
+    #[test]
+    fn empty_project_creates_silent_palette_and_rejects_invalid_or_excess_definitions() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../songs/examples/34-empty-project-patch");
+        let entries = std::fs::read_dir(&root).unwrap().count();
+        let project = meldritch_dsl::load_project_directory(&root).unwrap();
+        let (mut app, _engine) = AppController::new_empty_project(&project).unwrap();
+        let empty = app.authored_source().unwrap();
+        assert!(empty.synths().is_empty());
+        let silent = |source: &ValidatedSong| {
+            meldritch_render::song_host::CompiledSongPatch::compile_initial(source)
+                .unwrap()
+                .render_default(FrameRange::new(0, 128).unwrap())
+                .unwrap()
+        };
+        assert!(silent(&empty).samples().iter().all(|s| *s == 0.0));
+        let mut wrong = PatchCreation::mono_voice("bad-wiring");
+        if let PatchOperation::Connect { from, .. } = wrong.edit.operations.last_mut().unwrap() {
+            *from = "osc.audio".into();
+        }
+        // Valid types/topology counts, but unsupported executable routing.
+        assert!(empty.create_patch(&wrong).is_ok());
+        assert!(app.dispatch(AppCommand::CreatePatch(wrong)).is_err());
+        assert!(Arc::ptr_eq(&empty, &app.authored_source().unwrap()));
+        assert!(app.history().is_empty());
+        for i in 1..=32 {
+            app.dispatch(AppCommand::CreatePatch(PatchCreation::mono_voice(format!(
+                "voice-{i}"
+            ))))
+            .unwrap();
+        }
+        let accepted = app.authored_source().unwrap();
+        assert_eq!(accepted.synths().len(), 32);
+        assert!(accepted.performance().tracks().is_empty());
+        assert!(accepted.note_patterns().is_empty());
+        assert!(silent(&accepted).samples().iter().all(|s| *s == 0.0));
+        assert!(
+            app.dispatch(AppCommand::CreatePatch(PatchCreation::mono_voice(
+                "voice-1"
+            )))
+            .is_err()
+        );
+        assert!(
+            app.dispatch(AppCommand::CreatePatch(PatchCreation::mono_voice(
+                "voice-33"
+            )))
+            .is_err()
+        );
+        assert!(Arc::ptr_eq(&accepted, &app.authored_source().unwrap()));
+        assert_eq!(app.history().len(), 32);
+        assert_eq!(
+            app.project_source.as_ref().unwrap().base.fingerprint(),
+            empty.fingerprint()
+        );
+        app.dispatch(AppCommand::EditPatch(PatchEdit {
+            synth: "voice-1".into(),
+            operations: vec![PatchOperation::SetParameter {
+                module: "osc".into(),
+                parameter: InstrumentParameter::Waveform,
+                value: InstrumentValue::Waveform(InstrumentWaveform::Saw),
+            }],
+        }))
+        .unwrap();
+        assert_ne!(
+            accepted.fingerprint(),
+            app.authored_source().unwrap().fingerprint()
+        );
+        assert!(app.instrument_view().is_none());
+        assert_eq!(std::fs::read_dir(root).unwrap().count(), entries);
+        let (mut replay, _replay_engine) = AppController::new_empty_project(&project).unwrap();
+        for record in app.history() {
+            replay.dispatch(record.command.clone()).unwrap();
+        }
+        assert_eq!(
+            replay.authored_source().unwrap().fingerprint(),
+            app.authored_source().unwrap().fingerprint()
+        );
     }
 
     #[test]

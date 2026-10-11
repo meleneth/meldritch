@@ -1191,6 +1191,7 @@ dependencies = [
  "meldritch-app",
  "meldritch-audio",
  "meldritch-core",
+ "meldritch-dsl",
  "meldritch-render",
  "ratatui",
 ]

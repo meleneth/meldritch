@@ -1171,12 +1171,32 @@ fn compile_note_track_for_pattern(
     pattern_id: &str,
     transpose_semitones: i8,
 ) -> Result<CompiledNotePatch, SongRenderError> {
-    let synth =
-        song.synths()
-            .get(track.synth_id())
-            .ok_or_else(|| SongRenderError::MissingSynth {
-                id: track.synth_id().to_owned(),
-            })?;
+    compile_note_definition(
+        song,
+        track.synth_id(),
+        Some(pattern_id),
+        transpose_semitones,
+    )
+}
+
+/// Validate an unconnected palette definition with ordinary voice lowering.
+/// No synthetic track, pattern or published artifact is introduced.
+pub fn validate_palette_synth(song: &ValidatedSong, synth_id: &str) -> Result<(), SongRenderError> {
+    compile_note_definition(song, synth_id, None, 0).map(|_| ())
+}
+
+fn compile_note_definition(
+    song: &ValidatedSong,
+    synth_id: &str,
+    pattern_id: Option<&str>,
+    transpose_semitones: i8,
+) -> Result<CompiledNotePatch, SongRenderError> {
+    let synth = song
+        .synths()
+        .get(synth_id)
+        .ok_or_else(|| SongRenderError::MissingSynth {
+            id: synth_id.to_owned(),
+        })?;
     let sources = synth
         .modules()
         .iter()
@@ -1262,12 +1282,13 @@ fn compile_note_track_for_pattern(
             format!("{}.audio", output.id()),
         )?;
     }
-    let pattern =
-        song.note_patterns()
-            .get(pattern_id)
-            .ok_or_else(|| SongRenderError::MissingPattern {
-                id: pattern_id.to_owned(),
-            })?;
+    let pattern = pattern_id
+        .map(|id| {
+            song.note_patterns()
+                .get(id)
+                .ok_or_else(|| SongRenderError::MissingPattern { id: id.to_owned() })
+        })
+        .transpose()?;
     let waveform_name = oscillator.waveform().unwrap_or("sine");
     let waveform = parse_waveform(oscillator.id(), waveform_name)?;
     Ok(CompiledNotePatch {
@@ -1300,11 +1321,11 @@ fn compile_note_track_for_pattern(
             cutoff_hz: filter.cutoff_hz().unwrap_or(20_000.0),
             resonance: filter.resonance().unwrap_or(0.0),
         }),
-        pattern_length: pattern.length_frames(),
-        looped: pattern.is_looped(),
+        pattern_length: pattern.map_or(1, |p| p.length_frames()),
+        looped: pattern.is_some_and(|p| p.is_looped()),
         events: pattern
-            .events()
-            .iter()
+            .into_iter()
+            .flat_map(|p| p.events())
             .map(|event| CompiledNoteEvent {
                 start: event.start_frame(),
                 end: event.start_frame() + event.duration_frames(),

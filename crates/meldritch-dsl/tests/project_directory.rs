@@ -58,7 +58,62 @@ fn legacy_entry_uses_the_same_semantic_loader_and_fingerprint() {
         let project = load_project_directory(&root).unwrap();
         assert_eq!(project.composition(), Some(&base));
         assert_eq!(project.root(), base.root());
+        assert_eq!(project.authoring_source(), base);
     }
+}
+
+#[test]
+fn empty_palette_construction_reuses_typed_batches_without_creating_timed_material() {
+    use meldritch_dsl::{PatchCreation, SignalType};
+    let directory = Directory::new();
+    let empty = load_project_directory(&directory.0)
+        .unwrap()
+        .authoring_source();
+    assert!(empty.synths().is_empty());
+    assert!(empty.performance().tracks().is_empty());
+    assert!(empty.note_patterns().is_empty());
+    let request: PatchCreation = toml::from_str(
+        &fs::read_to_string(example("34-empty-project-patch/construction.toml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(request, PatchCreation::mono_voice("voice-1"));
+    let source = empty.create_patch(&request).unwrap();
+    assert_ne!(source.fingerprint(), empty.fingerprint());
+    assert_eq!(source, empty.create_patch(&request).unwrap());
+    let graph = &source.synths()["voice-1"];
+    assert_eq!(graph.modules().len(), 4);
+    assert_eq!(graph.cables().len(), 5);
+    assert_eq!(graph.inputs()[0].signal(), SignalType::Pitch);
+    assert_eq!(graph.inputs()[1].signal(), SignalType::Gate);
+    assert!(source.performance().tracks().is_empty());
+    assert!(source.note_patterns().is_empty());
+    assert!(
+        source
+            .create_patch(&request)
+            .unwrap_err()
+            .contains("duplicate instrument")
+    );
+    for name in [
+        "incomplete-construction.toml",
+        "incompatible-construction.toml",
+    ] {
+        let invalid: PatchCreation = toml::from_str(
+            &fs::read_to_string(example(&format!("34-empty-project-patch/invalid/{name}")))
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(empty.create_patch(&invalid).is_err(), "{name}");
+    }
+    assert!(empty.synths().is_empty());
+    assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
+    let mut duplicate_inputs = request.clone();
+    duplicate_inputs.inputs.push(request.inputs[0].clone());
+    assert!(empty.create_patch(&duplicate_inputs).is_err());
+    assert!(
+        empty
+            .create_patch(&PatchCreation::mono_voice("../escape"))
+            .is_err()
+    );
 }
 
 #[test]

@@ -3108,7 +3108,6 @@ fn connect_apc_feedback(
 
 fn open_project(path: PathBuf, check: bool) -> Result<(), String> {
     let project = meldritch_dsl::load_project_directory(path).map_err(|error| error.to_string())?;
-    let view = meldritch_app::ProjectOverview::from_project(&project);
     if check {
         if let Some(song) = project.composition() {
             println!(
@@ -3143,7 +3142,7 @@ fn open_project(path: PathBuf, check: bool) -> Result<(), String> {
             None,
         )
     } else {
-        meldritch_tui::run_empty_project(&view)
+        meldritch_tui::run_empty_project(&project)
             .map_err(|error| format!("failed to open project cockpit: {error}"))
     }
 }
