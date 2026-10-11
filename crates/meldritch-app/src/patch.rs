@@ -161,7 +161,7 @@ fn parse_operation(words: &[&str]) -> Result<PatchOperation, String> {
                 _ => return Err(format!("unsupported parameter '{parameter}'")),
             };
             let value = match parameter {
-                InstrumentParameter::Model => InstrumentValue::Model(match *value { "fm" => PlaitsModel::Fm, "harmonic" => PlaitsModel::Harmonic, _ => return Err("model must be fm or harmonic".into()) }),
+                InstrumentParameter::Model => InstrumentValue::Model(PlaitsModel::parse(value)?),
                 InstrumentParameter::Waveform => InstrumentValue::Waveform(match *value {
                     "sine" => InstrumentWaveform::Sine, "triangle" => InstrumentWaveform::Triangle,
                     "saw" => InstrumentWaveform::Saw, "pulse" => InstrumentWaveform::Pulse, "square" => InstrumentWaveform::Square,

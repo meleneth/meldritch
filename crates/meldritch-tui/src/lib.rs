@@ -667,7 +667,10 @@ fn draw_instrument_editor(
                 maximum.map_or_else(|| "inf".into(), |n| n.to_string())
             ),
             InstrumentRange::Waveform => "sine/triangle/saw/pulse/square".into(),
-            InstrumentRange::Model => "fm/harmonic".into(),
+            InstrumentRange::Model => format!(
+                "{} models (Left/Right)",
+                meldritch_app::PlaitsModel::ALL.len()
+            ),
         };
         lines.push(format!(
             "{} {}.{:?} = {} {} [{}]",

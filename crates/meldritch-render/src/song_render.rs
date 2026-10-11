@@ -309,7 +309,7 @@ pub struct CompiledNotePatch {
     sample_rate: u32,
     channels: u16,
     polyphony: u16,
-    plaits: Option<(meldritch_dsl::PlaitsSettings, bool)>,
+    plaits: Option<(meldritch_dsl::PlaitsSettings, bool, bool)>,
     waveform: Waveform,
     envelope: AdsrSettings,
     filter: Option<CompiledNoteFilter>,
@@ -745,6 +745,7 @@ impl CompiledNotePatch {
         for absolute_frame in 0..range.end() {
             if active_end == Some(absolute_frame) {
                 envelope.note_off();
+                oscillator.note_off();
                 active_end = None;
             }
             let pattern_frame = if self.looped {
@@ -754,6 +755,7 @@ impl CompiledNotePatch {
             };
             if self.looped && absolute_frame > 0 && pattern_frame == 0 {
                 envelope.note_off();
+                oscillator.note_off();
                 active_end = None;
             }
             for event in self
@@ -764,6 +766,7 @@ impl CompiledNotePatch {
                 frequency = midi_frequency(event.note);
                 velocity = event.velocity;
                 envelope.note_on();
+                oscillator.note_on(velocity);
                 active_end = Some(absolute_frame + (event.end - event.start));
             }
             // The compiled cables route VCA into the optional filter.
@@ -817,6 +820,7 @@ impl CompiledNotePatch {
                 .filter(|voice| !voice.released && voice.end == absolute_frame)
             {
                 voice.envelope.note_off();
+                voice.oscillator.note_off();
                 voice.released = true;
             }
             let pattern_frame = if self.looped {
@@ -827,6 +831,7 @@ impl CompiledNotePatch {
             if self.looped && absolute_frame > 0 && pattern_frame == 0 {
                 for voice in voices.iter_mut().filter(|voice| !voice.released) {
                     voice.envelope.note_off();
+                    voice.oscillator.note_off();
                     voice.released = true;
                 }
             }
@@ -840,8 +845,10 @@ impl CompiledNotePatch {
                 }
                 let mut envelope = AdsrEnvelope::new(self.envelope, self.sample_rate);
                 envelope.note_on();
+                let mut oscillator = NoteOscillator::new(self.waveform, self.plaits);
+                oscillator.note_on(event.velocity);
                 voices.push(CompiledNoteVoice {
-                    oscillator: NoteOscillator::new(self.waveform, self.plaits),
+                    oscillator,
                     envelope,
                     filter: StateVariableFilter::new(),
                     frequency: midi_frequency(event.note),
@@ -887,10 +894,29 @@ struct NoteOscillator {
     plaits: Option<crate::plaits::PlaitsSource>,
 }
 impl NoteOscillator {
-    fn new(waveform: Waveform, settings: Option<(meldritch_dsl::PlaitsSettings, bool)>) -> Self {
+    fn new(
+        waveform: Waveform,
+        settings: Option<(meldritch_dsl::PlaitsSettings, bool, bool)>,
+    ) -> Self {
         Self {
             oscillator: Oscillator::new(waveform),
-            plaits: settings.map(|(p, aux)| crate::plaits::PlaitsSource::new(p, aux)),
+            plaits: settings.map(|(p, aux, gate)| {
+                if gate {
+                    crate::plaits::PlaitsSource::with_gate(p, aux, true)
+                } else {
+                    crate::plaits::PlaitsSource::new(p, aux)
+                }
+            }),
+        }
+    }
+    fn note_on(&mut self, velocity: f64) {
+        if let Some(p) = &mut self.plaits {
+            p.note_on(velocity);
+        }
+    }
+    fn note_off(&mut self) {
+        if let Some(p) = &mut self.plaits {
+            p.note_off();
         }
     }
     fn next(&mut self, frequency: f64, sample_rate: u32) -> f64 {
@@ -1256,6 +1282,9 @@ fn compile_note_track_for_pattern(
                 synth.cables().iter().any(|c| {
                     c.from() == format!("{}.aux", oscillator.id())
                         && c.to() == format!("{}.audio", amplifier.id())
+                }),
+                synth.cables().iter().any(|c| {
+                    c.from() == "input.gate" && c.to() == format!("{}.gate", oscillator.id())
                 }),
             )
         }),

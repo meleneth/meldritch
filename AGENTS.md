@@ -99,8 +99,11 @@ source model, importer and compiler. General DAG/DSP graph authoring remains ope
 Example 32 integrates the pinned mi-plaits-dsp crate's FM/harmonic module with
 headless editor/publication/persistence and port-reference/allocation tests.
 Read `PLAITS.md`: native f32 and Plaits RNG are authorized exceptions; the global
-preferred/default omitted sample rate is 48 kHz. Other Plaits engines and physical
-listening remain unsupported/unverified.
+preferred/default omitted sample rate is 48 kHz. Example 33 expands typed model
+selection to all 24 bundled choices with explicit gate input, worker-side
+resource initialization and headless main/aux/persistence acceptance.
+Custom resources and Voice/LPG emulation remain unsupported; physical listening
+and deadline benchmarks remain unverified.
 Example 31 adds headless drum-editor acceptance using the existing one-shot
 sampler and explicit sample-slot note commands; read `DRUM_EDITOR.md`. Its kit
 is generated and 909-inspired, not a native TR-909 synthesis engine.

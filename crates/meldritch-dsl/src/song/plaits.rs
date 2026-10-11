@@ -1,4 +1,4 @@
-//! The intentionally bounded sourcebox engine subset; authoring values stay f64.
+//! Typed pinned sourcebox model choices; authoring values stay f64.
 use super::*;
 use serde::{Deserialize, Serialize};
 
@@ -7,12 +7,94 @@ use serde::{Deserialize, Serialize};
 pub enum PlaitsModel {
     Fm,
     Harmonic,
+    VirtualAnalog,
+    Waveshaping,
+    Grain,
+    Wavetable,
+    Chord,
+    Speech,
+    Swarm,
+    Noise,
+    Particle,
+    String,
+    Modal,
+    BassDrum,
+    SnareDrum,
+    Hihat,
+    VirtualAnalogVcf,
+    PhaseDistortion,
+    SixOpA,
+    SixOpB,
+    SixOpC,
+    WaveTerrain,
+    StringMachine,
+    Chiptune,
 }
 impl PlaitsModel {
+    /// Stable authoring/navigation order; existing FM and harmonic names are unchanged.
+    pub const ALL: [Self; 24] = [
+        Self::Fm,
+        Self::Harmonic,
+        Self::VirtualAnalog,
+        Self::Waveshaping,
+        Self::Grain,
+        Self::Wavetable,
+        Self::Chord,
+        Self::Speech,
+        Self::Swarm,
+        Self::Noise,
+        Self::Particle,
+        Self::String,
+        Self::Modal,
+        Self::BassDrum,
+        Self::SnareDrum,
+        Self::Hihat,
+        Self::VirtualAnalogVcf,
+        Self::PhaseDistortion,
+        Self::SixOpA,
+        Self::SixOpB,
+        Self::SixOpC,
+        Self::WaveTerrain,
+        Self::StringMachine,
+        Self::Chiptune,
+    ];
+    pub fn parse(name: &str) -> Result<Self, String> {
+        Self::ALL
+            .into_iter()
+            .find(|m| m.name() == name)
+            .ok_or_else(|| {
+                format!(
+                    "unknown Plaits model '{name}'; supported: {}",
+                    Self::ALL.map(Self::name).join(", ")
+                )
+            })
+    }
     pub const fn name(self) -> &'static str {
         match self {
             Self::Fm => "fm",
             Self::Harmonic => "harmonic",
+            Self::VirtualAnalog => "virtual_analog",
+            Self::Waveshaping => "waveshaping",
+            Self::Grain => "grain",
+            Self::Wavetable => "wavetable",
+            Self::Chord => "chord",
+            Self::Speech => "speech",
+            Self::Swarm => "swarm",
+            Self::Noise => "noise",
+            Self::Particle => "particle",
+            Self::String => "string",
+            Self::Modal => "modal",
+            Self::BassDrum => "bass_drum",
+            Self::SnareDrum => "snare_drum",
+            Self::Hihat => "hihat",
+            Self::VirtualAnalogVcf => "virtual_analog_vcf",
+            Self::PhaseDistortion => "phase_distortion",
+            Self::SixOpA => "six_op_a",
+            Self::SixOpB => "six_op_b",
+            Self::SixOpC => "six_op_c",
+            Self::WaveTerrain => "wave_terrain",
+            Self::StringMachine => "string_machine",
+            Self::Chiptune => "chiptune",
         }
     }
 }

@@ -15,7 +15,8 @@ foundation, with composed musical authoring still unfinished. The
 [Lua piano roll](PIANO_ROLL.md) now accepts examples 26/27 headlessly; examples
 28 now accepts [editable faders and mixer](CONTROL_ASSIGNMENTS.md) headlessly;
 30 now accepts typed patch composition and version-2 graph persistence headlessly. Example 32 adds the pinned Plaits crate subset;
-see [PLAITS.md](PLAITS.md).
+see [PLAITS.md](PLAITS.md). Example 33 now expands selection to all 24 bundled
+models with explicit source gates and unchanged historical FM/harmonic files.
 
 - [x] Inventory actual synthesis/compiler, notes/commands, MIDI, Lua, mixer and
   publication boundaries; verify Plaits absence and audit the proposed port
@@ -45,10 +46,20 @@ see [PLAITS.md](PLAITS.md).
 - [x] Example 32: pinned crate FM/harmonic typed module, editor, Lua persistence,
   source/publication tests, direct port-reference blocks and allocation checks;
   authorized native f32/RNG exceptions, global omitted-rate default 48 kHz
+- [x] Example 33: all 24 bundled Plaits choices, typed gate connections,
+  keyboard/Lua selection, main/aux render/publication, lossless Lua reload,
+  parameter boundary and worker allocation checks; physical listening pending
 - [x] Example 30: compose the supported oscillator/ADSR/VCA/low-pass patch;
   inspect typed cables, reject invalid/unsupported graphs and export/reload;
   reuse SynthDefinition/typed port validation/compiler, bounded drafts, atomic
   Lua batches, main/aux Plaits replacement and continued transport/publication
+Plaits catalog verification: all 24 models pass main/aux compilation/publication
+and independent Lua graph/value reload; keyboard and Lua cycle the full catalog.
+Ten nonrandom engines pass exact upstream block, split-range and reload checks.
+All models process patched/unpatched gates and joint 0/0.5/1 parameter boundaries
+without allocations after worker initialization. Example 32 source files and
+historical Lua definitions remain compatible. Physical listening is pending.
+
 - [ ] Example 29: complete composed round-trip across patterns, synths, cables,
   mappings and mixer settings; deterministic source/audio, atomic save failures
 - [x] Run relevant full crate/compatibility suites for the instrument slice

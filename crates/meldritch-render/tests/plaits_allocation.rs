@@ -31,7 +31,40 @@ unsafe impl GlobalAlloc for ObservedAllocator {
 #[global_allocator]
 static ALLOCATOR: ObservedAllocator = ObservedAllocator;
 #[test]
-fn construction_and_processing_allocate_nothing_for_supported_engines() {
+fn every_model_processes_extremes_without_allocating() {
+    use meldritch_dsl::{PlaitsModel, PlaitsSettings};
+    for model in PlaitsModel::ALL {
+        for value in [0.0, 0.5, 1.0] {
+            for gate in [false, true] {
+                let mut source = plaits::PlaitsSource::with_gate(
+                    PlaitsSettings {
+                        model,
+                        harmonics: value,
+                        timbre: value,
+                        morph: value,
+                    },
+                    false,
+                    gate,
+                );
+                source.note_on(0.8);
+                ALLOCATIONS.with(|n| n.set(0));
+                COUNTING.with(|on| on.set(true));
+                let mut finite = true;
+                for frame in 0..4800 {
+                    if frame == 2400 {
+                        source.note_off();
+                    }
+                    finite &= source.next(220.0).is_finite();
+                }
+                COUNTING.with(|on| on.set(false));
+                assert!(finite, "{model:?}, value={value}, gate={gate}");
+                assert_eq!(ALLOCATIONS.with(Cell::get), 0, "{model:?}");
+            }
+        }
+    }
+}
+#[test]
+fn historical_fm_and_harmonic_construction_and_processing_allocate_nothing() {
     use meldritch_dsl::{PlaitsModel, PlaitsSettings};
     for model in [PlaitsModel::Fm, PlaitsModel::Harmonic] {
         ALLOCATIONS.with(|n| n.set(0));

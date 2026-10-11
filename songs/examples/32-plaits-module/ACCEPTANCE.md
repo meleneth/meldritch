@@ -25,4 +25,5 @@ Bounded block processing must allocate nothing after engine construction.
 
 Plaits' f32 arithmetic is an explicit external DSP exception; source values,
 filter/envelope/mixing remain f64. Plaits RNG is authorized as an exception to
-determinism; the initial two engines do not use it. No random engine is exposed.
+determinism; the initial two engines do not use it. This initial example uses no random engine. Example 33 extends the catalog
+and tests explicit gate connections without changing this historical fixture.

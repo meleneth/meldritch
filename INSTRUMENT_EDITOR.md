@@ -5,7 +5,7 @@ in a validated `.mlsynth`. Rust owns the song source; keyboard and Lua commands
 both change that source through the same typed validation and existing compiler.
 TOML songs remain loadable. [The Lua piano roll](PIANO_ROLL.md) now edits the
 initial note-pattern subset. [Fader/mixer assignments](CONTROL_ASSIGNMENTS.md)
-and the [Plaits FM/harmonic module](PLAITS.md) are implemented.
+and the [Plaits model catalog](PLAITS.md) are implemented.
 [Typed patch composition](PATCH_EDITOR.md) now uses Ctrl-G in this editor.
 
 Start the small supported bass patch without a physical controller:
@@ -25,7 +25,7 @@ Ctrl-Tab retains the existing cockpit mode command.
 
 | Module | Editable parameter | Authored type and range |
 | --- | --- | --- |
-| plaits | model | `fm`, `harmonic` |
+| plaits | model | 24 typed choices; see [Plaits](PLAITS.md), cycle with Left/Right |
 | plaits | harmonics, timbre, morph | finite normalized values, 0 through 1 |
 | oscillator | waveform | `sine`, `triangle`, `saw`, `pulse`, `square` |
 | ADSR | attack, decay, release | finite seconds, >= 0 |

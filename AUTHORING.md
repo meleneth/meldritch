@@ -1,10 +1,12 @@
 # Interactive musical authoring investigation
 
 Implementation update: [typed patch composition](PATCH_EDITOR.md) and the
-[pinned Plaits subset](PLAITS.md) now supersede the earlier topology/Plaits gaps.
+[pinned Plaits model catalog](PLAITS.md) now supersede the earlier topology/Plaits gaps.
 Example 30 reuses the existing source graph/importer/compiler and exports changed
 graphs as version-2 Lua instrument snapshots; example 32 verifies FM/harmonic
 engines with authorized native f32/RNG exceptions and 48 kHz preference.
+Example 33 extends this to all 24 bundled model choices and explicit source gate
+connections, with headless keyboard/Lua/publication/persistence acceptance.
 
 Implementation update: [example 28 / editable faders and mixer](CONTROL_ASSIGNMENTS.md)
 now implements source-owned cutoff/resonance, single-track delay mix/feedback,
@@ -147,8 +149,9 @@ authoring accepts lane level; pan/bus authoring needs its own later example.
 
 This section records the earlier inventory. Current integration supersedes the
 old defer decision below: [PLAITS.md](PLAITS.md) documents the pinned crate,
-verified FM/harmonic subset and authorized f32/RNG exceptions. Other upstream
-engines remain unsupported.
+verified 24-model catalog and authorized f32/RNG exceptions. Custom resources,
+Voice/LPG emulation, CPU benchmarks and physical listening remain unimplemented
+or unverified.
 
 All repository files/manifests, Cargo.lock and `cargo tree --locked --offline`
 were inspected: no Plaits dependency, vendored implementation or Rust clone is

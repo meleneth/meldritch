@@ -137,7 +137,7 @@ fn native_keyboard_inspects_and_changes_model_choice() {
         .iter()
         .map(|c| c.symbol())
         .collect();
-    assert!(text.contains("fm/harmonic") && text.contains("harmonic") && text.contains("plaits"));
+    assert!(text.contains("24 models") && text.contains("harmonic") && text.contains("plaits"));
 }
 
 #[test]

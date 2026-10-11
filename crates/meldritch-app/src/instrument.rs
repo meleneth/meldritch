@@ -1,7 +1,8 @@
 use super::*;
 pub use meldritch_dsl::{
     InstrumentEdit, InstrumentParameter, InstrumentParameterDefinition, InstrumentParameterId,
-    InstrumentRange, InstrumentValue, InstrumentWaveform, PatchEdit, PatchOperation, ValidatedSong,
+    InstrumentRange, InstrumentValue, InstrumentWaveform, PatchEdit, PatchOperation, PlaitsModel,
+    ValidatedSong,
 };
 
 /// Baseline is immutable import provenance. `source` is the only editable song.
@@ -244,14 +245,14 @@ impl AppController {
                 };
                 InstrumentValue::Number(value + step * f64::from(delta))
             }
-            InstrumentValue::Model(value) => InstrumentValue::Model(if delta.rem_euclid(2) == 0 {
-                value
-            } else {
-                match value {
-                    meldritch_dsl::PlaitsModel::Fm => meldritch_dsl::PlaitsModel::Harmonic,
-                    meldritch_dsl::PlaitsModel::Harmonic => meldritch_dsl::PlaitsModel::Fm,
-                }
-            }),
+            InstrumentValue::Model(value) => {
+                let choices = meldritch_dsl::PlaitsModel::ALL;
+                let index = choices.iter().position(|v| *v == value).unwrap();
+                InstrumentValue::Model(
+                    choices[(index as i64 + i64::from(delta)).rem_euclid(choices.len() as i64)
+                        as usize],
+                )
+            }
             InstrumentValue::Waveform(value) => {
                 let choices = [
                     InstrumentWaveform::Sine,

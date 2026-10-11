@@ -1,6 +1,6 @@
 # Architecture
 
-The pinned [Plaits module](PLAITS.md) uses standalone upstream FM/harmonic engines
+The pinned [Plaits module](PLAITS.md) uses all 24 standalone upstream model choices
 on the existing render worker, explicit external envelopes/cables and the normal
 atomic publication path. Native f32 and Plaits RNG are authorized exceptions;
 all surrounding source/DSP/mix state remains f64. Preferred/default omitted song

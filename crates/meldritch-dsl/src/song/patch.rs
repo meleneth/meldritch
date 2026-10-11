@@ -130,7 +130,14 @@ impl ValidatedSong {
             .ok_or_else(|| format!("unknown synth '{synth}'"))?;
         let with_filter = graph.modules.iter().any(|m| m.kind == ModuleKind::LowPass);
         let expected_modules = if with_filter { 5 } else { 4 };
-        let expected_cables = if with_filter { 6 } else { 5 };
+        let patched_plaits_gate = graph.modules.iter().any(|m| {
+            m.kind == ModuleKind::Plaits
+                && graph
+                    .cables
+                    .iter()
+                    .any(|c| c.from == "input.gate" && c.to == format!("{}.gate", m.id))
+        });
+        let expected_cables = if with_filter { 6 } else { 5 } + usize::from(patched_plaits_gate);
         if graph.modules.len() != expected_modules || graph.cables.len() != expected_cables {
             return Err("unsupported note topology: one source, ADSR, VCA, output and optional low-pass with exactly the executable cables required".into());
         }

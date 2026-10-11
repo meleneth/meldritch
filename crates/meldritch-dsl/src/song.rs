@@ -3756,7 +3756,7 @@ fn resolve_port(
         (ModuleKind::Oscillator | ModuleKind::Plaits, PortDirection::Input, "pitch") => {
             SignalType::Pitch
         }
-        (ModuleKind::Adsr, PortDirection::Input, "gate") => SignalType::Gate,
+        (ModuleKind::Adsr | ModuleKind::Plaits, PortDirection::Input, "gate") => SignalType::Gate,
         (ModuleKind::Adsr, PortDirection::Output, "control")
         | (ModuleKind::Vca, PortDirection::Input, "level") => SignalType::Control,
         (ModuleKind::Vca, PortDirection::Input, "audio") => SignalType::Audio,

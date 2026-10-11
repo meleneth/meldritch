@@ -9,6 +9,11 @@ Edit an existing synth with **Ctrl-E** in `tui-song`, then save a readable Lua
 definition with **Ctrl-S**. See [the instrument editor guide](INSTRUMENT_EDITOR.md)
 for the supported parameters, independent reload/render commands and test scope.
 
+Explore all 24 bundled [Plaits model choices](PLAITS.md):
+`cargo run -- tui-song songs/examples/33-plaits-models --lua main.lua`.
+In Ctrl-E, select the model and cycle it with Left/Right; Ctrl-S saves the patch.
+Physical listening acceptance remains pending.
+
 Compose notes with the [Lua APC piano roll](PIANO_ROLL.md):
 `cargo run -- tui-song songs/examples/26-apc-note-pattern --lua main.lua`.
 Physical gesture/LED/listening acceptance is still pending.
