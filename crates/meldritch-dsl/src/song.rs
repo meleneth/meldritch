@@ -595,12 +595,14 @@ impl PerformanceUiDefinition {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PerformanceUiSectionKind {
-    Transport,
-    PageOverview,
-    PatternGrid,
-    VisibleControls,
-    Status,
-    KeyHints,
+    // These tags are semantic fingerprint inputs. Preserve historical values.
+    Transport = 0,
+    PageOverview = 1,
+    PatternGrid = 2,
+    VisibleControls = 3,
+    Status = 4,
+    KeyHints = 5,
+    SongAudio = 6,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -4089,6 +4091,7 @@ fn parse_performance_ui(
     for section in raw.sections {
         let kind = match section.kind.as_str() {
             "transport" => PerformanceUiSectionKind::Transport,
+            "song_audio" => PerformanceUiSectionKind::SongAudio,
             "page_overview" => PerformanceUiSectionKind::PageOverview,
             "pattern_grid" => PerformanceUiSectionKind::PatternGrid,
             "visible_controls" => PerformanceUiSectionKind::VisibleControls,

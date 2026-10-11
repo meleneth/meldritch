@@ -99,7 +99,7 @@ impl PlaybackControl {
     }
 }
 
-struct LoopingAudio {
+pub struct PublishedAudioRenderer {
     audio: AudioSnapshotReader,
     device_channels: usize,
     transport: PlaybackTransport,
@@ -111,7 +111,7 @@ struct LoopingAudio {
     last_missing_chunk: Option<usize>,
 }
 
-impl LoopingAudio {
+impl PublishedAudioRenderer {
     #[cfg(test)]
     fn new(block: &AudioBlock, device_channels: u16, loops: u32) -> Result<Self, String> {
         let audio = PublishedAudio::from_block(block, 4096)
@@ -142,12 +142,15 @@ impl LoopingAudio {
         Self::from_engine(audio, device_channels, loops, engine)
     }
 
-    fn from_engine(
+    pub fn from_engine(
         audio: AudioSnapshotReader,
         device_channels: u16,
         loops: u32,
         engine: PlaybackEngine,
     ) -> Result<Self, String> {
+        if device_channels == 0 {
+            return Err("device channel count must be positive".into());
+        }
         if loops == 0 {
             return Err("playback loop count must be at least one".to_owned());
         }
@@ -177,6 +180,11 @@ impl LoopingAudio {
         })
     }
 
+    /// Headless and device rendering share this same callback implementation.
+    pub fn render_f64(&mut self, output: &mut [f64]) -> bool {
+        self.fill(output)
+    }
+
     fn fill<T>(&mut self, output: &mut [T]) -> bool
     where
         T: DeviceSample + FromSample<Sample>,
@@ -185,6 +193,7 @@ impl LoopingAudio {
         let audio = self.audio.snapshot();
         let mut finished = false;
         let mut callback_underrun = false;
+        let mut rendered = false;
         for output_frame in output.chunks_mut(self.device_channels) {
             let Some(frame) = self.transport.next_frame() else {
                 for sample in output_frame {
@@ -196,6 +205,7 @@ impl LoopingAudio {
 
             match audio.frame(frame) {
                 Ok(source_frame) => {
+                    rendered = true;
                     self.last_missing_chunk = None;
                     for (channel, output_sample) in output_frame.iter_mut().enumerate() {
                         let source_channel = channel.min(source_frame.len() - 1);
@@ -218,6 +228,10 @@ impl LoopingAudio {
         }
         if callback_underrun {
             self.status.record_underrun();
+            self.audio.clear_acknowledgement();
+        }
+        if rendered && !callback_underrun {
+            self.audio.acknowledge(audio.generation());
         }
         self.status.publish_transport(&self.transport);
         self.status.callback_completed();
@@ -283,7 +297,7 @@ impl RealtimePlaybackSession {
         let counters = Arc::new(PlaybackCounters::default());
         let command_monitor = control.command_monitor.clone();
         let status_monitor = control.status_monitor.clone();
-        let state = LoopingAudio::from_engine(audio, config.channels, loops, engine)?;
+        let state = PublishedAudioRenderer::from_engine(audio, config.channels, loops, engine)?;
         let error_reporter = state.error_reporter();
         let stream = build_stream(
             &device,
@@ -424,7 +438,7 @@ fn build_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     format: SampleFormat,
-    state: LoopingAudio,
+    state: PublishedAudioRenderer,
     counters: Arc<PlaybackCounters>,
     error_reporter: StreamErrorReporter,
 ) -> Result<cpal::Stream, String> {
@@ -473,7 +487,7 @@ mod tests {
     fn looping_callback_finishes_without_allocating_new_audio() {
         let mut block = AudioBlock::silent(1, 2);
         block.samples_mut().copy_from_slice(&[0.25, -0.5]);
-        let mut state = LoopingAudio::new(&block, 2, 2).unwrap();
+        let mut state = PublishedAudioRenderer::new(&block, 2, 2).unwrap();
         let mut output = [0.0_f64; 10];
 
         assert!(state.fill(&mut output));
@@ -487,7 +501,7 @@ mod tests {
     fn callback_clamps_only_at_device_boundary() {
         let mut block = AudioBlock::silent(2, 1);
         block.samples_mut().copy_from_slice(&[2.0, -2.0]);
-        let mut state = LoopingAudio::new(&block, 2, 1).unwrap();
+        let mut state = PublishedAudioRenderer::new(&block, 2, 1).unwrap();
         let mut output = [0.0_f32; 2];
 
         assert!(state.fill(&mut output));
@@ -498,7 +512,7 @@ mod tests {
     #[test]
     fn callback_applies_initial_play_command() {
         let block = AudioBlock::silent(1, 1);
-        let mut state = LoopingAudio::new(&block, 1, 1).unwrap();
+        let mut state = PublishedAudioRenderer::new(&block, 1, 1).unwrap();
         let status = state.status_monitor();
         let mut output = [1.0_f64; 1];
 
@@ -521,7 +535,7 @@ mod tests {
     fn missing_chunk_falls_back_to_silence_and_counts_one_underrun() {
         let audio =
             PublishedAudio::from_chunks(1, 4, 2, vec![Some(Arc::from([0.5, 0.5])), None]).unwrap();
-        let mut state = LoopingAudio::from_published(audio, 1, 1).unwrap();
+        let mut state = PublishedAudioRenderer::from_published(audio, 1, 1).unwrap();
         let status = state.status_monitor();
         let mut output = [0.0_f64; 4];
 
@@ -537,7 +551,7 @@ mod tests {
         let partial =
             PublishedAudio::from_chunks(1, 4, 2, vec![Some(Arc::from([0.5, 0.5])), None]).unwrap();
         let (publisher, reader) = audio_publication(partial);
-        let mut state = LoopingAudio::from_reader(reader, 1, 2).unwrap();
+        let mut state = PublishedAudioRenderer::from_reader(reader, 1, 2).unwrap();
         let status = state.status_monitor();
         let mut first_output = [0.0_f64; 4];
 
@@ -570,7 +584,7 @@ mod tests {
         let (publisher, reader) = audio_publication(initial);
         let (control, engine) = playback_session_parts(4).unwrap();
         let status = control.status_monitor();
-        let mut state = LoopingAudio::from_engine(reader, 1, u32::MAX, engine).unwrap();
+        let mut state = PublishedAudioRenderer::from_engine(reader, 1, u32::MAX, engine).unwrap();
         control.play().unwrap();
 
         let mut first_output = [0.0_f64; 5];
@@ -599,7 +613,7 @@ mod tests {
         let (_, reader) = audio_publication(audio);
         let (control, engine) = playback_session_parts(4).unwrap();
         let status = control.status_monitor();
-        let mut state = LoopingAudio::from_engine(reader, 1, 1, engine).unwrap();
+        let mut state = PublishedAudioRenderer::from_engine(reader, 1, 1, engine).unwrap();
         let mut output = [1.0_f64; 1];
 
         control.play().unwrap();
@@ -613,5 +627,57 @@ mod tests {
         control.play().unwrap();
         assert!(state.fill(&mut output));
         assert_eq!(control.command_diagnostics().applied, 3);
+    }
+    #[test]
+    fn generation_ack_requires_playing_present_frames_and_preserves_atomic_tag() {
+        use crate::audio_publication::AudioPublicationError;
+        let block = AudioBlock::silent(1, 4);
+        let (publisher, reader) = audio_publication(PublishedAudio::from_block(&block, 2).unwrap());
+        let monitor = reader.playback_monitor();
+        let (control, engine) = playback_session_parts(8).unwrap();
+        assert!(
+            PublishedAudioRenderer::from_engine(
+                reader.clone(),
+                0,
+                1,
+                playback_session_parts(8).unwrap().1
+            )
+            .is_err()
+        );
+        let mut renderer =
+            PublishedAudioRenderer::from_engine(reader.clone(), 1, u32::MAX, engine).unwrap();
+        publisher
+            .publish_generation(PublishedAudio::from_block(&block, 2).unwrap(), 7)
+            .unwrap();
+        renderer.render_f64(&mut [0.0; 2]); // stopped
+        assert_eq!(monitor.generation(), None);
+        control.play().unwrap();
+        renderer.render_f64(&mut []); // no frames
+        assert_eq!(monitor.generation(), None);
+        let retained = reader.snapshot();
+        let missing = PublishedAudio::from_chunks(1, 4, 2, vec![None, None]).unwrap();
+        publisher.publish_generation(missing, 8).unwrap();
+        renderer.render_f64(&mut [0.0; 2]); // underrun
+        assert_eq!(monitor.generation(), None);
+        assert_eq!(retained.generation(), 7);
+        assert_eq!(reader.snapshot().generation(), 8);
+        publisher
+            .publish_generation(PublishedAudio::from_block(&block, 2).unwrap(), 9)
+            .unwrap();
+        renderer.render_f64(&mut [0.0; 2]);
+        assert_eq!(monitor.generation(), Some(9));
+        assert_eq!(
+            publisher.publish_generation(PublishedAudio::from_block(&block, 2).unwrap(), u64::MAX),
+            Err(AudioPublicationError::ReservedGeneration)
+        );
+        assert_eq!(reader.snapshot().generation(), 9);
+        publisher
+            .publish_generation(
+                PublishedAudio::from_chunks(1, 4, 2, vec![None, None]).unwrap(),
+                10,
+            )
+            .unwrap();
+        renderer.render_f64(&mut [0.0; 2]);
+        assert_eq!(monitor.generation(), None);
     }
 }

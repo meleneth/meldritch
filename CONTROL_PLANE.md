@@ -88,12 +88,13 @@ Other TOML bindings remain active.
 Lua, command observers, session writes, graph compilation and semantic RGB
 feedback all execute on the control owner. Output diffs suppress unchanged
 frames and clear removed cells; invalid colors cannot partially send a frame.
-Failed sends retain the diff for retry. Physical discovery/open happens once;
-automatic physical reconnect is unfinished. Missing output is reported and
+Failed sends retain the diff for paced retry. Physical discovery/recovery uses
+the lifecycle described below. Missing output is reported and
 does not prevent loading. Headless APC/LCD/TUI projections share one widget,
 and logical disconnect/reconnect reconstructs authoritative state. A green
 launch widget describes selection and global transport, not audio-generation
-acknowledgement. There is no quantized or audible-generation widget state yet.
+acknowledgement. Example 24 adds generation-aware presentation separately,
+preserving historical example 21. Quantized scheduling remains unimplemented.
 
 Production port smoke: example 21 opened the connected Linux APC Control input
 and feedback output with `--no-autoplay --midi-debug`, displayed stopped transport
@@ -183,6 +184,55 @@ the `tui-song` reconnect lifecycle.
 
 ## Minimal Lua API
 
+### Audio-aware presentation
+
+Example 24 uses `state.audio`, an optional immutable projection of shared
+`AppViewModel::song_audio` telemetry. `SongAudioHost` owns artifact revision
+metadata; `AppController` remains the only musical state/command authority.
+`observe_song_audio` refreshes derived facts without editing music or appending
+performance commands. TOML and Lua hosts use the same projection and worker.
+
+The projection provides `requested_generation`, `published_generation`,
+`callback_generation` (nil before valid consumption), `pending`, `error`, and
+`lanes[id].published_variation/playing_variation`. Requested variations remain
+in `state.lanes`; no widget keeps its own musical copy. A launch widget can
+show the requested pattern queued while the older pattern still plays. Stopped
+transport shows a published pattern ready. Render/compile/publication errors
+retain the previous audio and expose a bounded diagnostic, while the accepted
+request remains a recorded fact. Starting new work supersedes the older
+generation even when its compilation fails, preventing late stale publication.
+
+Every immutable `PublishedAudio` carries its generation with its samples. The
+existing callback renderer, also exposed as `PublishedAudioRenderer` for
+headless tests, acknowledges that exact generation after rendering at least
+one present frame with no underrun in the completed buffer. This adds one
+atomic store and scalar bookkeeping, with no Lua, string work, allocation,
+locks, graph work or tracing. Missing chunks clear the acknowledgement. Empty
+and stopped callbacks do not advance it. `u64::MAX` is reserved for unknown;
+legacy untagged snapshots use generation zero. One audio stream owns the
+acknowledgement writer for each publication.
+
+The host retains four bounded revision slots: latest submitted, current and
+previous publication, and last identified callback revision. A callback delayed
+beyond retained metadata is unknown, never guessed. Telemetry is refreshable;
+it is not a replacement for the lossless accepted-command journal. Audio
+progress changes appear in the control trace as diagnostics, with unchanged
+updates suppressed. The declared native TUI `song_audio` section and simulated LCD/APC/text
+widgets read the same facts. Reconnect reconstructs these facts without HSM
+entry/exit actions or musical edits.
+The new optional UI section leaves historical page layouts intact. UI kind
+fingerprint tags retain their historical numeric values and add `song_audio`
+at the end; no existing project's semantic fingerprint is changed by this kind.
+
+`playing_variation` means samples rendered into a device callback, including
+valid silence. It does not prove audible output at the DAC or human listening.
+Lane inclusion follows existing mute/solo semantics; fader zero and note gaps
+do not change pattern playback identity. Global whole-song render work queues
+all requested lanes; there is no new per-lane scheduler or quantized launch
+implementation. Hardware visual/listening acceptance and precise device-clock
+latency remain open. Older Lua scripts continue to load and retain their own
+presentation policy; they opt into this API using the `audio` dependency.
+
 `main.lua` returns a table with `version = 1`, a stable `id`, confined `song`
 directory, `initial` state, `surfaces`, `widgets` and `states`.
 
@@ -193,7 +243,7 @@ names of at most 64 bytes. They do not depend on enumeration order.
 
 A widget declares `id`, `dependencies`, `interact(state)` and
 `present(state, surface_kind, page)`. Allowed dependencies are `mode`, `page`,
-`controls`, `lanes` and `transport`. This version refreshes at command/page/host
+`controls`, `lanes`, `transport` and `audio`. This version refreshes at command/page/host
 boundaries rather than maintaining a subscription graph. `interact` returns
 one command request. `present` returns `{label, color, style}`. Semantically
 unchanged frames are suppressed; outputs replace a complete surface frame so

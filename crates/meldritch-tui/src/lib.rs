@@ -528,6 +528,9 @@ fn draw_declared_performance_mode(
         .zip(rows.iter().copied())
     {
         match section.kind {
+            meldritch_app::PerformanceUiSectionKind::SongAudio => {
+                draw_song_audio(frame, area, view, section.title.as_deref())
+            }
             meldritch_app::PerformanceUiSectionKind::Transport => draw_transport(frame, area, view),
             meldritch_app::PerformanceUiSectionKind::PageOverview => {
                 draw_groovebox_surface_with_title(frame, area, view, section.title.as_deref())
@@ -670,6 +673,53 @@ fn draw_performance_pages(
         panel(
             title.unwrap_or("Ensemble Page Overview"),
             Paragraph::new(lines).wrap(Wrap { trim: false }),
+        ),
+        area,
+    );
+}
+
+fn draw_song_audio(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    view: &AppViewModel,
+    title: Option<&str>,
+) {
+    let states = view.song_audio.as_ref().map_or_else(
+        || "Audio telemetry unavailable".to_owned(),
+        |audio| {
+            audio
+                .lanes
+                .iter()
+                .map(|(id, lane)| {
+                    let selected = view
+                        .performance
+                        .pages
+                        .iter()
+                        .flat_map(|page| &page.strips)
+                        .find(|strip| strip.lane_id == *id)
+                        .and_then(|strip| strip.active_variation_id.as_deref());
+                    let status = if audio.error.is_some() {
+                        "error"
+                    } else if audio.pending {
+                        "queued"
+                    } else if selected.is_some() && lane.playing_variation.as_deref() == selected {
+                        "playing"
+                    } else if selected.is_some() && lane.published_variation.as_deref() == selected
+                    {
+                        "ready"
+                    } else {
+                        "unavailable"
+                    };
+                    format!("{id} {} {status}", selected.unwrap_or("—"))
+                })
+                .collect::<Vec<_>>()
+                .join(" · ")
+        },
+    );
+    frame.render_widget(
+        panel(
+            title.unwrap_or("Song audio"),
+            Paragraph::new(states).wrap(Wrap { trim: false }),
         ),
         area,
     );
@@ -1615,6 +1665,7 @@ mod tests {
             missed_artifacts: 1,
         };
         AppViewModel {
+            song_audio: None,
             cockpit_mode: meldritch_app::CockpitMode::AllParameters,
             curated_controls: Vec::new(),
             transport: TransportView {

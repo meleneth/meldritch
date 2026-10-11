@@ -11,6 +11,11 @@ patches, live overrides and the bounded rerender worker live in
 `meldritch-render::song_host`. These are control-thread adapters to existing
 commands and immutable audio publication, with no second musical state model.
 
+Song snapshot generations now travel with immutable samples. The callback emits
+only atomic consumption telemetry; the song host maps retained revision metadata
+to `AppViewModel::song_audio` outside realtime. Native TUI and Lua presentation
+share that projection. Publication alone never establishes callback playback.
+
 ## Workspace shape
 
 Initial Rust workspace:

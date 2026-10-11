@@ -30,10 +30,15 @@ fn historical_song_directories_load_compile_and_retain_range_identical_audio() {
         ("19-apc-mini-mk2-playground", "mix"),
         ("21-lua-apc-performance", "mix"),
         ("22-midi-soft-takeover", "mix"),
+        ("24-audio-aware-widgets", "mix"),
     ];
     for (fixture, compiler) in fixtures {
         let path = repository().join("songs/examples").join(fixture);
         let song = load_song_directory(&path).unwrap_or_else(|e| panic!("{fixture}: {e}"));
+        if fixture == "17-launch-control-xl-ensemble" {
+            // Captured from the production loader before adding song_audio.
+            assert_eq!(format!("{:016x}", song.fingerprint()), "2010d44585037a44");
+        }
         assert_eq!(
             song.fingerprint(),
             load_song_directory(&path).unwrap().fingerprint()

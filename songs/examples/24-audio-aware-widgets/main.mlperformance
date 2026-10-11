@@ -1,0 +1,66 @@
+[meldritch]
+kind = "performance"
+version = 1
+[performance]
+id = "audio-aware-widgets"
+title = "Queued and callback-playing patterns"
+bpm = 120.0
+sample_rate = 48000
+[ui]
+[[ui.sections]]
+kind = "transport"
+height = 3
+[[ui.sections]]
+kind = "song_audio"
+title = "Song audio"
+height = 3
+[[ui.sections]]
+kind = "page_overview"
+title = "Audio-aware patterns"
+height = 9
+[[ui.sections]]
+kind = "status"
+height = 3
+[[ui.sections]]
+kind = "key_hints"
+height = 4
+[[ui.key_hints]]
+keys = "APC pads 0/8"
+label = "Lead A/B; amber queued, green callback-playing"
+[[ui.key_hints]]
+keys = "p / q"
+label = "Play/stop / quit"
+[[midi_devices]]
+id = "apc-mini"
+name_contains = "APC mini mk2 Control"
+[[tracks]]
+id = "lead"
+synth = "voice.mlsynth"
+patterns = ["a.mlpattern", "b.mlpattern"]
+initial_pattern = "a"
+[[tracks]]
+id = "bass"
+synth = "voice.mlsynth"
+patterns = ["bass.mlpattern"]
+initial_pattern = "bass"
+[[lanes]]
+id = "lead"
+label = "Lead"
+role = "melody"
+track = "lead"
+variations = ["a", "b"]
+[[lanes]]
+id = "bass"
+label = "Bass"
+role = "bass"
+track = "bass"
+variations = ["bass"]
+[[pages]]
+id = "perform"
+label = "Perform"
+[[pages.strips]]
+strip = 1
+lane = "lead"
+[[pages.strips]]
+strip = 2
+lane = "bass"

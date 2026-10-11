@@ -323,7 +323,8 @@ impl LuaProject {
                 .map_err(error)?;
             if dependencies.len() > MAX_DEFINITIONS
                 || dependencies.iter().any(|d| {
-                    !["mode", "page", "controls", "lanes", "transport"].contains(&d.as_str())
+                    !["mode", "page", "controls", "lanes", "transport", "audio"]
+                        .contains(&d.as_str())
                 })
             {
                 return Err(format!("unknown dependency for widget '{id}'"));
@@ -487,6 +488,33 @@ impl LuaProject {
             }
         }
         values.set("lanes", self.readonly(lanes)?).map_err(error)?;
+        if let Some(status) = &view.song_audio {
+            let audio = self.lua.create_table().map_err(error)?;
+            audio
+                .set("requested_generation", status.requested_generation)
+                .map_err(error)?;
+            audio
+                .set("published_generation", status.published_generation)
+                .map_err(error)?;
+            audio
+                .set("callback_generation", status.callback_generation)
+                .map_err(error)?;
+            audio.set("pending", status.pending).map_err(error)?;
+            audio.set("error", status.error.clone()).map_err(error)?;
+            let lanes = self.lua.create_table().map_err(error)?;
+            for (id, state) in &status.lanes {
+                let lane = self.lua.create_table().map_err(error)?;
+                lane.set("published_variation", state.published_variation.clone())
+                    .map_err(error)?;
+                lane.set("playing_variation", state.playing_variation.clone())
+                    .map_err(error)?;
+                lanes
+                    .set(id.as_str(), self.readonly(lane)?)
+                    .map_err(error)?;
+            }
+            audio.set("lanes", self.readonly(lanes)?).map_err(error)?;
+            values.set("audio", self.readonly(audio)?).map_err(error)?;
+        }
         values
             .set(
                 "page",
@@ -741,6 +769,7 @@ fn utc_timestamp(seconds: u64) -> String {
 /// One control-thread owner, bounded FIFO and lossless accepted-command outbox.
 /// Call `take_journal` before it fills. Audio never references this object.
 pub struct ControlPlane {
+    observed_audio: Option<meldritch_app::SongAudioView>,
     pub project: LuaProject,
     active: String,
     connected: BTreeSet<String>,
@@ -760,6 +789,7 @@ impl ControlPlane {
         let active = project.initial.clone();
         let connected = project.surfaces.keys().cloned().collect();
         let mut plane = Self {
+            observed_audio: None,
             project,
             active,
             connected,
@@ -1115,6 +1145,30 @@ impl ControlPlane {
     }
 
     fn refresh_at(&mut self, app: &AppController, absolute_frame: u64) -> Result<()> {
+        let audio = app.view_model().song_audio;
+        if self.observed_audio != audio {
+            let event = Event {
+                source: "audio".into(),
+                frame: absolute_frame,
+                payload: EventPayload::Observed(Input::Named("audio_progress".into())),
+                depth: 0,
+            };
+            if let Some(status) = &audio {
+                self.log(
+                    &event,
+                    Phase::Diagnostic,
+                    format!(
+                        "audio requested={} published={} callback={:?} pending={} error={:?}",
+                        status.requested_generation,
+                        status.published_generation,
+                        status.callback_generation,
+                        status.pending,
+                        status.error
+                    ),
+                );
+            }
+            self.observed_audio = audio;
+        }
         let projection = self.project.projection(&app.view_model())?;
         let mut updates = BTreeMap::new();
         for surface in &self.connected {

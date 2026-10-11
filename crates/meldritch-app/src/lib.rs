@@ -307,6 +307,7 @@ pub enum PerformanceUiSectionKind {
     VisibleControls,
     Status,
     KeyHints,
+    SongAudio,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -424,6 +425,7 @@ pub struct CuratedControlView {
 
 #[derive(Clone, Debug)]
 pub struct AppViewModel {
+    pub song_audio: Option<SongAudioView>,
     pub cockpit_mode: CockpitMode,
     pub curated_controls: Vec<CuratedControlView>,
     pub transport: TransportView,
@@ -440,6 +442,23 @@ pub struct AppViewModel {
     pub history: Vec<CommandRecord>,
     pub bass_voice: Option<BassVoiceSettings>,
     pub performance_fx: Option<PerformanceFxSettings>,
+}
+
+/// Derived artifact/callback telemetry, not another musical state model.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SongAudioView {
+    pub requested_generation: u64,
+    pub published_generation: u64,
+    pub callback_generation: Option<u64>,
+    pub pending: bool,
+    pub error: Option<String>,
+    pub lanes: BTreeMap<String, LaneAudioView>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LaneAudioView {
+    pub published_variation: Option<String>,
+    pub playing_variation: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -849,6 +868,7 @@ impl Drop for PerformanceFxWorker {
 }
 
 pub struct AppController {
+    song_audio: Option<SongAudioView>,
     cockpit_mode: CockpitMode,
     curated_controls: Vec<CuratedControlView>,
     playback: PlaybackControl,
@@ -894,6 +914,7 @@ impl AppController {
         history_capacity: usize,
     ) -> Self {
         Self {
+            song_audio: None,
             cockpit_mode: CockpitMode::Performance,
             curated_controls: Vec::new(),
             playback,
@@ -968,6 +989,15 @@ impl AppController {
     pub fn set_performance_pages(&mut self, pages: Vec<PerformancePageView>) {
         self.active_performance_page = if pages.is_empty() { None } else { Some(0) };
         self.performance_pages = pages;
+    }
+
+    /// Refreshable publication facts. Does not edit music or append command history.
+    pub fn observe_song_audio(&mut self, view: SongAudioView) -> bool {
+        if self.song_audio.as_ref() == Some(&view) {
+            return false;
+        }
+        self.song_audio = Some(view);
+        true
     }
 
     pub fn set_performance_modifiers(&mut self, modifiers: Vec<PerformanceModifierView>) {
@@ -1657,6 +1687,7 @@ impl AppController {
             })
             .collect();
         AppViewModel {
+            song_audio: self.song_audio.clone(),
             cockpit_mode: self.cockpit_mode,
             curated_controls: self.curated_controls.clone(),
             transport: TransportView {

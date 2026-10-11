@@ -3,9 +3,11 @@
 use crate::published_audio::PublishedAudio;
 use arc_swap::ArcSwap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AudioPublicationError {
+    ReservedGeneration,
     IncompatibleChannels { expected: u16, actual: u16 },
     IncompatibleFrames { expected: u32, actual: u32 },
     IncompatibleChunkFrames { expected: u32, actual: u32 },
@@ -13,6 +15,7 @@ pub enum AudioPublicationError {
 
 #[derive(Clone)]
 pub struct AudioSnapshotPublisher {
+    played: Arc<AtomicU64>,
     shared: Arc<ArcSwap<PublishedAudio>>,
     channels: u16,
     frames: u32,
@@ -21,7 +24,18 @@ pub struct AudioSnapshotPublisher {
 
 #[derive(Clone)]
 pub struct AudioSnapshotReader {
+    played: Arc<AtomicU64>,
     shared: Arc<ArcSwap<PublishedAudio>>,
+}
+
+/// Refreshable callback telemetry. One stream owns the writer; control reads it.
+#[derive(Clone)]
+pub struct AudioPlaybackMonitor(Arc<AtomicU64>);
+impl AudioPlaybackMonitor {
+    pub fn generation(&self) -> Option<u64> {
+        let generation = self.0.load(Ordering::Acquire);
+        (generation != u64::MAX).then_some(generation)
+    }
 }
 
 #[must_use]
@@ -30,18 +44,35 @@ pub fn audio_publication(initial: PublishedAudio) -> (AudioSnapshotPublisher, Au
     let frames = initial.frames();
     let chunk_frames = initial.chunk_frames();
     let shared = Arc::new(ArcSwap::from_pointee(initial));
+    let played = Arc::new(AtomicU64::new(u64::MAX));
     (
         AudioSnapshotPublisher {
+            played: Arc::clone(&played),
             shared: Arc::clone(&shared),
             channels,
             frames,
             chunk_frames,
         },
-        AudioSnapshotReader { shared },
+        AudioSnapshotReader { shared, played },
     )
 }
 
 impl AudioSnapshotPublisher {
+    pub fn playback_monitor(&self) -> AudioPlaybackMonitor {
+        AudioPlaybackMonitor(Arc::clone(&self.played))
+    }
+
+    pub fn publish_generation(
+        &self,
+        mut snapshot: PublishedAudio,
+        generation: u64,
+    ) -> Result<(), AudioPublicationError> {
+        if generation == u64::MAX {
+            return Err(AudioPublicationError::ReservedGeneration);
+        }
+        snapshot.generation = generation;
+        self.publish(snapshot)
+    }
     /// Publish a complete or partial snapshot for acquisition by the next
     /// callback. Timeline layout remains fixed for the lifetime of a stream.
     pub fn publish(&self, snapshot: PublishedAudio) -> Result<(), AudioPublicationError> {
@@ -69,6 +100,16 @@ impl AudioSnapshotPublisher {
 }
 
 impl AudioSnapshotReader {
+    pub fn playback_monitor(&self) -> AudioPlaybackMonitor {
+        AudioPlaybackMonitor(Arc::clone(&self.played))
+    }
+
+    pub(crate) fn acknowledge(&self, generation: u64) {
+        self.played.store(generation, Ordering::Release);
+    }
+    pub(crate) fn clear_acknowledgement(&self) {
+        self.played.store(u64::MAX, Ordering::Release);
+    }
     /// Acquire one immutable snapshot. Callbacks should retain this `Arc` for
     /// the complete output buffer so publication cannot split a callback.
     #[must_use]

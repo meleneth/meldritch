@@ -57,6 +57,8 @@ impl LuaPerformance {
         // Retain the lossless outbox if persistence fails. Checkpoint outside RT.
         capture.checkpoint()?;
         self.plane.take_journal();
+        audio.refresh_view(app);
+        self.plane.refresh(app)?;
         Ok(processed)
     }
 

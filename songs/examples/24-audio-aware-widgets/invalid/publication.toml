@@ -1,0 +1,2 @@
+# Fault injection: worker frame count differs from the live publication layout.
+render_frames = 1

@@ -59,6 +59,233 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../songs/examples/21-lua-apc-performance")
 }
 
+fn native_tui(app: &AppController) -> String {
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+    terminal
+        .draw(|frame| meldritch_tui::draw(frame, &app.view_model()))
+        .unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect()
+}
+
+#[test]
+fn audio_aware_widgets_wait_for_real_callback_and_compose_across_surfaces() {
+    use meldritch_audio::device_output::PublishedAudioRenderer;
+    let root = root().with_file_name("24-audio-aware-widgets");
+    let source = std::fs::read_to_string(root.join("main.lua")).unwrap();
+    let project = LuaProject::load(&root, &source).unwrap();
+    let saved = project.save().unwrap();
+    assert_eq!(
+        LuaProject::restore(&root, &saved).unwrap().save().unwrap(),
+        saved
+    );
+    let restored = LuaProject::restore(&root, &saved).unwrap();
+    assert_eq!(restored.song.fingerprint(), project.song.fingerprint());
+    let project = restored; // exercise commands and playback from restored Lua
+    let song = project.song.clone();
+    let patch = CompiledSongPatch::compile_initial(&song).unwrap();
+    let initial = patch
+        .render_default(FrameRange::new(0, 24000).unwrap())
+        .unwrap();
+    let (publisher, reader) =
+        audio_publication(PublishedAudio::from_block(&initial, 1024).unwrap());
+    let monitor = reader.playback_monitor();
+    let (mut app, engine) = controller();
+    app.set_performance_pages(song_performance_pages_for_view(&song));
+    app.set_performance_ui(song_performance_ui_sections_for_view(&song), vec![]);
+    let mut renderer =
+        PublishedAudioRenderer::from_engine(reader.clone(), 1, u32::MAX, engine).unwrap();
+    let mut audio = SongAudioHost::new(song.clone(), patch, publisher, 24000, 1024);
+    audio.refresh_view(&mut app);
+    let mut live = LuaPerformance::new(project, &app, Tempo::new(120.0, 48000).unwrap()).unwrap();
+    let scratch =
+        std::env::temp_dir().join(format!("meldritch-audio-aware-{}", std::process::id()));
+    let mut capture =
+        PerformanceSessionCapture::create_at(&scratch, &song, 24000, "20261011T010000Z").unwrap();
+    let check = |live: &LuaPerformance, cell: u8, label: &str| {
+        let apc_cell = if cell == 0 { 0 } else { 8 };
+        for (surface, index) in [("apc-mini", apc_cell), ("deck", cell), ("terminal", cell)] {
+            assert_eq!(
+                live.plane.output(surface).unwrap().cells[&index].label,
+                label
+            );
+        }
+    };
+    check(&live, 0, "a ready");
+    assert_eq!(monitor.generation(), None);
+    app.dispatch(AppCommand::Play).unwrap();
+    renderer.render_f64(&mut [0.0; 128]);
+    audio.refresh_view(&mut app);
+    live.plane.refresh(&app).unwrap();
+    assert_eq!(monitor.generation(), Some(0));
+    check(&live, 0, "a playing");
+    live.press("deck", 1, 128, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    check(&live, 1, "b queued");
+    assert!(native_tui(&app).contains("lead b queued"));
+    check(&live, 0, "a playing");
+    let generation = audio.generation();
+    wait(&mut audio);
+    assert_eq!(reader.snapshot().generation(), generation);
+    audio.refresh_view(&mut app);
+    live.plane.refresh(&app).unwrap();
+    check(&live, 1, "b queued"); // publication is not callback acknowledgement
+    check(&live, 0, "a playing");
+    renderer.render_f64(&mut [0.0; 128]);
+    assert_eq!(monitor.generation(), Some(generation));
+    audio.refresh_view(&mut app);
+    live.plane.refresh(&app).unwrap();
+    check(&live, 1, "b playing");
+    assert!(native_tui(&app).contains("lead b playing"));
+    check(&live, 0, "a idle");
+    // Real rapid commands + worker, not a mocked completion pipeline.
+    live.press("apc-mini", 0, 256, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    live.press("apc-mini", 8, 256, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    live.press("deck", 0, 256, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    let latest = audio.generation();
+    check(&live, 0, "a queued");
+    wait(&mut audio);
+    assert_eq!(reader.snapshot().generation(), latest);
+    assert_eq!(monitor.generation(), Some(generation));
+    renderer.render_f64(&mut [0.0; 128]);
+    audio.refresh_view(&mut app);
+    live.plane.refresh(&app).unwrap();
+    check(&live, 0, "a playing");
+    assert_eq!(capture.events.len(), 4);
+    live.connection("apc-mini", false, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    live.connection("apc-mini", true, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    check(&live, 0, "a playing");
+    let result = app
+        .dispatch(AppCommand::ToggleLaneMute("lead".into()))
+        .unwrap();
+    audio.accepted(&app.view_model(), &result).unwrap();
+    wait(&mut audio);
+    renderer.render_f64(&mut [0.0; 128]);
+    audio.refresh_view(&mut app);
+    live.plane.refresh(&app).unwrap();
+    check(&live, 0, "a unavailable");
+    app.dispatch(AppCommand::Stop).unwrap();
+    renderer.render_f64(&mut [0.0; 128]);
+    let stopped_generation = monitor.generation();
+    let result = app
+        .dispatch(AppCommand::ToggleLaneMute("lead".into()))
+        .unwrap();
+    audio.accepted(&app.view_model(), &result).unwrap();
+    wait(&mut audio);
+    renderer.render_f64(&mut [0.0; 128]);
+    assert_eq!(monitor.generation(), stopped_generation);
+    audio.refresh_view(&mut app);
+    live.plane.refresh(&app).unwrap();
+    check(&live, 0, "a ready");
+    capture.finish_clean(&app).unwrap();
+}
+
+#[test]
+fn audio_widget_failures_preserve_samples_and_reject_forged_progress() {
+    let root = root().with_file_name("24-audio-aware-widgets");
+    let source = std::fs::read_to_string(root.join("main.lua")).unwrap();
+    let project = LuaProject::load(&root, &source).unwrap();
+    let song = project.song.clone();
+    let patch = CompiledSongPatch::compile_initial(&song).unwrap();
+    let initial = patch
+        .render_default(FrameRange::new(0, 24000).unwrap())
+        .unwrap();
+    let (publisher, reader) =
+        audio_publication(PublishedAudio::from_block(&initial, 1024).unwrap());
+    let retained = reader.snapshot();
+    let (mut app, _engine) = controller();
+    app.set_performance_pages(song_performance_pages_for_view(&song));
+    app.set_performance_ui(song_performance_ui_sections_for_view(&song), vec![]);
+    let fixture: toml::Value =
+        toml::from_str(&std::fs::read_to_string(root.join("invalid/publication.toml")).unwrap())
+            .unwrap();
+    let frames = fixture["render_frames"]
+        .as_integer()
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let mut audio = SongAudioHost::new(song.clone(), patch, publisher, frames, 1024);
+    audio.refresh_view(&mut app);
+    let mut live = LuaPerformance::new(project, &app, Tempo::new(120.0, 48000).unwrap()).unwrap();
+    let scratch =
+        std::env::temp_dir().join(format!("meldritch-audio-error-{}", std::process::id()));
+    let mut capture =
+        PerformanceSessionCapture::create_at(&scratch, &song, 24000, "20261011T020000Z").unwrap();
+    live.press("deck", 1, 0, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let error = loop {
+        if let Err(error) = audio.poll_publish() {
+            break error;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    };
+    assert!(error.contains("IncompatibleFrames"));
+    audio.refresh_view(&mut app);
+    live.plane.refresh(&app).unwrap();
+    let status = app.view_model().song_audio.unwrap();
+    assert!(status.error.is_some());
+    assert!(!status.pending);
+    assert_eq!(status.requested_generation, 1);
+    assert_eq!(status.published_generation, 0);
+    assert_eq!(status.callback_generation, None);
+    assert!(Arc::ptr_eq(&retained, &reader.snapshot()));
+    assert_eq!(
+        live.plane.output("apc-mini").unwrap().cells[&8].label,
+        "b error"
+    );
+    assert_eq!(
+        live.plane.output("deck").unwrap().cells[&1].label,
+        "b error"
+    );
+    assert!(native_tui(&app).contains("lead b error"));
+    assert_eq!(capture.events.len(), 1); // accepted launch, no fictitious completion command
+    let malformed = std::fs::read_to_string(root.join("invalid/unknown-dependency.lua")).unwrap();
+    assert!(
+        LuaProject::load(&root, &malformed)
+            .err()
+            .unwrap()
+            .contains("dependency")
+    );
+    let forbidden = std::fs::read_to_string(root.join("invalid/mutate-audio.lua")).unwrap();
+    let mut forbidden = LuaPerformance::new(
+        LuaProject::load(&root, &forbidden).unwrap(),
+        &app,
+        Tempo::new(120.0, 48000).unwrap(),
+    )
+    .unwrap();
+    let history = app.history().len();
+    forbidden
+        .press("apc-mini", 0, 0, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    assert!(
+        forbidden
+            .plane
+            .trace()
+            .iter()
+            .any(|row| row.phase == Phase::Rejected && row.detail.contains("read-only"))
+    );
+    assert_eq!(app.history().len(), history);
+    assert_eq!(capture.events.len(), 1);
+    assert_eq!(audio.generation(), 1);
+    assert!(Arc::ptr_eq(&retained, &reader.snapshot()));
+    let trace_rows = live.plane.trace().len();
+    live.plane.refresh(&app).unwrap();
+    assert_eq!(live.plane.trace().len(), trace_rows); // unchanged telemetry produces no storm
+    capture.finish_clean(&app).unwrap();
+}
+
 fn wait(host: &mut SongAudioHost) {
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while host.poll_publish().unwrap().is_none() {

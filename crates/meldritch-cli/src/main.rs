@@ -3329,6 +3329,17 @@ fn tui_song(
                 }
             }
             let dropped_lua = lua_route.take_dropped();
+            {
+                let mut audio = host.lock().expect("song host lock poisoned");
+                match audio.poll_publish() {
+                    Ok(Some(generation)) => {
+                        message = Some(format!("Song rerender published: generation {generation}"));
+                    }
+                    Err(error) => message = Some(error),
+                    Ok(None) => {}
+                }
+                audio.refresh_view(controller);
+            }
             if let Some(performance) = lua_performance.borrow_mut().as_mut() {
                 for cell in lua_receiver
                     .try_iter()
@@ -3359,15 +3370,6 @@ fn tui_song(
                     lua_feedback.invalidate();
                     message = Some(format!("Lua APC feedback: {error}"));
                 }
-            }
-            match host.lock().expect("song host lock poisoned").poll_publish() {
-                Ok(Some(generation)) => {
-                    message = Some(format!("Song rerender published: generation {generation}"));
-                }
-                Err(error) => {
-                    message = Some(error);
-                }
-                Ok(None) => {}
             }
             if dropped_control != 0 || dropped_lua != 0 || stale_control != 0 {
                 message = Some(format!(
@@ -3427,35 +3429,7 @@ fn song_performance_modifiers_for_view(
 fn song_performance_ui_sections_for_view(
     song: &meldritch_dsl::ValidatedSong,
 ) -> Vec<meldritch_app::PerformanceUiSectionView> {
-    song.performance()
-        .ui()
-        .sections()
-        .iter()
-        .map(|section| meldritch_app::PerformanceUiSectionView {
-            kind: match section.kind() {
-                meldritch_dsl::PerformanceUiSectionKind::Transport => {
-                    meldritch_app::PerformanceUiSectionKind::Transport
-                }
-                meldritch_dsl::PerformanceUiSectionKind::PageOverview => {
-                    meldritch_app::PerformanceUiSectionKind::PageOverview
-                }
-                meldritch_dsl::PerformanceUiSectionKind::PatternGrid => {
-                    meldritch_app::PerformanceUiSectionKind::PatternGrid
-                }
-                meldritch_dsl::PerformanceUiSectionKind::VisibleControls => {
-                    meldritch_app::PerformanceUiSectionKind::VisibleControls
-                }
-                meldritch_dsl::PerformanceUiSectionKind::Status => {
-                    meldritch_app::PerformanceUiSectionKind::Status
-                }
-                meldritch_dsl::PerformanceUiSectionKind::KeyHints => {
-                    meldritch_app::PerformanceUiSectionKind::KeyHints
-                }
-            },
-            title: section.title().map(ToOwned::to_owned),
-            height: section.height(),
-        })
-        .collect()
+    meldritch_control::song_host::song_performance_ui_sections_for_view(song)
 }
 
 fn song_performance_key_hints_for_view(

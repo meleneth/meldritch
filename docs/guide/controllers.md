@@ -27,6 +27,12 @@ interaction and listening remain unverified. Hardware-specific
 protocol references and transport limitations are recorded in the
 [control-plane note](../CONTROL_PLANE).
 
+The [audio-aware example](../examples/audio-aware-widgets) shows queued,
+ready, callback-playing and failed pattern launches using the same immutable
+audio telemetry as the native TUI. It distinguishes snapshot publication from
+actual callback consumption. DAC timing and physical color/listening acceptance
+remain open; older examples keep their authored presentation behavior.
+
 The separate [Lua color demo](../examples/apc-colors) sends a bounded palette
 animation and leaves static playground hints on the real APC. This is physical
 LED output. The Lua performance example separately derives live colors from

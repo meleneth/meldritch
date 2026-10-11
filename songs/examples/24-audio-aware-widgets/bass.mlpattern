@@ -1,0 +1,14 @@
+[meldritch]
+kind = "pattern"
+version = 1
+[pattern]
+id = "bass"
+type = "notes"
+length = "1 bar"
+resolution = "1/16"
+loop = true
+[[events]]
+at = "1:1:0"
+note = "C2"
+duration = "1/4"
+velocity = 0.4

@@ -544,8 +544,8 @@ Remaining implementation and acceptance work:
 
 - [ ] Human physical pad/fader interaction, color observation and listening
   acceptance of the Lua host; stopped-port smoke is not musical acceptance
-- [ ] Audible-generation/queued widget states tied to actual publication and
-  device-clock acknowledgement; green currently means selected/global playing
+- [x] Queued/callback-playing widget state tied to generation-tagged publication
+  and callback consumption (19.15); DAC timing and physical acceptance remain open
 - [x] Wire page/context fader soft takeover into the production MIDI path (19.13)
 - [x] Production MIDI disconnect/reconnect and feedback restoration (19.14),
   accepted with simulated failures; actual cable acceptance remains open
@@ -665,6 +665,69 @@ same-identity detach/reattach between polls may escape detection. Shared modifie
 booleans lack per-device reference counts, so loss releases the declared shared
 layer safely. Stream Deck HID and the standalone color demo do not acquire this
 `tui-song` recovery lifecycle.
+Nothing is stable yet.
+
+### 19.15 Audio-aware widget presentation (headless acceptance complete)
+
+- [x] Audit atomic publication, callback ownership and shared app/Lua projections
+- [x] Write example 24 and acceptance before implementation
+- [x] Add failing generation/presentation/failure acceptance tests
+- [x] Add bounded callback generation telemetry and shared app projection
+- [x] Connect queued/published/playing/error state to Lua and native TUI
+- [x] Verify rapid supersession, stopped playback, reconnect, cleanup and compatibility
+- [x] Update API/site/capabilities, record results and prepare verified checkpoint
+
+Example 24's reusable Lua pattern widget now distinguishes queued, ready,
+callback-playing, idle, unavailable and error states on APC/LCD/text projections.
+Immutable snapshots carry their generation; the production callback acknowledges
+present samples only after a completed, underrun-free buffer. Stopped/empty
+callbacks do not advance acknowledgement and missing chunks clear it. The song
+host maps bounded revision metadata to the shared app view outside realtime;
+the new optional `song_audio` UI section renders those facts at 80×24 without
+changing historical page layouts. UI fingerprint discriminants are explicit
+and retain their old values; the ensemble hash is pinned to `2010d44585037a44`.
+
+Verification commands and actual results:
+
+- `cargo test --workspace`: 339 executions passed, zero failures; includes all
+  historical load/compile/render tests, the new song and stable ensemble hash
+- `cargo test -p meldritch-control --test live_performance`: 13 passed; actual
+  dispatcher/commands/render worker/session capture/native 80×24 TUI and callback
+  renderer prove queued vs published vs consumed, rapid supersession, error
+  preservation, readonly Lua state, reconnect and restored Lua behavior
+- `cargo test -p meldritch-control --test compatibility`: 2 passed
+- `cargo test -p meldritch-audio --lib generation_ack`: 1 passed; stopped/empty
+  buffers, present/missing samples, immutable tags and reserved generation
+- `cargo clippy -p meldritch-audio -p meldritch-app -p meldritch-control --lib --no-deps -- -D warnings`: passed
+- `cargo clippy -p meldritch-cli -p meldritch-control --all-targets --no-deps -- -D warnings -A clippy::too_many_arguments`: passed; existing CLI allowance
+- `cargo clippy -p meldritch-tui --lib --no-deps -- -D warnings -A clippy::collapsible_if -A clippy::manual_checked_ops`: passed;
+  strict TUI lib check without those allowances found two pre-existing warnings
+  in key mapping and pattern-monitor division, not new audio-status code
+- `cargo fmt --all -- --check`, `git diff --check`, `npm run docs:build`: passed
+- `cargo run -q -- validate-song songs/examples/24-audio-aware-widgets`,
+  `cargo run -q -- validate-song songs/examples/09-curated-performance-controls`
+  and `cargo run -q -- validate-song songs/examples/17-launch-control-xl-ensemble`: passed
+- `cargo run -q -- tui-song songs/examples/24-audio-aware-widgets --lua main.lua --no-autoplay --midi-debug`:
+  real APC Control input/output opened; compact native song-audio panel showed
+  both patterns ready, stopped transport reported zero underruns/misses, and
+  `q` exited 0 with `performances/session-20261011T055245Z.mlperformance`
+
+No functional compatibility regressions were observed. Historical fixtures,
+session format and render scheduler are unchanged. Callback work adds scalar
+bookkeeping and one atomic telemetry store on rendered/underrun buffers; it
+adds no Lua, allocation, lock, parsing, logging or graph work. No throughput,
+latency or DAC timing measurement is claimed. Four metadata slots retain
+submitted/current/previous/last-identified revisions; a callback beyond retained
+metadata is unknown rather than falsely identified. Opaque legacy scene patches
+keep lane audio identity unavailable until an authoritative lane recompile.
+
+Remaining: physical APC interaction/listening, DAC timing, quantized launch,
+rewind/loop-aware input epochs, typed replay, Stream Deck HID and scheduler work.
+Input clock epochs are next: existing Lua musical-input monotonic validation can
+reject presses after loop wrap or rewind; connection observations are exempt,
+but the musical timing/session migration has not been changed in this slice.
+Older Lua fixtures keep their authored selection/global-transport color policy;
+only scripts opting into the new audio projection claim callback-playing state.
 Nothing is stable yet.
 
 ## Completed showcase milestones

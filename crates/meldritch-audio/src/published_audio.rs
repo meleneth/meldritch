@@ -21,6 +21,7 @@ pub enum PublishedAudioError {
 
 #[derive(Clone, Debug)]
 pub struct PublishedAudio {
+    pub(crate) generation: u64,
     channels: u16,
     frames: Frames,
     chunk_frames: Frames,
@@ -96,11 +97,17 @@ impl PublishedAudio {
         }
 
         Ok(Self {
+            generation: 0,
             channels,
             frames,
             chunk_frames,
             chunks: chunks.into_boxed_slice(),
         })
+    }
+
+    /// Identity attached to the immutable samples, never a separately published tag.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     #[must_use]

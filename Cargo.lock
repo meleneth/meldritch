@@ -1142,7 +1142,9 @@ dependencies = [
  "meldritch-core",
  "meldritch-dsl",
  "meldritch-render",
+ "meldritch-tui",
  "mlua",
+ "ratatui",
  "serde",
  "toml",
 ]

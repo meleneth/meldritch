@@ -1,5 +1,6 @@
-use meldritch_app::{AppCommandResult, AppViewModel};
-use meldritch_audio::audio_publication::AudioSnapshotPublisher;
+use meldritch_app::{AppCommandResult, AppController, AppViewModel, LaneAudioView, SongAudioView};
+use meldritch_audio::audio_publication::{AudioPlaybackMonitor, AudioSnapshotPublisher};
+use meldritch_audio::published_audio::PublishedAudio;
 use meldritch_dsl::{ParameterOwner, ParameterTargetDefinition, ValidatedSong};
 use meldritch_render::song_host::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,6 +15,44 @@ pub struct SongAudioHost {
     generation: u64,
     publisher: AudioSnapshotPublisher,
     chunk_frames: u32,
+    monitor: AudioPlaybackMonitor,
+    submitted: AudioRevision,
+    published: AudioRevision,
+    previous: Option<AudioRevision>,
+    rendered: Option<AudioRevision>,
+    error: Option<String>,
+    compile_failed: bool,
+    lane_metadata_known: bool,
+}
+
+#[derive(Clone)]
+struct AudioRevision {
+    generation: u64,
+    lanes: BTreeMap<String, Option<String>>,
+}
+
+fn lane_audio_state(
+    pages: &[meldritch_app::PerformancePageView],
+) -> BTreeMap<String, Option<String>> {
+    let solo = pages
+        .iter()
+        .flat_map(|page| &page.strips)
+        .any(|strip| strip.soloed);
+    pages
+        .iter()
+        .flat_map(|page| &page.strips)
+        .map(|strip| {
+            let included = if solo { strip.soloed } else { !strip.muted };
+            (
+                strip.lane_id.clone(),
+                if included {
+                    strip.active_variation_id.clone()
+                } else {
+                    None
+                },
+            )
+        })
+        .collect()
 }
 
 impl SongAudioHost {
@@ -27,7 +66,19 @@ impl SongAudioHost {
         frames: u32,
         chunk_frames: u32,
     ) -> Self {
+        let initial = AudioRevision {
+            generation: 0,
+            lanes: lane_audio_state(&song_performance_pages_for_view(&song)),
+        };
         Self {
+            monitor: publisher.playback_monitor(),
+            submitted: initial.clone(),
+            published: initial,
+            previous: None,
+            rendered: None,
+            error: None,
+            compile_failed: false,
+            lane_metadata_known: true,
             targets: live_song_control_targets(&song),
             song,
             patch,
@@ -41,11 +92,19 @@ impl SongAudioHost {
 
     pub fn replace_patch(&mut self, patch: CompiledSongPatch) {
         self.patch = patch;
+        self.generation += 1;
+        // Legacy opaque scene selection does not establish lane metadata.
+        self.submitted = AudioRevision {
+            generation: self.generation,
+            lanes: BTreeMap::new(),
+        };
+        self.error = None;
+        self.compile_failed = false;
+        self.lane_metadata_known = false;
         self.submit();
     }
 
     fn submit(&mut self) {
-        self.generation += 1;
         self.worker
             .submit(self.generation, self.patch.clone(), self.overrides.clone());
     }
@@ -57,6 +116,32 @@ impl SongAudioHost {
         view: &AppViewModel,
         result: &AppCommandResult,
     ) -> Result<bool, String> {
+        let relevant = match result {
+            AppCommandResult::LaneOctaveSet { .. }
+            | AppCommandResult::LaneVariationSelected { .. }
+            | AppCommandResult::LanePatternBankSelected { .. }
+            | AppCommandResult::LaneMuteToggled { .. }
+            | AppCommandResult::LaneSoloToggled { .. } => true,
+            AppCommandResult::CuratedControlAdjusted { id, .. } => self.targets.contains_key(id),
+            _ => false,
+        };
+        if !relevant {
+            return Ok(false);
+        }
+        self.generation += 1;
+        self.submitted = AudioRevision {
+            generation: self.generation,
+            lanes: BTreeMap::new(),
+        };
+        self.error = None;
+        let result = self.prepare(view, result);
+        if let Err(error) = &result {
+            self.error = Some(error.chars().take(512).collect());
+        }
+        result
+    }
+
+    fn prepare(&mut self, view: &AppViewModel, result: &AppCommandResult) -> Result<bool, String> {
         let recompile = match result {
             AppCommandResult::LaneOctaveSet {
                 lane_id, current, ..
@@ -107,7 +192,8 @@ impl SongAudioHost {
             }
             _ => return Ok(false),
         };
-        if recompile {
+        if recompile || self.compile_failed {
+            self.compile_failed = true;
             let variations = active_lane_variations(view);
             // Keep the delayed single-track path, including its DSP graph.
             self.patch = if self.song.performance().tracks().len() == 1
@@ -131,21 +217,103 @@ impl SongAudioHost {
                     &included_lanes_from_view(view),
                 )?
             };
+            self.compile_failed = false;
+            self.lane_metadata_known = true;
+        }
+        if self.lane_metadata_known {
+            self.submitted.lanes = lane_audio_state(&view.performance.pages);
         }
         self.submit();
         Ok(true)
     }
 
     pub fn poll_publish(&mut self) -> Result<Option<u64>, String> {
+        let _ = self.observe_callback();
         let Some((generation, block, _)) = self.worker.latest_completed() else {
             return Ok(None);
         };
         if generation != self.generation {
             return Ok(None);
         }
-        let block = block.map_err(|e| format!("song render failed: {e:?}"))?;
-        publish_song_audio(&self.publisher, &block, self.chunk_frames)?;
+        let result = block
+            .map_err(|e| format!("song render failed: {e:?}"))
+            .and_then(|block| {
+                let snapshot = PublishedAudio::from_block(&block, self.chunk_frames)
+                    .map_err(|e| format!("invalid song audio snapshot: {e:?}"))?;
+                self.publisher
+                    .publish_generation(snapshot, generation)
+                    .map_err(|e| format!("incompatible song audio publication: {e:?}"))
+            });
+        if let Err(error) = result {
+            self.error = Some(error.chars().take(512).collect());
+            return Err(error);
+        }
+        self.previous = Some(std::mem::replace(
+            &mut self.published,
+            self.submitted.clone(),
+        ));
         Ok(Some(generation))
+    }
+
+    fn observe_callback(&mut self) -> Option<u64> {
+        let generation = self.monitor.generation();
+        if self.rendered.as_ref().map(|revision| revision.generation) == generation {
+            return generation;
+        }
+        if generation == Some(self.published.generation) {
+            self.rendered = Some(self.published.clone());
+        } else if let Some(previous) = &self.previous
+            && generation == Some(previous.generation)
+        {
+            self.rendered = Some(previous.clone());
+        } else if self.rendered.as_ref().map(|revision| revision.generation) != generation {
+            // Bounded metadata cannot identify an arbitrarily delayed callback.
+            // Unknown is preferable to claiming a different generation played.
+            self.rendered = None;
+        }
+        generation
+    }
+
+    pub fn refresh_view(&mut self, app: &mut AppController) -> bool {
+        let callback_generation = self.observe_callback();
+        let view = app.view_model();
+        let playing = view.transport.state == meldritch_audio::transport::TransportState::Playing;
+        let lanes = view
+            .performance
+            .pages
+            .iter()
+            .flat_map(|page| &page.strips)
+            .map(|strip| {
+                let published_variation =
+                    self.published.lanes.get(&strip.lane_id).cloned().flatten();
+                let playing_variation = if playing {
+                    self.rendered
+                        .as_ref()
+                        .and_then(|revision| revision.lanes.get(&strip.lane_id))
+                        .cloned()
+                        .flatten()
+                } else {
+                    None
+                };
+                (
+                    strip.lane_id.clone(),
+                    LaneAudioView {
+                        published_variation,
+                        playing_variation,
+                    },
+                )
+            })
+            .collect();
+        app.observe_song_audio(SongAudioView {
+            requested_generation: self.generation,
+            published_generation: self.published.generation,
+            callback_generation,
+            pending: self.error.is_none()
+                && (self.generation != self.published.generation
+                    || (playing && callback_generation != Some(self.generation))),
+            error: self.error.clone(),
+            lanes,
+        })
     }
 }
 
@@ -346,6 +514,31 @@ pub fn song_performance_pages_for_view(
                     })
                 })
                 .collect(),
+        })
+        .collect()
+}
+
+pub fn song_performance_ui_sections_for_view(
+    song: &ValidatedSong,
+) -> Vec<meldritch_app::PerformanceUiSectionView> {
+    use meldritch_app::PerformanceUiSectionKind as App;
+    use meldritch_dsl::PerformanceUiSectionKind as Dsl;
+    song.performance()
+        .ui()
+        .sections()
+        .iter()
+        .map(|section| meldritch_app::PerformanceUiSectionView {
+            kind: match section.kind() {
+                Dsl::SongAudio => App::SongAudio,
+                Dsl::Transport => App::Transport,
+                Dsl::PageOverview => App::PageOverview,
+                Dsl::PatternGrid => App::PatternGrid,
+                Dsl::VisibleControls => App::VisibleControls,
+                Dsl::Status => App::Status,
+                Dsl::KeyHints => App::KeyHints,
+            },
+            title: section.title().map(ToOwned::to_owned),
+            height: section.height(),
         })
         .collect()
 }

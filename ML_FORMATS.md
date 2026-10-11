@@ -52,6 +52,12 @@ existing song and defines headless control behavior. Saved Lua envelopes retain
 source text, stable project identity and song fingerprint; they revalidate the
 same typed song on restore. See [CONTROL_PLANE.md](CONTROL_PLANE.md).
 
+Example 24 adds an optional `[ui]` section declaration with
+`[[ui.sections]] kind = "song_audio"`, plus the existing title/height fields.
+It displays shared publication/callback telemetry without changing historical
+page layouts. Historical UI kind fingerprint tags remain stable. Lua's `audio`
+projection is runtime telemetry and does not enter authored song fingerprints.
+
 ## Time
 
 Authored patterns use musical time. Initial examples use:
