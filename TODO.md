@@ -453,6 +453,30 @@ output submission and startup are observed; listening/visual acceptance remains
 explicitly unverified. Local captured sessions are ignored user data.
 
 
+### 19.11 VitePress documentation and GitHub Pages
+
+- [x] Add VitePress site with getting started, controller/example guides, local
+  search and a persistent “Nothing is stable yet” notice
+- [x] Include architecture, invariants, formats, Lua API, capability matrix,
+  testing strategy and this queue directly from their repository sources
+- [x] Add reproducible public-registry npm lockfile, Node 24 scripts and a
+  patched Vite 6.4.4 override for stable VitePress 1.6.4
+- [x] Add PR build and main-branch Pages artifact/deployment workflow with
+  read-only PR permissions and scoped Pages/OIDC deployment permissions
+- [x] Verify clean `npm ci --offline --cache /tmp/meldritch-npm-cache`,
+  `npm run docs:build` and `npm audit --offline --cache /tmp/meldritch-npm-cache`
+  (zero advisories); inspect desktop and mobile headless-Chrome screenshots
+- [x] Check all 19 generated HTML pages for the persistent notice, repository
+  base links, local search index and public-registry lockfile URLs
+- [ ] Enable repository Pages source **GitHub Actions** once in repository
+  Settings → Pages, then confirm the first deployment and public URL
+
+GitHub's configure-pages action explicitly requires a separate administrative
+token to enable Pages automatically; this workflow uses only `GITHUB_TOKEN`.
+The public Pages metadata endpoint currently returns 404. Local verification
+does not claim the site is deployed. Setup and local commands are documented in
+`docs/guide/contributing.md`.
+
 ## Completed showcase milestones
 
 The following work formed the previous implementation queue for the long-form

@@ -1,5 +1,27 @@
 # Relational TUI Groovebox
 
+**In massive development: nothing is stable yet.** APIs, formats, commands,
+controller mappings and behavior may change. See the
+[documentation](https://meleneth.github.io/meldritch/),
+[capability matrix](songs/examples/CAPABILITIES.md) and [active queue](TODO.md).
+
+For the connected APC Mini MK2, start the four-lane playground:
+
+```sh
+cargo run -- tui-song songs/examples/19-apc-mini-mk2-playground --midi-debug
+```
+
+See its [control map and acceptance scope](songs/examples/19-apc-mini-mk2-playground/ACCEPTANCE.md).
+
+Run a Lua-authored LED animation and leave static playground color hints:
+
+```sh
+cargo run -- apc-lua-colors songs/examples/20-apc-lua-colors/colors.lua
+```
+
+Add `--dry-run` to inspect the bounded MIDI plan without hardware. See the
+[Lua color API and remaining hardware checks](songs/examples/20-apc-lua-colors/ACCEPTANCE.md).
+
 ## Install
 
 From the repository root:

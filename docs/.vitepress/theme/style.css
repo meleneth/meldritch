@@ -1,0 +1,42 @@
+:root {
+  --vp-c-brand-1: #7045b8;
+  --vp-c-brand-2: #8459c8;
+  --vp-c-brand-3: #966cd5;
+  --vp-c-brand-soft: rgba(132, 89, 200, 0.12);
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(115deg, #8459c8, #287d65);
+  --vp-layout-top-height: 40px;
+}
+
+.dark {
+  --vp-c-brand-1: #c1a0f3;
+  --vp-c-brand-2: #a77edf;
+  --vp-c-brand-3: #8459c8;
+  --vp-home-hero-name-background: linear-gradient(115deg, #c1a0f3, #83d6b2);
+}
+
+.development-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  height: var(--vp-layout-top-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  background: #29223b;
+  color: #f3eaff;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.development-banner:hover { background: #3b2d56; }
+.development-banner:focus-visible { outline: 3px solid #83d6b2; outline-offset: -3px; }
+.development-dot { width: 7px; height: 7px; border-radius: 50%; background: #83d6b2; }
+
+@media (max-width: 380px) {
+  .development-banner { font-size: 11px; gap: 6px; }
+}
