@@ -15,8 +15,12 @@ The [Lua example](../examples/lua-control-plane) proves shared authoritative
 state on simulated surfaces, including reconnect restoration. This does not
 establish physical reconnect behavior in the production MIDI host.
 
-The Lua performance example wires live APC RGB feedback. Page-aware fader soft
-takeover remains unfinished; absolute faders can jump on first movement. Hardware-specific
+The Lua performance example wires live APC RGB feedback and enables
+[fader pickup](../examples/midi-soft-takeover). Existing TOML projects can opt
+in with `--soft-takeover`; their default input behavior remains direct.
+Pickup waits for the physical fader to reach the current value after a page,
+layer or external value change. Its behavior is accepted headlessly; physical
+interaction and listening remain unverified. Hardware-specific
 protocol references and transport limitations are recorded in the
 [control-plane note](../CONTROL_PLANE).
 

@@ -1,0 +1,4 @@
+# These are observations to reject before typed command application.
+normalized_values = ["NaN", "inf", "-0.1", "1.1"]
+missing_control = "nonexistent"
+malformed_messages = [[176, 48, 128], [176, 128, 1], [144, 1], [144, 1, 1, 1]]

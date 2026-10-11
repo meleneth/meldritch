@@ -90,13 +90,24 @@ fn lua_apc_commands_compose_audio_surfaces_and_shared_session() {
     let retained = reader.snapshot();
     let (mut app, _engine) = controller();
     app.set_performance_pages(song_performance_pages_for_view(&song));
-    app.set_curated_controls(song_controls_for_view(
+    let mut controls = song_controls_for_view(
         &song,
         patch.feedback(),
         patch.mix(),
         patch.cutoff_hz(),
         patch.resonance(),
-    ));
+    );
+    initialize_pickup_controls(&song, &mut controls);
+    app.set_curated_controls(controls);
+    assert_eq!(
+        app.view_model()
+            .curated_controls
+            .iter()
+            .find(|control| control.id == "pad-cutoff")
+            .unwrap()
+            .value,
+        Some(2100.0)
+    );
     // Pad starts on C in the authored track, not the first listed variation A.
     assert_eq!(active_lane_variations(&app.view_model())["pad"], "pad-c");
     let mut audio = SongAudioHost::new(song.clone(), patch, publisher, frames, 1024);
@@ -430,5 +441,305 @@ fn invalid_color_fixture_is_diagnosed_without_device_writes() {
             ))
             .unwrap_err()
             .contains("puce")
+    );
+}
+
+#[test]
+fn fader_pickup_composes_with_lua_pages_audio_and_capture() {
+    let root = root().join("../22-midi-soft-takeover");
+    let project = LuaProject::load(
+        &root,
+        &std::fs::read_to_string(root.join("main.lua")).unwrap(),
+    )
+    .unwrap();
+    let song = project.song.clone();
+    let patch = CompiledSongPatch::compile_initial(&song).unwrap();
+    let initial = patch
+        .render_default(FrameRange::new(0, 24000).unwrap())
+        .unwrap();
+    let (publisher, reader) =
+        audio_publication(PublishedAudio::from_block(&initial, 1024).unwrap());
+    let (mut app, _engine) = controller();
+    app.set_performance_pages(song_performance_pages_for_view(&song));
+    let mut controls = song_controls_for_view(&song, None, None, None, None);
+    initialize_pickup_controls(&song, &mut controls);
+    app.set_curated_controls(controls);
+    assert_eq!(app.view_model().curated_controls[0].value, Some(1.0));
+    let mut audio = SongAudioHost::new(song.clone(), patch, publisher, 24000, 1024);
+    let tempo = Tempo::new(120.0, 48000).unwrap();
+    let scratch = std::env::temp_dir().join(format!("meldritch-pickup-{}", std::process::id()));
+    let mut capture =
+        PerformanceSessionCapture::create_at(&scratch, &song, 24000, "20261010T000000Z").unwrap();
+    let mut live = LuaPerformance::new(project, &app, tempo).unwrap();
+    let mut pickup = MidiPickup::default();
+    let mut physical = meldritch_app::MidiControlInput {
+        device: "apc-mini".into(),
+        channel: 1,
+        cc: 48,
+        value: 0,
+    };
+    let input = |id: &str, value| meldritch_app::AppInput::SetCuratedControlNormalized {
+        id: id.into(),
+        value,
+    };
+    let retained = reader.snapshot();
+    assert!(
+        !pickup
+            .observe(&physical, &input("a-level", 0.0), &app.view_model())
+            .unwrap()
+    );
+    assert!(app.history().is_empty());
+    assert!(audio.poll_publish().unwrap().is_none());
+    assert!(capture.events.is_empty());
+    assert!(Arc::ptr_eq(&retained, &reader.snapshot()));
+    live.press("deck", 0, 0, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    wait(&mut audio); // authoritative A = 0.5 from another interface
+    assert!(
+        !pickup
+            .observe(&physical, &input("a-level", 0.0), &app.view_model())
+            .unwrap()
+    );
+    physical.value = 64;
+    let acquired = input("a-level", 64.0 / 127.0);
+    assert!(
+        pickup
+            .observe(&physical, &acquired, &app.view_model())
+            .unwrap()
+    );
+    let result = app.handle_input(acquired.clone()).unwrap();
+    pickup.acknowledge(&physical, &app.view_model());
+    audio.accepted(&app.view_model(), &result).unwrap();
+    capture
+        .record(&app, &acquired, &result, 24000, tempo)
+        .unwrap();
+    live.external_accepted(&app, &result).unwrap();
+    wait(&mut audio);
+    assert_eq!(capture.events.len(), 2);
+    physical.value = 80;
+    assert!(
+        pickup
+            .observe(
+                &physical,
+                &input("a-level", 80.0 / 127.0),
+                &app.view_model()
+            )
+            .unwrap()
+    );
+    let previous = reader.snapshot();
+    let movement = input("a-level", 80.0 / 127.0);
+    let result = app.handle_input(movement.clone()).unwrap();
+    pickup.acknowledge(&physical, &app.view_model());
+    audio.accepted(&app.view_model(), &result).unwrap();
+    capture
+        .record(&app, &movement, &result, 24000, tempo)
+        .unwrap();
+    live.external_accepted(&app, &result).unwrap();
+    wait(&mut audio);
+    assert!(
+        (0..24000)
+            .any(|frame| previous.frame(frame).unwrap() != reader.snapshot().frame(frame).unwrap())
+    );
+    assert!(
+        live.plane.output("deck").unwrap().cells[&0]
+            .label
+            .contains("0.63")
+    );
+    assert_eq!(capture.events.len(), 3);
+    // Changing away and back with no physical movement still rearms.
+    for page in ["b", "a"] {
+        let selected = meldritch_app::AppInput::SelectPerformancePage(page.into());
+        let result = app.handle_input(selected.clone()).unwrap();
+        capture
+            .record(&app, &selected, &result, 24000, tempo)
+            .unwrap();
+    }
+    physical.value = 127;
+    assert!(
+        !pickup
+            .observe(&physical, &input("a-level", 1.0), &app.view_model())
+            .unwrap()
+    );
+    // Crossing from the other side is supported.
+    assert!(
+        pickup
+            .observe(&physical, &input("a-level", 0.4), &app.view_model())
+            .unwrap()
+    );
+    let result = app.handle_input(input("a-level", 0.4)).unwrap();
+    pickup.acknowledge(&physical, &app.view_model());
+    audio.accepted(&app.view_model(), &result).unwrap();
+    capture
+        .record(&app, &input("a-level", 0.4), &result, 24000, tempo)
+        .unwrap();
+    live.external_accepted(&app, &result).unwrap();
+    // A Lua edit must release physical ownership, even after acquisition.
+    live.press("deck", 0, 0, &mut app, &mut audio, &mut capture)
+        .unwrap();
+    assert!(
+        !pickup
+            .observe(&physical, &input("a-level", 0.1), &app.view_model())
+            .unwrap()
+    );
+    assert!(
+        pickup
+            .observe(&physical, &input("a-level", 0.5), &app.view_model())
+            .unwrap()
+    );
+    capture.finish_clean(&app).unwrap();
+    assert_eq!(capture.events.len(), 7);
+    std::fs::remove_dir_all(scratch).unwrap();
+}
+
+#[test]
+fn bounded_midi_queue_retains_page_and_fader_order() {
+    let queue = MidiInputQueue::default();
+    let route = queue.route("apc-mini");
+    assert!(route.observe(&[0x90, 101, 127]));
+    assert!(route.observe(&[0xb0, 48, 0]));
+    assert_eq!(queue.next().unwrap().bytes, [0x90, 101, 127]);
+    assert_eq!(queue.next().unwrap().bytes, [0xb0, 48, 0]);
+    assert!(!route.observe(&[0xb0, 48, 128]));
+    for _ in 0..QUEUE_CAPACITY + 2 {
+        route.observe(&[0xb0, 48, 127]);
+    }
+    assert_eq!(queue.take_dropped(), 2);
+    assert_eq!(
+        (0..QUEUE_CAPACITY).filter_map(|_| queue.next()).count(),
+        QUEUE_CAPACITY
+    );
+    assert!(queue.next().is_none());
+}
+
+#[test]
+fn pickup_rejects_invalid_observations_and_rearms_other_controllers() {
+    let song = meldritch_dsl::load_song_directory(root().join("../22-midi-soft-takeover")).unwrap();
+    let (mut app, _engine) = controller();
+    app.set_performance_pages(song_performance_pages_for_view(&song));
+    let mut controls = song_controls_for_view(&song, None, None, None, None);
+    initialize_pickup_controls(&song, &mut controls);
+    app.set_curated_controls(controls);
+    let fixture: toml::Value = toml::from_str(
+        &std::fs::read_to_string(song.root().join("invalid/observations.toml")).unwrap(),
+    )
+    .unwrap();
+    let mut pickup = MidiPickup::default();
+    let physical = meldritch_app::MidiControlInput {
+        device: "one".into(),
+        channel: 1,
+        cc: 48,
+        value: 127,
+    };
+    for value in fixture["normalized_values"].as_array().unwrap() {
+        let value: f64 = value.as_str().unwrap().parse().unwrap();
+        assert!(
+            pickup
+                .observe(
+                    &physical,
+                    &meldritch_app::AppInput::SetCuratedControlNormalized {
+                        id: "a-level".into(),
+                        value
+                    },
+                    &app.view_model()
+                )
+                .is_err()
+        );
+    }
+    let queue = MidiInputQueue::default();
+    let route = queue.route("one");
+    for message in fixture["malformed_messages"].as_array().unwrap() {
+        let bytes = message
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_integer().unwrap() as u8)
+            .collect::<Vec<_>>();
+        assert!(!route.observe(&bytes));
+    }
+    assert!(queue.next().is_none());
+    assert!(
+        pickup
+            .observe(
+                &physical,
+                &meldritch_app::AppInput::SetCuratedControlNormalized {
+                    id: fixture["missing_control"].as_str().unwrap().into(),
+                    value: 0.5
+                },
+                &app.view_model()
+            )
+            .is_err()
+    );
+    assert!(app.history().is_empty());
+    let mut input = meldritch_app::AppInput::SetCuratedControlNormalized {
+        id: "a-level".into(),
+        value: 1.0,
+    };
+    let mut second = physical.clone();
+    second.device = "two".into();
+    assert!(
+        pickup
+            .observe(&physical, &input, &app.view_model())
+            .unwrap()
+    );
+    assert!(pickup.observe(&second, &input, &app.view_model()).unwrap());
+    input = meldritch_app::AppInput::SetCuratedControlNormalized {
+        id: "a-level".into(),
+        value: 0.5,
+    };
+    assert!(
+        pickup
+            .observe(&physical, &input, &app.view_model())
+            .unwrap()
+    );
+    app.handle_input(input).unwrap();
+    pickup.acknowledge(&physical, &app.view_model());
+    let at_max = meldritch_app::AppInput::SetCuratedControlNormalized {
+        id: "a-level".into(),
+        value: 1.0,
+    };
+    assert!(!pickup.observe(&second, &at_max, &app.view_model()).unwrap());
+    assert!(
+        pickup
+            .observe(&physical, &at_max, &app.view_model())
+            .unwrap()
+    );
+    // Bounded storage, including when many unrelated device identities appear.
+    let mut pickup = MidiPickup::default();
+    for index in 0..QUEUE_CAPACITY {
+        let mut physical = physical.clone();
+        physical.device = format!("device-{index}");
+        assert!(
+            !pickup
+                .observe(&physical, &at_max, &app.view_model())
+                .unwrap()
+        );
+    }
+    assert!(
+        pickup
+            .observe(&second, &at_max, &app.view_model())
+            .unwrap_err()
+            .contains("full")
+    );
+    // A history gap invalidates acquired state rather than trusting old context.
+    let mut pickup = MidiPickup::default();
+    let at_half = meldritch_app::AppInput::SetCuratedControlNormalized {
+        id: "a-level".into(),
+        value: 0.5,
+    };
+    assert!(
+        pickup
+            .observe(&physical, &at_half, &app.view_model())
+            .unwrap()
+    );
+    for _ in 0..300 {
+        app.dispatch(AppCommand::SetCockpitMode(
+            meldritch_app::CockpitMode::Performance,
+        ))
+        .unwrap();
+    }
+    assert!(
+        !pickup
+            .observe(&physical, &at_max, &app.view_model())
+            .unwrap()
     );
 }

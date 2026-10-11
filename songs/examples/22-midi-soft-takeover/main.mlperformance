@@ -1,0 +1,130 @@
+[meldritch]
+kind = "performance"
+version = 1
+
+[performance]
+id = "midi-soft-takeover"
+title = "Two pages, one fader"
+bpm = 120.0
+sample_rate = 48000
+
+[[midi_devices]]
+id = "apc-mini"
+name_contains = "APC mini mk2 Control"
+
+[[tracks]]
+id = "a"
+synth = "synth.mlsynth"
+patterns = ["a.mlpattern"]
+initial_pattern = "a"
+
+[[tracks]]
+id = "b"
+synth = "synth.mlsynth"
+patterns = ["b.mlpattern"]
+initial_pattern = "b"
+
+[[lanes]]
+id = "a"
+label = "Lane A"
+role = "bass"
+track = "a"
+variations = ["a"]
+controls = ["a-level"]
+
+[[lanes]]
+id = "b"
+label = "Lane B"
+role = "bass"
+track = "b"
+variations = ["b"]
+controls = ["b-level"]
+
+[[pages]]
+id = "a"
+label = "Page A"
+[[pages.strips]]
+strip = 1
+lane = "a"
+controls = ["a-level"]
+
+[[pages]]
+id = "b"
+label = "Page B"
+[[pages.strips]]
+strip = 1
+lane = "b"
+controls = ["b-level"]
+
+[[controls]]
+id = "a-level"
+label = "A level"
+target = "lane:a/level"
+range = [0.0, 1.0]
+step = 0.01
+[[controls.bindings]]
+type = "midi_cc"
+device = "apc-mini"
+page = "a"
+channel = 1
+cc = 48
+action = "absolute"
+
+[[controls]]
+id = "b-level"
+label = "B level"
+target = "lane:b/level"
+range = [0.0, 1.0]
+step = 0.01
+[[controls.bindings]]
+type = "midi_cc"
+device = "apc-mini"
+page = "b"
+channel = 1
+cc = 48
+action = "absolute"
+
+[[actions]]
+id = "page-a"
+label = "Page A"
+action = "select_page"
+page = "a"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 100
+
+[[actions]]
+id = "page-b"
+label = "Page B"
+action = "select_page"
+page = "b"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 101
+
+[[modifiers]]
+id = "octave-layer"
+label = "Octave layer"
+[[modifiers.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 122
+
+[[modifier_controls]]
+id = "b-octave"
+label = "B octave"
+modifier = "octave-layer"
+action = "set_lane_octave"
+page = "b"
+lane = "b"
+range = [-2, 2]
+[[modifier_controls.bindings]]
+type = "midi_cc"
+device = "apc-mini"
+channel = 1
+cc = 48

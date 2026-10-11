@@ -546,7 +546,7 @@ Remaining implementation and acceptance work:
   acceptance of the Lua host; stopped-port smoke is not musical acceptance
 - [ ] Audible-generation/queued widget states tied to actual publication and
   device-clock acknowledgement; green currently means selected/global playing
-- [ ] Wire page/context fader soft takeover into the production MIDI path
+- [x] Wire page/context fader soft takeover into the production MIDI path (19.13)
 - [ ] Automatic physical disconnect/reconnect and feedback restoration; logical
   reconstruction and failed-send retry are tested, USB lifecycle remains open
 - [ ] Real Stream Deck HID discovery/images and MicroLab live voice integration
@@ -558,6 +558,58 @@ Remaining implementation and acceptance work:
 Run the new playground with
 `cargo run -- tui-song songs/examples/21-lua-apc-performance --lua main.lua --midi-debug`.
 Nothing is stable yet. GitHub Pages still needs the setup step in 19.11.
+
+### 19.13 MIDI fader takeover (headless acceptance complete)
+
+- [x] Audit callback mapping, authoritative control values and existing pickup codec
+- [x] Write example 22 and explicit acceptance criteria before implementation
+- [x] Add failing headless tests for pickup, external edits, page changes and FIFO routing
+- [x] Implement bounded control-thread input routing and physical pickup state
+- [x] Connect typed commands, shared rendering, projections and recording
+- [x] Preserve historical input defaults and run full compatibility/verification
+- [x] Update API/site/capability status and prepare the verified checkpoint
+
+The examples now prove distant observations produce no commands/audio/session
+facts; crossing acquires control and publishes changed audio; Lua edits, page
+away/back and modifier layers rearm it. Ownership acknowledgement preserves
+quantized input from its controller while releasing other controllers. Typed
+history gaps rearm safely. Both input and pickup storage have 64 slots, with
+explicit overflow/invalid-target diagnostics. `--lua` enables pickup;
+`--soft-takeover` opts TOML projects in while preserving historical defaults.
+Unknown controls are blocked rather than assigned invented pickup values.
+
+Verification commands and actual results:
+
+- `cargo test --workspace`: 333 executions passed, zero failures; includes
+  historical compatibility and the new immutable project in the pinned corpus
+- `cargo test -p meldritch-control --test live_performance`: 8 passed,
+  including real fader → command → audio publication → widget/session behavior
+- `cargo test -p meldritch-cli control_thread_mapper`: 1 passed; actual CLI
+  mapper/FIFO proves page ordering, absolute/centered/overdrive curves and layers
+- `cargo clippy -p meldritch-control -p meldritch-render --lib --no-deps -- -D warnings`: passed
+- `cargo clippy -p meldritch-cli -p meldritch-control --all-targets --no-deps -- -D warnings -A clippy::too_many_arguments`: passed; existing CLI lint allowance
+- `cargo fmt --all -- --check`, `git diff --check`, and `npm run docs:build`: passed
+- `cargo run -q -- validate-song songs/examples/09-curated-performance-controls`
+  and `cargo run -q -- validate-song songs/examples/22-midi-soft-takeover`: passed
+- `cargo run -q -- tui-song songs/examples/22-midi-soft-takeover --lua main.lua --no-autoplay --midi-debug`:
+  real APC Control input/output opened, stopped transport reported zero
+  underruns/misses, and `q` exited 0 with a clean captured session
+
+No historical fixtures, audio callbacks or render scheduler were changed.
+No functional regressions were observed. Enabled control-thread mapping uses
+the existing TUI's 50ms poll cadence plus processing time; no throughput or
+latency benchmark is claimed. Bursts beyond 64 observations are explicitly
+dropped and counted. Unknown initial targets block pickup instead of guessing;
+static projections are not audio-clock automation telemetry.
+
+Remaining implementation and hardware acceptance:
+
+- [ ] Physical fader pickup/page/layer interaction and listening acceptance
+- [ ] Automatic physical reconnect, including fresh pickup ownership on reconnect
+- [ ] Audio-clock automation telemetry and queued/audible widget states
+- [ ] Typed session migration/replay and render scheduling work from 19.12
+
+Nothing is stable yet. GitHub Pages setup remains open in 19.11.
 
 ## Completed showcase milestones
 

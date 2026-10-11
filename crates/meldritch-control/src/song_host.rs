@@ -231,6 +231,51 @@ pub fn song_controls_for_view(
         .collect()
 }
 
+/// Seed unknown pickup projections from existing renderer defaults. Does not
+/// apply overrides or change audio. Legacy hosts can retain their old display.
+pub fn initialize_pickup_controls(
+    song: &ValidatedSong,
+    controls: &mut [meldritch_app::CuratedControlView],
+) {
+    for view in controls {
+        if view.value.is_some() {
+            continue;
+        }
+        let Some(control) = song
+            .performance()
+            .controls()
+            .iter()
+            .find(|control| control.id() == view.id)
+        else {
+            continue;
+        };
+        let target = control.target();
+        let value =
+            if matches!(target.owner(), ParameterOwner::Lane) && target.parameter() == "level" {
+                Some(1.0)
+            } else if matches!(target.owner(), ParameterOwner::Synth) {
+                song.synths()
+                    .get(target.definition_id())
+                    .and_then(|synth| {
+                        synth
+                            .modules()
+                            .iter()
+                            .find(|module| module.id() == target.module_id())
+                    })
+                    .and_then(|module| match target.parameter() {
+                        "cutoff_hz" => Some(module.cutoff_hz().unwrap_or(20_000.0)),
+                        "resonance" => Some(module.resonance().unwrap_or(0.0)),
+                        _ => None,
+                    })
+            } else {
+                None
+            };
+        // Unknown/out-of-range projections stay unavailable, rather than
+        // inventing a pickup point that differs from the rendered parameter.
+        view.value = value.filter(|value| (view.minimum..=view.maximum).contains(value));
+    }
+}
+
 pub fn song_performance_pages_for_view(
     song: &meldritch_dsl::ValidatedSong,
 ) -> Vec<meldritch_app::PerformancePageView> {

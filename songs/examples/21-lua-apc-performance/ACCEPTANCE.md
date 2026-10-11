@@ -51,7 +51,11 @@ no device is required for validation. Grid columns 1–4 are drums/perc/bass/pad
 bottom four rows choose A/B/C/D, row 5 mutes and row 6 solos. Nine faders and
 transport buttons keep example 19's map. Use a terminal at least 34 lines tall.
 
-Physical LED/color and listening acceptance, fader takeover, automatic physical
+Fader pickup is enabled by `--lua`; example 22 proves page/context and external
+edit rearming. Known initial level/filter values are projected from the current
+typed song and renderer defaults. Move through the current value to acquire it.
+
+Physical LED/color and listening acceptance, automatic physical
 reconnection, quantized launching and exact audio-clock replay remain separate
 work. Full shared typed session migration is not implied by reusing the existing
 writer; legacy debug-string fields and its retained event history remain.

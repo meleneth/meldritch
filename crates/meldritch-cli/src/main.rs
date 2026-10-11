@@ -695,6 +695,10 @@ enum Command {
         /// Confined Lua control composition, evaluated only on the TUI thread.
         #[arg(long, value_name = "PROJECT_RELATIVE_LUA")]
         lua: Option<PathBuf>,
+        /// Require physical pickup before absolute MIDI controls can edit values.
+        /// Enabled automatically by --lua; legacy TOML defaults remain direct.
+        #[arg(long)]
+        soft_takeover: bool,
     },
     /// Open the realtime cockpit with a native synthesized bassline track.
     TuiBassline {
@@ -1080,6 +1084,7 @@ fn run(cli: Cli) -> Result<(), String> {
             midi_debug,
             audio_debug,
             lua,
+            soft_takeover,
         } => tui_song(
             song,
             frames,
@@ -1090,6 +1095,7 @@ fn run(cli: Cli) -> Result<(), String> {
             midi_debug,
             effective_song_audio_debug(midi_debug, audio_debug),
             lua,
+            soft_takeover,
         ),
         Command::TuiBassline {
             project,
@@ -2017,6 +2023,7 @@ fn connect_midi_control_input(
     active_modifiers: Arc<Mutex<Vec<String>>>,
     debug: bool,
     lua_route: Option<meldritch_control::devices::ApcInputRoute>,
+    control_route: Option<meldritch_control::devices::MidiInputRoute>,
 ) -> Result<Option<MidiControlInputConnection>, String> {
     let mut midi_input = midir::MidiInput::new(&format!("meldritch-midi-{}", device.id()))
         .map_err(|error| midi_input_client_error("failed to create MIDI input client", &error))?;
@@ -2038,6 +2045,12 @@ fn connect_midi_control_input(
             &port,
             &format!("meldritch-midi-{}-input", device.id()),
             move |_timestamp, message, _state| {
+                if control_route
+                    .as_ref()
+                    .is_some_and(|route| route.observe(message))
+                {
+                    return;
+                }
                 if lua_route
                     .as_ref()
                     .is_some_and(|route| route.observe(message))
@@ -2492,6 +2505,86 @@ fn app_input_for_performance_action(
     })
 }
 
+struct ScriptMidiMapper {
+    controls: Vec<meldritch_app::MidiControlBinding>,
+    modifier_controls: Vec<meldritch_app::MidiModifierControlBinding>,
+    modifiers: Vec<MidiModifierBinding>,
+    actions: Vec<MidiActionBinding>,
+}
+
+enum MidiMappedOutcome {
+    Applied(MappedMidiInput, meldritch_app::AppCommandResult),
+    Waiting(String),
+    Unmapped,
+}
+
+impl ScriptMidiMapper {
+    fn for_song(song: &meldritch_dsl::ValidatedSong) -> Self {
+        Self {
+            controls: midi_control_bindings_for_song(song),
+            modifier_controls: midi_modifier_control_bindings_for_song(song),
+            modifiers: midi_modifier_bindings_for_song(song),
+            actions: midi_action_bindings_for_song(song),
+        }
+    }
+
+    fn apply(
+        &self,
+        observed: &meldritch_control::devices::ObservedMidi,
+        app: &mut meldritch_app::AppController,
+        pickup: &mut meldritch_control::devices::MidiPickup,
+    ) -> Result<MidiMappedOutcome, String> {
+        let view = app.view_model();
+        let modifiers = view
+            .performance
+            .active_modifiers
+            .iter()
+            .filter(|modifier| modifier.active)
+            .map(|modifier| modifier.id.clone())
+            .collect::<Vec<_>>();
+        let page = active_page_id(&view);
+        let Some(mapped) = decode_script_midi_input(
+            &observed.bytes,
+            &observed.device,
+            &self.controls,
+            &self.modifier_controls,
+            &self.modifiers,
+            &self.actions,
+            page.as_deref(),
+            &modifiers,
+        ) else {
+            return Ok(MidiMappedOutcome::Unmapped);
+        };
+        let physical = decode_midi_cc_message(&observed.bytes).map(|(channel, cc, value)| {
+            meldritch_app::MidiControlInput {
+                device: observed.device.to_string(),
+                channel,
+                cc,
+                value,
+            }
+        });
+        if let Some(physical) = &physical
+            && !pickup.observe(physical, &mapped.input, &view)?
+        {
+            return Ok(MidiMappedOutcome::Waiting(format!(
+                "{} pickup waiting: {:?}",
+                observed.device, mapped.input
+            )));
+        }
+        let result = app
+            .handle_input(mapped.input.clone())
+            .map_err(|e| format!("MIDI command rejected: {e:?}"))?;
+        if matches!(
+            mapped.input,
+            meldritch_app::AppInput::SetCuratedControlNormalized { .. }
+        ) && let Some(physical) = &physical
+        {
+            pickup.acknowledge(physical, &app.view_model());
+        }
+        Ok(MidiMappedOutcome::Applied(mapped, result))
+    }
+}
+
 fn decode_script_midi_input(
     message: &[u8],
     device: &str,
@@ -2774,11 +2867,13 @@ fn tui_song(
     midi_debug: bool,
     audio_debug: bool,
     lua_source: Option<PathBuf>,
+    soft_takeover: bool,
 ) -> Result<(), String> {
     let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
     let lua_project = lua_source
         .map(|source| load_lua_controls(&song, &source))
         .transpose()?;
+    let soft_takeover = soft_takeover || lua_project.is_some();
     let patch = CompiledSongPatch::compile_initial(&song)?;
     let scene_bank = song_scene_bank(&song, tempo_from_song(&song)?)?;
     let frame_count = frames.unwrap_or_else(|| {
@@ -2846,13 +2941,16 @@ fn tui_song(
         },
         256,
     );
-    let controls = song_controls_for_view(
+    let mut controls = song_controls_for_view(
         &song,
         patch.feedback(),
         patch.mix(),
         patch.cutoff_hz(),
         patch.resonance(),
     );
+    if soft_takeover {
+        initialize_pickup_controls(&song, &mut controls);
+    }
     controller.set_curated_controls(controls);
     controller.set_performance_pages(song_performance_pages_for_view(&song));
     controller.set_performance_modifiers(song_performance_modifiers_for_view(&song));
@@ -2916,6 +3014,7 @@ fn tui_song(
     };
     let mut lua_feedback = meldritch_control::devices::ApcFeedback::default();
     let (external_input_sender, external_input_receiver) = mpsc::channel();
+    let control_queue = meldritch_control::devices::MidiInputQueue::default();
     let midi_control_bindings = midi_control_bindings_for_song(&song);
     let midi_modifier_control_bindings = midi_modifier_control_bindings_for_song(&song);
     let midi_modifier_bindings = midi_modifier_bindings_for_song(&song);
@@ -2953,6 +3052,7 @@ fn tui_song(
                 Arc::clone(&midi_active_modifiers),
                 midi_debug,
                 (lua_surface.as_deref() == Some(device.id())).then(|| lua_route.clone()),
+                soft_takeover.then(|| control_queue.route(device.id())),
             )? {
                 Some(connection) => connections.push(connection),
                 None => {
@@ -2998,17 +3098,94 @@ fn tui_song(
     let input_capture = Arc::clone(&capture);
     let tick_capture = Arc::clone(&capture);
     let input_midi_active_page = Arc::clone(&midi_active_page);
+    let mapper = ScriptMidiMapper::for_song(&song);
+    let mut pickup = meldritch_control::devices::MidiPickup::default();
+    let accepted = Rc::new(RefCell::new(
+        move |controller: &meldritch_app::AppController,
+              input: &meldritch_app::AppInput,
+              result: &meldritch_app::AppCommandResult| {
+            if let Err(error) = input_capture
+                .lock()
+                .expect("performance session capture lock poisoned")
+                .record(controller, input, result, frame_count, tempo)
+            {
+                eprintln!("session capture failed: {error}");
+            }
+            if matches!(
+                result,
+                meldritch_app::AppCommandResult::PerformancePageSelected { .. }
+            ) {
+                *input_midi_active_page
+                    .lock()
+                    .expect("active page lock poisoned") = active_page_id(&controller.view_model());
+            }
+            let mut host = input_host.lock().expect("song host lock poisoned");
+            if let Some((scene, variation)) = song_scene_selection(input, result)
+                && let Some(patch) = scene_patches.get(&(scene, variation)).cloned()
+            {
+                host.replace_patch(patch);
+            } else if let Err(error) = host.accepted(&controller.view_model(), result) {
+                eprintln!("song update failed: {error}");
+            }
+            if let Some(performance) = input_lua_performance.borrow_mut().as_mut()
+                && let Err(error) = performance.external_accepted(controller, result)
+            {
+                eprintln!("Lua presentation failed: {error}");
+            }
+        },
+    ));
+    let tick_accepted = Rc::clone(&accepted);
     let run_result = meldritch_tui::run_with_hooks_and_external_inputs(
         &mut controller,
         Step::new(36),
         move |controller| {
             let mut message = None;
-            let dropped = lua_route.take_dropped();
-            if dropped != 0 {
-                message = Some(format!(
-                    "Lua APC input queue full: {dropped} observed presses dropped"
-                ));
+            let dropped_control = control_queue.take_dropped();
+            for _ in 0..meldritch_control::QUEUE_CAPACITY {
+                let Some(observed) = control_queue.next() else {
+                    break;
+                };
+                if lua_surface.as_deref() == Some(observed.device.as_ref())
+                    && let Some(meldritch_control::devices::ApcInput::Grid { cell, pressed }) =
+                        meldritch_control::devices::decode_apc(0, &observed.bytes)
+                    && lua_route.owns_cell(cell)
+                {
+                    if pressed && let Some(performance) = lua_performance.borrow_mut().as_mut() {
+                        let frame = u64::from(controller.view_model().transport.position);
+                        if let Err(error) = performance.press(
+                            &observed.device,
+                            cell,
+                            frame,
+                            controller,
+                            &mut host.lock().expect("song host lock poisoned"),
+                            &mut tick_capture.lock().expect("capture lock poisoned"),
+                        ) {
+                            message = Some(format!("Lua host: {error}"));
+                        }
+                    }
+                    continue;
+                }
+                match mapper.apply(&observed, controller, &mut pickup) {
+                    Ok(MidiMappedOutcome::Applied(mapped, result)) => {
+                        tick_accepted.borrow_mut()(controller, &mapped.input, &result);
+                        if midi_debug {
+                            message = Some(format!("MIDI accepted: {:?}", mapped.input));
+                        }
+                    }
+                    Ok(MidiMappedOutcome::Waiting(waiting)) => {
+                        message = Some(waiting);
+                    }
+                    Ok(MidiMappedOutcome::Unmapped) => {
+                        if midi_debug {
+                            message = Some(format!("MIDI {:?} -> unmapped", observed.bytes));
+                        }
+                    }
+                    Err(error) => {
+                        message = Some(error);
+                    }
+                }
             }
+            let dropped_lua = lua_route.take_dropped();
             if let Some(performance) = lua_performance.borrow_mut().as_mut() {
                 for cell in lua_receiver
                     .try_iter()
@@ -3046,6 +3223,12 @@ fn tui_song(
                 }
                 Ok(None) => {}
             }
+            if dropped_control != 0 || dropped_lua != 0 {
+                message = Some(format!(
+                    "Input overflow: {dropped_control} MIDI observations, {dropped_lua} Lua presses dropped; {}",
+                    message.unwrap_or_default()
+                ));
+            }
             if message.is_some() {
                 return Ok(message);
             }
@@ -3060,34 +3243,7 @@ fn tui_song(
         },
         move || external_input_receiver.try_recv().ok(),
         move |controller, input, result| {
-            if let Err(error) = input_capture
-                .lock()
-                .expect("performance session capture lock poisoned")
-                .record(controller, input, result, frame_count, tempo)
-            {
-                eprintln!("session capture failed: {error}");
-            }
-            if matches!(
-                result,
-                meldritch_app::AppCommandResult::PerformancePageSelected { .. }
-            ) {
-                *input_midi_active_page
-                    .lock()
-                    .expect("active page lock poisoned") = active_page_id(&controller.view_model());
-            }
-            let mut host = input_host.lock().expect("song host lock poisoned");
-            if let Some((scene, variation)) = song_scene_selection(input, result)
-                && let Some(patch) = scene_patches.get(&(scene, variation)).cloned()
-            {
-                host.replace_patch(patch);
-            } else if let Err(error) = host.accepted(&controller.view_model(), result) {
-                eprintln!("song update failed: {error}");
-            }
-            if let Some(performance) = input_lua_performance.borrow_mut().as_mut()
-                && let Err(error) = performance.external_accepted(controller, result)
-            {
-                eprintln!("Lua presentation failed: {error}");
-            }
+            accepted.borrow_mut()(controller, input, result);
         },
     );
     if let Err(error) = run_result {
@@ -6649,6 +6805,197 @@ mod tests {
         } else {
             manifest.join("../..").join(relative)
         }
+    }
+
+    #[test]
+    fn control_thread_mapper_applies_page_before_fader_and_preserves_curves() {
+        use meldritch_control::devices::{MidiInputQueue, MidiPickup};
+        let song = meldritch_dsl::load_song_directory(example_song_path(
+            "songs/examples/22-midi-soft-takeover",
+        ))
+        .unwrap();
+        let (playback, _engine) =
+            meldritch_audio::device_output::playback_session_parts(8).unwrap();
+        let state = meldritch_render::coordinator::SampleRenderState::new(
+            Pattern::new(PatternId::new(1), 4, 4).unwrap(),
+            Tempo::new(120.0, 48000).unwrap(),
+            ProbabilitySeed::new(1),
+            RenderSettings::new(1).unwrap(),
+            Arc::new(BTreeMap::new()),
+        );
+        let coordinator = RenderCoordinator::new_from_state(
+            RenderCoordinatorConfig::new(1, 24000, 6000, 1, Duration::from_millis(2)).unwrap(),
+            state.clone(),
+            playback.status_monitor(),
+        )
+        .unwrap();
+        let mut app = meldritch_app::AppController::new(
+            playback,
+            coordinator,
+            meldritch_render::live_edit::LivePatternEditor::new(state, 24000),
+            meldritch_app::Selection {
+                track: TrackId::new(1),
+                step: StepIndex::new(0),
+            },
+            256,
+        );
+        app.set_performance_pages(song_performance_pages_for_view(&song));
+        app.set_performance_modifiers(song_performance_modifiers_for_view(&song));
+        let mut controls = song_controls_for_view(&song, None, None, None, None);
+        initialize_pickup_controls(&song, &mut controls);
+        app.set_curated_controls(controls);
+        let mut mapper = ScriptMidiMapper::for_song(&song);
+        let mut pickup = MidiPickup::default();
+        let queue = MidiInputQueue::default();
+        let route = queue.route("apc-mini");
+        route.observe(&[0x90, 101, 127]);
+        route.observe(&[0xb0, 48, 0]);
+        route.observe(&[0xb0, 48, 127]);
+        assert!(matches!(
+            mapper
+                .apply(&queue.next().unwrap(), &mut app, &mut pickup)
+                .unwrap(),
+            MidiMappedOutcome::Applied(
+                _,
+                meldritch_app::AppCommandResult::PerformancePageSelected { .. }
+            )
+        ));
+        assert!(matches!(
+            mapper
+                .apply(&queue.next().unwrap(), &mut app, &mut pickup)
+                .unwrap(),
+            MidiMappedOutcome::Waiting(_)
+        ));
+        assert!(
+            matches!(mapper.apply(&queue.next().unwrap(), &mut app, &mut pickup).unwrap(), MidiMappedOutcome::Applied(MappedMidiInput { input: meldritch_app::AppInput::SetCuratedControlNormalized { id, .. }, .. }, _) if id == "b-level")
+        );
+        assert_eq!(app.history().len(), 2);
+        app.dispatch(meldritch_app::AppCommand::SetCuratedControlNormalized {
+            id: "b-level".into(),
+            value: 0.7,
+        })
+        .unwrap();
+        mapper
+            .controls
+            .iter_mut()
+            .find(|binding| binding.control_id == "b-level")
+            .unwrap()
+            .action = meldritch_app::MidiControlAction::Overdrive {
+            normal: 0.7,
+            normal_midi: 80,
+        };
+        route.observe(&[0xb0, 48, 80]);
+        assert!(
+            matches!(mapper.apply(&queue.next().unwrap(), &mut app, &mut pickup).unwrap(), MidiMappedOutcome::Applied(MappedMidiInput { input: meldritch_app::AppInput::SetCuratedControlNormalized { value, .. }, .. }, _) if (value - 0.7).abs() < 1e-12)
+        );
+        app.dispatch(meldritch_app::AppCommand::SetCuratedControlNormalized {
+            id: "b-level".into(),
+            value: 0.5,
+        })
+        .unwrap();
+        mapper
+            .controls
+            .iter_mut()
+            .find(|binding| binding.control_id == "b-level")
+            .unwrap()
+            .action = meldritch_app::MidiControlAction::Centered { center: 0.5 };
+        route.observe(&[0xb0, 48, 64]);
+        assert!(matches!(
+            mapper
+                .apply(&queue.next().unwrap(), &mut app, &mut pickup)
+                .unwrap(),
+            MidiMappedOutcome::Applied(
+                MappedMidiInput {
+                    input: meldritch_app::AppInput::SetCuratedControlNormalized { value: 0.5, .. },
+                    ..
+                },
+                _
+            )
+        ));
+        // Momentary layer messages are mapped on the same owner and FIFO.
+        route.observe(&[0x90, 122, 127]);
+        route.observe(&[0xb0, 48, 127]);
+        route.observe(&[0x90, 122, 0]);
+        route.observe(&[0xb0, 48, 10]);
+        assert!(matches!(
+            mapper
+                .apply(&queue.next().unwrap(), &mut app, &mut pickup)
+                .unwrap(),
+            MidiMappedOutcome::Applied(
+                _,
+                meldritch_app::AppCommandResult::PerformanceModifierChanged { active: true, .. }
+            )
+        ));
+        assert!(matches!(
+            mapper
+                .apply(&queue.next().unwrap(), &mut app, &mut pickup)
+                .unwrap(),
+            MidiMappedOutcome::Applied(
+                _,
+                meldritch_app::AppCommandResult::LaneOctaveSet { current: 2, .. }
+            )
+        ));
+        assert!(matches!(
+            mapper
+                .apply(&queue.next().unwrap(), &mut app, &mut pickup)
+                .unwrap(),
+            MidiMappedOutcome::Applied(
+                _,
+                meldritch_app::AppCommandResult::PerformanceModifierChanged { active: false, .. }
+            )
+        ));
+        assert!(matches!(
+            mapper
+                .apply(&queue.next().unwrap(), &mut app, &mut pickup)
+                .unwrap(),
+            MidiMappedOutcome::Waiting(_)
+        ));
+        mapper
+            .controls
+            .iter_mut()
+            .find(|binding| binding.control_id == "b-level")
+            .unwrap()
+            .action = meldritch_app::MidiControlAction::Increment;
+        route.observe(&[0xb0, 48, 1]);
+        assert!(matches!(
+            mapper
+                .apply(&queue.next().unwrap(), &mut app, &mut pickup)
+                .unwrap(),
+            MidiMappedOutcome::Applied(
+                MappedMidiInput {
+                    input: meldritch_app::AppInput::AdjustCuratedControl { .. },
+                    ..
+                },
+                _
+            )
+        ));
+        let direct = Cli::try_parse_from([
+            "meldritch",
+            "tui-song",
+            "songs/examples/22-midi-soft-takeover",
+        ])
+        .unwrap();
+        assert!(matches!(
+            direct.command,
+            Command::TuiSong {
+                soft_takeover: false,
+                ..
+            }
+        ));
+        let enabled = Cli::try_parse_from([
+            "meldritch",
+            "tui-song",
+            "songs/examples/22-midi-soft-takeover",
+            "--soft-takeover",
+        ])
+        .unwrap();
+        assert!(matches!(
+            enabled.command,
+            Command::TuiSong {
+                soft_takeover: true,
+                ..
+            }
+        ));
     }
 
     #[test]

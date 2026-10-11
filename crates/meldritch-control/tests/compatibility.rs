@@ -29,6 +29,7 @@ fn historical_song_directories_load_compile_and_retain_range_identical_audio() {
         ("18-lua-control-plane", "drone"),
         ("19-apc-mini-mk2-playground", "mix"),
         ("21-lua-apc-performance", "mix"),
+        ("22-midi-soft-takeover", "mix"),
     ];
     for (fixture, compiler) in fixtures {
         let path = repository().join("songs/examples").join(fixture);

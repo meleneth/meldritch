@@ -1,7 +1,72 @@
 //! Protocol codecs and logical device simulation, outside musical semantics.
 //! No hardware connection is implied by these functions. See CONTROL_PLANE.md.
 
+pub use crate::pickup::MidiPickup;
 use crate::{ControlPlane, Input, Result, SurfaceFrame};
+
+#[derive(Clone, Debug)]
+pub struct ObservedMidi {
+    pub device: std::sync::Arc<str>,
+    pub bytes: [u8; 3],
+}
+
+pub struct MidiInputQueue {
+    sender: std::sync::mpsc::SyncSender<ObservedMidi>,
+    receiver: std::sync::mpsc::Receiver<ObservedMidi>,
+    dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+impl Default for MidiInputQueue {
+    fn default() -> Self {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(crate::QUEUE_CAPACITY);
+        Self {
+            sender,
+            receiver,
+            dropped: Default::default(),
+        }
+    }
+}
+impl MidiInputQueue {
+    pub fn route(&self, device: &str) -> MidiInputRoute {
+        MidiInputRoute {
+            device: device.into(),
+            sender: self.sender.clone(),
+            dropped: self.dropped.clone(),
+        }
+    }
+    pub fn next(&self) -> Option<ObservedMidi> {
+        self.receiver.try_recv().ok()
+    }
+    pub fn take_dropped(&self) -> u64 {
+        self.dropped.swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[derive(Clone)]
+pub struct MidiInputRoute {
+    device: std::sync::Arc<str>,
+    sender: std::sync::mpsc::SyncSender<ObservedMidi>,
+    dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+impl MidiInputRoute {
+    pub fn observe(&self, bytes: &[u8]) -> bool {
+        if decode_midi(bytes).is_none() {
+            return false;
+        }
+        let bytes = [bytes[0], bytes[1], bytes[2]];
+        if self
+            .sender
+            .try_send(ObservedMidi {
+                device: self.device.clone(),
+                bytes,
+            })
+            .is_err()
+        {
+            self.dropped
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        true
+    }
+}
 
 /// Exclusive pad ownership prevents Lua and TOML from applying one press twice.
 /// Bounded observation queue; overflow is counted for control-thread diagnostics.
@@ -12,6 +77,9 @@ pub struct ApcInputRoute {
     dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 impl ApcInputRoute {
+    pub fn owns_cell(&self, cell: u8) -> bool {
+        self.cells.contains(&cell)
+    }
     pub fn new(cells: std::collections::BTreeSet<u8>) -> (Self, std::sync::mpsc::Receiver<u8>) {
         let (sender, receiver) = std::sync::mpsc::sync_channel(crate::QUEUE_CAPACITY);
         (

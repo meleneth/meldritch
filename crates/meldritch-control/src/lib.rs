@@ -13,6 +13,7 @@ use std::rc::Rc;
 pub type Result<T> = std::result::Result<T, String>;
 pub mod led_demo;
 pub mod performance;
+pub mod pickup;
 pub mod session;
 pub mod song_host;
 const MAX_DEFINITIONS: usize = 64;

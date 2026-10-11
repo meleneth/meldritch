@@ -15,7 +15,8 @@ commands, prints an inspectable trace and semantic surface frames, and writes a
 unique UTC timestamped session under `/tmp/meldritch-lua-headless/performances`.
 It does not open an audio device. It constructs the existing app's backing
 pattern/coordinator for headless mode-control commands; it is not a general
-song-playback host. Production `tui-song` remains the existing TOML/MIDI path.
+song-playback host. Production `tui-song` uses the shared song host with optional
+Lua composition.
 
 ## Reuse and boundaries
 
@@ -77,10 +78,12 @@ before dispatch, while the independent dispatcher/journal retain `u64` frames.
 Run `cargo run -- tui-song songs/examples/21-lua-apc-performance --lua main.lua`.
 The CLI confines this bounded Lua source to the loaded song root and requires
 the same validated song fingerprint. One Lua APC surface is mapped by device
-id to the TOML Session Control port. A 64-slot nonblocking observation queue
-owns bound pads across all Lua pages, including releases, so TOML cannot apply
-the same press twice. Overflow counts observed presses, not accepted command
-facts, and reports on the TUI thread. Other TOML bindings remain active.
+id to the TOML Session Control port. A 64-slot nonblocking MIDI observation queue
+preserves note/CC/pitch order and maps against the authoritative view on the
+control owner. Lua owns bound pads across all pages, including releases, so
+TOML cannot apply the same press twice. Overflow counts observations, not
+accepted command facts, and has priority in the TUI diagnostic status.
+Other TOML bindings remain active.
 
 Lua, command observers, session writes, graph compilation and semantic RGB
 feedback all execute on the control owner. Output diffs suppress unchanged
@@ -97,6 +100,41 @@ and feedback output with `--no-autoplay --midi-debug`, displayed stopped transpo
 with zero reported underruns/misses, and exited cleanly via `q` with a saved
 session. This verifies connection/wiring; no pad interaction, physical color
 observation, listening or automatic reconnection acceptance is claimed.
+
+## Physical fader pickup
+
+`tui-song --soft-takeover` opts existing TOML projects into the bounded
+control-thread MIDI path; `--lua` enables it automatically. The legacy TOML
+default remains direct. The MIDI callback copies only complete three-byte
+channel observations into one 64-slot FIFO; no Lua, domain mutation or pickup
+evaluation runs there. Unsupported diagnostic packets retain the existing path.
+
+`MidiPickup` keeps at most 64 physical `(device, channel, CC)` entries. It
+filters the existing mapper's normalized absolute/centered/overdrive inputs
+against immutable app control projections. It is physical ownership state,
+not a second musical parameter model. Until the fader crosses or comes within
+1/127 of the normalized target, no command, rerender or session event exists.
+Step buttons and momentary modifier actions retain existing command semantics.
+
+Typed app history detects page/layer changes, even away-and-back between
+observations, and edits by other interfaces. A history gap safely rearms all
+pickup entries. An accepted physical command acknowledges only that controller;
+other controllers targeting the same value rearm. App step quantization does
+not release the owner. Accepted inputs invoke the same rendering, projection
+and recorder hooks as TUI input. Queue overflow and invalid targets report
+diagnostics without editing the song.
+
+Enabled hosts seed previously unknown lane levels and synth filter controls
+from the validated model/current renderer defaults. Unknown/out-of-range values
+stay unavailable rather than guessing. This is a static-control projection;
+audio-clock automation telemetry is not introduced. The headless contract in
+example 22 verifies pickup plus actual app/render/publication/capture machinery,
+curves, layer routing, FIFO order, registry bounds and invalid observations.
+Physical pickup interaction/listening and automatic USB reconnect remain open.
+The production owner uses the existing 50ms TUI poll cadence plus processing
+time; no new latency/throughput measurement is claimed. Example 22's stopped
+hardware smoke opened APC Control input/output and exited cleanly via `q` with
+a saved session. This does not establish physical pickup or musical acceptance.
 
 ## Minimal Lua API
 
@@ -265,9 +303,9 @@ and toggle into a machine.
 - [Akai APC Mini MK2 protocol v1.0](https://cdn.inmusicbrands.com/akai/attachments/APC%20mini%20mk2%20-%20Communication%20Protocol%20-%20v1.0.pdf): USB port 0 Session grid notes 0..63, button notes,
   CC 0x30..0x38 faders, channel/port distinctions, and 8-byte-per-pad RGB SysEx
   payloads. Codecs implement these and normalized faders. Soft takeover is a
-  resettable crossing/near-target foundation; the host must reset it when a
-  bank/context or another surface changes the target. It is not wired to an
-  attached fader or Lua binding in this example.
+  resettable crossing/near-target primitive used by the production pickup host
+  in example 22, which rearms on context/external target changes. Physical
+  pickup interaction has not been accepted on hardware yet.
 - [Arturia MicroLab mk3 manual 1.0.0](https://dl.arturia.net/products/microlab-mk3/manual/microlab-mk3_Manual_1_0_0_EN.pdf): velocity-sensitive keyboard, pitch/modulation strips and configurable
   sustain/expression pedal controls. The decoder preserves note velocity,
   release (including note-on-zero), channel, 14-bit pitch and caller-configured
