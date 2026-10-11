@@ -1,8 +1,47 @@
 # Active TODO
 
-The showcase milestones below are complete. The active work is to replace the
-fixture-oriented, monolithic project input with a composable song-directory
-format and a curated, recordable performance runtime.
+Immediate priority: interactive musical authoring through the TUI and hardware,
+with authored changes persisted as human-readable Lua. Section 20 is the new
+prioritized queue. Section 19 retains unfinished format/performance work and
+historical verification; its older next-step recommendations are superseded.
+The completed showcase milestones remain completion history.
+
+## 20. Instrument and pattern authoring (priority over section 19)
+
+Investigation and ownership decisions: [AUTHORING.md](AUTHORING.md). Examples
+25–30 are `design`: executable-form acceptance specifications with concrete
+vectors, but authoring commands, Lua export and test step bindings are not yet
+implemented. No new synthesis dependency or speculative schema is authorized
+by this documentation milestone.
+
+- [x] Inventory actual synthesis/compiler, notes/commands, MIDI, Lua, mixer and
+  publication boundaries; verify Plaits absence and audit the proposed port
+- [x] Specify six initial authoring examples, invalid cases, observable criteria
+  and required Lua persistence; retain all older unfinished work
+- [ ] Bind example 29's first parameter round-trip to failing headless tests;
+  establish one editable Rust song source, minimum versioned Lua edit export/
+  reload and confined base validation, without duplicating graph semantics
+- [ ] Example 25: inspect and edit existing low-pass and ADSR through TUI;
+  validate typed source edits, rerender publication and Lua persistence
+- [ ] Example 26: create/assign a one-bar note pattern with APC grid and TUI;
+  persist musical positions/pitches/velocities and stable identities
+- [ ] Example 27: held-pad explicit note duration, release/lost-release cleanup,
+  rewind/loop-safe interaction ordering and persistence beyond one step
+- [ ] Example 28: author fader bindings to existing synth cutoff and lane level;
+  shared inspection, pickup rearming and persistent mappings/mixer settings
+- [ ] Example 30: compose the supported oscillator/ADSR/VCA/low-pass patch;
+  inspect typed cables, reject invalid/unsupported graphs and export/reload
+- [ ] Example 29: complete composed round-trip across patterns, synths, cables,
+  mappings and mixer settings; deterministic source/audio, atomic save failures
+- [ ] Run relevant full crate/compatibility suites and record physical APC
+  pad/hold/fader/listening results separately from headless acceptance
+
+Done when a musician can create/edit these example instruments, patterns,
+patches, mappings and lane levels, save readable Lua, and reload equivalent
+music without hardware or replaying a session. Existing-module authoring comes
+before Plaits integration, a generalized editor, pan/bus schema, full runtime
+replay or scheduler work. Necessary authoring clock/capture correctness remains
+part of each slice. Physical acceptance stays pending until actually tested.
 
 ## 19. Song directories and `.ml*` formats
 

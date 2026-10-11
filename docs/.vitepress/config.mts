@@ -37,6 +37,7 @@ export default defineConfig({
       { text: 'Development', items: [
         { text: 'Nothing is stable yet', link: '/guide/status' },
         { text: 'Progress & remaining tasks', link: '/TODO' },
+        { text: 'Interactive authoring investigation', link: '/AUTHORING' },
         { text: 'Testing strategy', link: '/TESTING_STRATEGY' },
         { text: 'Roadmap', link: '/ROADMAP' },
         { text: 'Contributing & documentation', link: '/guide/contributing' },

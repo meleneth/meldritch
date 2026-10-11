@@ -4,6 +4,12 @@ This document is an index, not an independent specification. The executable
 song trees under `songs/examples/` define the behavior we want to support. The
 format grows only when an accepted example requires it.
 
+Interactive authoring is now the immediate priority (TODO section 20).
+[AUTHORING.md](AUTHORING.md) specifies the source ownership and minimum Lua
+persistence direction; examples 25–30 remain `design`. Existing TOML loading and
+Lua v1 entrypoint behavior are unchanged in this documentation slice. Future
+Lua export must reconstruct accepted musical edits, beyond saving script text.
+
 ## Example-first rule
 
 For every capability:

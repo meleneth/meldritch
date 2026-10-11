@@ -1,5 +1,11 @@
 # Architecture
 
+The immediate authoring roadmap is in [AUTHORING.md](AUTHORING.md). Its target
+is a single editable Rust source/relation model, shared typed commands and
+readonly projections for TUI/Lua/hardware, with host-owned Lua source export.
+This is planned: the current loaded `ValidatedSong`, backing TUI pattern and
+song-host caches do not yet form a loaded-song authoring path.
+
 The current Lua/control-plane reuse boundaries, API and implementation limits
 are documented in [CONTROL_PLANE.md](CONTROL_PLANE.md). Lua composes the existing
 validated song model and dispatches existing app commands on a control thread;

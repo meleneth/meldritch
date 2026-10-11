@@ -1,5 +1,10 @@
 # Lua control plane, API version 1
 
+Immediate priority has changed to interactive musical authoring; see
+[AUTHORING.md](AUTHORING.md) and TODO section 20. The API described here remains
+the implemented v1 boundary: its saved source envelope is not persistence of
+musical edits. New authoring examples are design contracts, not new API support.
+
 This milestone implements the headless vertical slice in
 `songs/examples/18-lua-control-plane`. Run it with:
 

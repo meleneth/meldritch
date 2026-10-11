@@ -27,6 +27,12 @@ Status values:
 | `22-midi-soft-takeover` | Control-thread MIDI FIFO, page/context-aware fader pickup, cross-controller rearming and shared audio/session behavior; curves/modifiers/negative paths accepted headlessly, physical interaction pending | accept |
 | `23-midi-reconnect` | Paced production MIDI input/output recovery, stale-observation rejection, pickup/layer release and RGB reconstruction; failure composition accepted headlessly using immutable example 22, physical cable acceptance pending | accept |
 | `24-audio-aware-widgets` | Generation-tagged song publication, production callback acknowledgement, reusable queued/ready/playing/error Lua widgets and shared native TUI projection; rapid supersession, failure, readonly API, reconnect and compatibility accepted headlessly, hardware/listening pending | accept |
+| `25-edit-existing-synth` | Source-owned low-pass/ADSR inspection and TUI editing, rerender and Lua export contract; unimplemented | design |
+| `26-apc-note-pattern` | APC/TUI creation of a pitched one-bar note pattern, assignment and Lua persistence contract; unimplemented, hardware pending | design |
+| `27-held-pad-duration` | Held-pad endpoint editing of explicit multi-step note duration and lost-release cleanup contract; unimplemented, hardware pending | design |
+| `28-author-fader-mappings` | Editable cutoff/lane-level physical mappings, pickup and Lua persistence contract; unimplemented, hardware pending | design |
+| `29-lua-authored-roundtrip` | Deterministic human-readable Lua musical-edit export/reload, base validation and atomic-save contract; unimplemented | design |
+| `30-compose-typed-patch` | Existing oscillator/ADSR/VCA/low-pass graph composition, inspection and Lua persistence contract; unimplemented | design |
 
 An implementation may advance a row only when all earlier statuses for that row
 are satisfied. New schema or runtime behavior requires a new row or an explicit

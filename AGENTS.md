@@ -83,7 +83,12 @@ Preserve `INVARIANTS.md`. In particular:
 
 ## Current `.ml*` implementation state
 
-The active milestone is section 19 of `TODO.md`.
+The immediate priority is section 20 of `TODO.md`: interactive instrument,
+pattern, patch, mapping and mixer authoring through TUI/hardware, persisted as
+human-readable Lua. Read `AUTHORING.md` and examples 25–30 before that work.
+Their status is `design`; Lua v1 currently composes TOML songs and does not save
+musical edits. Section 19's unfinished performance infrastructure is retained
+but no longer determines the next implementation slice.
 
 Implemented foundations include:
 
@@ -154,7 +159,7 @@ this guide was written:
   launch timing, exact replay, and MIDI output/LED feedback are not yet
   implemented.
 
-The next implementation direction is `17-launch-control-xl-ensemble`: an
+The retained ensemble direction is `17-launch-control-xl-ensemble`: an
 example-first multi-lane LaunchControl XL performance. The requested musical
 surface is one beat drum lane, two rhythm/percussion lanes, one polyphonic
 chord/pad lane, two monophonic bass lanes, and three sample-based lanes. That
@@ -216,9 +221,9 @@ pitch/slice controls, and real pattern-bank runtime semantics beyond choosing a
 lane variation are not implemented yet. `.mlsynth` patches with `polyphony > 1`
 now render overlapping note events as independent voices in the song renderer;
 the ensemble pad uses four voices.
-Build this from examples first, then implement only the required multi-track,
-sample-track playback, poly-synth, pattern-bank runtime, and modifier control
-support.
+When returning to this deferred work, build it from examples first, then
+implement only the required multi-track, sample-track playback, poly-synth,
+pattern-bank runtime, and modifier control support.
 Modifier/layer behavior must remain script-declared, typed, captured, and
 replayable; do not hard-code LaunchControl policy in Rust. LED feedback remains
 deferred until the ensemble control semantics are stable. Full all-parameters
