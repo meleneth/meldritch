@@ -185,6 +185,8 @@ impl CableDefinition {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SynthDefinition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    output_level_control: Option<String>,
     id: String,
     polyphony: u16,
     inputs: Vec<PatchInput>,
@@ -223,6 +225,11 @@ impl DspDefinition {
 }
 
 impl SynthDefinition {
+    /// Explicit normalized linear output-gain interface for mono instances.
+    #[must_use]
+    pub fn output_level_control(&self) -> Option<&str> {
+        self.output_level_control.as_deref()
+    }
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
@@ -3356,6 +3363,7 @@ fn parse_synth(path: &Path, raw: RawSynthFile) -> Result<SynthDefinition, SongLo
     }
 
     Ok(SynthDefinition {
+        output_level_control: None,
         id: raw.synth.id,
         polyphony: raw.synth.polyphony,
         inputs,
@@ -4674,6 +4682,10 @@ fn fingerprint_song(
         fingerprint.string(hint.label());
     }
     for synth in synths.values() {
+        if let Some(id) = &synth.output_level_control {
+            fingerprint.string("patch-output-level-control-v1");
+            fingerprint.string(id);
+        }
         fingerprint.string(&synth.id);
         fingerprint.u64(u64::from(synth.polyphony));
         for input in &synth.inputs {

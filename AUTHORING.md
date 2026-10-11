@@ -31,7 +31,17 @@ device opens only after prepared audio and an explicit play request. Ctrl-Tab
 uses the existing mode state: the native cockpit starts in construction
 (AllParameters), while performance hides/blocks construction editing and keeps
 transport. The legacy song cockpit still defaults to Performance. Runtime
-overlays, capture and standalone saves remain next. Everything stays in memory.
+output-level overlays now work: native x explicitly declares the selected patch's
+`output_level_control`, and performance arrows/Home/End dispatch SetOutputLevel
+against (instance ID, control ID). Normalized linear gain replaces the instance
+output gain, not envelope/VCA wiring. No internal parameter is automatically exposed.
+App-owned runtime values and accepted command facts stay outside source/provenance;
+mode changes preserve them and explicit source loading resets them. A repeated
+identical setting does not submit another audio generation. Keyboard selection
+reuses the selected patch; the native workflow creates one instance per patch.
+General multi-instance surface selection, hardware mappings/pickup for these controls,
+graph recipes and revisioned dynamic interfaces remain future work.
+Disk capture and standalone saves remain next. Everything stays in memory.
 The full example retains `design` status.
 
 ## Recommended immediate implementation prompt

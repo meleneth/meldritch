@@ -391,6 +391,24 @@ pub fn session_result_fields(
     result: &meldritch_app::AppCommandResult,
 ) -> (String, Option<String>, Option<String>, Option<String>) {
     match result {
+        meldritch_app::AppCommandResult::OutputLevelExposed { synth, .. } => (
+            "patch_control_interface".into(),
+            Some(synth.clone()),
+            None,
+            None,
+        ),
+        meldritch_app::AppCommandResult::OutputLevelAdjusted {
+            voice,
+            control,
+            previous,
+            current,
+            ..
+        } => (
+            "runtime_output_level".into(),
+            Some(format!("{voice}/{control}")),
+            Some(previous.to_string()),
+            Some(current.to_string()),
+        ),
         meldritch_app::AppCommandResult::PatternVoiceEdited { voice, .. } => (
             "pattern_voice_definition".into(),
             Some(voice.clone()),

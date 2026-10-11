@@ -52,6 +52,49 @@ fn source() -> ValidatedSong {
 }
 
 #[test]
+fn runtime_level_replaces_the_instance_default_and_is_split_render_deterministic() {
+    use meldritch_render::song_host::SongLiveOverrides;
+    let source = source().expose_output_level("voice-1", "level").unwrap();
+    let fingerprint = source.fingerprint();
+    let patch = CompiledSongPatch::compile_initial(&source).unwrap();
+    let range = FrameRange::new(0, 200_000).unwrap();
+    let authored = patch.render_default(range).unwrap();
+    let mut overrides = SongLiveOverrides::default();
+    overrides
+        .voice_levels
+        .insert("voice-instance-1".into(), 0.4);
+    let half = patch.render(range, &overrides).unwrap();
+    for (runtime, default) in half.samples().iter().zip(authored.samples()) {
+        assert_eq!(*runtime, *default * 0.5);
+    }
+    let mut split = Vec::new();
+    for (start, end) in [(0, 123), (123, 97_007), (97_007, 200_000)] {
+        split.extend_from_slice(
+            patch
+                .render(FrameRange::new(start, end).unwrap(), &overrides)
+                .unwrap()
+                .samples(),
+        );
+    }
+    assert_eq!(split, half.samples());
+    for value in [f64::NAN, f64::INFINITY, -0.1, 1.1] {
+        overrides
+            .voice_levels
+            .insert("voice-instance-1".into(), value);
+        assert!(patch.render(range, &overrides).is_err());
+    }
+    overrides.voice_levels.clear();
+    overrides.voice_levels.insert("unrelated-lane".into(), 0.0);
+    assert!(patch.render(range, &overrides).is_err());
+    assert_eq!(source.fingerprint(), fingerprint);
+    assert_eq!(source.pattern_voices()["voice-instance-1"].level, 0.8);
+    assert_eq!(
+        patch.render_default(range).unwrap().samples(),
+        authored.samples()
+    );
+}
+
+#[test]
 fn independent_pitch_changes_under_a_held_gate_and_reuses_continuous_oscillator_phase() {
     let song = source();
     assert!(song.performance().tracks().is_empty());

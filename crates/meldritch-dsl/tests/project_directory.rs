@@ -29,6 +29,56 @@ fn example(name: &str) -> PathBuf {
 }
 
 #[test]
+fn explicit_output_level_fixture_and_graph_snapshot_preserve_control_identity() {
+    let directory = Directory::new();
+    let root = example("34-empty-project-patch");
+    let source = load_project_directory(&directory.0)
+        .unwrap()
+        .authoring_source()
+        .create_patch(&meldritch_dsl::PatchCreation::mono_voice("voice-1"))
+        .unwrap();
+    let request: toml::Table =
+        toml::from_str(&fs::read_to_string(root.join("output-level-control.toml")).unwrap())
+            .unwrap();
+    let next = source
+        .expose_output_level(
+            request["synth"].as_str().unwrap(),
+            request["control"].as_str().unwrap(),
+        )
+        .unwrap();
+    assert_ne!(source.fingerprint(), next.fingerprint());
+    let encoded = toml::to_string(&next.synths()["voice-1"]).unwrap();
+    let graph: meldritch_dsl::SynthDefinition = toml::from_str(&encoded).unwrap();
+    assert_eq!(graph.output_level_control(), Some("level"));
+    assert_eq!(
+        source.replace_patch(graph).unwrap().fingerprint(),
+        next.fingerprint()
+    );
+    let invalid: toml::Table = toml::from_str(
+        &fs::read_to_string(root.join("invalid/output-level-control.toml")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        source
+            .expose_output_level(
+                invalid["synth"].as_str().unwrap(),
+                invalid["control"].as_str().unwrap()
+            )
+            .is_err()
+    );
+    let forged = encoded.replace(
+        "output_level_control = \"level\"",
+        "output_level_control = \"../level\"",
+    );
+    assert!(
+        source
+            .replace_patch(toml::from_str(&forged).unwrap())
+            .is_err()
+    );
+    assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
+}
+
+#[test]
 fn independent_voice_fixture_has_separate_bindings_and_no_track_ownership() {
     use meldritch_dsl::{PatchCreation, PatternSignal, PatternVoiceDefinition};
     let directory = Directory::new();

@@ -198,6 +198,7 @@ impl ValidatedSong {
         next.synths.insert(
             id.clone(),
             SynthDefinition {
+                output_level_control: None,
                 id: id.clone(),
                 polyphony: 1,
                 inputs: creation.inputs.clone(),
@@ -351,6 +352,15 @@ impl ValidatedSong {
     }
     /// Re-run the ordinary synth importer and typed-port boundary on a graph.
     pub fn replace_patch(&self, graph: SynthDefinition) -> Result<Self, String> {
+        if graph.output_level_control.as_ref().is_some_and(|id| {
+            id.is_empty()
+                || id.len() > 64
+                || !id
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
+        }) {
+            return Err("invalid output-level control identity".into());
+        }
         let previous = self
             .synths
             .get(&graph.id)
@@ -424,7 +434,11 @@ impl ValidatedSong {
                 })
                 .collect(),
         };
-        let validated = parse_synth(Path::new("authored patch"), raw).map_err(|e| e.to_string())?;
+        let mut validated =
+            parse_synth(Path::new("authored patch"), raw).map_err(|e| e.to_string())?;
+        // This declaration belongs to the authored graph snapshot, not the
+        // historical .mlsynth TOML schema reconstructed above.
+        validated.output_level_control = graph.output_level_control.clone();
         if graph != validated {
             return Err("graph includes inconsistent typed cable/module state".into());
         }

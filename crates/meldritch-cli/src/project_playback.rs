@@ -61,6 +61,17 @@ impl ProjectPlaybackHost for NativeProjectAudio {
             self.host.replace_source(source.as_ref().clone())?;
             self.submitted_fingerprint = source.fingerprint();
         }
+        let levels = app
+            .output_levels()
+            .iter()
+            .filter_map(|((voice, control), value)| {
+                source
+                    .validate_output_level_control(voice, control)
+                    .ok()
+                    .map(|_| (voice.clone(), *value))
+            })
+            .collect();
+        self.host.set_voice_levels(levels)?;
         if let Some(generation) = self.host.poll_publish()? {
             self.ready_generation = Some(generation);
         }
@@ -176,8 +187,12 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(2));
             }
         };
+        app.dispatch(AppCommand::ExposeOutputLevel {
+            synth: "voice-1".into(),
+            control: "level".into(),
+        })
+        .unwrap();
         wait_ready(&mut host, &mut app);
-        let snapshot = host.reader.snapshot();
         let source = app.authored_source().unwrap();
         let mut callback = PublishedAudioRenderer::from_engine(
             host.reader.clone(),
@@ -190,6 +205,42 @@ mod tests {
         let mut samples = vec![0.0; 512];
         callback.render_f64(&mut samples);
         assert!(samples.iter().any(|sample| sample.abs() > 0.01));
+        let control = |value| AppCommand::SetOutputLevel {
+            voice: "voice-1-instance".into(),
+            control: "level".into(),
+            value,
+        };
+        let history = app.history().len();
+        for value in [f64::NAN, f64::INFINITY, -0.1, 1.1] {
+            assert!(app.dispatch(control(Some(value))).is_err());
+        }
+        assert_eq!(app.history().len(), history);
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        app.dispatch(control(Some(0.0))).unwrap();
+        assert!(app.history().back().unwrap().changed);
+        assert_eq!(app.history().back().unwrap().dirty_ranges.len(), 1);
+        wait_ready(&mut host, &mut app);
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        assert_eq!(source.pattern_voices()["voice-1-instance"].level, 0.8);
+        callback.render_f64(&mut samples);
+        assert!(samples.iter().all(|sample| *sample == 0.0));
+        assert_eq!(
+            app.playback_control().status_monitor().snapshot().position,
+            512
+        );
+        let generation = host.host.generation();
+        let muted = host.reader.snapshot();
+        app.dispatch(control(Some(0.0))).unwrap();
+        host.poll(&mut app).unwrap();
+        assert!(!app.history().back().unwrap().changed);
+        assert_eq!(host.host.generation(), generation);
+        assert!(Arc::ptr_eq(&muted, &host.reader.snapshot()));
+        app.dispatch(control(None)).unwrap();
+        wait_ready(&mut host, &mut app);
+        callback.render_f64(&mut samples);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.01));
+        assert!(app.view_model().output_levels.is_empty());
+        let snapshot = host.reader.snapshot();
         for _ in 0..2 {
             app.handle_input(AppInput::ToggleCockpitMode).unwrap();
             host.poll(&mut app).unwrap();
@@ -197,7 +248,7 @@ mod tests {
             assert!(Arc::ptr_eq(&snapshot, &host.reader.snapshot()));
             assert_eq!(
                 app.playback_control().status_monitor().snapshot().position,
-                256
+                768
             );
         }
         app.dispatch(AppCommand::BindPatternVoice {
@@ -211,7 +262,7 @@ mod tests {
         assert!(samples.iter().all(|sample| *sample == 0.0));
         assert_eq!(
             app.playback_control().status_monitor().snapshot().position,
-            512
+            1024
         );
         assert!(host.stream.is_none());
     }

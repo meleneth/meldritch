@@ -40,7 +40,10 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 1 native playback checkpoint: lazy device opening via existing
   SongAudioHost, worker and immutable publication; typed transport and mode
   transitions with native construction gestures blocked in performance
-- [ ] Slice 1 next: exposed runtime level, capture, self-contained save/fresh reload
+- [x] Slice 1 runtime level checkpoint: explicit patch-owned output-level declaration,
+  typed instance overlay, native x/arrows/Home/End; source/defaults unchanged,
+  existing worker/callback mute/restore and in-memory accepted facts checked
+- [ ] Slice 1 next: disk capture, self-contained save/fresh reload
 - [ ] Slice 2: shared palette, two compositions and independent pattern sources
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
@@ -128,7 +131,20 @@ PTY opening, empty play diagnostic, patch/pattern/binding gestures, every cable,
 mode switching, blocked performance edits and clean quit/restoration pass with
 zero files and no audio device. Formatting/diff checks, affected-crate Clippy
 (existing allowances) and docs build pass. Physical listening/deadlines remain
-unverified; exposed runtime level, capture and self-contained save are still next.
+unverified. That checkpoint preceded runtime controls; see the checkpoint below.
+
+Runtime level checkpoint: `keyboard-level.txt` specifies explicit construction
+exposure and performance gain gestures. App tests reject unknown/unexposed identities,
+invalid/renamed declarations and nonfinite/out-of-range values without source/history
+changes, isolate two instances, preserve overlays across modes and patch edits, and
+reset them on load. Native host/callback tests mute and restore consumed PCM while
+playhead advances; identical settings retain generation/publication. TUI checks
+native keys and stable instance/control identities at 80×24. Disk capture and
+self-contained save/reopen remain unfinished; no physical listening claim.
+Workspace tests, focused final DSL/render/both-CLI checks, formatting/diff checks,
+affected-crate Clippy (existing allowances) and the docs/reference build pass.
+Linear half-gain full/split raw f64 renders agree, and the legacy example 09
+fingerprint remains `41472b38b65b60ed`. This checkpoint is committed locally.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

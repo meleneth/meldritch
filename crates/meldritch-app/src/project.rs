@@ -13,6 +13,70 @@ pub(crate) struct ProjectSource {
 }
 
 impl super::AppController {
+    pub(crate) fn output_level_command(
+        &mut self,
+        command: &super::AppCommand,
+    ) -> Result<super::AppCommandResult, super::AppCommandError> {
+        use super::{AppCommand, AppCommandError, AppCommandResult};
+        let owner = self
+            .project_source
+            .as_mut()
+            .ok_or_else(|| AppCommandError::Instrument("no project source".into()))?;
+        match command {
+            AppCommand::ExposeOutputLevel { synth, control } => {
+                let next = owner
+                    .source
+                    .expose_output_level(synth, control)
+                    .map_err(AppCommandError::Instrument)?;
+                meldritch_render::song_host::CompiledSongPatch::compile_initial(&next)
+                    .map_err(AppCommandError::Instrument)?;
+                let changed = next.fingerprint() != owner.source.fingerprint();
+                if changed {
+                    owner.source = Arc::new(next);
+                }
+                Ok(AppCommandResult::OutputLevelExposed {
+                    synth: synth.clone(),
+                    changed,
+                })
+            }
+            AppCommand::SetOutputLevel {
+                voice,
+                control,
+                value,
+            } => {
+                let definition = owner
+                    .source
+                    .validate_output_level_control(voice, control)
+                    .map_err(AppCommandError::Instrument)?;
+                let current = value.unwrap_or(definition.level);
+                if !current.is_finite() || !(0.0..=1.0).contains(&current) {
+                    return Err(AppCommandError::Instrument(
+                        "output level must be finite and in 0..=1".into(),
+                    ));
+                }
+                let key = (voice.clone(), control.clone());
+                let previous = self
+                    .output_levels
+                    .get(&key)
+                    .copied()
+                    .unwrap_or(definition.level);
+                let changed = self.output_levels.get(&key).copied() != *value;
+                if let Some(value) = value {
+                    self.output_levels.insert(key, *value);
+                } else {
+                    self.output_levels.remove(&key);
+                }
+                Ok(AppCommandResult::OutputLevelAdjusted {
+                    voice: voice.clone(),
+                    control: control.clone(),
+                    previous,
+                    current,
+                    changed,
+                })
+            }
+            _ => unreachable!(),
+        }
+    }
     pub(crate) fn synth_dirty_tracks(
         &self,
         synth: &str,
@@ -145,6 +209,7 @@ impl super::AppController {
     /// leaves the existing source, selections and assignment state intact.
     pub fn enable_project_source(&mut self, song: ValidatedSong) -> Result<(), String> {
         meldritch_render::song_host::CompiledSongPatch::compile_initial(&song)?;
+        self.output_levels.clear();
         let source = Arc::new(song);
         self.project_source = Some(ProjectSource {
             base: source.clone(),
@@ -162,6 +227,11 @@ impl super::AppController {
         self.project_source
             .as_ref()
             .map(|owner| owner.source.clone())
+    }
+
+    #[must_use]
+    pub fn output_levels(&self) -> &std::collections::BTreeMap<(String, String), f64> {
+        &self.output_levels
     }
 }
 

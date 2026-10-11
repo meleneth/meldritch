@@ -121,6 +121,31 @@ impl SongAudioHost {
             .submit(self.generation, self.patch.clone(), self.overrides.clone());
     }
 
+    /// Runtime instance gains; separate identities from legacy lane controls.
+    pub fn set_voice_levels(&mut self, levels: BTreeMap<String, f64>) -> Result<bool, String> {
+        for (id, value) in &levels {
+            let voice = self
+                .song
+                .pattern_voices()
+                .get(id)
+                .ok_or("unknown runtime voice")?;
+            if self.song.synths()[&voice.synth]
+                .output_level_control()
+                .is_none()
+                || !value.is_finite()
+                || !(0.0..=1.0).contains(value)
+            {
+                return Err("invalid runtime output level".into());
+            }
+        }
+        if self.overrides.voice_levels == levels {
+            return Ok(false);
+        }
+        self.overrides.voice_levels = levels;
+        self.replace_patch(self.patch.clone());
+        Ok(true)
+    }
+
     /// Observe an already accepted command against the complete authoritative view.
     /// Compile errors preserve the last published audio and are returned to the host.
     pub fn accepted(

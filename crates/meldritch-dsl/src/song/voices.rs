@@ -25,6 +25,48 @@ pub struct PatternVoiceDefinition {
 }
 
 impl ValidatedSong {
+    /// A declaration changes authored interface, never the current runtime gain.
+    pub fn expose_output_level(&self, synth: &str, id: &str) -> Result<Self, String> {
+        if id.is_empty()
+            || id.len() > 64
+            || !id
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
+        {
+            return Err("invalid output-level control identity".into());
+        }
+        self.validate_executable_patch(synth)?;
+        if self.synths[synth]
+            .output_level_control()
+            .is_some_and(|existing| existing != id)
+        {
+            return Err(
+                "renaming an exposed control requires an explicit interface migration".into(),
+            );
+        }
+        let mut next = self.clone();
+        next.synths
+            .get_mut(synth)
+            .ok_or("unknown synth")?
+            .output_level_control = Some(id.into());
+        next.refresh_authoring_fingerprint();
+        Ok(next)
+    }
+
+    pub fn validate_output_level_control(
+        &self,
+        voice: &str,
+        control: &str,
+    ) -> Result<&PatternVoiceDefinition, String> {
+        let voice = self
+            .pattern_voices
+            .get(voice)
+            .ok_or("unknown pattern voice")?;
+        if self.synths[&voice.synth].output_level_control() != Some(control) {
+            return Err("unknown exposed patch control".into());
+        }
+        Ok(voice)
+    }
     #[must_use]
     pub fn pattern_voices(&self) -> &BTreeMap<String, PatternVoiceDefinition> {
         &self.pattern_voices

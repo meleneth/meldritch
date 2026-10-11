@@ -52,10 +52,11 @@ impl CompiledSongPatch {
             Self::Mixed(patch) => {
                 let synth_filter_overrides = overrides.synth_filter_overrides();
                 let lane_level_overrides = overrides.lane_level_overrides();
-                patch.render_with_live_overrides(
+                patch.render_with_voice_levels(
                     range,
                     &synth_filter_overrides,
                     &lane_level_overrides,
+                    &overrides.voice_levels,
                 )
             }
         }
@@ -99,6 +100,7 @@ impl CompiledSongPatch {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SongLiveOverrides {
+    pub voice_levels: BTreeMap<String, f64>,
     pub feedback: Option<f64>,
     pub cutoff_hz: Option<f64>,
     pub resonance: Option<f64>,

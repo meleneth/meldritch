@@ -338,6 +338,7 @@ pub struct CompiledMixedNoteSong {
 #[derive(Clone, Debug, PartialEq)]
 enum CompiledMixedTrack {
     Note {
+        voice_id: Option<String>,
         lane_id: Option<String>,
         patch: CompiledNotePatch,
     },
@@ -628,6 +629,21 @@ impl CompiledMixedNoteSong {
         filter_overrides: &[CompiledSynthFilterOverride],
         lane_level_overrides: &[CompiledLaneLevelOverride],
     ) -> Result<AudioBlock, SongRenderError> {
+        self.render_with_voice_levels(
+            range,
+            filter_overrides,
+            lane_level_overrides,
+            &std::collections::BTreeMap::new(),
+        )
+    }
+
+    pub fn render_with_voice_levels(
+        &self,
+        range: FrameRange,
+        filter_overrides: &[CompiledSynthFilterOverride],
+        lane_level_overrides: &[CompiledLaneLevelOverride],
+        voice_levels: &std::collections::BTreeMap<String, f64>,
+    ) -> Result<AudioBlock, SongRenderError> {
         let frame_count = range.end() - range.start();
         let frames = u32::try_from(frame_count).map_err(|_| SongRenderError::RangeTooLong {
             frames: frame_count,
@@ -643,10 +659,19 @@ impl CompiledMixedNoteSong {
             return Err(SongRenderError::InvalidLaneLevelOverride);
         }
         let gain = 1.0 / (self.tracks.len() as f64).sqrt();
+        if voice_levels.iter().any(|(id, level)| !level.is_finite() || !(0.0..=1.0).contains(level) || !self.tracks.iter().any(|track| matches!(track, CompiledMixedTrack::Note { voice_id: Some(voice), .. } if voice == id))) {
+            return Err(SongRenderError::InvalidLaneLevelOverride);
+        }
         for (track, (volume, pan)) in self.tracks.iter().zip(&self.mixers) {
+            let volume = match track {
+                CompiledMixedTrack::Note {
+                    voice_id: Some(id), ..
+                } => voice_levels.get(id).copied().unwrap_or(*volume),
+                _ => *volume,
+            };
             let block = apply_track_mixer(
                 track.render(range, filter_overrides, lane_level_overrides)?,
-                *volume,
+                volume,
                 *pan,
             );
             let block = if block.channels() == 1 && self.channels == 2 {
@@ -1619,6 +1644,7 @@ fn compile_mixed_note_song_with_track_patterns_transposes_and_included_lanes(
             }
         } else {
             CompiledMixedTrack::Note {
+                voice_id: None,
                 lane_id,
                 patch: compile_note_track_for_pattern(song, track, &pattern_id, transpose)?,
             }
@@ -1644,6 +1670,7 @@ fn compile_mixed_note_song_with_track_patterns_transposes_and_included_lanes(
         }
         channels = Some(channels.unwrap_or(0).max(patch.channels));
         tracks.push(CompiledMixedTrack::Note {
+            voice_id: Some(voice.id.clone()),
             lane_id: None,
             patch,
         });

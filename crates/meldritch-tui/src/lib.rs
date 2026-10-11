@@ -2109,6 +2109,12 @@ fn draw_status_with_title(
 
 fn command_result_text(result: &AppCommandResult) -> String {
     match result {
+        AppCommandResult::OutputLevelExposed { synth, changed } => {
+            format!("{synth} output level exposed (changed: {changed})")
+        }
+        AppCommandResult::OutputLevelAdjusted { voice, current, .. } => {
+            format!("{voice} runtime level {current:.2}")
+        }
         AppCommandResult::PatternVoiceEdited { voice, changed } => {
             format!("Pattern voice {voice} bindings edited (changed: {changed})")
         }
@@ -2274,6 +2280,7 @@ mod tests {
             missed_artifacts: 1,
         };
         AppViewModel {
+            output_levels: Default::default(),
             palette_pattern_editor: None,
             assignments: None,
             instrument_editor: None,

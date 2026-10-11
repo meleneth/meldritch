@@ -1,0 +1,3 @@
+# Must reject: semantic identities cannot be filesystem paths.
+synth = "voice-1"
+control = "../level"

@@ -1,0 +1,11 @@
+# After n, c, Enter, Esc, v, p, g:
+# x explicitly exposes the selected patch's output-level control, id "level".
+# Ctrl-Tab enters performance; Up/Down select a declared instance control.
+# Left/Right change its runtime linear gain by 0.1, Home silences, End restores
+# the authored instance default. There is no automatic parameter exposure.
+# Identity is (instance id, patch control id); graph/editor order is irrelevant.
+# Invalid identity, nonfinite or out-of-range values reject without an event.
+# Accepted runtime changes retain source Arc/fingerprint, authored level and
+# selected pattern. Published PCM changes through the existing worker/host.
+# End removes the runtime override. Mode changes retain it. Saving (future)
+# exports only the declaration and authored default, never the runtime gain.

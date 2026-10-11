@@ -7,8 +7,16 @@ tests cover empty/legacy roots, diagnostics and presentation. `opening.txt` and
 note authoring and independent mono binding checkpoints are implemented.
 Bindings render through the existing worker and production callback headlessly;
 native lazy-output playback and mode transitions are implemented with headless
-host/callback checks. Physical listening remains unverified; runtime controls,
-capture and self-contained save/reopen remain unimplemented.
+host/callback checks. Explicit patch output-level declarations and instance runtime
+overlays are implemented as specified by `keyboard-level.txt`; app/TUI/native-host
+tests prove rejected identity/value commands preserve source/history, independent
+instance values, mode/patch preservation, load reset, callback mute/restore with
+advancing transport, and no generation for repeated identical settings. Accepted
+runtime facts exist in bounded in-memory command history and session classification;
+disk capture, timed replay and self-contained save/reopen remain unimplemented.
+Physical listening remains unverified. Run `cargo test -p meldritch-app --test
+pattern_voice`, `cargo test -p meldritch-tui native_level` and `cargo test -p
+meldritch-cli project_playback` for this checkpoint.
 An additional
 ownership checkpoint moves accepted definitions/provenance into app-owned
 `ProjectSource`. Headless commands create/edit a pattern and edit a patch without

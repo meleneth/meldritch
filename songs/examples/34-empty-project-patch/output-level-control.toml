@@ -1,0 +1,4 @@
+# Typed declaration request, not a standalone project save format.
+# Gain is linear 0..1; each instance starts at its authored level.
+synth = "voice-1"
+control = "level"

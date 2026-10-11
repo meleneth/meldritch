@@ -7,6 +7,119 @@ use meldritch_render::song_host::CompiledSongPatch;
 use std::{path::Path, sync::Arc};
 
 #[test]
+fn declared_level_controls_are_instance_owned_runtime_overlays_not_authored_edits() {
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../songs/examples/34-empty-project-patch");
+    let project = load_project_directory(root).unwrap();
+    let (mut app, _engine) = AppController::new_empty_project(&project).unwrap();
+    app.dispatch(AppCommand::CreatePatch(PatchCreation::mono_voice("voice")))
+        .unwrap();
+    for id in ["a", "b"] {
+        app.dispatch(AppCommand::CreatePatternVoice(PatternVoiceDefinition {
+            id: id.into(),
+            synth: "voice".into(),
+            length_ticks: 3840,
+            looped: true,
+            initial_pitch: 48,
+            level: 0.8,
+            pitch_pattern: None,
+            gate_pattern: None,
+        }))
+        .unwrap();
+    }
+    let set = |voice: &str, control: &str, value| AppCommand::SetOutputLevel {
+        voice: voice.into(),
+        control: control.into(),
+        value,
+    };
+    assert!(app.dispatch(set("a", "level", Some(0.0))).is_err());
+    let original = app.authored_source().unwrap();
+    app.dispatch(AppCommand::ExposeOutputLevel {
+        synth: "voice".into(),
+        control: "level".into(),
+    })
+    .unwrap();
+    let declared = app.authored_source().unwrap();
+    assert_ne!(declared.fingerprint(), original.fingerprint());
+    let history = app.history().len();
+    for command in [
+        AppCommand::ExposeOutputLevel {
+            synth: "missing".into(),
+            control: "level".into(),
+        },
+        AppCommand::ExposeOutputLevel {
+            synth: "voice".into(),
+            control: "../bad".into(),
+        },
+        AppCommand::ExposeOutputLevel {
+            synth: "voice".into(),
+            control: "renamed".into(),
+        },
+        set("missing", "level", Some(0.5)),
+        set("a", "unexposed", Some(0.5)),
+        set("a", "level", Some(f64::NAN)),
+        set("a", "level", Some(-0.1)),
+        set("a", "level", Some(1.1)),
+    ] {
+        assert!(app.dispatch(command).is_err());
+        assert!(Arc::ptr_eq(&declared, &app.authored_source().unwrap()));
+        assert_eq!(app.history().len(), history);
+    }
+    app.dispatch(set("a", "level", Some(0.4))).unwrap();
+    assert_eq!(app.view_model().output_levels.len(), 1);
+    assert_eq!(
+        app.view_model().output_levels[&("a".into(), "level".into())],
+        0.4
+    );
+    assert_eq!(
+        app.authored_source().unwrap().pattern_voices()["b"].level,
+        0.8
+    );
+    assert!(Arc::ptr_eq(&declared, &app.authored_source().unwrap()));
+    for _ in 0..2 {
+        app.handle_input(meldritch_app::AppInput::ToggleCockpitMode)
+            .unwrap();
+    }
+    assert_eq!(app.view_model().output_levels.len(), 1);
+    app.dispatch(set("b", "level", Some(0.2))).unwrap();
+    app.dispatch(AppCommand::EditPatch(meldritch_app::PatchEdit {
+        synth: "voice".into(),
+        operations: vec![meldritch_app::PatchOperation::SetParameter {
+            module: "osc".into(),
+            parameter: meldritch_app::InstrumentParameter::Waveform,
+            value: meldritch_app::InstrumentValue::Waveform(
+                meldritch_app::InstrumentWaveform::Triangle,
+            ),
+        }],
+    }))
+    .unwrap();
+    assert_eq!(
+        app.authored_source().unwrap().synths()["voice"].output_level_control(),
+        Some("level")
+    );
+    assert_eq!(app.view_model().output_levels.len(), 2);
+    app.dispatch(set("a", "level", None)).unwrap();
+    assert_eq!(app.view_model().output_levels.len(), 1);
+    let history = app.history().len();
+    let reloaded = declared
+        .create_pattern_voice(PatternVoiceDefinition {
+            id: "unsupported".into(),
+            synth: "voice".into(),
+            length_ticks: 3840,
+            looped: true,
+            initial_pitch: 48,
+            level: 0.8,
+            pitch_pattern: None,
+            gate_pattern: None,
+        })
+        .unwrap();
+    // Successful explicit source loading resets runtime values to authored defaults.
+    app.enable_project_source(reloaded).unwrap();
+    assert!(app.view_model().output_levels.is_empty());
+    assert_eq!(app.history().len(), history);
+}
+
+#[test]
 fn accepted_bindings_render_and_invalid_edits_preserve_source_provenance_and_history() {
     let root =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../songs/examples/34-empty-project-patch");

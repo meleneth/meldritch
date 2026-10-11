@@ -25,10 +25,10 @@ vertical slices are planned in [ROADMAP.md](ROADMAP.md).
   native patch editing, independent pattern authoring and separate mono pitch/gate
   bindings are also implemented. Native Space playback and mode transitions reuse
   the existing host/worker/publication; callback behavior is checked headlessly,
-  physical listening remains unverified. Runtime controls and standalone
+  physical listening remains unverified. Explicit patch output-level declarations
+  and instance runtime overlays are implemented; disk capture and standalone
   persistence remain unfinished.
-  Routing/playback construction from empty and standalone
-  save/reopen remain unimplemented. Git is allowed as an external
+  Standalone save/reopen remain unimplemented. Git is allowed as an external
   dependency and may be required installed; a repository, commit or network
   operation is unnecessary merely to open/play local music.
 - Construction edits authored definitions. Performance edits active instances

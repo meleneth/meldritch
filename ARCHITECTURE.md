@@ -17,8 +17,9 @@ The first example 34 checkpoint adds `load_project_directory`/`ProjectDirectory`
 around the existing importer, `ProjectOverview` as a detached app projection,
 and no-subcommand empty startup. It creates no seed, files or devices. Native `n`
 creates an in-memory silent palette patch through the existing typed batch.
-Legacy roots use the same song cockpit; palette construction and standalone
-persistence remain missing. Examples 31–33 add sampler-slot authoring and standalone Plaits engines without
+Legacy roots use the same song cockpit; native palette authoring/binding/playback
+compose through the same source/compiler/host. Standalone persistence remains missing.
+Examples 31–33 add sampler-slot authoring and standalone Plaits engines without
 changing those ownership boundaries. Physical acceptance is still separate.
 
 ### Project boundary and compatibility
@@ -80,7 +81,18 @@ Mode changes reuse CockpitMode and preserve source/publication/transport;
 performance blocks native construction gestures. Device setup failure retains
 authored memory, but a failed stream setup consumes the current engine and cannot
 retry in that cockpit. Physical listening/deadlines remain unverified. Runtime
-overlays, capture and standalone saves remain proposed.
+output-level overlays are implemented. `SynthDefinition.output_level_control` is an
+explicit patch-owned declaration; the effective control key is (instance ID, control
+ID). `AppController.output_levels` owns runtime gains; typed SetOutputLevel validates
+the declaration and finite 0..1 value before changing runtime/history. Source Arc,
+fingerprint and defaults stay unchanged. `SongAudioHost::set_voice_levels` updates
+the existing worker's live overrides; the mixed renderer replaces only that instance's
+output gain, with independent identities from legacy lane gains. Construction patch
+edits preserve the declaration/overlay. Loading resets overlays; mode changes do not.
+This additive graph-snapshot field leaves historical .mlsynth files, hashes and empty
+declarations unchanged. In-memory facts/classification exist; disk capture and
+standalone saves remain proposed. It does not provide general dynamic surfaces or
+stateful DSP migration.
 Compilers may receive a selected composition projection, but that view
 must not become another mutable palette.
 

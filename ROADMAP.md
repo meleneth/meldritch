@@ -4,7 +4,8 @@
 
 This sequence supersedes the original phases below as the active direction.
 All full slices here remain **proposed/unimplemented**. Slice 1's empty/legacy
-opening, ownership, palette/native authoring and independent mono binding checkpoints are implemented,
+opening, ownership, palette/native authoring, independent mono bindings, playback
+and explicit instance runtime-level checkpoints are implemented,
 without accepting its complete workflow. Historical examples 25–33 remain
 accepted within their scopes. Requirements live in [FEATURES.md](FEATURES.md),
 the code/reuse audit in [ARCHITECTURE.md](ARCHITECTURE.md), and the active queue

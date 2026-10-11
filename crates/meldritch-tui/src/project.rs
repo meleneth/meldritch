@@ -5,6 +5,75 @@ use meldritch_app::{
     ProjectDirectory, ProjectOverview, ValidatedSong,
 };
 
+pub fn project_level_command(
+    key: KeyEvent,
+    view: &AppViewModel,
+    source: &ValidatedSong,
+) -> Option<AppCommand> {
+    if key.kind != KeyEventKind::Press || key.modifiers != KeyModifiers::NONE {
+        return None;
+    }
+    let synth = &view.instrument_editor.as_ref()?.synth;
+    if view.cockpit_mode != meldritch_app::CockpitMode::Performance {
+        if key.code == KeyCode::Char('x')
+            && !view.instrument_editor.as_ref()?.visible
+            && !view
+                .palette_pattern_editor
+                .as_ref()
+                .is_some_and(|editor| editor.visible)
+        {
+            return Some(AppCommand::ExposeOutputLevel {
+                synth: synth.clone(),
+                control: "level".into(),
+            });
+        }
+        return None;
+    }
+    let controls: Vec<_> = source
+        .pattern_voices()
+        .values()
+        .filter(|voice| {
+            source.synths()[&voice.synth]
+                .output_level_control()
+                .is_some()
+        })
+        .collect();
+    if matches!(key.code, KeyCode::Up | KeyCode::Down) {
+        if controls.is_empty() {
+            return None;
+        }
+        let index = controls
+            .iter()
+            .position(|voice| &voice.synth == synth)
+            .unwrap_or(0);
+        let next = if key.code == KeyCode::Down {
+            (index + 1) % controls.len()
+        } else {
+            (index + controls.len() - 1) % controls.len()
+        };
+        return Some(AppCommand::SelectInstrument(controls[next].synth.clone()));
+    }
+    let voice = controls.into_iter().find(|voice| &voice.synth == synth)?;
+    let control = source.synths()[synth].output_level_control()?.to_owned();
+    let current = view
+        .output_levels
+        .get(&(voice.id.clone(), control.clone()))
+        .copied()
+        .unwrap_or(voice.level);
+    let value = match key.code {
+        KeyCode::Left => Some((current - 0.1).max(0.0)),
+        KeyCode::Right => Some((current + 0.1).min(1.0)),
+        KeyCode::Home => Some(0.0),
+        KeyCode::End => None,
+        _ => return None,
+    };
+    Some(AppCommand::SetOutputLevel {
+        voice: voice.id.clone(),
+        control,
+        value,
+    })
+}
+
 /// Composition relationships are deliberate typed actions, separate from creation.
 pub fn project_binding_command(
     key: KeyEvent,
@@ -357,7 +426,7 @@ fn draw_project_construction_selected(
     ];
     if !source.pattern_voices().is_empty() {
         lines.push(Line::from(
-            "v: instance · p/g: connect/disconnect selected pattern pitch/gate",
+            "v: instance · p/g: pitch/gate binding · x: expose level",
         ));
         for voice in source.pattern_voices().values() {
             lines.push(Line::from(format!(
@@ -400,7 +469,11 @@ fn draw_project_construction_selected(
         );
         return;
     };
-    lines.push(Line::from(format!("Patch {} (mono)", graph.id())));
+    lines.push(Line::from(format!(
+        "Patch {} (mono) · exposed level: {}",
+        graph.id(),
+        graph.output_level_control().unwrap_or("none; x to expose")
+    )));
     for input in graph.inputs() {
         lines.push(Line::from(format!(
             "input.{} : {:?}",
@@ -464,7 +537,7 @@ fn draw_project_performance(
     model: &AppViewModel,
     status: &str,
 ) {
-    let lines = vec![
+    let mut lines = vec![
         Line::from(project.root().display().to_string()),
         Line::from(format!(
             "Performance · {:?} · frame {}",
@@ -475,10 +548,38 @@ fn draw_project_performance(
             source.pattern_voices().len()
         )),
         Line::from("Space: play/stop · Ctrl-Tab: construction · q/Esc: quit"),
-        Line::from("No performance controls declared yet"),
+        Line::from("Up/Down: select · Left/Right: level · Home: mute · End: default"),
         Line::from("Unsaved project; quitting discards authored edits"),
         Line::from(status.to_owned()),
     ];
+    let mut count = 0;
+    for voice in source.pattern_voices().values() {
+        if let Some(control) = source.synths()[&voice.synth].output_level_control() {
+            count += 1;
+            let value = model
+                .output_levels
+                .get(&(voice.id.clone(), control.to_owned()))
+                .copied()
+                .unwrap_or(voice.level);
+            let selected = model
+                .instrument_editor
+                .as_ref()
+                .is_some_and(|editor| editor.synth == voice.synth);
+            lines.push(Line::from(format!(
+                "{} {}/{} = {:.2} (authored {:.2})",
+                if selected { ">" } else { " " },
+                voice.id,
+                control,
+                value,
+                voice.level
+            )));
+        }
+    }
+    if count == 0 {
+        lines.push(Line::from(
+            "No controls declared; use x in construction to expose level",
+        ));
+    }
     frame.render_widget(
         Paragraph::new(lines)
             .block(
@@ -577,6 +678,15 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                     status = "Mode changed; transport and authored source retained".into();
                     continue;
                 }
+                if let Some(command) =
+                    project_level_command(key, &model, &app.authored_source().unwrap())
+                {
+                    status = match app.dispatch(command) {
+                        Ok(result) => command_result_text(&result),
+                        Err(error) => format!("Control rejected: {error:?}"),
+                    };
+                    continue;
+                }
                 if model.cockpit_mode == meldritch_app::CockpitMode::Performance {
                     continue;
                 }
@@ -643,6 +753,84 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
 mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
+
+    #[test]
+    fn native_level_is_explicit_and_performance_keys_preserve_authored_defaults() {
+        let project = meldritch_dsl::load_project_directory(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../songs/examples/34-empty-project-patch"),
+        )
+        .unwrap();
+        let (mut app, _engine) = AppController::new_empty_project(&project).unwrap();
+        app.dispatch(AppCommand::CreatePatch(PatchCreation::mono_voice(
+            "voice-1",
+        )))
+        .unwrap();
+        app.dispatch(AppCommand::SelectInstrument("voice-1".into()))
+            .unwrap();
+        app.dispatch(AppCommand::CreatePatternVoice(PatternVoiceDefinition {
+            id: "voice-1-instance".into(),
+            synth: "voice-1".into(),
+            length_ticks: 3840,
+            looped: true,
+            initial_pitch: 48,
+            level: 0.8,
+            pitch_pattern: None,
+            gate_pattern: None,
+        }))
+        .unwrap();
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let expose = project_level_command(
+            key(KeyCode::Char('x')),
+            &app.view_model(),
+            &app.authored_source().unwrap(),
+        )
+        .unwrap();
+        app.dispatch(expose).unwrap();
+        let source = app.authored_source().unwrap();
+        app.handle_input(AppInput::ToggleCockpitMode).unwrap();
+        for code in [KeyCode::Home, KeyCode::Right] {
+            let command = project_level_command(key(code), &app.view_model(), &source).unwrap();
+            app.dispatch(command).unwrap();
+        }
+        assert_eq!(
+            app.view_model().output_levels[&("voice-1-instance".into(), "level".into())],
+            0.1
+        );
+        assert!(std::sync::Arc::ptr_eq(
+            &source,
+            &app.authored_source().unwrap()
+        ));
+        for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+            assert!(
+                project_level_command(
+                    KeyEvent {
+                        kind,
+                        ..key(KeyCode::Home)
+                    },
+                    &app.view_model(),
+                    &source
+                )
+                .is_none()
+            );
+        }
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| draw_project_performance(frame, &project, &source, &app.view_model(), ""))
+            .unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(screen.contains("> voice-1-instance/level = 0.10 (authored 0.80)"));
+        assert!(!screen.contains("amp.audio"));
+        let reset = project_level_command(key(KeyCode::End), &app.view_model(), &source).unwrap();
+        app.dispatch(reset).unwrap();
+        assert!(app.view_model().output_levels.is_empty());
+    }
 
     #[test]
     fn native_composition_bindings_are_deliberate_independent_and_inspectable() {

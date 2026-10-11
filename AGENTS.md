@@ -15,8 +15,9 @@ authoring are implemented. Independent mono pitch/gate composition bindings
 render through the existing voice/worker/callback. Native Space playback lazily
 opens output; Ctrl-Tab preserves transport and separates construction gestures
 from performance presentation. This path has headless acceptance; physical
-listening is unverified. Runtime controls and self-contained persistence remain
-future work.
+listening is unverified. Native x declares a patch output-level control;
+performance arrows/Home/End change an instance overlay without changing source.
+Disk capture and self-contained persistence remain future work.
 Git is permitted as a required installed dependency, but opening a project must
 not require a Git repository or initialization.
 

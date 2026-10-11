@@ -66,6 +66,15 @@ impl CockpitMode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommand {
+    ExposeOutputLevel {
+        synth: String,
+        control: String,
+    },
+    SetOutputLevel {
+        voice: String,
+        control: String,
+        value: Option<f64>,
+    },
     CreatePatternVoice(PatternVoiceDefinition),
     BindPatternVoice {
         voice: String,
@@ -181,6 +190,17 @@ pub struct CommandRecord {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommandResult {
+    OutputLevelExposed {
+        synth: String,
+        changed: bool,
+    },
+    OutputLevelAdjusted {
+        voice: String,
+        control: String,
+        previous: f64,
+        current: f64,
+        changed: bool,
+    },
     PatternVoiceEdited {
         voice: String,
         changed: bool,
@@ -529,6 +549,7 @@ pub struct CuratedControlView {
 
 #[derive(Clone, Debug)]
 pub struct AppViewModel {
+    pub output_levels: BTreeMap<(String, String), f64>,
     pub palette_pattern_editor: Option<PalettePatternEditorView>,
     pub assignments: Option<AssignmentEditorView>,
     pub pattern_editor: Option<PatternEditorView>,
@@ -1005,6 +1026,7 @@ impl Drop for PerformanceFxWorker {
 }
 
 pub struct AppController {
+    output_levels: BTreeMap<(String, String), f64>,
     project_source: Option<project::ProjectSource>,
     assignment_editor: Option<AssignmentEditor>,
     pattern_selection: Option<PatternSelection>,
@@ -1056,6 +1078,7 @@ impl AppController {
     ) -> Self {
         Self {
             project_source: None,
+            output_levels: BTreeMap::new(),
             pattern_selection: None,
             assignment_editor: None,
             instrument_editor: None,
@@ -1479,6 +1502,9 @@ impl AppController {
             return self.dispatch(edit);
         }
         let result = match &command {
+            AppCommand::ExposeOutputLevel { .. } | AppCommand::SetOutputLevel { .. } => {
+                self.output_level_command(&command)?
+            }
             AppCommand::CreatePatternVoice(_) | AppCommand::BindPatternVoice { .. } => {
                 self.pattern_voice_command(&command)?
             }
@@ -1914,6 +1940,28 @@ impl AppController {
                 },
             ),
             AppCommandResult::AssignmentsChanged { changed } => (*changed, vec![]),
+            AppCommandResult::OutputLevelExposed { changed, .. } => (*changed, vec![]),
+            AppCommandResult::OutputLevelAdjusted { voice, changed, .. } => {
+                let source = &self.project_source.as_ref().unwrap().source;
+                let index = source
+                    .pattern_voices()
+                    .keys()
+                    .position(|id| id == voice)
+                    .unwrap();
+                (
+                    *changed,
+                    if *changed {
+                        vec![DirtyRange::new(
+                            EntityId::Track(TrackId::new(
+                                (source.performance().tracks().len() + index + 1) as u64,
+                            )),
+                            FrameRange::new(0, self.editor.timeline_frames()).unwrap(),
+                        )]
+                    } else {
+                        vec![]
+                    },
+                )
+            }
             AppCommandResult::PatternVoiceEdited { voice, changed } => {
                 let source = &self.project_source.as_ref().unwrap().source;
                 let index = source
@@ -2063,6 +2111,7 @@ impl AppController {
             })
             .collect();
         AppViewModel {
+            output_levels: self.output_levels.clone(),
             palette_pattern_editor: self.palette_pattern_view(),
             assignments: self.assignment_view(),
             pattern_editor: self.pattern_view(),
