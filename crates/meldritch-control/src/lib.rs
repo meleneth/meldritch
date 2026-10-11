@@ -12,6 +12,7 @@ use std::rc::Rc;
 
 pub type Result<T> = std::result::Result<T, String>;
 pub mod led_demo;
+pub mod session;
 const MAX_DEFINITIONS: usize = 64;
 pub const QUEUE_CAPACITY: usize = 64;
 pub const JOURNAL_CAPACITY: usize = 256;

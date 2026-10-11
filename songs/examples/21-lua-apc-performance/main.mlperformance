@@ -1,0 +1,596 @@
+[meldritch]
+kind = "performance"
+version = 1
+
+[performance]
+id = "lua-apc-performance"
+title = "Lua APC Performance"
+bpm = 118.0
+sample_rate = 48000
+
+[ui]
+[[ui.sections]]
+kind = "transport"
+height = 3
+[[ui.sections]]
+kind = "page_overview"
+title = "APC: columns 1–4 drums/perc/bass/pad · bottom rows A/B/C/D"
+height = 14
+[[ui.sections]]
+kind = "visible_controls"
+title = "Faders 1–4 level · 5–8 cutoff · 9 pad resonance"
+height = 7
+[[ui.sections]]
+kind = "status"
+height = 3
+[[ui.sections]]
+kind = "key_hints"
+height = 3
+[[ui.key_hints]]
+keys = "p / r / q"
+label = "play-stop / rewind / quit"
+
+[[midi_devices]]
+id = "apc-mini"
+name_contains = "APC mini mk2 Control"
+
+[[tracks]]
+id = "beat-drum"
+synth = "synths/beat-drum.mlsynth"
+patterns = ["patterns/beat-drum-a.mlpattern", "patterns/beat-drum-b.mlpattern", "patterns/beat-drum-c.mlpattern", "patterns/beat-drum-d.mlpattern"]
+initial_pattern = "beat-drum-a"
+
+[[tracks]]
+id = "rhythm-drum-a"
+synth = "synths/rhythm-drum-a.mlsynth"
+patterns = ["patterns/rhythm-drum-a-a.mlpattern", "patterns/rhythm-drum-a-b.mlpattern", "patterns/rhythm-drum-a-c.mlpattern", "patterns/rhythm-drum-a-d.mlpattern"]
+initial_pattern = "rhythm-drum-a-a"
+
+[[tracks]]
+id = "bass-a"
+synth = "synths/bass-a.mlsynth"
+patterns = ["patterns/bass-a-a.mlpattern", "patterns/bass-a-b.mlpattern", "patterns/bass-a-c.mlpattern", "patterns/bass-a-d.mlpattern"]
+initial_pattern = "bass-a-a"
+
+[[tracks]]
+id = "pad"
+synth = "synths/pad.mlsynth"
+patterns = ["patterns/pad-a.mlpattern", "patterns/pad-b.mlpattern", "patterns/pad-c.mlpattern", "patterns/pad-d.mlpattern"]
+initial_pattern = "pad-c"
+
+[[lanes]]
+id = "beat-drum"
+label = "Beat Drum"
+role = "beat_drum"
+track = "beat-drum"
+controls = ["beat-drum-level", "beat-drum-cutoff"]
+variations = ["beat-drum-a", "beat-drum-b", "beat-drum-c", "beat-drum-d"]
+
+[[lanes]]
+id = "rhythm-drum-a"
+label = "Percussion"
+role = "rhythm_drum"
+track = "rhythm-drum-a"
+controls = ["rhythm-drum-a-level", "rhythm-drum-a-cutoff"]
+variations = ["rhythm-drum-a-a", "rhythm-drum-a-b", "rhythm-drum-a-c", "rhythm-drum-a-d"]
+
+[[lanes]]
+id = "bass-a"
+label = "Bass"
+role = "monophonic_synth"
+track = "bass-a"
+controls = ["bass-a-level", "bass-a-cutoff"]
+variations = ["bass-a-a", "bass-a-b", "bass-a-c", "bass-a-d"]
+
+[[lanes]]
+id = "pad"
+label = "Pad"
+role = "polyphonic_synth"
+track = "pad"
+controls = ["pad-level", "pad-cutoff", "pad-resonance"]
+variations = ["pad-a", "pad-b", "pad-c", "pad-d"]
+
+[[pages]]
+id = "main"
+label = "APC Groove"
+
+[[pages.strips]]
+strip = 1
+lane = "beat-drum"
+controls = ["beat-drum-level", "beat-drum-cutoff"]
+
+[[pages.strips]]
+strip = 2
+lane = "rhythm-drum-a"
+controls = ["rhythm-drum-a-level", "rhythm-drum-a-cutoff"]
+
+[[pages.strips]]
+strip = 3
+lane = "bass-a"
+controls = ["bass-a-level", "bass-a-cutoff"]
+
+[[pages.strips]]
+strip = 4
+lane = "pad"
+controls = ["pad-level", "pad-cutoff", "pad-resonance"]
+
+[[controls]]
+id = "beat-drum-level"
+label = "Beat Drum level"
+target = "lane:beat-drum/level"
+range = [0.0, 1.0]
+step = 0.01
+[[controls.bindings]]
+type = "midi_cc"
+device = "apc-mini"
+channel = 1
+cc = 48
+action = "absolute"
+
+[[controls]]
+id = "beat-drum-cutoff"
+label = "Beat Drum cutoff"
+target = "synth:beat-drum/filter.cutoff_hz"
+range = [80.0, 6000.0]
+step = 20.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "apc-mini"
+channel = 1
+cc = 52
+action = "absolute"
+
+[[controls]]
+id = "rhythm-drum-a-level"
+label = "Percussion level"
+target = "lane:rhythm-drum-a/level"
+range = [0.0, 1.0]
+step = 0.01
+[[controls.bindings]]
+type = "midi_cc"
+device = "apc-mini"
+channel = 1
+cc = 49
+action = "absolute"
+
+[[controls]]
+id = "rhythm-drum-a-cutoff"
+label = "Percussion cutoff"
+target = "synth:rhythm-drum-a/filter.cutoff_hz"
+range = [80.0, 6000.0]
+step = 20.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "apc-mini"
+channel = 1
+cc = 53
+action = "absolute"
+
+[[controls]]
+id = "bass-a-level"
+label = "Bass level"
+target = "lane:bass-a/level"
+range = [0.0, 1.0]
+step = 0.01
+[[controls.bindings]]
+type = "midi_cc"
+device = "apc-mini"
+channel = 1
+cc = 50
+action = "absolute"
+
+[[controls]]
+id = "bass-a-cutoff"
+label = "Bass cutoff"
+target = "synth:bass-a/filter.cutoff_hz"
+range = [80.0, 6000.0]
+step = 20.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "apc-mini"
+channel = 1
+cc = 54
+action = "absolute"
+
+[[controls]]
+id = "pad-level"
+label = "Pad level"
+target = "lane:pad/level"
+range = [0.0, 1.0]
+step = 0.01
+[[controls.bindings]]
+type = "midi_cc"
+device = "apc-mini"
+channel = 1
+cc = 51
+action = "absolute"
+
+[[controls]]
+id = "pad-cutoff"
+label = "Pad cutoff"
+target = "synth:pad/filter.cutoff_hz"
+range = [80.0, 6000.0]
+step = 20.0
+[[controls.bindings]]
+type = "midi_cc"
+device = "apc-mini"
+channel = 1
+cc = 55
+action = "absolute"
+
+[[controls]]
+id = "pad-resonance"
+label = "Pad resonance (fader 9)"
+target = "synth:pad/filter.resonance"
+range = [0.0, 0.8]
+step = 0.01
+[[controls.bindings]]
+type = "midi_cc"
+device = "apc-mini"
+channel = 1
+cc = 56
+action = "absolute"
+
+[[actions]]
+id = "beat-drum-a"
+label = "Beat Drum variation A"
+action = "select_lane_variation"
+lane = "beat-drum"
+variation_id = "beat-drum-a"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 0
+
+[[actions]]
+id = "beat-drum-b"
+label = "Beat Drum variation B"
+action = "select_lane_variation"
+lane = "beat-drum"
+variation_id = "beat-drum-b"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 8
+
+[[actions]]
+id = "beat-drum-c"
+label = "Beat Drum variation C"
+action = "select_lane_variation"
+lane = "beat-drum"
+variation_id = "beat-drum-c"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 16
+
+[[actions]]
+id = "beat-drum-d"
+label = "Beat Drum variation D"
+action = "select_lane_variation"
+lane = "beat-drum"
+variation_id = "beat-drum-d"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 24
+
+[[actions]]
+id = "beat-drum-mute"
+label = "Beat Drum mute"
+action = "toggle_lane_mute"
+lane = "beat-drum"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 32
+
+[[actions]]
+id = "beat-drum-solo"
+label = "Beat Drum solo"
+action = "toggle_lane_solo"
+lane = "beat-drum"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 40
+
+[[actions]]
+id = "beat-drum-track-mute"
+label = "Beat Drum track mute"
+action = "toggle_lane_mute"
+lane = "beat-drum"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 100
+
+[[actions]]
+id = "rhythm-drum-a-a"
+label = "Percussion variation A"
+action = "select_lane_variation"
+lane = "rhythm-drum-a"
+variation_id = "rhythm-drum-a-a"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 1
+
+[[actions]]
+id = "rhythm-drum-a-b"
+label = "Percussion variation B"
+action = "select_lane_variation"
+lane = "rhythm-drum-a"
+variation_id = "rhythm-drum-a-b"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 9
+
+[[actions]]
+id = "rhythm-drum-a-c"
+label = "Percussion variation C"
+action = "select_lane_variation"
+lane = "rhythm-drum-a"
+variation_id = "rhythm-drum-a-c"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 17
+
+[[actions]]
+id = "rhythm-drum-a-d"
+label = "Percussion variation D"
+action = "select_lane_variation"
+lane = "rhythm-drum-a"
+variation_id = "rhythm-drum-a-d"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 25
+
+[[actions]]
+id = "rhythm-drum-a-mute"
+label = "Percussion mute"
+action = "toggle_lane_mute"
+lane = "rhythm-drum-a"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 33
+
+[[actions]]
+id = "rhythm-drum-a-solo"
+label = "Percussion solo"
+action = "toggle_lane_solo"
+lane = "rhythm-drum-a"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 41
+
+[[actions]]
+id = "rhythm-drum-a-track-mute"
+label = "Percussion track mute"
+action = "toggle_lane_mute"
+lane = "rhythm-drum-a"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 101
+
+[[actions]]
+id = "bass-a-a"
+label = "Bass variation A"
+action = "select_lane_variation"
+lane = "bass-a"
+variation_id = "bass-a-a"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 2
+
+[[actions]]
+id = "bass-a-b"
+label = "Bass variation B"
+action = "select_lane_variation"
+lane = "bass-a"
+variation_id = "bass-a-b"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 10
+
+[[actions]]
+id = "bass-a-c"
+label = "Bass variation C"
+action = "select_lane_variation"
+lane = "bass-a"
+variation_id = "bass-a-c"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 18
+
+[[actions]]
+id = "bass-a-d"
+label = "Bass variation D"
+action = "select_lane_variation"
+lane = "bass-a"
+variation_id = "bass-a-d"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 26
+
+[[actions]]
+id = "bass-a-mute"
+label = "Bass mute"
+action = "toggle_lane_mute"
+lane = "bass-a"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 34
+
+[[actions]]
+id = "bass-a-solo"
+label = "Bass solo"
+action = "toggle_lane_solo"
+lane = "bass-a"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 42
+
+[[actions]]
+id = "bass-a-track-mute"
+label = "Bass track mute"
+action = "toggle_lane_mute"
+lane = "bass-a"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 102
+
+[[actions]]
+id = "pad-a"
+label = "Pad variation A"
+action = "select_lane_variation"
+lane = "pad"
+variation_id = "pad-a"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 3
+
+[[actions]]
+id = "pad-b"
+label = "Pad variation B"
+action = "select_lane_variation"
+lane = "pad"
+variation_id = "pad-b"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 11
+
+[[actions]]
+id = "pad-c"
+label = "Pad variation C"
+action = "select_lane_variation"
+lane = "pad"
+variation_id = "pad-c"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 19
+
+[[actions]]
+id = "pad-d"
+label = "Pad variation D"
+action = "select_lane_variation"
+lane = "pad"
+variation_id = "pad-d"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 27
+
+[[actions]]
+id = "pad-mute"
+label = "Pad mute"
+action = "toggle_lane_mute"
+lane = "pad"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 35
+
+[[actions]]
+id = "pad-solo"
+label = "Pad solo"
+action = "toggle_lane_solo"
+lane = "pad"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 43
+
+[[actions]]
+id = "pad-track-mute"
+label = "Pad track mute"
+action = "toggle_lane_mute"
+lane = "pad"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 103
+
+[[actions]]
+id = "play"
+label = "Play / stop"
+action = "toggle_playback"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 112
+
+[[actions]]
+id = "stop"
+label = "Stop"
+action = "stop"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 113
+
+[[actions]]
+id = "rewind"
+label = "Rewind"
+action = "rewind"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 114
+
+[[actions]]
+id = "mode"
+label = "Cockpit mode"
+action = "toggle_cockpit_mode"
+[[actions.bindings]]
+type = "midi_note"
+device = "apc-mini"
+channel = 1
+note = 115

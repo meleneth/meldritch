@@ -484,6 +484,30 @@ site failed” / HTTP 404 because the repository has not enabled Pages. Enable
 the GitHub Actions Pages source, then rerun the failed deployment job. This is
 an outstanding repository setup step; no public deployment is claimed.
 
+### 19.12 Production Lua APC performance integration (in progress)
+
+- [x] Audit existing host, MIDI, app, recording, Lua and TUI boundaries
+- [x] Write example 21's executable acceptance contract before implementation
+- [x] Extract compiled-song overrides, rerender worker and publication adapter;
+  bound completion storage and report failures without touching audio callbacks
+- [x] Extract the existing performance-session writer without changing its format
+- [ ] Use one authoritative-view song-host adapter for TOML and Lua commands;
+  prove successive lane variations do not reset previously selected lanes
+- [ ] Add reusable Lua launch/mute/solo widgets on APC and simulated LCD/TUI
+- [ ] Wire Lua-owned APC pads exactly once, and state-driven output on the
+  non-realtime control thread; preserve other authored MIDI bindings
+- [ ] Test input → accepted command → rendered publication → projections →
+  shared captured session, plus rejections, stale work, cleanup and compatibility
+- [ ] Update status/API/site documentation and run complete verification
+- [ ] Commit and push verified implementation slices with remaining work explicit
+
+Extraction checkpoint: `cargo test --workspace` passed 321 executions, including
+the original CLI session/publication/MIDI checks and historical compatibility.
+The shared render worker has one pending and one completion slot, reports invalid
+overrides, and retains latest-request behavior. The session writer's legacy v1
+format and checkpoint semantics are unchanged. Next: authoritative-view host
+application and Lua widget/MIDI integration; example 21 remains `design`.
+
 ## Completed showcase milestones
 
 The following work formed the previous implementation queue for the long-form

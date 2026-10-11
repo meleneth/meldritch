@@ -50,14 +50,22 @@ must run all its operations on a non-realtime control thread. Audio callbacks,
 immutable `PublishedAudio`, atomic snapshot publication, renderer and current
 LaunchControl mapping are unchanged.
 
-There are two integration gaps in existing boundaries. Song rerender requests
-and publication live in private CLI `SongRerenderWorker` code; app lane/curated
-control results alone do not schedule that work. The new trace states this
-explicitly. The CLI `PerformanceSessionCapture` also privately stores debug
-command strings and `u32` frames. This slice adds a typed `u64` Lua command
+Host extraction checkpoint: `meldritch-render::song_host` now owns the existing
+compiled-song/live-override types, rerender worker and atomic publication helper.
+The production TOML CLI uses those same primitives. The worker has one pending
+request and one completion slot; superseded audio is refreshable, while render
+errors are delivered explicitly. In-flight rendering remains non-cancellable.
+`meldritch-control::session` owns the existing performance-session writer;
+its format and CLI capture/checkpoint behavior are preserved. These are internal
+Rust host APIs, separate from the versioned Lua vocabulary.
+
+The remaining gap is applying accepted app results to this shared host from
+production Lua. App lane/curated control results alone do not schedule audio;
+the headless trace states this explicitly. The legacy session writer still uses
+debug command strings and `u32` frames. The Lua slice adds a typed `u64` command
 outbox and replay journal without pretending to migrate old capture files.
-Extracting reusable CLI host/capture adapters is subsequent work. Only mode
-commands are exercised across surfaces in this example; they need no rerender.
+Connecting the shared host/capture adapters is subsequent work in example 21.
+Only mode commands are exercised across surfaces in example 18; they need no rerender.
 
 ## Minimal Lua API
 
@@ -247,8 +255,8 @@ chunk/future jobs and atomically publishes ready chunks; its worker diagnostics
 count queued/active/completed jobs, not measured utilization or deadline slack.
 It does not currently execute a general dependency-aware DSP DAG scheduler.
 
-The CLI `SongRerenderWorker` is one worker with latest-request replacement and
-an unbounded completion channel. A rerender rebuilds the full song frame range
+The extracted `SongRerenderWorker` is one worker with latest-request replacement
+and a single bounded completion slot. A rerender rebuilds the full song frame range
 from zero; obsolete in-flight work cannot be cancelled. In `song_render`, the
 mixed track sum is serial, and oscillator/envelope/filter/delay paths preroll
 from frame zero to each range's end. No persistent stateful-DSP checkpoint cache
