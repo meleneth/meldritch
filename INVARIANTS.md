@@ -66,7 +66,7 @@ Command::SetRelation { relation_id, relation_def }
 
 Command processing:
 1. validate
-2. mutate source graph
+2. mutate the declared authored or runtime owner (never implicitly promote)
 3. bump revisions/fingerprints
 4. compute dirty ranges
 5. enqueue render jobs
@@ -245,3 +245,31 @@ It is:
 - fingerprints are stable
 - render jobs are deterministic
 - realtime callback stays bounded
+
+## 16. Composition invariants and implementation obligations
+
+The following are enforceable requirements for new slices. They are **not
+claims that the current runtime already satisfies them**. Existing exceptions
+and gaps are identified in [ARCHITECTURE.md](ARCHITECTURE.md#architectural-gap-analysis).
+Historical formats retain explicit compatibility adapters.
+
+| Boundary | Required invariant | Current evidence / outstanding work |
+| --- | --- | --- |
+| Project ownership | A root owns definitions, compositions, local overrides and dependency resolution. Empty roots are valid; no hidden musical database or Git repository is needed. Referenced definitions are immutable; local instances own overrides. | Song-root confinement exists; empty roots, palette and multiple composition selection are missing. Git may be required installed. |
+| State ownership | Every accepted mutation identifies authored construction or active performance state. Journals describe facts; only an explicit promotion writes runtime material into authored definitions. Save never silently promotes. | Source edits and live overrides are partly separate; editable faders currently write source, not performance overlays. |
+| Signals | Pitch, Gate, Trigger, Audio, Control, Event, Feature and Metadata retain independent types. Conversion and rate/unit changes have explicit inspectable semantics. | Song ports implement only Audio/Pitch/Gate/Control; note execution couples pitch/articulation. |
+| Graph validity | Only complete, type/topology-valid, executable candidates enter accepted musical state. Incomplete drafts have no audio authority. Every endpoint resolves; unsupported execution rejects explicitly. | Example 30 proves a bounded synth subset; validated graphs are not all executable. |
+| Normalization | Authored policy, resolved routes and current values are distinct. Override/disable never implicitly adds signals. Multiple sources require a declared combiner/selector. | No authored normalization model; current single-input rule must not become a permanent restriction. |
+| Modulation | Each connection declares family, units, rate/interpolation/latching, instance scope and combination. Fan-out shares a source instance unless authored otherwise. Reset/random state is fingerprinted; cycles need executable delay semantics. | Legacy matrix sums a fixed destination catalog; graph LFOs, scopes and rate adapters are missing. |
+| Transactions | Transaction ID, base revision and stable entity identities determine acceptance; complete graph/interface validation precedes commit. Rejection retains source, runtime, accepted journal and published audio. Activation and acceptance are distinct facts. | Clone/compile acceptance and keyboard stale-base checks exist; cable IDs, general base checks and scheduled graph activation are missing. |
+| Dynamic surfaces | Semantic control identity is independent of position. Removed/changed targets invalidate mappings; no unrelated target inherits identity. Interface and graph share one revision, and absolute controllers rearm. | Static targets/pickup exist; revisioned dynamic interfaces are missing. |
+| Publication | Submitted, compiled, published, activated and callback-consumed revisions are distinguishable. Workers cannot activate stale work. Callback work/storage stays bounded. Stateful changes declare preserve/reset/drain/crossfade policies and gate continuity. | Generation-tagged PCM exists, with fixed layout and no DSP-state migration. Consumption is not proof of DAC sound. |
+| Time and ordering | Absolute positions are u64; loop/rewind use explicit epochs. Same-frame events have deterministic order and bounded expansion. End-exclusive notes/gates cannot be left stuck by disconnect, cancellation or graph replacement. | Core/typed Lua use u64; legacy host/session and finite PCM lengths use u32. General epochs/event ordering remain open. |
+| Reproducibility | Saves retain every accepted authored semantic input, stable identity, dependency pin, asset content fingerprint and supported random commitment, or reject loss. Missing/incompatible references diagnose before activation. Updates are deliberate. | Base-bound Lua round trips exist; self-contained project exports/dependency locks do not. Plaits f32/RNG exceptions above remain authorized. |
+
+Acceptance must separately prove source correctness, published/consumed audio,
+state-transition semantics and physical behavior. Conservative full-horizon
+invalidation is the current authoring fallback; it must be reported honestly
+until dependency/range precision is proved. No future continuity requirement
+licenses allocating, compiling, running Lua/Git or doing filesystem/network work
+in the audio callback.

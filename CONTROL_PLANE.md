@@ -1,5 +1,12 @@
 # Lua control plane, API version 1
 
+Project architecture now distinguishes construction requests, runtime performance
+requests and explicit promotion; see [ARCHITECTURE.md](ARCHITECTURE.md).
+This guide describes implemented v1 behavior. Assignment faders currently may
+issue source edits; they are not automatically performance overlays. Dynamic
+patch interfaces and coherent graph/interface revisions are future requirements.
+Lua remains declarative on the bounded control plane.
+
 Composed authoring now adds `{name="save_project"}` through the existing typed
 host bridge. It requests a unique authored Lua export and does not render or
 mutate musical state. The version-1 `kind="project"` envelope composes existing
@@ -7,8 +14,8 @@ instrument, pattern and controls snapshots over one base fingerprint. All
 components validate/compile before installation; conflicting shared values and
 uncaptured changes reject. See [the workflow](MUSICAL_AUTHORING.md).
 
-Immediate priority has changed to interactive musical authoring; see
-[AUTHORING.md](AUTHORING.md) and TODO section 20. The API described here remains
+Immediate priority is project-root construction; see
+[AUTHORING.md](AUTHORING.md) and TODO section 21. The API described here remains
 the implemented v1 boundary. Its composition source envelope is distinct from
 the new version-1 authored instrument definition. See
 [INSTRUMENT_EDITOR.md](INSTRUMENT_EDITOR.md) for the supported parameter subset,

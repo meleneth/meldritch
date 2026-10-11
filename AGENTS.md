@@ -6,8 +6,14 @@ do not infer that work is finished from the older completed showcase milestones.
 
 ## Product direction
 
-MELDRITCH is a Rust, TUI-first relational groovebox inspired by Eurorack.
-Songs are directories of human-readable TOML files that reference each other:
+MELDRITCH is a Rust, TUI-first project-oriented patchable musical environment
+inspired by Eurorack. Coherence under composition governs its next architecture;
+see FEATURES.md, ARCHITECTURE.md, INVARIANTS.md and ROADMAP.md. Projects own a
+palette and compositions; empty-directory construction is a future requirement.
+Git is permitted as a required installed dependency, but opening a project must
+not require a Git repository or initialization.
+
+Current song loading uses directories of human-readable TOML references:
 
 - `.mlsynth` — modular synth patch graphs
 - `.mldsp` — modular DSP patch graphs
@@ -83,11 +89,11 @@ Preserve `INVARIANTS.md`. In particular:
 
 ## Current `.ml*` implementation state
 
-The immediate priority is section 20 of `TODO.md`: interactive instrument,
-pattern, patch, mapping and mixer authoring through TUI/hardware, persisted as
-human-readable Lua. Read `AUTHORING.md` and examples 25–30 before that work.
-Example 25 now has headless `accept` status; example 29's instrument persistence
-foundation is `compile`, with its composed contract unfinished. The supported
+The immediate priority is section 21 of `TODO.md` and example 34's design-only
+empty-project contract. Read the architecture, roadmap, AUTHORING.md and accepted
+examples 25–33 before implementation. Section 20 retains accepted authoring and
+unfinished work. Example 25 has headless `accept` status; example 29 now has
+bounded composed headless `accept` status. The supported
 editor and versioned instrument Lua exports are documented in
 `INSTRUMENT_EDITOR.md`. Examples 26/27 now have automated headless `accept`
 status for Lua piano-roll gestures, typed note edits, publication and independent
@@ -256,7 +262,8 @@ share the instrument editor's validated source, and readable `kind="controls"`
 Lua snapshots remain separate from journals. Native stereo balance retains
 left/right content; authored pan promotes mono. Unchanged mono imports preserve
 their samples and fingerprints. Physical fader/listening acceptance remains open;
-general routing and composed example 29 persistence are unfinished.
+general routing remains unfinished; composed example 29 persistence is accepted
+within its bounded headless contract.
 
 ## Important files
 

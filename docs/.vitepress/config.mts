@@ -34,6 +34,7 @@ export default defineConfig({
         { text: 'Lua acceptance example', link: '/examples/lua-control-plane' },
       ] },
       { text: 'Design & contracts', items: [
+        { text: 'Product requirements', link: '/FEATURES' },
         { text: 'Architecture', link: '/ARCHITECTURE' },
         { text: 'Project invariants', link: '/INVARIANTS' },
         { text: 'Project formats', link: '/ML_FORMATS' },
@@ -48,6 +49,7 @@ export default defineConfig({
         { text: 'Create, save and reload music', link: '/MUSICAL_AUTHORING' },
         { text: 'Testing strategy', link: '/TESTING_STRATEGY' },
         { text: 'Roadmap', link: '/ROADMAP' },
+        { text: 'Empty project contract (design)', link: '/songs/examples/34-empty-project-patch/ACCEPTANCE' },
         { text: 'Contributing & documentation', link: '/guide/contributing' },
       ] },
     ],

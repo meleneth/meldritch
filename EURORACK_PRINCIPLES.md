@@ -2,6 +2,12 @@
 
 Eurorack is a major design inspiration.
 
+The governing principle is coherence under composition. Digital atomic rewiring,
+dynamic interfaces and elaborate musical relationships are positive goals;
+physical rack constraints do not bound the product. The requirements in
+[FEATURES.md](FEATURES.md) and the current-support audit in
+[ARCHITECTURE.md](ARCHITECTURE.md) distinguish intended semantics from execution.
+
 The project should not become a monolithic integrated workstation where every feature is fused into every other feature.
 
 The preferred model is:
@@ -48,6 +54,9 @@ Typed signal families:
 ```text
 Audio
   sample-rate signal buffers
+
+Pitch
+  musical pitch with explicit representation/units, independent of articulation
 
 Gate
   on/off state, often step/event derived
@@ -118,7 +127,9 @@ manual/UI-rate
 offline-only
 ```
 
-The compiler can insert smoothing, resampling, latching, or quantization modules when needed.
+An authored recipe may request smoothing, resampling, latching or quantization.
+Every resulting adapter must be inspectable and fingerprinted; numeric similarity
+alone never authorizes conversion or an implicit rate policy.
 
 Example:
 
@@ -184,11 +195,25 @@ This project can use the same idea.
 
 Example:
 - a track’s envelope may normally drive its own amp
-- patching another control source into amp CV overrides or blends with the default
+- patching another control source into amp CV replaces the declared default
+  route; blending requires an explicit combiner
 - a bus normally routes to master
 - patching a bus to a transform recorder adds a parallel route
 
 Normalization gives fast setup without hiding the patch model.
+
+Normalization belongs to authored patch policy, which can be inspected, replaced,
+disabled and edited. Policy, resolved active connections and signal values are
+separate. Dynamic selection uses explicit executable routing components.
+Neither plugging a jack nor declaring normalization implicitly sums signals.
+Current song graphs do not yet implement this policy model.
+
+Pitch and gate sources can be routed independently. A note-pattern recipe may
+wire pitch to an oscillator and gate to an ADSR, but the oscillator does not own
+articulation and the ADSR does not own amplitude. Gates may come from clocks,
+comparators, other oscillators, controllers or envelopes as supported modules
+are added. Envelopes and LFOs can drive any compatible destination through
+explicit unit/rate/combination semantics.
 
 ## Modulation matrix as patch view
 

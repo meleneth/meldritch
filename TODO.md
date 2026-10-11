@@ -1,10 +1,50 @@
 # Active TODO
 
-Immediate priority: interactive musical authoring through the TUI and hardware,
-with authored changes persisted as human-readable Lua. Section 20 is the new
-prioritized queue. Section 19 retains unfinished format/performance work and
-historical verification; its older next-step recommendations are superseded.
+Immediate priority: the project-to-playable-patch workflow in section 21 and
+[ROADMAP.md](ROADMAP.md). This is a requirements/planning update, not new runtime
+support. Sections 20/19 retain accepted work, unfinished work and historical
+verification; their older next-step recommendations are superseded.
 The completed showcase milestones remain completion history.
+
+## 21. Coherence under composition: project architecture
+
+Requirements: [FEATURES.md](FEATURES.md). Code audit, conflicts and reuse:
+[ARCHITECTURE.md](ARCHITECTURE.md). Future/current invariants:
+[INVARIANTS.md](INVARIANTS.md). Detailed ordered slice contracts and dependencies:
+[ROADMAP.md](ROADMAP.md). Git is permitted as a required installed dependency;
+an empty project requires no Git repository or initialization.
+
+- [x] Audit actual source ownership, accepted examples 25–33, persistence,
+  pattern/event execution, modulation, typed batches, pickup and PCM publication
+- [x] Reconcile project requirements/invariants and preserve historical contracts
+- [x] Specify [example 34](songs/examples/34-empty-project-patch/ACCEPTANCE.md)
+  as design only; select the immediate implementation prompt in AUTHORING.md
+- [ ] Slice 1: empty-directory project, create supported patch/pattern, independent
+  pitch/gate bindings, keyboard authoring, play/edit/self-contained save/reopen
+- [ ] Slice 2: shared palette, two compositions and independent pattern sources
+- [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
+- [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
+- [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
+- [ ] Slice 6: quantized graph activation and proved compatible DSP-state continuity
+- [ ] Slice 7: typed u64/epoch capture, timed replay and metapattern harvesting
+- [ ] Slice 8: pinned library definitions/assets, local overrides and deliberate updates
+- [ ] Record physical interaction/listening and independent deadline evidence
+
+No implementation status for examples 00–33 changes in this planning slice.
+Example 29 is currently headless `accept`; older verification paragraphs below
+record prior checkpoints where its composed contract was still unfinished.
+
+Architecture/planning verification (2026-10-11): documentation/runtime status
+only; no Rust behavior or historical musical fixtures changed. `cargo fmt --all
+-- --check`, `git diff --check`, `npm run docs:build` and local Markdown target/
+include checks pass. Missing published routes found by the first docs build were
+fixed with include-only pages for requirements and example 34; dead-link checking
+remains enabled. Offline tests passed: DSL `ml_examples` 11, render `song_examples`
+23, control `compatibility` 2, `patch_authoring` 11 and `project_authoring` 6
+(53 top-level tests; its ignored child entry executes under the fresh-process
+parent). Historical example 09 validates with fingerprint `41472b38b65b60ed`.
+These checks protect existing support; they do not implement or accept example
+34, physical interaction, DSP-state migration or realtime deadlines.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

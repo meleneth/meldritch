@@ -1,9 +1,18 @@
-# Relational TUI Groovebox
+# MELDRITCH: a patchable musical environment
 
 **In massive development: nothing is stable yet.** APIs, formats, commands,
 controller mappings and behavior may change. See the
 [documentation](https://meleneth.github.io/meldritch/),
 [capability matrix](songs/examples/CAPABILITIES.md) and [active queue](TODO.md).
+
+The intended model is project-oriented: reusable definitions and compositions
+built from explicit typed relationships, with the machine itself as a playable
+compositional instrument. **Coherence under composition** governs design. See
+[requirements](FEATURES.md), [architecture/code audit](ARCHITECTURE.md) and
+[next roadmap](ROADMAP.md). Empty-directory startup, patchable pattern routing
+and stateful graph transitions are proposed, not supported today. Commands below
+remain valid. Git is allowed as a required installed dependency; the proposed
+empty-project workflow needs no Git repository or initialization.
 
 Create, change and return to music with [composed authoring](MUSICAL_AUTHORING.md):
 
@@ -167,7 +176,7 @@ This project is not “another groovebox with a terminal UI.”
 
 The thesis:
 
-> Build a TUI-first groovebox that treats sources, relationships, futures, and mix rules as first-class compositional material.
+> Build a TUI-first musical environment that treats sources, relationships, futures, and mix rules as first-class compositional material.
 
 Most grooveboxes sequence tracks. This one sequences relationships.
 
@@ -201,6 +210,9 @@ It should be:
 9. `CODEX_PLAN_PROMPT.md`
 
 ## Initial implementation posture
+
+This is historical engine-layering advice. Current vertical slices in
+[ROADMAP.md](ROADMAP.md) supersede its sequencing recommendations.
 
 Build the engine in layers.
 

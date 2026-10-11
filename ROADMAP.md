@@ -1,5 +1,238 @@
 # Roadmap
 
+## Next architecture: planned vertical slices (2026-10-11)
+
+This sequence supersedes the original phases below as the active direction.
+All slices here are **proposed/unimplemented**. Historical examples 25–33 remain
+accepted within their scopes. Requirements live in [FEATURES.md](FEATURES.md),
+the code/reuse audit in [ARCHITECTURE.md](ARCHITECTURE.md), and the active queue
+in [TODO.md](TODO.md). Each slice starts with a readable scenario and invalid
+neighbors, then binds acceptance to actual app/compiler/host boundaries.
+
+Only example 34's design contract is added now. Example names 35–41 below are
+reserved planning names, not existing files, schema or capability claims.
+No slice requires rewriting working examples or introducing another engine.
+
+### 1. Empty project to a saved playable patch (next)
+
+**Scenario/example:** [34-empty-project-patch](songs/examples/34-empty-project-patch/ACCEPTANCE.md).
+In a new directory run `meldritch`, enter construction, create one mono
+oscillator/ADSR/VCA/output patch (optional existing low-pass), create a short
+note pattern with the native keyboard, explicitly connect pattern pitch to
+patch pitch and pattern gate to patch gate, play, modify and save/reopen.
+
+**Sound/control:** independent pitch/gate bindings and traces are visible;
+disconnecting the composition gate binding supplies an explicitly documented
+low gate and silences the finite render after release without changing pitch
+events; reconnect restores notes. Internal patch cables remain explicit.
+Construction parameter/note edits publish changed finite audio; runtime exposed
+level changes do not overwrite defaults. Mode transitions preserve transport.
+Keep one instance, one pattern and the already executable mono chain; broader
+graphs are unnecessary for this first usable workflow.
+
+**Negative tests:** duplicate IDs, missing/type-invalid endpoints, unsupported
+topology, stale draft, invalid notes, lossy export, save failure, malformed/unknown
+version, escaping paths and incompatible references. Failed commands leave
+accepted source/history/publication intact; failed saves retain dirty work.
+
+**Persistence:** additive self-contained readable authored format for this
+subset, chosen in its example; no required pre-existing TOML base or controller
+script. Save graph, pattern IDs/counter/ticks, bindings, defaults and exposed
+controls. Do not serialize transport, pickup or runtime overrides. Opening an
+empty root creates no files; save creates only necessary authored files.
+
+**Reuse/compatibility:** move existing source ownership out of the synth-only
+editor as needed; extend importer/builders, `PatchEdit`, `NoteEdit`, note
+compilation, host/publication and Lua serializers. Native note editing dispatches
+existing typed note operations. Legacy entrypoints and v1/v2 exports keep their
+unchanged-base behavior and hashes. No general package manager/DAG/state migration.
+
+**Complete when:** a fresh-process keyboard-only acceptance completes the whole
+workflow and reproduces exact supported source/f64 audio without original seed,
+MIDI or journals; historical compatibility and applicable full crate suites pass.
+PCM revision publication is reported honestly; no continuous DSP-state claim.
+
+### 2. One palette, two compositions, two independent pattern sources
+
+**Scenario/example:** proposed `35-project-palette-routing`: reuse one bass
+definition in two compositions; melody supplies pitch, rhythm supplies gate.
+One pattern also feeds two separately identified instances.
+
+**Sound/control:** changing rhythm changes articulation without transposing;
+changing melody changes pitch without moving gate boundaries. Composition
+selection exposes palette/instance identities and retains the playing instance
+until its replacement is prepared. Explicit stop/start transition policy is
+acceptable here; preserving every DSP state is not claimed.
+
+**Negative tests:** ambiguous selection, missing definitions, conflicting
+instance IDs, multi-source input without combiner, unsupported chord-to-mono
+binding, deletion of referenced palette material and gate-end collisions.
+
+**Persistence/compatibility:** project-wide save includes all accepted definitions
+and both composition bindings; no permanent `AuthoredPattern.track` owner in
+new data. Adapt legacy track lists and base-bound exports. Keep existing duration,
+voice and sampler behavior; reject unsupported translation rather than lose it.
+
+**Complete when:** both compositions reopen independently, shared definitions
+remain equal, edits/instance overrides have documented scope, routing traces and
+full/split audio prove independence. Depends on slice 1.
+
+### 3. A modulated bass through explicit graph controls
+
+**Scenario/example:** proposed `36-patch-lfo`: one beat-synchronized LFO feeds
+filter cutoff and oscillator pitch through separate explicit unit adapters;
+envelope controls LFO depth and pattern gate resets it. A free-running variant
+demonstrates the different transport contract.
+
+**Sound/control:** shared phase sweeps both destinations; depth/rate/reset are
+inspectable. Demonstrate explicit sum/scale/clamp, event versus audio/control
+cadence and per-instance scope. Reuse `Lfo` kernels and DSP functions while
+extending the existing song compiler's supported topology; do not invoke the
+legacy matrix as hidden routing.
+
+**Negative tests:** unit/family/rate mismatch, multiple cables without combination,
+zero/invalid period, undeclared scope, unbroken feedback, unbounded expansion.
+
+**Persistence/compatibility:** store module identity, rate/scope/reset/seed,
+adapters and combinations. Historical matrix summation/clamping and Plaits
+exceptions stay compatible; no automatic conversion changes old music.
+
+**Complete when:** shared fan-out, modulated-rate integration, reset/stop/rewind,
+tempo and split-render tests pass, audible assertions show expected modulation,
+and save/reopen preserves the graph. Depends on slice 1; slice 2 supplies expanded
+instance-scope acceptance without blocking the first mono demonstration.
+
+### 4. Normalled patch and an atomic dynamic interface recipe
+
+**Scenario/example:** proposed `37-normalled-patch-recipe`: a default envelope
+controls amplitude; one transaction replaces that route with LFO control,
+introduces a combiner/macro and exposes its rate/depth controls. Disable the
+normal explicitly and inspect resolution.
+
+**Sound/control:** default notes, replaced route and explicit blended control
+produce distinguishable rendered behavior. Graph/normalization/interface share
+one revision; removed controls show unavailable, new controls need pickup.
+Reuse example 30 batches, typed assignments, readonly Lua widgets and pickup.
+
+**Negative tests:** ambiguous normal priorities, invalid complete graph, stale
+transaction/interface, duplicate semantic control IDs, stale fader events and
+implicit mixing. Failure cannot partially accept a macro or route.
+
+**Persistence/compatibility:** save authored policy, recipe expansion, stable
+module/cable/control IDs and transforms; runtime resolved values are not defaults.
+Existing explicit cable files retain exact meaning and v1/v2 reload behavior.
+
+**Complete when:** route/interface changes commit atomically, old mappings cannot
+retarget, pickup/reconnect pass and saved graphs reproduce all variants. Immediate
+finite PCM publication is sufficient; performance-state migration remains slice 6.
+Depends on slice 3's control ports and slice 1's transaction/save path.
+
+### 5. Event transformations in the existing scheduler
+
+**Scenario/example:** proposed `38-pattern-event-patch`: melody passes through
+transpose/quantize and rhythm through seeded probability/ratchet/gate-length
+processing; an LFO controls probability sampled at each original event boundary.
+
+**Sound/control:** changed subdivisions/pitches and deterministic committed
+outcomes appear in event traces and rendered audio. Each transform declares
+time, identity, retrigger and loop semantics; children retain provenance.
+
+**Negative tests:** expansion beyond declared budget, invalid offsets/durations,
+same-frame ambiguity, dropped gate ends, inappropriate continuous-rate evaluation,
+feedback without a timing break and incompatible event adapters.
+
+**Persistence/compatibility:** store transforms, seed/commit policy and occurrence
+provenance; a fresh render/replay produces the same supported outcomes. Preserve
+legacy step clipping and authored note durations through explicit adapters.
+
+**Complete when:** direct and chunked schedules/audio agree, loop/rewind and
+gate cleanup pass, bounds are enforced and save/reopen is deterministic. Depends
+on slices 2/3; extend existing event compilation instead of adding a sequencer.
+
+### 6. One stateful graph revision at a musical boundary
+
+**Scenario/example:** proposed `39-performing-graph-revision`: sustain a bass
+while inserting a filter at the next bar, then remove a delay while draining
+its tail. Start with one supported state compatibility contract, then expand.
+
+**Sound/control:** unchanged oscillator/envelope state continues, inserted state
+initializes by declared policy, removed gates release and old delay tail remains.
+Show requested/ready/actual activation and consumed revision separately.
+
+**Negative tests:** compilation misses boundary, stale completion, incompatible
+state/version, superseded/cancelled revisions, resource limit and failed migration.
+Never drop an accepted structural action through the knob worker's latest-wins slot.
+
+**Persistence/compatibility:** record transaction/base IDs, state policy,
+requested musical time, actual u64 epoch/frame and failure/reschedule facts.
+Authored graph stays unchanged until promotion. Existing PCM publication and
+callback startup gain remain compatible.
+
+**Complete when:** cross-revision checkpoint/split tests preserve phase, envelope,
+filter history and tails as declared; no stuck gates; bounded callback checks and
+separate reproducible deadline measurements pass. Test a deterministic worker
+checkpoint/segmented-render path first; PCM crossfade alone cannot pass continuity.
+Depends on slice 4 and sufficient checkpoint/state work within this slice.
+
+### 7. Capture, replay and harvest a metapattern
+
+**Scenario/example:** proposed `40-performance-metapattern`: capture pattern
+replacement, modulation macro and quantized recipe; harvest them into a reusable
+composition metapattern and perform it with a live intervention.
+
+**Sound/control:** replay applies the same supported actions at the same epochs/
+frames; arranged and live precedence is inspectable. Loops/conditions have finite
+budgets and stable same-frame ordering. Reuse `PerformanceLauncher`, phrases,
+futures, typed requests/journal and source revisions; no callback Lua.
+
+**Negative tests:** incompatible base/dependencies, >u32 frame truncation,
+rewind/loop epochs, duplicate accepted facts, recursive/unbounded metapattern,
+crash checkpoint/retry and stale activation.
+
+**Persistence/compatibility:** versioned typed capture adapter preserves old
+sessions and writes new u64 facts; harvest creates new authored files and leaves
+capture/defaults intact. Declared RNG exceptions limit exact PCM guarantees.
+
+**Complete when:** fresh-process timed replay proves supported state/audio,
+harvested composition reproduces the selected material and crash/rejection tests
+preserve facts. Depends on slices 2/5/6. Input epoch and capture fixes needed by
+earlier slices must land earlier; this is not permission to postpone correctness.
+
+### 8. Pin and update a reusable library patch with its sample assets
+
+**Scenario/example:** proposed `41-pinned-library`: reference a pinned bass patch
+and sample kit, instantiate local overrides, compare copying material, update
+deliberately and bundle for another machine.
+
+**Sound/control:** upstream edits leave existing music unchanged; adopted update
+has an inspectable dependency/source change and audio result. Missing material
+has actionable dependency status rather than partial playback.
+
+**Negative tests:** wrong content digest, missing commit/asset, incompatible
+version, path escape, changed cache, transitive mismatch and conflicting override.
+
+**Persistence/compatibility:** lock identities, full revisions, content digests,
+transitive definitions/assets and resolver version. Offline cache and portable
+copy/bundle are explicit. Git is allowed/required installed, not auto-initialized;
+local legacy references remain confined. No full package manager.
+
+**Complete when:** fresh offline resolution reproduces pinned source/audio,
+updates are atomic and portable bundle reopens. Depends on slice 2's palette;
+may proceed independently of slices 3–7 once local ownership is accepted.
+
+### Acceptance track alongside every slice
+
+Physical APC/LaunchControl gesture, pickup, reconnect, LEDs and listening are
+separate protocols. Preserve current headless `accept` scope; never infer physical
+or deadline acceptance from finite renders. General bus/DSP DAGs, additional
+signal families and polyphonic routing grow through further small examples, not
+by shrinking the intended musical model to these first slices.
+
+## Original phased roadmap (historical)
+
+The original phases describe early engine layering and completed showcase work.
+They are retained for rationale, not as current status or a waterfall prerequisite.
+
 The current implementation queue for arrangement, automation, polyphony, chord
 editing, and the long-form showcase lives in [`TODO.md`](TODO.md).
 

@@ -10,6 +10,7 @@ Status values:
 
 | Example | Capability | Status |
 | --- | --- | --- |
+| `34-empty-project-patch` | Proposed empty-directory construction, independent pattern pitch/gate bindings and self-contained save/reopen; contract only, no runtime/format implementation | design |
 | `00-minimal-synth` | Explicit oscillator-to-output patch | accept |
 | `01-synth-note-pattern` | Note pattern drives pitch and gate | accept |
 | `02-synth-parameter-pattern` | Pattern drives a synth parameter port | accept |

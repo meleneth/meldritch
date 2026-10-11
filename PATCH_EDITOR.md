@@ -1,5 +1,11 @@
 # Compose a typed patch
 
+This is the accepted bounded construction editor. Project transactions, authored
+normalization, patch-owned interfaces and quantized stateful activation extend
+this boundary; see [ARCHITECTURE.md](ARCHITECTURE.md). Continued playback currently
+uses PCM replacement, not DSP-state migration. Single-cable/fixed-topology rules
+are current implementation limits, not permanent musical constraints.
+
 Start `tui-song songs/examples/30-compose-typed-patch --no-midi-controls`.
 Press Ctrl-E, then Ctrl-G. Type a command and Enter to stage it:
 

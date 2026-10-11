@@ -4,7 +4,9 @@ This document is an index, not an independent specification. The executable
 song trees under `songs/examples/` define the behavior we want to support. The
 format grows only when an accepted example requires it.
 
-Interactive authoring is now the immediate priority (TODO section 20).
+Project construction is the immediate priority (TODO section 21). FEATURES.md
+and ARCHITECTURE.md specify the direction without adding a format in this
+planning update. Existing entrypoints and explicit Lua load flags keep their meaning.
 
 Example 28 implements [Lua fader assignments and mixer authoring](CONTROL_ASSIGNMENTS.md).
 Track `volume` defaults to unity and optional `pan` explicitly opts into stereo
@@ -12,7 +14,7 @@ balance. Their source values and supported synth/DSP assignments persist in a
 separate version-1 `kind="controls"` Lua snapshot over the unchanged TOML base.
 [AUTHORING.md](AUTHORING.md) specifies the source ownership and minimum Lua
 persistence direction. Example 25 accepts the initial instrument subset;
-example 29's larger composed round-trip is unfinished. The separate version-1
+example 29 accepts a bounded composed round-trip headlessly. The separate version-1
 authored instrument Lua representation is defined in
 [INSTRUMENT_EDITOR.md](INSTRUMENT_EDITOR.md), with a complete checked-in example
 and independent validation/render commands. Existing TOML entry points and
@@ -70,8 +72,10 @@ All formats are TOML and begin with a versioned `[meldritch]` table.
 
 Synth and DSP files are Eurorack-inspired patch graphs. A module exposes typed
 ports. A cable connects `module.port` to `module.port`. Audio, gate, pitch, and
-control signals are distinct. Normalled connections belong to module
-definitions or explicit recipes; they must never become a second hidden graph.
+control signals are distinct. Future normalled connections belong to inspectable
+authored patch policy or explicit recipe expansion, separating policy, resolved
+routes and current values. They never imply hidden blending. Current formats
+do not implement authored normalization.
 
 Convenience recipes are acceptable only when their complete module-and-cable
 expansion can be inspected and fingerprinted like a handwritten patch.
@@ -82,7 +86,9 @@ References are paths relative to the file containing them. Loaders normalize
 the path and reject escape from the song root. Stable IDs name definitions
 inside resolved files; filenames are organization, not identity.
 
-The authored entry point is `main.mlperformance`. Captured sessions are written
+The current song loader's entry point is `main.mlperformance`. Future projects
+may be empty or contain multiple compositions; their layout requires an example.
+Captured sessions are written
 under `performances/` and are never considered entry-point candidates.
 
 Lua API v1 adds an explicit composition adapter, without changing the authored

@@ -1,6 +1,71 @@
 # Feature Spine
 
-This document separates table-stakes groovebox features from the features that make this project worth existing.
+## Governing product requirements (2026-10-11)
+
+MELDRITCH is a project-oriented, patchable, dynamically reconfigurable musical
+environment. The machine itself is a playable compositional instrument.
+**Coherence under composition** governs design: independently understandable
+primitives retain explicit meaning as musical complexity grows. Maximal
+expressive complexity is welcome; hidden semantics, ambiguous ownership and
+unnecessary interaction friction are not. Eurorack is inspiration, not a limit
+on digital capabilities or a requirement to reproduce a physical rack.
+
+These are requirements, not implementation claims. Current support is recorded
+in [the capability matrix](https://github.com/meleneth/meldritch/blob/main/songs/examples/CAPABILITIES.md); the code audit and
+migration decisions are in [ARCHITECTURE.md](ARCHITECTURE.md), and accepted
+vertical slices are planned in [ROADMAP.md](ROADMAP.md).
+
+- A project is an ordinary directory containing a reusable palette and zero or
+  more compositions, control declarations, captures and assets. An instrument
+  is not a track; a pattern is not an instrument; a composition is not a
+  performance; a project is not a composition. Relationships are explicit.
+- `mkdir black-cathedral; cd black-cathedral; meldritch` must open an empty
+  project without initialization, mandatory manifest/database/template or Git
+  repository. This workflow is unimplemented. Git is allowed as an external
+  dependency and may be required installed; a repository, commit or network
+  operation is unnecessary merely to open/play local music.
+- Construction edits authored definitions. Performance edits active instances
+  and exposed controls, launches material and requests graph revisions. Both
+  share Rust authority and continue audio across mode changes. Capture and
+  explicit promotion into authored music are separate operations.
+- Typed ports preserve Audio, Pitch, Gate, Trigger, Control/CV, Event, Feature
+  and appropriate Metadata families. Numeric representation does not authorize
+  conversion. Pitch and gate remain independently routable; envelopes have no
+  inherent amplitude destination, and gates need not originate from notes.
+- Patterns are independent timed sources. Supported transforms compose through
+  inspectable ports with explicit timing, identity and probability commitments.
+  There must be no second event engine to implement this direction.
+- LFOs and other modulators are graph modules with destination-independent
+  algorithms. Rate, units, phase/reset, scope, fan-out, scaling, combination,
+  feedback and render-ahead semantics are explicit. Modulators are modulatable.
+- Normalization is patch-authored policy, distinct from resolved connections and
+  signal values. It selects/replaces routes; mixing/multiplication/selection
+  uses explicit components. Dynamic routing remains a supported direction.
+- Graph transactions validate the complete candidate and atomically publish
+  coherent graph/control interfaces. Performance activation can be immediate
+  or quantized. Stateful continuity needs explicit module-state migration;
+  a PCM swap alone does not provide it.
+- Patches declare separate signal, construction and performance interfaces.
+  Performance controls include numeric, enum, toggle, trigger, gate, transformed
+  macros, inspectable graph recipes and composite/quantized actions. Surfaces
+  can change by revision; semantic identities and pickup prevent silent retargeting.
+  Hardware and TUI are adapters. Lua composes on the control plane; Rust validates,
+  schedules, accepts state and publishes audio.
+- Compositions are metapatterns scheduling material, routing, modulation,
+  controls, graph revisions and bounded conditional actions. A performance is
+  an interpretation with live interventions. Captures must be harvestable into
+  compositions without manually reconstructing gestures.
+- Libraries support copy/import, pinned reference, local instantiation/override
+  and deliberate update as distinct operations. Definition identities, pinned
+  Git revisions, content/dependency locks and asset fingerprints must make
+  resolution reproducible and report resolved/missing/incompatible dependencies.
+  Submodules are optional, not the universal model. A package manager is deferred.
+
+The feature categories below retain the original feature spine and showcase
+history. Their initial non-goals are sequencing decisions, not ceilings on this
+product model; the newer roadmap takes priority.
+
+The original spine separates basic musical facilities from relational behavior.
 
 ## Sonic thesis
 
@@ -13,7 +78,7 @@ The draw is not:
 
 The draw is:
 
-> A groovebox where sources, roles, relationships, and future performance states are compiled into adaptive audio behavior.
+> A musical environment where sources, roles, relationships, and future performance states are compiled into adaptive audio behavior.
 
 A second core identity:
 

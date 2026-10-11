@@ -1,5 +1,54 @@
 # Interactive musical authoring investigation
 
+## Current direction (2026-10-11)
+
+The original investigation below is historical. Examples 25–33 now have headless
+acceptance, including example 29's bounded composed persistence. Their guides
+and contracts specify actual limits. Next work is project-root construction and
+self-contained save/reopen in [ROADMAP.md](ROADMAP.md),
+[ARCHITECTURE.md](ARCHITECTURE.md) and TODO section 21. Git is permitted as a
+required installed dependency; a project need not be a Git repository.
+
+## Recommended immediate implementation prompt
+
+Implement only [example 34](songs/examples/34-empty-project-patch/ACCEPTANCE.md):
+empty directory → construct patch → create pattern → independent pitch/gate →
+play → modify → save → fresh-process reopen, with native keyboard controls.
+First add its smallest readable authored/invalid fixtures and failing acceptance
+bindings. Choose additive save syntax there; invent no speculative schema.
+
+Reuse the existing Rust definition/importer/fingerprint machinery, moving source
+ownership out of the synth-only `InstrumentEditor` only enough to represent an
+empty project and selected composition. Keep `load_song_directory` and historical
+commands unchanged. Add no-subcommand project opening; do not copy a seed or
+initialize Git. Compose the supported mono oscillator/ADSR/VCA/output chain
+through `PatchEdit`, and route native note editing to existing `NoteEdit`.
+Expose independent pattern pitch/gate and explicit composition bindings consumed
+by existing note lowering, including the contract's disconnected-gate low policy.
+Do not implement another event engine.
+
+Distinguish construction edits from a single exposed runtime level control;
+save authored defaults only. Reuse `SongAudioHost`, worker, generation telemetry,
+immutable publication, pickup and host-side serialization. Extend serializers/
+importer with a self-contained versioned subset, preserving base-bound project
+v1 and instrument v1/v2. Reject lossy saves and unsupported graphs. Prove fresh
+reopen without seed, hardware, controller script or journal. Do not claim DSP
+continuity from PCM publication.
+
+Reviewable checkpoints within the one accepted slice: empty/source ownership
+and CLI; create patch/pattern/native typed inputs; bindings/play/runtime overlay;
+save/fresh reload/compatibility. Partial checkpoints do not accept the whole
+workflow. Run focused tests then affected full crate suites/docs checks. Update
+statuses only to behavior actually proved; commit verified checkpoints only when
+authorized. Defer general DAGs, LFOs, normalization, libraries, polyphonic signal
+routing, quantized graph activation and full capture harvesting.
+
+This comes first because example 29 proves editing/save over an existing seed,
+while new-directory users cannot start that workflow. Each addition closes part
+of the same usable loop; isolated infrastructure leaves the entry barrier intact.
+
+## Historical authoring investigation (2026-10-10)
+
 Implementation update: [typed patch composition](PATCH_EDITOR.md) and the
 [pinned Plaits model catalog](PLAITS.md) now supersede the earlier topology/Plaits gaps.
 Example 30 reuses the existing source graph/importer/compiler and exports changed
@@ -275,9 +324,10 @@ scheduling and the remaining ensemble backlog are deferred, not erased.
 ## Acceptance execution contract
 
 Examples 25–30 contain Gherkin `.feature` specifications with concrete inputs,
-observable assertions and invalid neighbors. They are executable-form contracts
-for a future headless test adapter, not passing tests today: no step bindings or
-new authoring runtime exist. Every row is `design`. Baselines refer to immutable
+observable assertions and invalid neighbors. At the original investigation
+checkpoint they had no passing bindings. Subsequently Rust integration suites
+accepted their headless contracts; there is no separate Gherkin runner.
+Baselines refer to immutable
 existing fixtures; feature tables are interaction/expected-source examples, not
 proposed schema fields. This distinction must remain visible in test reports.
 

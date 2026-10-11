@@ -2,6 +2,32 @@
 
 The engine should be tested like a compiler and like an audio system.
 
+## Next-architecture acceptance obligations
+
+Follow [ROADMAP.md](ROADMAP.md) and example 34. Untested requirements remain
+proposed. Assert Rust state, compiler behavior, worker publication and callback
+consumption separately from presentation, then fresh-process persistence.
+
+- Empty opening creates no musical files or Git repository; saved music reopens
+  without a seed, hardware or replay.
+- Construction/performance mutations have distinct owners; runtime gestures do
+  not change authored fingerprints/defaults until explicit promotion.
+- Pitch/gate streams, transforms, rate/unit adapters and normalization have
+  inspectable traces; prove sound and reject ambiguous signal combination.
+- Rejection preserves source/runtime/history/audio. Dynamic interface and graph
+  revisions agree; identity/pickup/stale-input protection survive surface changes.
+- Test across graph revisions, not only pre-roll within one graph: phase/envelope/
+  filter history, tails/gate continuity, activation/missed deadlines, cancellation,
+  supersession and checkpoint/chunk equivalence.
+- Capture/composition tests cover u64 frames above u32, loop/rewind epochs,
+  same-frame order, bounded conditions/expansion, crash/retry and harvesting.
+- Dependency tests distinguish pin/copy/override/update, missing/incompatible
+  content, offline cache and portable sample bundles.
+
+Protect historical fixtures, entrypoint precedence, hashes and Lua versions.
+Plaits native f32/RNG exceptions keep their scoped tests. Physical sound,
+gestures and deadline evidence remain separate from headless acceptance.
+
 ## Test layers
 
 ### 1. Pure model tests

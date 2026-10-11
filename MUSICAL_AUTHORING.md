@@ -1,5 +1,11 @@
 # Create, save and return to a musical idea
 
+This is the implemented bounded workflow over an existing song base. The next
+[project construction slice](ROADMAP.md) and
+[example 34 contract](songs/examples/34-empty-project-patch/ACCEPTANCE.md) remove
+that entry barrier. They are design only; current project v1 exports retain
+their base-bound meaning and are not standalone directory projects.
+
 Example 29 composes existing instrument, patch, piano-roll and assignment editors.
 Automated acceptance uses actual keyboard mapping, MIDI decoding, Lua gestures,
 typed commands, worker publication and surface projections. Physical gesture and
