@@ -58,8 +58,9 @@ polyphony and synth ID. It is a snapshot, not a second patch language.
 Fields are deterministically sorted; module/cable order and all IDs remain
 exact; numbers round-trip. Fresh load reconstructs the same graph, fingerprints
 and samples through the ordinary semantic importer and compiler.
-Unrelated instruments and song definitions stay at the base; broader combined
-pattern/mapping/mixer snapshots remain unfinished example 29 work.
+Standalone exports reject unrelated authored changes. [Example 29](MUSICAL_AUTHORING.md)
+now combines the selected graph/pattern, declared mixer values and bindings
+through F6; other edited instruments/patterns remain unsupported.
 
 Exactly representable parameter-only instrument exports remain version 1. Save creates a unique
 `authored/instrument-*.lua` atomically and does not overwrite TOML, scripts,

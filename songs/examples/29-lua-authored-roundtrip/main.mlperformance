@@ -1,0 +1,18 @@
+[meldritch]
+kind = "performance"
+version = 1
+[performance]
+id = "piano-roll"
+title = "Return to a Musical Idea"
+bpm = 120.0
+sample_rate = 48000
+[[tracks]]
+id = "bass"
+synth = "synths/bass.mlsynth"
+patterns = ["patterns/seed.mlpattern"]
+initial_pattern = "seed"
+volume = 1.0
+pan = 0.0
+[[midi_devices]]
+id = "apc-mini"
+name_contains = "APC mini mk2 Control"

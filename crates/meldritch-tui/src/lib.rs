@@ -124,11 +124,30 @@ pub fn map_key_for_view(
     if key.kind != KeyEventKind::Press {
         return None;
     }
+    if view.instrument_editor.is_some()
+        && view.pattern_editor.is_some()
+        && view.assignments.is_some()
+        && (key.code == KeyCode::F(6)
+            || (matches!(key.code, KeyCode::Char('s' | 'S'))
+                && key
+                    .modifiers
+                    .contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT)))
+    {
+        return Some(TuiAction::Input(AppInput::SaveProject));
+    }
     if view.assignments.is_some()
         && key.code == KeyCode::Char('m')
         && key.modifiers.contains(KeyModifiers::CONTROL)
     {
         return Some(TuiAction::Input(AppInput::ToggleAssignmentEditor));
+    }
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        if view.pattern_editor.is_some() && key.code == KeyCode::Char('n') {
+            return Some(TuiAction::Input(AppInput::TogglePatternEditor));
+        }
+        if view.instrument_editor.is_some() && key.code == KeyCode::Char('e') {
+            return Some(TuiAction::Input(AppInput::ToggleInstrumentEditor));
+        }
     }
     if let Some(a) = &view.assignments
         && a.visible
@@ -188,12 +207,6 @@ pub fn map_key_for_view(
         };
         return Some(TuiAction::Input(input));
     }
-    if view.pattern_editor.is_some()
-        && key.code == KeyCode::Char('n')
-        && key.modifiers.contains(KeyModifiers::CONTROL)
-    {
-        return Some(TuiAction::Input(AppInput::TogglePatternEditor));
-    }
     if view.pattern_editor.as_ref().is_some_and(|e| e.visible) {
         if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
             return Some(TuiAction::Input(AppInput::SavePattern));
@@ -212,12 +225,6 @@ pub fn map_key_for_view(
             }
             _ => None,
         };
-    }
-    if view.instrument_editor.is_some()
-        && key.code == KeyCode::Char('e')
-        && key.modifiers.contains(KeyModifiers::CONTROL)
-    {
-        return Some(TuiAction::Input(AppInput::ToggleInstrumentEditor));
     }
     if let Some(editor) = &view.instrument_editor
         && editor.visible
@@ -648,6 +655,11 @@ fn draw_instrument_editor(
         "Up/Down parameter  Left/Right edit  Tab instrument  Home imported default".into(),
         "Ctrl-G patch commands  Ctrl-S save Lua  Esc close  p play  r rewind".into(),
         format!("Source fingerprint: {:016x}", editor.source.fingerprint()),
+        if view.assignments.is_some() && view.pattern_editor.is_some() {
+            "F6 saves composed Lua · Ctrl-Shift-S also supported".into()
+        } else {
+            String::new()
+        },
     ];
     for (index, parameter) in editor.parameters.iter().enumerate() {
         let value = match &parameter.value {
@@ -819,6 +831,28 @@ pub fn draw_with_status(
                 }
             ));
         }
+        if let Some(fader) = a
+            .definition
+            .faders
+            .iter()
+            .filter(|f| f.page == a.page)
+            .nth(a.selected_fader)
+        {
+            let observation = a.observations.get(&fader.id);
+            lines.push(format!(
+                "Selected {}: raw {:?}, {}",
+                fader.id,
+                observation.map(|o| o.0),
+                if observation.is_some_and(|o| o.1) {
+                    "acquired"
+                } else {
+                    "pickup pending"
+                }
+            ));
+        }
+        if view.pattern_editor.is_some() {
+            lines.push("F6 saves composed Lua · Ctrl-Shift-S also supported".into());
+        }
         lines.push(
             a.save_status
                 .clone()
@@ -846,6 +880,11 @@ pub fn draw_with_status(
                 editor.pattern.length_ticks, editor.pattern.looped, editor.selected_note
             ),
             "Ctrl-S save Lua | Ctrl-N/Esc close | p transport | Lua owns pad gestures".into(),
+            if view.assignments.is_some() {
+                "F6 saves composed Lua · Ctrl-Shift-S also supported".into()
+            } else {
+                String::new()
+            },
             format!(
                 "Source: {:016x} | audio: {}",
                 editor.source.fingerprint(),
@@ -1017,7 +1056,9 @@ fn draw_curated_performance_mode(
     frame.render_widget(
         panel(
             "Performance Keys",
-            Paragraph::new(if view.assignments.is_some() {
+            Paragraph::new(if view.assignments.is_some() && view.pattern_editor.is_some() {
+                "Ctrl-E synth · Ctrl-N notes · Ctrl-M mixer · F6 save all · q quit"
+            } else if view.assignments.is_some() {
                 "Ctrl-M assignments · Ctrl-E instrument · Ctrl-Tab all parameters · p play/stop · r rewind · q quit"
             } else if view.instrument_editor.is_some() {
                 "Ctrl-E instrument · Ctrl-Tab all parameters · p play/stop · r rewind · q quit"
@@ -2092,6 +2133,7 @@ fn command_result_text(result: &AppCommandResult) -> String {
             format!("Patch {synth} committed (changed: {changed})")
         }
         AppCommandResult::InstrumentEditorChanged => "Instrument selection updated".to_owned(),
+        AppCommandResult::ProjectSaveRequested => "Composed Lua project save requested".into(),
         AppCommandResult::InstrumentSaveRequested => "Authored Lua save requested".to_owned(),
         AppCommandResult::TransportQueued => "Transport command queued".to_owned(),
         AppCommandResult::SelectionChanged { current, .. } => format!(

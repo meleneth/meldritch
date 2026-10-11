@@ -1,0 +1,15 @@
+[meldritch]
+kind = "pattern"
+version = 1
+[pattern]
+id = "seed"
+type = "notes"
+length = "2 bar"
+loop = true
+resolution = "1/8"
+
+[[events]]
+at = "1:1:0"
+note = "C3"
+duration = "1/4"
+velocity = 0.8

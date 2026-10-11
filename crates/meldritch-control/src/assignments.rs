@@ -55,6 +55,12 @@ fn target_lua(target: &EditableTarget) -> String {
     }
 }
 pub fn encode_controls(view: &AssignmentEditorView) -> Result<String> {
+    encode_controls_scoped(view, true)
+}
+pub(crate) fn encode_controls_scoped(
+    view: &AssignmentEditorView,
+    standalone: bool,
+) -> Result<String> {
     use crate::instrument::quote as q;
     view.definition.validate(&view.source)?;
     let mut text = format!(
@@ -96,14 +102,23 @@ pub fn encode_controls(view: &AssignmentEditorView) -> Result<String> {
         }
     }
     text.push_str("  },\n}\n");
-    let (loaded, _) = load_controls(view.source.root(), &text)?;
-    if loaded.fingerprint() != view.source.fingerprint() {
+    if standalone
+        && load_controls(view.source.root(), &text)?.0.fingerprint() != view.source.fingerprint()
+    {
         return Err("controls export refuses unrelated or uncatalogued source edits".into());
     }
     Ok(text)
 }
 pub fn load_controls(
     root: impl AsRef<Path>,
+    source: &str,
+) -> Result<(ValidatedSong, AssignmentDefinition)> {
+    let base = meldritch_dsl::load_song_directory(root).map_err(crate::error)?;
+    apply_controls(&base, base.clone(), source)
+}
+pub(crate) fn apply_controls(
+    base: &ValidatedSong,
+    mut song: ValidatedSong,
     source: &str,
 ) -> Result<(ValidatedSong, AssignmentDefinition)> {
     let (lua, _) = crate::constrained_vm(source)?;
@@ -117,12 +132,11 @@ pub fn load_controls(
     if d.kind != "controls" || d.version != 1 {
         return Err("unsupported controls authoring kind/version".into());
     }
-    let mut song = meldritch_dsl::load_song_directory(root).map_err(crate::error)?;
-    if d.base_fingerprint != format!("{:016x}", song.fingerprint()) {
+    if d.base_fingerprint != format!("{:016x}", base.fingerprint()) {
         return Err("authored controls base fingerprint changed".into());
     }
     d.assignments.validate(&song)?;
-    let base = song.clone();
+    let defaults_base = song.clone();
     let mut seen = std::collections::BTreeSet::new();
     for edit in d.values {
         if !seen.insert(edit.target.identity())
@@ -136,7 +150,7 @@ pub fn load_controls(
         }
         song = song.edit_parameter(&edit)?;
     }
-    song = song.canonicalize_instrument_defaults(&base)?;
+    song = song.canonicalize_instrument_defaults(&defaults_base)?;
     meldritch_render::song_host::CompiledSongPatch::compile_initial(&song)?;
     Ok((song, d.assignments))
 }

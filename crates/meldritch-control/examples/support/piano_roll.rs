@@ -49,6 +49,12 @@ impl Harness {
         Self::from_fixture(&fixture())
     }
     pub fn from_fixture(fixture: &std::path::Path) -> Self {
+        Self::from_fixture_with_project(fixture, None)
+    }
+    pub fn from_fixture_with_project(
+        fixture: &std::path::Path,
+        authored: Option<&std::path::Path>,
+    ) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "meldritch-piano-roll-{}-{}",
@@ -59,6 +65,9 @@ impl Harness {
             std::fs::create_dir_all(to).unwrap();
             for entry in std::fs::read_dir(from).unwrap() {
                 let entry = entry.unwrap();
+                if entry.file_name() == "performances" {
+                    continue;
+                }
                 if entry.file_type().unwrap().is_dir() {
                     copy(&entry.path(), &to.join(entry.file_name()));
                 } else {
@@ -70,7 +79,10 @@ impl Harness {
         let base = meldritch_dsl::load_song_directory(&root).unwrap();
         let source = std::fs::read_to_string(root.join("main.lua")).unwrap();
         let project = LuaProject::load(&root, &source).unwrap();
-        let patch = CompiledSongPatch::compile_initial(&base).unwrap();
+        let restored = authored
+            .map(|file| meldritch_control::project::load_project_file(&root, file).unwrap());
+        let song = restored.as_ref().map_or(&base, |p| &p.song);
+        let patch = CompiledSongPatch::compile_initial(song).unwrap();
         let mut audio = patch
             .render_default(FrameRange::new(0, 192000).unwrap())
             .unwrap();
@@ -126,16 +138,27 @@ impl Harness {
             },
             256,
         );
-        app.enable_instrument_editor(base.clone()).unwrap();
-        app.enable_pattern_editor(base.performance().tracks()[0].initial_pattern().unwrap())
+        if let Some(p) = &restored {
+            app.enable_project_authoring_from(
+                base.clone(),
+                p.song.clone(),
+                &p.instrument,
+                &p.pattern,
+                p.assignments.clone(),
+            )
             .unwrap();
-        if let Some(a) = project.assignments.clone() {
-            app.enable_assignments(a).unwrap();
+        } else {
+            app.enable_instrument_editor(base.clone()).unwrap();
+            app.enable_pattern_editor(base.performance().tracks()[0].initial_pattern().unwrap())
+                .unwrap();
+            if let Some(a) = project.assignments.clone() {
+                app.enable_assignments(a).unwrap();
+            }
         }
         let performance =
             LuaPerformance::new(project, &app, Tempo::new(120.0, 48000).unwrap()).unwrap();
-        let capture = PerformanceSessionCapture::create(&base, 192000).unwrap();
-        let host = SongAudioHost::new(base.clone(), patch, publisher, 192000, 1024);
+        let capture = PerformanceSessionCapture::create(song, 192000).unwrap();
+        let host = SongAudioHost::new(song.clone(), patch, publisher, 192000, 1024);
         Self {
             app,
             host,

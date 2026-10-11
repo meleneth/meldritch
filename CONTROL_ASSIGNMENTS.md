@@ -115,8 +115,8 @@ typed validation and compiles through the existing song compiler. Rendering
 the saved file needs no controller script, hardware or session replay. The
 TUI uses the saved assignment definition rather than replacing it with the
 composition's initial assignments. This is a supported control/mixer snapshot
-over an existing song; composing snapshots with newly authored patterns and
-arbitrary synth edits remains example 29 work.
+over an existing song. [Example 29](MUSICAL_AUTHORING.md) now composes the
+selected synth graph/pattern, declared mixer values and bindings with F6.
 
 Headless acceptance: `cargo test -p meldritch-control --test assignments` and
 `cargo run -p meldritch-control --example assignments`. See

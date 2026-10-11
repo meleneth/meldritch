@@ -105,6 +105,7 @@ pub enum AppCommand {
         parameter_delta: i32,
     },
     SaveInstrument,
+    SaveProject,
     Play,
     Stop,
     Rewind,
@@ -189,6 +190,7 @@ pub enum AppCommandResult {
     },
     InstrumentEditorChanged,
     InstrumentSaveRequested,
+    ProjectSaveRequested,
     TransportQueued,
     SelectionChanged {
         previous: Selection,
@@ -573,6 +575,7 @@ pub enum AppInput {
     PatchSubmit,
     EditInstrument(InstrumentEdit),
     SaveInstrument,
+    SaveProject,
     ToggleCockpitMode,
     AdjustCuratedControl {
         id: String,
@@ -1544,6 +1547,17 @@ impl AppController {
                 synth_delta,
                 parameter_delta,
             } => self.instrument_navigation(*synth_delta, *parameter_delta)?,
+            AppCommand::SaveProject => {
+                if self.instrument_editor.is_none()
+                    || self.pattern_selection.is_none()
+                    || self.assignment_editor.is_none()
+                {
+                    return Err(AppCommandError::Instrument(
+                        "project save requires instrument, pattern and assignment views".into(),
+                    ));
+                }
+                AppCommandResult::ProjectSaveRequested
+            }
             AppCommand::SaveInstrument => {
                 if self.instrument_editor.is_none() {
                     return Err(AppCommandError::Instrument(
@@ -1910,7 +1924,8 @@ impl AppController {
                 },
             ),
             AppCommandResult::InstrumentEditorChanged
-            | AppCommandResult::InstrumentSaveRequested => (false, Vec::new()),
+            | AppCommandResult::InstrumentSaveRequested
+            | AppCommandResult::ProjectSaveRequested => (false, Vec::new()),
             AppCommandResult::TransportQueued => (true, Vec::new()),
             AppCommandResult::SelectionChanged { previous, current } => {
                 (previous != current, Vec::new())
@@ -2191,6 +2206,7 @@ impl AppController {
             AppInput::PatchSubmit => AppCommand::PatchSubmit,
             AppInput::EditInstrument(edit) => AppCommand::EditInstrument(edit),
             AppInput::SaveInstrument => AppCommand::SaveInstrument,
+            AppInput::SaveProject => AppCommand::SaveProject,
             AppInput::ToggleCockpitMode => AppCommand::SetCockpitMode(self.cockpit_mode.toggled()),
             AppInput::AdjustCuratedControl { id, steps } => {
                 AppCommand::AdjustCuratedControl { id, steps }

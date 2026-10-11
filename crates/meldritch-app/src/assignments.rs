@@ -164,6 +164,48 @@ pub fn normalized_parameter_value(minimum: f64, maximum: f64, step: f64, normali
     (minimum + step * ((raw - minimum) / step).round()).clamp(minimum, maximum)
 }
 impl AppController {
+    /// Install a composed snapshot by reconstructing its supported semantic scope.
+    /// The validated Rust source remains the only musical owner.
+    pub fn enable_project_authoring_from(
+        &mut self,
+        base: ValidatedSong,
+        source: ValidatedSong,
+        synth: &str,
+        pattern: &str,
+        definition: AssignmentDefinition,
+    ) -> Result<(), String> {
+        definition.validate(&source)?;
+        let graph = source
+            .synths()
+            .get(synth)
+            .ok_or("missing project synth")?
+            .clone();
+        let mut reconstructed = base.replace_patch(graph)?;
+        reconstructed =
+            reconstructed.restore_authored_pattern(&source.authored_pattern(pattern)?)?;
+        for t in &definition.targets {
+            if matches!(&t.target, EditableTarget::Track {id,parameter:meldritch_dsl::MixerParameter::Pan}
+                if source.performance().tracks().iter().find(|t|t.id()==id).unwrap().pan().is_none())
+            {
+                continue;
+            }
+            reconstructed = reconstructed.edit_parameter(&ParameterEdit {
+                target: t.target.clone(),
+                value: source.editable_parameter(&t.target)?.value,
+            })?;
+        }
+        reconstructed = reconstructed.canonicalize_instrument_defaults(&source)?;
+        if reconstructed.fingerprint() != source.fingerprint() {
+            return Err("project reload changed unsupported/uncaptured source semantics".into());
+        }
+        meldritch_render::song_host::CompiledSongPatch::compile_initial(&source)?;
+        self.enable_instrument_editor(base)?;
+        let editor = self.instrument_editor.as_mut().unwrap();
+        editor.source = Arc::new(source);
+        editor.synth = synth.into();
+        self.enable_pattern_editor(pattern)?;
+        self.enable_assignments(definition)
+    }
     /// Existing curated widgets observing a catalog target use the same source
     /// command as physical faders, rather than maintaining a competing override.
     pub(crate) fn catalog_control_command(

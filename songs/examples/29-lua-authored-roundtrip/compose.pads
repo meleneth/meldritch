@@ -1,0 +1,28 @@
+# Create a two-bar pattern; C3 held through step 3, E3 on step 4.
+press 116
+release 116
+wait
+press 0
+press 3
+release 0
+release 3
+wait
+press 36
+release 36
+wait
+# Page 1, G3 on step 8, C3 on step 10 extended through step 12.
+press 107
+release 107
+press 56
+release 56
+wait
+press 2
+press 4
+release 4
+zero 2
+wait
+expect_count 4
+expect_note note-1 C3 0 1920 0.8
+expect_note note-2 E3 1920 480 0.8
+expect_note note-3 G3 3840 480 0.8
+expect_note note-4 C3 4800 1440 0.8

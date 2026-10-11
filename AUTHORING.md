@@ -13,8 +13,9 @@ now implements source-owned cutoff/resonance, single-track delay mix/feedback,
 track volume/stereo balance, interactive Lua/TUI assignments, pickup and control
 snapshot persistence. The historical inventory below records the earlier
 investigation; its pan/mapping gaps are superseded for this supported subset.
-General routing, catalog/device editing and composed example 29 persistence
-remain unfinished. Physical fader/listening acceptance remains pending.
+General routing and catalog/device editing remain unfinished. Bounded
+[composed example 29 persistence](MUSICAL_AUTHORING.md) now passes fresh-process
+headless source/audio equivalence. Physical fader/listening acceptance remains pending.
 
 This inventory records the pre-implementation investigation. The subsequent
 [instrument editor slice](INSTRUMENT_EDITOR.md) implements example 25 and the
@@ -24,7 +25,8 @@ the linked guide and capability matrix describe the current supported subset.
 
 The subsequent [piano-roll slice](PIANO_ROLL.md) implements example 26/27 note
 creation/assignment, duration/velocity/delete editing, Lua controller gestures
-and independent pattern exports. The broader composed export remains unfinished.
+and independent pattern exports. Example 29 now composes a selected synth graph/pattern with declared mixer
+values and bindings; multiple edited instruments/patterns remain unsupported.
 
 The [drum editor](DRUM_EDITOR.md) adds explicit one-shot sample-slot authoring
 through the same note source, commands and Lua pattern definition. Its generated

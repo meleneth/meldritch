@@ -1,41 +1,35 @@
-@design @headless
-Feature: Lua reconstructs accepted authored state
-  Scenario: Smallest parameter round-trip
-    Given a temporary immutable base from example "02-synth-parameter-pattern"
-    When source low-pass cutoff is set to 900 Hz and exported as authored Lua
-    And a fresh host loads the Lua export with no session journal or hardware
-    Then the same synth and module identities have source cutoff 900 Hz
-    And compilation succeeds and deterministic source fingerprint and audio match
-    And saving the unchanged source again produces identical Lua text
+@headless @rust_project_authoring
+Feature: Return to composed music
+  Scenario: Create change publish save exit and fresh-process reload
+    Given example 29 loaded with its synth and Lua controller policy
+    When keyboard commands edit sound and patch connections
+    And APC presses create notes and held durations on two time pages
+    And assignments and CC pickup edit cutoff volume and pan
+    And all views and simulated surfaces observe authoritative music
+    And composed Lua is saved and the performer exits cleanly
+    Then a fresh process restores music without reading old journals
+    And Lua text source state and deterministic f64 audio are identical
 
-  Scenario: Composed authoring round-trip
-    Given accepted synth, note, duration, mapping, mixer and patch edits from examples 25 to 30
-    When those edits are exported as authored Lua
-    And a fresh host loads the Lua export with no session journal or hardware
-    Then all source identities, musical events, cables, mappings and lane levels match
-    And whole-range and split-range rendered audio match the pre-save revision
-    And no transport position, held pads or device availability is restored as music
+  Scenario: Invalid commands preserve source history and publication
+    When a missing parameter wrong type invalid range or unsupported target is edited
+    Then the typed command rejects without changing music
 
-  Scenario Outline: Failed save preserves recoverability
-    Given a previous good Lua export and unsaved accepted edits
-    When save fails at "<boundary>"
-    Then the previous good export remains loadable and unchanged
-    And the error is displayed and the current authored state remains dirty for retry
-    Examples:
-      | boundary       |
-      | temporary write|
-      | sync           |
-      | atomic replace |
+  Scenario: Interrupted gesture consumes late releases
+    When APC disconnect interrupts a held duration gesture
+    Then late note-off and zero-velocity releases create no unintended note
+    And the next gesture composes normally
 
-  Scenario Outline: Reject invalid reload or lossy export
-    When persistence encounters "<invalid>"
-    Then a source-aware diagnostic rejects it before musical mutation or file replacement
-    Examples:
-      | invalid                    |
-      | base reference escapes root|
-      | missing base               |
-      | changed base fingerprint   |
-      | duplicate source identity  |
-      | unknown authoring version  |
-      | unsupported source edit    |
-      | omitted semantic content   |
+  Scenario: Failed save preserves recoverability
+    Given previous valid Lua and unsaved music
+    When the authored directory is blocked by a file
+    Then all editor views report failed save and unsaved edits
+    And prior Lua journal and authoritative music remain intact
+
+  Scenario: Stale graph draft cannot replace current source
+    When music changes after a graph draft opens
+    Then stale commit rejects without source replacement
+
+  Scenario: Invalid reload and lossy export reject
+    When a component has invalid version duration cable binding value or base
+    Then semantic validation rejects it
+    And export of two edited patterns rejects omitted content

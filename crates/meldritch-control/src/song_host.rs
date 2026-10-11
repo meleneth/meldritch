@@ -118,6 +118,20 @@ impl SongAudioHost {
         view: &AppViewModel,
         result: &AppCommandResult,
     ) -> Result<bool, String> {
+        if matches!(result, AppCommandResult::ProjectSaveRequested) {
+            let saved = crate::project::save_project(view);
+            self.authoring_save = Some(match &saved {
+                Ok(path) => format!(
+                    "Project saved: {}",
+                    path.strip_prefix(self.song.root())
+                        .unwrap_or(path)
+                        .display()
+                ),
+                Err(error) => format!("Project save failed; edits remain unsaved: {error}"),
+            });
+            saved?;
+            return Ok(false);
+        }
         if matches!(result, AppCommandResult::AssignmentSaveRequested) {
             let saved = crate::assignments::save_controls(
                 view.assignments.as_ref().ok_or("no assignments")?,
@@ -494,7 +508,11 @@ impl SongAudioHost {
 
     pub fn refresh_view(&mut self, app: &mut AppController) -> bool {
         if let Some(status) = self.authoring_save.take() {
-            if status.starts_with("Controls") {
+            if status.starts_with("Project") {
+                app.observe_assignment_save(status.clone());
+                app.observe_pattern_save(status.clone());
+                app.observe_instrument_save(status);
+            } else if status.starts_with("Controls") {
                 app.observe_assignment_save(status);
             } else if status.starts_with("Pattern") {
                 app.observe_pattern_save(status);

@@ -1,34 +1,56 @@
-# Persist and reload musical edits as Lua
+# Create, change, hear, save and return
 
-Status: `compile` for separate instrument and pattern foundations; the full composed contract
-below remains unimplemented. Example 25's `edited-instrument.lua` and
-`cargo test -p meldritch-control --test instrument_authoring` prove seven-parameter
-exports, independent reload/render, deterministic text, base validation, atomic
-unique saves and failure recovery. Examples 26/27 now independently accept
-selected note-pattern exports, stable IDs/counters, musical ticks, assignment,
-gesture cleanup and reload/render via `cargo test -p meldritch-control --test piano_roll`.
-Instrument and pattern exports remain separate definitions; unrelated source
-edits reject selected-pattern export rather than disappear silently. Composed
-exports and graph/mapping/mixer authoring remain unimplemented.
-Use [shared rules](../../../AUTHORING.md#acceptance-execution-contract).
+Status: **accept, headless bounded subset**. Physical gestures/listening pending.
+Real APC input/LED connection and clean stopped production TUI exit smoke pass.
+See [scenario](SCENARIO.md), [results](RESULTS.md), [physical checklist](PHYSICAL_ACCEPTANCE.md)
+and [guide](../../../MUSICAL_AUTHORING.md).
 
-The first subset uses example 25's bass with authored cutoff/release edits. Export
-human-readable Lua referencing the confined immutable base plus deterministic
-absolute source edits. The implemented minimum versioned syntax is documented
-in [INSTRUMENT_EDITOR.md](../../../INSTRUMENT_EDITOR.md). The base identity/fingerprint
-is required so a changed external source cannot silently change the saved music.
+Executable specifications:
 
-Then compose examples 25–28 and 30. Save reconstructs synth defaults, note
-events/durations/assignment, mappings, lane settings and explicit patch graph.
-Fresh reload, with hardware disconnected and no performance journal, must
-validate/compile into equivalent source and deterministic rendered audio.
-Saved text exposes readable IDs, note names, musical times, parameters and
-cables; it contains no VM bytecode, rendered samples or toggles depending on
-prior runtime history. Stable source exports identically. Do not rewrite an
-arbitrary hand-authored script in place; write an explicit authored export.
+```sh
+cargo run -p meldritch-control --example authoring_acceptance --offline -- --output /tmp/meldritch-authoring-acceptance
+cargo test -p meldritch-control --test project_authoring --offline
+```
 
-The host owns atomic filesystem save and reports failure while retaining dirty
-state and the previous good file. Confined paths, missing/changed bases, duplicate
-identities, unknown versions and unsupported edits/content must diagnose.
-No session replay, HSM snapshot, full TOML migration or default entrypoint
-precedence change is implied. Partial exports must reject rather than drop music.
+Output directory must be new. The runner uses actual keyboard mapping, MIDI
+press/release decoding, Lua policy, typed commands, worker publication and capture.
+It launches a fresh process for reload; the integration test also spawns a fresh
+test executable. Its ignored child entry is explicitly executed by the parent.
+`acceptance.feature` names the executable Rust scenarios, with no Cucumber runner.
+Examples 25–28/30 retain their detailed boundary acceptance.
+
+Observable pass criteria:
+
+- Load unchanged TOML with existing eight-voice oscillator/ADSR/VCA/filter.
+  Ctrl-E edits waveform/release and changes published samples. Ctrl-G executes
+  `compose.patch`, replacing osc with typed source and explicit cables.
+- Ctrl-N plus `compose.pads` creates roll, four stable IDs, durations
+  1920/480/480/1440 ticks and eight-step page navigation. Both release orders and
+  velocity-zero release preserve intended notes. Rust ends are exclusive; the
+  pressed endpoint includes its eighth-note step.
+- Ctrl-M binds three Lua-declared faders to cutoff/volume/pan. Real CC bytes
+  observe, wait for pickup, acquire, then edit to 6000 Hz / 0.5 / +1.
+  Each changes compiled/published audio. Hard-right pan silences left output.
+- Native 80×30 TUI shows authoritative parameters, note/end times, bindings,
+  values/observation/pickup. APC and simulated terminal grid labels/colors agree;
+  simulated Stream Deck transport/LCD musical telemetry tracks authoritative
+  state. View changes and supported edits preserve playing transport.
+- F6 saves a unique readable kind="project", version=1 Lua envelope
+  containing instrument v2, pattern v1 and controls v1. Repeated text is identical;
+  base TOML, prior exports and journals remain intact. q finishes a separate
+  clean performance session.
+- Fresh load without old journals restores exact graph, parameters, note IDs/
+  counter, track assignment, mixer values and bindings. Transport/gestures/pickup
+  reset. Same-source encode is identical. Full/split renders and saved/reloaded
+  raw f64 samples match exactly: 192000 stereo frames.
+- Invalid IDs/types/ranges, unsupported targets, dependent/stale graphs, dangling
+  references, invalid durations, conflicting component values, unknown versions,
+  changed base and uncaptured edits reject. Rejected commands preserve source,
+  history/publication. Disconnect cancels holds; late releases do not edit music.
+  Filesystem save failure reports unsaved state and preserves prior Lua/journal.
+
+The envelope supports one selected existing synth and one selected pattern plus
+declared control/mixer values and bindings. It requires the unchanged base root.
+Multiple edited synths/patterns, arbitrary scripts, general DSP topology and
+session replay are outside this accepted contract. Random Plaits is excluded from
+exact PCM comparison. Granular sync/commit fault injection remains subsequent work.

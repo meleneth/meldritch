@@ -82,6 +82,9 @@ It stores absolute values for every supported parameter of the **selected
 instrument**, including unchanged values, in stable module/parameter order.
 Other instruments remain as authored in the base. Saving several edited
 instruments as one combined definition is not supported in this slice.
+Standalone exports reject unrelated source changes. Use F6 in the
+[composed workflow](MUSICAL_AUTHORING.md) to save the selected graph together
+with its selected pattern, declared mixer values and controller bindings.
 
 The base is the same song root's unchanged `main.mlperformance` and referenced
 TOML definitions. Its semantic fingerprint preserves graph IDs, cables, patterns

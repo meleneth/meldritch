@@ -16,6 +16,9 @@ struct Definition {
 }
 
 pub fn encode_pattern(view: &PatternEditorView) -> Result<String> {
+    encode_pattern_scoped(view, true)
+}
+pub(crate) fn encode_pattern_scoped(view: &PatternEditorView, standalone: bool) -> Result<String> {
     use crate::instrument::quote;
     let p = &view.pattern;
     let mut text = format!(
@@ -35,13 +38,22 @@ pub fn encode_pattern(view: &PatternEditorView) -> Result<String> {
         text.push_str(&format!("      {{ id = {}, note = {}, start_tick = {}, duration_ticks = {}, velocity = {:?}{} }},\n", quote(&n.id), quote(&n.note), n.start_tick, n.duration_ticks, n.velocity, slot));
     }
     text.push_str("    },\n  },\n}\n");
-    let (restored, _) = load_pattern(view.source.root(), &text)?;
-    if restored.fingerprint() != view.source.fingerprint() {
+    if standalone
+        && load_pattern(view.source.root(), &text)?.0.fingerprint() != view.source.fingerprint()
+    {
         return Err("pattern export cannot include unrelated source edits".into());
     }
     Ok(text)
 }
 pub fn load_pattern(root: impl AsRef<Path>, source: &str) -> Result<(ValidatedSong, String)> {
+    let base = load_song_directory(root).map_err(error)?;
+    apply_pattern(&base, base.clone(), source)
+}
+pub(crate) fn apply_pattern(
+    base: &ValidatedSong,
+    song: ValidatedSong,
+    source: &str,
+) -> Result<(ValidatedSong, String)> {
     let (lua, _budget) = constrained_vm(source)?;
     let value = lua
         .load(source)
@@ -53,11 +65,10 @@ pub fn load_pattern(root: impl AsRef<Path>, source: &str) -> Result<(ValidatedSo
     if definition.kind != "pattern" || definition.version != 1 {
         return Err("unsupported authored pattern kind/version".into());
     }
-    let base = load_song_directory(root).map_err(error)?;
     if definition.base_fingerprint != format!("{:016x}", base.fingerprint()) {
         return Err("authored pattern base fingerprint changed".into());
     }
-    let song = base.restore_authored_pattern(&definition.pattern)?;
+    let song = song.restore_authored_pattern(&definition.pattern)?;
     meldritch_render::song_host::CompiledSongPatch::compile_initial(&song)?;
     Ok((song, definition.pattern.id))
 }

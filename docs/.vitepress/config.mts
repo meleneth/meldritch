@@ -45,6 +45,7 @@ export default defineConfig({
         { text: 'Nothing is stable yet', link: '/guide/status' },
         { text: 'Progress & remaining tasks', link: '/TODO' },
         { text: 'Interactive authoring investigation', link: '/AUTHORING' },
+        { text: 'Create, save and reload music', link: '/MUSICAL_AUTHORING' },
         { text: 'Testing strategy', link: '/TESTING_STRATEGY' },
         { text: 'Roadmap', link: '/ROADMAP' },
         { text: 'Contributing & documentation', link: '/guide/contributing' },

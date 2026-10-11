@@ -1,5 +1,12 @@
 # Lua control plane, API version 1
 
+Composed authoring now adds `{name="save_project"}` through the existing typed
+host bridge. It requests a unique authored Lua export and does not render or
+mutate musical state. The version-1 `kind="project"` envelope composes existing
+instrument, pattern and controls snapshots over one base fingerprint. All
+components validate/compile before installation; conflicting shared values and
+uncaptured changes reject. See [the workflow](MUSICAL_AUTHORING.md).
+
 Immediate priority has changed to interactive musical authoring; see
 [AUTHORING.md](AUTHORING.md) and TODO section 20. The API described here remains
 the implemented v1 boundary. Its composition source envelope is distinct from

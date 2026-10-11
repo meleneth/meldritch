@@ -344,6 +344,18 @@ enum Command {
         pattern: Option<PathBuf>,
         #[arg(long, conflicts_with_all = ["instrument", "pattern"])]
         controls: Option<PathBuf>,
+        #[arg(long, conflicts_with_all = ["instrument", "pattern", "controls"])]
+        authored: Option<PathBuf>,
+    },
+    /// Independently reload composed authored music through the existing compiler.
+    RenderAuthored {
+        song: PathBuf,
+        #[arg(long)]
+        authored: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = 192000)]
+        frames: u64,
     },
     /// Independently reload an authored instrument and render using the song compiler.
     RenderInstrument {
@@ -709,6 +721,8 @@ enum Command {
         pattern: Option<PathBuf>,
         #[arg(long, conflicts_with_all = ["instrument", "pattern"], requires = "lua")]
         controls: Option<PathBuf>,
+        #[arg(long, conflicts_with_all = ["instrument", "pattern", "controls"], requires = "lua")]
+        authored: Option<PathBuf>,
         #[arg(long)]
         frames: Option<u64>,
         #[arg(long, default_value_t = 4096)]
@@ -893,8 +907,16 @@ fn run(cli: Cli) -> Result<(), String> {
             instrument,
             pattern,
             controls,
+            authored,
         } => {
-            if let Some(file) = controls {
+            if let Some(file) = authored {
+                let project = meldritch_control::project::load_project_file(&song, &file)?;
+                println!(
+                    "valid authored project · fingerprint {:016x}",
+                    project.song.fingerprint()
+                );
+                Ok(())
+            } else if let Some(file) = controls {
                 let (song, _) = meldritch_control::assignments::load_controls_file(&song, &file)?;
                 println!(
                     "valid authored controls song · fingerprint {:016x}",
@@ -911,6 +933,19 @@ fn run(cli: Cli) -> Result<(), String> {
             } else {
                 validate_song(song, instrument)
             }
+        }
+        Command::RenderAuthored {
+            song,
+            authored,
+            output,
+            frames,
+        } => {
+            let project = meldritch_control::project::load_project_file(song, &authored)?;
+            let audio = CompiledSongPatch::compile_initial(&project.song)?
+                .render_default(FrameRange::new(0, frames).map_err(|e| format!("{e:?}"))?)
+                .map_err(|e| format!("{e:?}"))?;
+            meldritch_audio::write_wav_f32(output, &audio, project.song.performance().sample_rate())
+                .map_err(|e| e.to_string())
         }
         Command::RenderControls {
             song,
@@ -1181,6 +1216,7 @@ fn run(cli: Cli) -> Result<(), String> {
             instrument,
             pattern,
             controls,
+            authored,
             frames,
             chunk_frames,
             workers,
@@ -1206,6 +1242,7 @@ fn run(cli: Cli) -> Result<(), String> {
             instrument,
             pattern,
             controls,
+            authored,
         ),
         Command::TuiBassline {
             project,
@@ -3071,17 +3108,28 @@ fn tui_song(
     instrument: Option<PathBuf>,
     authored_pattern: Option<PathBuf>,
     authored_controls: Option<PathBuf>,
+    authored_project: Option<PathBuf>,
 ) -> Result<(), String> {
     let base = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
+    let restored_project = authored_project
+        .map(|file| meldritch_control::project::load_project_file(&path, &file))
+        .transpose()?;
+    let project_instrument = restored_project.as_ref().map(|p| p.instrument.clone());
+    let project_pattern = restored_project.as_ref().map(|p| p.pattern.clone());
+    let project_assignments = restored_project.as_ref().map(|p| p.assignments.clone());
     let restored_pattern = authored_pattern
         .map(|file| meldritch_control::pattern::load_pattern_file(&path, &file))
         .transpose()?;
-    let selected_pattern = restored_pattern.as_ref().map(|(_, id)| id.clone());
+    let selected_pattern =
+        project_pattern.or_else(|| restored_pattern.as_ref().map(|(_, id)| id.clone()));
     let restored_controls = authored_controls
         .map(|file| meldritch_control::assignments::load_controls_file(&path, &file))
         .transpose()?;
-    let assignments = restored_controls.as_ref().map(|(_, a)| a.clone());
-    let song = if let Some((song, _)) = restored_controls {
+    let assignments =
+        project_assignments.or_else(|| restored_controls.as_ref().map(|(_, a)| a.clone()));
+    let song = if let Some(project) = restored_project {
+        project.song
+    } else if let Some((song, _)) = restored_controls {
         song
     } else if let Some(file) = instrument {
         meldritch_control::instrument::load_instrument_file(&path, &file)?
@@ -3190,7 +3238,15 @@ fn tui_song(
         256,
     );
     if !song.synths().is_empty() {
-        if let Some(a) = assignments.clone() {
+        if let Some(synth) = &project_instrument {
+            controller.enable_project_authoring_from(
+                base.clone(),
+                song.clone(),
+                synth,
+                selected_pattern.as_ref().unwrap(),
+                assignments.clone().unwrap(),
+            )?;
+        } else if let Some(a) = assignments.clone() {
             controller.enable_assignment_authoring_from(base.clone(), song.clone(), a)?;
         } else if let Some(pattern) = &selected_pattern {
             controller.enable_pattern_authoring_from(base, song.clone(), pattern)?;
@@ -3585,6 +3641,10 @@ fn tui_song(
             }
             let dropped_lua = lua_route.take_dropped();
             {
+                let previous_save = controller
+                    .view_model()
+                    .instrument_editor
+                    .and_then(|editor| editor.save_status);
                 let mut audio = host.lock().expect("song host lock poisoned");
                 match audio.poll_publish() {
                     Ok(Some(generation)) => {
@@ -3594,6 +3654,13 @@ fn tui_song(
                     Ok(None) => {}
                 }
                 audio.refresh_view(controller);
+                let current_save = controller
+                    .view_model()
+                    .instrument_editor
+                    .and_then(|editor| editor.save_status);
+                if current_save != previous_save && current_save.is_some() {
+                    message = current_save;
+                }
             }
             if let Some(performance) = lua_performance.borrow_mut().as_mut() {
                 for cell in lua_receiver
@@ -7173,6 +7240,68 @@ fn resolve_project_path(project_path: &Path, relative_or_absolute: &str) -> Path
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composed_project_cli_restores_music_before_device_initialization() {
+        let root = example_song_path("songs/examples/29-lua-authored-roundtrip");
+        let base = meldritch_dsl::load_song_directory(&root).unwrap();
+        let restored =
+            meldritch_control::project::load_project_file(&root, Path::new("edited-project.lua"))
+                .unwrap();
+        assert_eq!(
+            format!("{:016x}", restored.song.fingerprint()),
+            "b083eb1f96df891e"
+        );
+        assert_ne!(base.fingerprint(), restored.song.fingerprint());
+        assert_eq!(restored.instrument, "bass");
+        assert_eq!(restored.pattern, "roll");
+        assert!(
+            CompiledSongPatch::compile_initial(&restored.song)
+                .unwrap()
+                .render_default(FrameRange::new(0, 192000).unwrap())
+                .unwrap()
+                .peak_abs()
+                > 0.01
+        );
+        for command in ["validate-song", "render-authored", "tui-song"] {
+            let mut args = vec![
+                "meldritch",
+                command,
+                root.to_str().unwrap(),
+                "--authored",
+                "edited-project.lua",
+            ];
+            if command == "tui-song" {
+                args.extend(["--lua", "main.lua"]);
+            }
+            if command == "render-authored" {
+                args.extend(["--output", "/tmp/composed.wav"]);
+            }
+            assert!(Cli::try_parse_from(args).is_ok());
+        }
+        assert!(
+            Cli::try_parse_from([
+                "meldritch",
+                "tui-song",
+                root.to_str().unwrap(),
+                "--authored",
+                "edited-project.lua"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "meldritch",
+                "validate-song",
+                root.to_str().unwrap(),
+                "--authored",
+                "edited-project.lua",
+                "--instrument",
+                "edited-instrument.lua"
+            ])
+            .is_err()
+        );
+    }
 
     #[test]
     fn piano_roll_loads_before_devices_and_preserves_legacy_toml_entrypoint() {

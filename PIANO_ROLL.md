@@ -127,8 +127,9 @@ and assignment currently require synth tracks without performance lane banks.
 The piano example uses a single synth-track owner; the separate
 [drum editor](DRUM_EDITOR.md) supports explicit one-shot sampler slots.
 A selected-pattern export
-rejects unrelated authored source changes; composed instrument/pattern exports,
-multiple new patterns per export and lane-bank authoring remain future work.
+rejects unrelated authored source changes. [Example 29](MUSICAL_AUTHORING.md)
+adds composed selected instrument/pattern/control snapshots with F6;
+multiple edited patterns per export and lane-bank authoring remain future work.
 
 ```sh
 cargo run -- validate-song songs/examples/26-apc-note-pattern --pattern edited-pattern.lua

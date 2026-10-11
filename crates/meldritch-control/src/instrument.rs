@@ -44,7 +44,7 @@ pub(crate) fn quote(value: &str) -> String {
     out
 }
 
-fn encode_graph_value(value: &serde_json::Value, depth: usize) -> Result<String> {
+pub(crate) fn encode_graph_value(value: &serde_json::Value, depth: usize) -> Result<String> {
     use serde_json::Value;
     let indent = "  ".repeat(depth);
     match value {
@@ -90,6 +90,12 @@ fn validate_executable_patch(song: &ValidatedSong, synth: &str) -> Result<()> {
 
 /// Stable ordering, round-trip f64 formatting, explicit absolute values. No toggles.
 pub fn encode_instrument(view: &InstrumentEditorView) -> Result<String> {
+    encode_instrument_scoped(view, true)
+}
+pub(crate) fn encode_instrument_scoped(
+    view: &InstrumentEditorView,
+    standalone: bool,
+) -> Result<String> {
     let graph = &view.source.synths()[&view.synth];
     // Use v1 only if ordinary parameter replay can represent the exact graph.
     // This catches structural defaults as well as module/cable identity changes.
@@ -117,6 +123,15 @@ pub fn encode_instrument(view: &InstrumentEditorView) -> Result<String> {
         );
         if text.len() > 256 * 1024 {
             return Err("patch export exceeds source size limit".into());
+        }
+        if standalone
+            && load_instrument(view.source.root(), &text)?.fingerprint()
+                != view.source.fingerprint()
+        {
+            return Err(
+                "instrument export cannot include unrelated source edits; save a composed project"
+                    .into(),
+            );
         }
         return Ok(text);
     }
@@ -146,11 +161,27 @@ pub fn encode_instrument(view: &InstrumentEditorView) -> Result<String> {
     if text.len() > 256 * 1024 {
         return Err("instrument export exceeds Lua source size limit".into());
     }
+    if standalone
+        && load_instrument(view.source.root(), &text)?.fingerprint() != view.source.fingerprint()
+    {
+        return Err(
+            "instrument export cannot include unrelated source edits; save a composed project"
+                .into(),
+        );
+    }
     Ok(text)
 }
 
 /// Independently reload into the ordinary semantic model and existing compiler.
 pub fn load_instrument(root: impl AsRef<Path>, source: &str) -> Result<ValidatedSong> {
+    let base = load_song_directory(root).map_err(error)?;
+    apply_instrument(&base, base.clone(), source)
+}
+pub(crate) fn apply_instrument(
+    base: &ValidatedSong,
+    mut song: ValidatedSong,
+    source: &str,
+) -> Result<ValidatedSong> {
     let (lua, _budget) = constrained_vm(source)?;
     let value = lua
         .load(source)
@@ -162,8 +193,7 @@ pub fn load_instrument(root: impl AsRef<Path>, source: &str) -> Result<Validated
     if definition.kind != "instrument" || ![1, 2].contains(&definition.version) {
         return Err("unsupported authored instrument kind/version".into());
     }
-    let mut song = load_song_directory(root).map_err(error)?;
-    if definition.base_fingerprint != format!("{:016x}", song.fingerprint()) {
+    if definition.base_fingerprint != format!("{:016x}", base.fingerprint()) {
         return Err("authored instrument base fingerprint changed".into());
     }
     if definition.version == 2 {

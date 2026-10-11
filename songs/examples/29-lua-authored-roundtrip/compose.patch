@@ -1,0 +1,7 @@
+# Replace the source through the existing typed graph draft.
+remove osc disconnect
+add source oscillator
+set source waveform triangle
+connect input.pitch source.pitch
+connect source.audio amp.audio
+commit

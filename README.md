@@ -5,6 +5,18 @@ controller mappings and behavior may change. See the
 [documentation](https://meleneth.github.io/meldritch/),
 [capability matrix](songs/examples/CAPABILITIES.md) and [active queue](TODO.md).
 
+Create, change and return to music with [composed authoring](MUSICAL_AUTHORING.md):
+
+```sh
+cargo run -- tui-song songs/examples/29-lua-authored-roundtrip --lua main.lua
+```
+
+**Ctrl-E** edits synths, **Ctrl-N** inspects APC notes, **Ctrl-M** assigns faders
+and mixer values. **F6** saves the composed instrument, patch, pattern,
+mixer and bindings as readable Lua; restart with `--authored PATH`. Fresh-process
+source/audio equivalence passes headlessly. APC connection/clean exit were
+smoke-tested; physical gestures and listening remain pending.
+
 Edit an existing synth with **Ctrl-E** in `tui-song`, then save a readable Lua
 definition with **Ctrl-S**. See [the instrument editor guide](INSTRUMENT_EDITOR.md)
 for the supported parameters, independent reload/render commands and test scope.

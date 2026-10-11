@@ -17,6 +17,7 @@ pub mod led_demo;
 pub mod pattern;
 pub mod performance;
 pub mod pickup;
+pub mod project;
 pub mod reconnect;
 pub mod session;
 pub mod song_host;
@@ -115,6 +116,7 @@ pub enum CommandRequest {
         edit: meldritch_dsl::PatchEdit,
     },
     SaveInstrument,
+    SaveProject,
     SetMode {
         mode: Mode,
     },
@@ -190,6 +192,7 @@ impl CommandRequest {
             Self::EditInstrument { edit } => AppCommand::EditInstrument(edit.clone()),
             Self::EditPatch { edit } => AppCommand::EditPatch(edit.clone()),
             Self::SaveInstrument => AppCommand::SaveInstrument,
+            Self::SaveProject => AppCommand::SaveProject,
             Self::SetMode { mode } => AppCommand::SetCockpitMode(match mode {
                 Mode::Performance => CockpitMode::Performance,
                 Mode::AllParameters => CockpitMode::AllParameters,

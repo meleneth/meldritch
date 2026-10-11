@@ -10,8 +10,8 @@ The completed showcase milestones remain completion history.
 
 Investigation and ownership decisions: [AUTHORING.md](AUTHORING.md). The first
 implemented slice is [the instrument editor](INSTRUMENT_EDITOR.md): example 25
-has automated headless acceptance; example 29 has its instrument persistence
-foundation, with composed musical authoring still unfinished. The
+has automated headless acceptance; example 29 now accepts bounded
+[composed musical authoring](MUSICAL_AUTHORING.md) headlessly. The
 [Lua piano roll](PIANO_ROLL.md) now accepts examples 26/27 headlessly; examples
 28 now accepts [editable faders and mixer](CONTROL_ASSIGNMENTS.md) headlessly;
 30 now accepts typed patch composition and version-2 graph persistence headlessly. Example 32 adds the pinned Plaits crate subset;
@@ -60,14 +60,30 @@ All models process patched/unpatched gates and joint 0/0.5/1 parameter boundarie
 without allocations after worker initialization. Example 32 source files and
 historical Lua definitions remain compatible. Physical listening is pending.
 
-- [ ] Example 29: complete composed round-trip across patterns, synths, cables,
-  mappings and mixer settings; deterministic source/audio, atomic save failures
+- [x] Example 29: selected synth graph/pattern, declared mixer/fader bindings,
+  unique composed Lua save, clean journal exit, fresh-process exact source/audio;
+  invalid edits, interrupted gestures, stale references and save failure tested
+- [x] Fix mixer swallowing Ctrl-E/Ctrl-N; show composed save and selected pickup
+  hints; reject lossy standalone instrument exports
+- [ ] Subsequent examples: multiple edited synths/patterns in one export;
+  granular sync/commit fault injection, beyond tested filesystem failure
+- [ ] Musician iteration: visible pitch/time page + modifier legend and fewer
+  assignment-selection keystrokes; evaluate on physical APC first
 - [x] Run relevant full crate/compatibility suites for the instrument slice
 - [x] Default live device output to zero gain for four seconds, then a 100 ms
   rise to unity; device-frame clock independent of transport, unchanged authored
   values/offline renders, 44.1/48 kHz headless boundary tests
 - [ ] Record physical APC pad/hold/fader/listening results separately from
   headless acceptance
+
+Example 29 adds six headless integration tests plus a subprocess reload entry.
+Composed checkpoint: 416 workspace tests pass, zero fail; the ignored child
+entry runs explicitly under its parent. CLI reload/render, historical example
+09 validation, formatting/diff checks, Clippy with existing allowances and
+documentation build pass. F6 is portable save-all; performance shows its path.
+Host APC input/LED connection and clean stopped TUI exit pass; physical gestures
+and listening remain pending. See its results. Historical verification below
+describes earlier checkpoints; bounded composed persistence is now implemented.
 
 Current catalog/startup verification: all 408 workspace tests pass, including
 historical compatibility. Formatting, diff checks, workspace Clippy with existing
