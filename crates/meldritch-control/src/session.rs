@@ -139,6 +139,59 @@ impl PerformanceSessionCapture {
         frame_count: u32,
         tempo: Tempo,
     ) -> Result<(), String> {
+        self.record_observed(controller, input, result, frame_count, tempo, None)
+    }
+
+    /// Bridge Lua's vocabulary to the existing session categories and writer.
+    /// The authoritative command is taken from app history, not synthesized.
+    pub fn record_command(
+        &mut self,
+        controller: &meldritch_app::AppController,
+        request: &crate::CommandRequest,
+        result: &meldritch_app::AppCommandResult,
+        source: &str,
+        frame: u64,
+        tempo: Tempo,
+    ) -> Result<(), String> {
+        use crate::CommandRequest as R;
+        use meldritch_app::AppInput as I;
+        let input = match request {
+            R::SetMode { .. } => I::ToggleCockpitMode,
+            R::Play => I::TogglePlayback,
+            R::Stop => I::Stop,
+            R::Rewind => I::Rewind,
+            R::SelectPage { id } => I::SelectPerformancePage(id.clone()),
+            R::SelectLaneVariation { lane, variation } => I::SelectLaneVariation {
+                lane_id: lane.clone(),
+                variation_id: variation.clone(),
+            },
+            R::ToggleLaneMute { lane } => I::ToggleLaneMute(lane.clone()),
+            R::ToggleLaneSolo { lane } => I::ToggleLaneSolo(lane.clone()),
+            R::SetControl { id, value } => I::SetCuratedControlNormalized {
+                id: id.clone(),
+                value: *value,
+            },
+        };
+        let frame = u32::try_from(frame).map_err(|_| "legacy session frame exceeds u32::MAX")?;
+        self.record_observed(
+            controller,
+            &input,
+            result,
+            self.timeline_frames,
+            tempo,
+            Some((source, frame, format!("{request:?}"))),
+        )
+    }
+
+    fn record_observed(
+        &mut self,
+        controller: &meldritch_app::AppController,
+        input: &meldritch_app::AppInput,
+        result: &meldritch_app::AppCommandResult,
+        frame_count: u32,
+        tempo: Tempo,
+        observed: Option<(&str, u32, String)>,
+    ) -> Result<(), String> {
         let view = controller.view_model();
         let latest = controller.history().back();
         let sequence = latest.map_or(self.events.len() as u64, |record| record.sequence);
@@ -147,7 +200,9 @@ impl PerformanceSessionCapture {
             |record| format!("{:?}", record.command),
         );
         let changed = latest.is_none_or(|record| record.changed);
-        let absolute_frame = view.transport.position;
+        let absolute_frame = observed
+            .as_ref()
+            .map_or(view.transport.position, |(_, frame, _)| *frame);
         let musical_beat = f64::from(absolute_frame) / tempo.frames_per_beat().max(f64::EPSILON);
         let (kind, target_id, previous, current) = session_result_fields(input, result);
         self.push_event(CapturedSessionEvent {
@@ -157,8 +212,11 @@ impl PerformanceSessionCapture {
             musical_beat,
             requested_quantization: "immediate".to_owned(),
             actual_frame: absolute_frame.min(frame_count.saturating_sub(1)),
-            provenance: "performer".to_owned(),
-            input: format!("{input:?}"),
+            provenance: observed.as_ref().map_or_else(
+                || "performer".to_owned(),
+                |(source, _, _)| format!("lua:{source}"),
+            ),
+            input: observed.map_or_else(|| format!("{input:?}"), |(_, _, description)| description),
             command,
             result: format!("{result:?}"),
             changed,

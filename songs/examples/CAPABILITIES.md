@@ -23,7 +23,7 @@ Status values:
 | `18-lua-control-plane` | Constrained Lua composition, hierarchical pages, reusable mode widget, coherent simulated surfaces, typed journal and historical compatibility (headless scope in ACCEPTANCE.md) | accept |
 | `19-apc-mini-mk2-playground` | Four synth lanes, sixteen variations, nine faders and script-authored APC Session input; Linux discovery/input observed, full hardware/audio smoke pending | play |
 | `20-apc-lua-colors` | Bounded Lua-authored palette animation, MIDI output and static playground hints; headless protocol tests, visual hardware confirmation pending | compile |
-| `21-lua-apc-performance` | Shared song host and reusable Lua lane widgets driving audio, authoritative surfaces and recorded sessions | design |
+| `21-lua-apc-performance` | Shared production song host, reusable Lua launch/mute/solo widgets, bounded APC input and RGB feedback; real commands/audio publication/session capture and APC/LCD/TUI coherence accepted headlessly; hardware/listening acceptance pending | accept |
 
 An implementation may advance a row only when all earlier statuses for that row
 are satisfied. New schema or runtime behavior requires a new row or an explicit

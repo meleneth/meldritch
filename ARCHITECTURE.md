@@ -5,6 +5,12 @@ are documented in [CONTROL_PLANE.md](CONTROL_PLANE.md). Lua composes the existin
 validated song model and dispatches existing app commands on a control thread;
 audio publication and realtime ownership remain unchanged.
 
+The TOML TUI and optional Lua APC host share `meldritch-control::song_host`
+for accepted app results and `meldritch-control::session` for capture. Render
+patches, live overrides and the bounded rerender worker live in
+`meldritch-render::song_host`. These are control-thread adapters to existing
+commands and immutable audio publication, with no second musical state model.
+
 ## Workspace shape
 
 Initial Rust workspace:

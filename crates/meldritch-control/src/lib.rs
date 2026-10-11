@@ -12,7 +12,9 @@ use std::rc::Rc;
 
 pub type Result<T> = std::result::Result<T, String>;
 pub mod led_demo;
+pub mod performance;
 pub mod session;
+pub mod song_host;
 const MAX_DEFINITIONS: usize = 64;
 pub const QUEUE_CAPACITY: usize = 64;
 pub const JOURNAL_CAPACITY: usize = 256;
@@ -72,6 +74,7 @@ pub enum CommandRequest {
     SelectPage { id: String },
     SelectLaneVariation { lane: String, variation: String },
     ToggleLaneMute { lane: String },
+    ToggleLaneSolo { lane: String },
     SetControl { id: String, value: f64 },
 }
 
@@ -86,7 +89,7 @@ impl CommandRequest {
     pub fn command(&self) -> Result<AppCommand> {
         match self {
             Self::SelectPage { id } | Self::SetControl { id, .. } => identity(id)?,
-            Self::ToggleLaneMute { lane } => identity(lane)?,
+            Self::ToggleLaneMute { lane } | Self::ToggleLaneSolo { lane } => identity(lane)?,
             Self::SelectLaneVariation { lane, variation } => {
                 identity(lane)?;
                 identity(variation)?;
@@ -107,6 +110,7 @@ impl CommandRequest {
                 variation_id: variation.clone(),
             },
             Self::ToggleLaneMute { lane } => AppCommand::ToggleLaneMute(lane.clone()),
+            Self::ToggleLaneSolo { lane } => AppCommand::ToggleLaneSolo(lane.clone()),
             Self::SetControl { id, value } => {
                 if !value.is_finite() || !(0.0..=1.0).contains(value) {
                     return Err("control value must be finite and normalized".into());
@@ -264,6 +268,21 @@ fn constrained_vm(source: &str) -> Result<(Lua, Rc<Cell<u32>>)> {
 }
 
 impl LuaProject {
+    /// Immutable transport ownership across all pages; releases never fall through.
+    pub fn surface_cells(&self, surface: &str) -> BTreeSet<u8> {
+        self.states
+            .values()
+            .flat_map(|state| &state.bindings)
+            .filter(|binding| binding.surface == surface)
+            .map(|binding| binding.cell)
+            .collect()
+    }
+
+    pub fn surfaces(&self) -> impl Iterator<Item = (&str, SurfaceKind)> {
+        self.surfaces
+            .values()
+            .map(|surface| (surface.id.as_str(), surface.kind))
+    }
     pub fn load(root: impl AsRef<Path>, source: &str) -> Result<Self> {
         let (lua, budget) = constrained_vm(source)?;
         let definition: Table = lua
@@ -301,9 +320,9 @@ impl LuaProject {
                 .from_value(table.get("dependencies").map_err(error)?)
                 .map_err(error)?;
             if dependencies.len() > MAX_DEFINITIONS
-                || dependencies
-                    .iter()
-                    .any(|d| !["mode", "page", "controls", "lanes"].contains(&d.as_str()))
+                || dependencies.iter().any(|d| {
+                    !["mode", "page", "controls", "lanes", "transport"].contains(&d.as_str())
+                })
             {
                 return Err(format!("unknown dependency for widget '{id}'"));
             }
@@ -434,6 +453,12 @@ impl LuaProject {
         values
             .set("frame", u64::from(view.transport.position))
             .map_err(error)?;
+        values
+            .set(
+                "playing",
+                view.transport.state == meldritch_audio::transport::TransportState::Playing,
+            )
+            .map_err(error)?;
         let controls = self.lua.create_table().map_err(error)?;
         for control in &view.curated_controls {
             controls
@@ -444,10 +469,14 @@ impl LuaProject {
             .set("controls", self.readonly(controls)?)
             .map_err(error)?;
         let lanes = self.lua.create_table().map_err(error)?;
+        let included = song_host::included_lanes_from_view(view);
         for page in &view.performance.pages {
             for strip in &page.strips {
                 let lane = self.lua.create_table().map_err(error)?;
                 lane.set("muted", strip.muted).map_err(error)?;
+                lane.set("soloed", strip.soloed).map_err(error)?;
+                lane.set("audible", included.contains(&strip.lane_id))
+                    .map_err(error)?;
                 lane.set("variation", strip.active_variation_id.clone())
                     .map_err(error)?;
                 lanes
@@ -819,6 +848,22 @@ impl ControlPlane {
     }
     /// At most 64 events per pump, including queued domain follow-ups.
     pub fn pump(&mut self, app: &mut AppController) -> usize {
+        self.pump_with_observer(app, |_, _, _, _, _| Ok(None))
+    }
+
+    /// Called immediately after acceptance, before any causal follow-up command.
+    /// Observer errors are diagnostics: accepted facts are never rolled back.
+    pub fn pump_with_observer(
+        &mut self,
+        app: &mut AppController,
+        mut observer: impl FnMut(
+            &AppController,
+            &CommandRequest,
+            &meldritch_app::AppCommandResult,
+            &str,
+            u64,
+        ) -> Result<Option<String>>,
+    ) -> usize {
         let mut processed = 0;
         while processed < QUEUE_CAPACITY {
             let Some(event) = self.queue.pop_front() else {
@@ -832,14 +877,25 @@ impl ControlPlane {
                     self.log(&event, Phase::Domain, format!("dispatch {fact:?}"))
                 }
             }
-            if let Err(message) = self.process(&event, app) {
+            if let Err(message) = self.process(&event, app, &mut observer) {
                 self.log(&event, Phase::Rejected, message);
             }
             processed += 1;
         }
         processed
     }
-    fn process(&mut self, event: &Event, app: &mut AppController) -> Result<()> {
+    fn process(
+        &mut self,
+        event: &Event,
+        app: &mut AppController,
+        observer: &mut impl FnMut(
+            &AppController,
+            &CommandRequest,
+            &meldritch_app::AppCommandResult,
+            &str,
+            u64,
+        ) -> Result<Option<String>>,
+    ) -> Result<()> {
         if let EventPayload::Observed(Input::Connection(connected)) = event.payload {
             if connected {
                 self.connected.insert(event.source.clone());
@@ -924,10 +980,10 @@ impl ControlPlane {
                 .dispatch(request.command()?)
                 .map_err(|e| format!("command rejected: {e:?}"))?;
             self.log(event, Phase::Accepted, format!("{result:?}"));
-            self.log(
-                event,
-                Phase::Diagnostic,
-                match &result {
+            let diagnostic = match observer(app, &request, &result, &event.source, event.frame) {
+                Err(message) => format!("accepted-command observer failed: {message}"),
+                Ok(Some(message)) => message,
+                Ok(None) => match &result {
                     meldritch_app::AppCommandResult::TransportQueued => {
                         "audio transport queued; completion belongs to the audio engine"
                     }
@@ -937,8 +993,10 @@ impl ControlPlane {
                         "app state accepted; song host must submit existing rerender work"
                     }
                     _ => "presentation change; no audio or graph work scheduled",
-                },
-            );
+                }
+                .to_owned(),
+            };
+            self.log(event, Phase::Diagnostic, diagnostic);
             self.journal.push(AcceptedCommand {
                 sequence: self.next_command,
                 frame: event.frame,
@@ -1065,7 +1123,7 @@ impl ControlPlane {
                 if let Some(id) = &binding.widget {
                     let widget = &self.project.widgets[id];
                     // Dependencies are validated API declarations. v1 refreshes
-                    // at command/page boundaries; no polling or subscriptions.
+                    // at command/page/host boundaries; no subscription graph.
                     let _dependencies = &widget.dependencies;
                     self.project.arm();
                     let result: Value = widget

@@ -484,29 +484,80 @@ site failed” / HTTP 404 because the repository has not enabled Pages. Enable
 the GitHub Actions Pages source, then rerun the failed deployment job. This is
 an outstanding repository setup step; no public deployment is claimed.
 
-### 19.12 Production Lua APC performance integration (in progress)
+### 19.12 Production Lua APC performance integration (headless acceptance complete)
 
 - [x] Audit existing host, MIDI, app, recording, Lua and TUI boundaries
 - [x] Write example 21's executable acceptance contract before implementation
 - [x] Extract compiled-song overrides, rerender worker and publication adapter;
   bound completion storage and report failures without touching audio callbacks
 - [x] Extract the existing performance-session writer without changing its format
-- [ ] Use one authoritative-view song-host adapter for TOML and Lua commands;
+- [x] Use one authoritative-view song-host adapter for TOML and Lua commands;
   prove successive lane variations do not reset previously selected lanes
-- [ ] Add reusable Lua launch/mute/solo widgets on APC and simulated LCD/TUI
-- [ ] Wire Lua-owned APC pads exactly once, and state-driven output on the
+- [x] Add reusable Lua launch/mute/solo widgets on APC and simulated LCD/TUI
+- [x] Wire Lua-owned APC pads exactly once, and state-driven output on the
   non-realtime control thread; preserve other authored MIDI bindings
-- [ ] Test input → accepted command → rendered publication → projections →
+- [x] Test input → accepted command → rendered publication → projections →
   shared captured session, plus rejections, stale work, cleanup and compatibility
-- [ ] Update status/API/site documentation and run complete verification
-- [ ] Commit and push verified implementation slices with remaining work explicit
+- [x] Update status/API/site documentation and run complete verification
+- [x] Commit extraction checkpoint (`120774b`); prepare verified integration
+  checkpoint with remaining work explicit
 
 Extraction checkpoint: `cargo test --workspace` passed 321 executions, including
 the original CLI session/publication/MIDI checks and historical compatibility.
 The shared render worker has one pending and one completion slot, reports invalid
 overrides, and retains latest-request behavior. The session writer's legacy v1
-format and checkpoint semantics are unchanged. Next: authoritative-view host
-application and Lua widget/MIDI integration; example 21 remains `design`.
+format and checkpoint semantics are unchanged.
+
+Integration checkpoint: example 21 is `accept` for its headless contract.
+`tui-song --lua main.lua` uses the shared song host and recorder. Complete-view
+compilation fixes successive lane changes resetting previous choices; the view
+now starts at each track's authored initial pattern. The LaunchControl delayed
+single-track variation and mute path have a direct audio regression test.
+Lua-owned pad presses use a 64-slot observation mailbox and cannot also run
+TOML bindings. Overflow is reported; accepted session facts are retained.
+Lua launch/mute/solo widgets project coherent APC RGB/LCD/text descriptions.
+The existing TUI continues to render the authoritative lane state.
+
+Verification commands and actual results:
+
+- `cargo test --workspace`: 328 executions passed, zero failures; includes
+  historical compatibility, five new live-performance tests and CLI confinement
+- `cargo test -p meldritch-control --test live_performance`: 5 passed
+- `cargo clippy -p meldritch-control -p meldritch-render --lib --no-deps -- -D warnings`: passed
+- `cargo clippy -p meldritch-cli -p meldritch-control --all-targets --no-deps -- -D warnings -A clippy::too_many_arguments`: passed; allows the existing CLI lint
+- `cargo fmt --all -- --check` and `git diff --check`: passed
+- `cargo run -q -- validate-song songs/examples/09-curated-performance-controls`
+  and `cargo run -q -- validate-song songs/examples/21-lua-apc-performance`: passed
+- `npm run docs:build`: passed, including the new Lua APC guide
+- `cargo run -q -- tui-song songs/examples/21-lua-apc-performance --lua main.lua --no-autoplay --midi-debug`:
+  exited 0 after `q`; real APC Control input and feedback output opened;
+  stopped transport reported zero underruns/misses, and a clean session was saved
+
+Strict render **all-targets** Clippy additionally reports two pre-existing
+`chunks_exact_to_as_chunks` warnings in DSP tests; library Clippy passes. No
+audio callback code or historical fixtures changed. No functional regressions
+were found by the suites. Full-history rerender cost, legacy retained session
+history and per-tick bounded Lua presentation evaluation remain performance
+limitations; there is no new throughput or realtime deadline claim.
+
+Remaining implementation and acceptance work:
+
+- [ ] Human physical pad/fader interaction, color observation and listening
+  acceptance of the Lua host; stopped-port smoke is not musical acceptance
+- [ ] Audible-generation/queued widget states tied to actual publication and
+  device-clock acknowledgement; green currently means selected/global playing
+- [ ] Wire page/context fader soft takeover into the production MIDI path
+- [ ] Automatic physical disconnect/reconnect and feedback restoration; logical
+  reconstruction and failed-send retry are tested, USB lifecycle remains open
+- [ ] Real Stream Deck HID discovery/images and MicroLab live voice integration
+- [ ] Shared typed, `u64` session migration, exhaustive capture, exact/quantized
+  replay and crash recovery; legacy v1 still uses debug strings and retained events
+- [ ] Render checkpointing/dependency scheduling justified by reproducible
+  measurements; this slice deliberately preserves the existing renderer
+
+Run the new playground with
+`cargo run -- tui-song songs/examples/21-lua-apc-performance --lua main.lua --midi-debug`.
+Nothing is stable yet. GitHub Pages still needs the setup step in 19.11.
 
 ## Completed showcase milestones
 

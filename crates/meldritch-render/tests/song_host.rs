@@ -22,10 +22,10 @@ fn shared_worker_renders_latest_state_and_reports_invalid_overrides() {
     }
     let deadline = Instant::now() + Duration::from_secs(5);
     let actual = loop {
-        if let Some((generation, block, _)) = worker.latest_completed() {
-            if generation == 64 {
-                break block.unwrap();
-            }
+        if let Some((generation, block, _)) = worker.latest_completed()
+            && generation == 64
+        {
+            break block.unwrap();
         }
         assert!(
             Instant::now() < deadline,

@@ -40,4 +40,6 @@ The existing LaunchControl XL projects remain available under
 
 The [capability matrix](../examples/capabilities) distinguishes design, parsing,
 compilation, playback and accepted behavior. The [Lua adapter](../CONTROL_PLANE)
-currently runs headlessly; `tui-song` uses the established TOML song host.
+also connects to the established song host through optional `--lua main.lua`.
+Try the [Lua APC performance example](../examples/lua-apc-performance); its
+shared audio/state/session behavior is tested without hardware.

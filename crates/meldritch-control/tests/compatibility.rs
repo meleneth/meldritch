@@ -13,8 +13,8 @@ fn repository() -> PathBuf {
 
 #[test]
 fn historical_song_directories_load_compile_and_retain_range_identical_audio() {
-    // Explicitly pinned to the supported corpus before introducing Lua. Design
-    // fixtures 05-08, 10, 12-14 do not claim current loader compatibility.
+    // Preserve every original row and grow the corpus with accepted projects.
+    // Design fixtures 05-08, 10, 12-14 do not claim current loader compatibility.
     let fixtures = [
         ("00-minimal-synth", "drone"),
         ("01-synth-note-pattern", "note"),
@@ -26,7 +26,9 @@ fn historical_song_directories_load_compile_and_retain_range_identical_audio() {
         ("15-launch-control-xl-input", "delay"),
         ("16-launch-control-xl-playground", "delay"),
         ("17-launch-control-xl-ensemble", "mix"),
+        ("18-lua-control-plane", "drone"),
         ("19-apc-mini-mk2-playground", "mix"),
+        ("21-lua-apc-performance", "mix"),
     ];
     for (fixture, compiler) in fixtures {
         let path = repository().join("songs/examples").join(fixture);

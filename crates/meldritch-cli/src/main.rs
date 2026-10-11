@@ -1,18 +1,20 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use meldritch_audio::published_audio::PublishedAudio;
 use meldritch_control::session::*;
+use meldritch_control::song_host::*;
 use meldritch_core::{
     Arrangement, ArrangementSection, AutomationInterpolation, AutomationLane, AutomationPoint,
     AutomationTarget, AutomationValue, DirtyRange, EntityId, Event, EventTag, FrameRange, Pattern,
     PatternId, ProbabilitySeed, SceneId, SourceId, Step, StepIndex, Tempo, TrackId,
 };
-use meldritch_dsl::{ParameterOwner, ParameterTargetDefinition};
 use meldritch_render::coordinator::{RenderCoordinator, RenderCoordinatorConfig};
 use meldritch_render::song_host::*;
 use meldritch_render::{ArtifactCache, CacheStatus, RenderSettings};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -690,6 +692,9 @@ enum Command {
         /// Show live song-publication/device read diagnostics in the TUI status line.
         #[arg(long)]
         audio_debug: bool,
+        /// Confined Lua control composition, evaluated only on the TUI thread.
+        #[arg(long, value_name = "PROJECT_RELATIVE_LUA")]
+        lua: Option<PathBuf>,
     },
     /// Open the realtime cockpit with a native synthesized bassline track.
     TuiBassline {
@@ -1074,6 +1079,7 @@ fn run(cli: Cli) -> Result<(), String> {
             no_autoplay,
             midi_debug,
             audio_debug,
+            lua,
         } => tui_song(
             song,
             frames,
@@ -1083,6 +1089,7 @@ fn run(cli: Cli) -> Result<(), String> {
             autoplay || !no_autoplay,
             midi_debug,
             effective_song_audio_debug(midi_debug, audio_debug),
+            lua,
         ),
         Command::TuiBassline {
             project,
@@ -2009,6 +2016,7 @@ fn connect_midi_control_input(
     active_page: Arc<Mutex<Option<String>>>,
     active_modifiers: Arc<Mutex<Vec<String>>>,
     debug: bool,
+    lua_route: Option<meldritch_control::devices::ApcInputRoute>,
 ) -> Result<Option<MidiControlInputConnection>, String> {
     let mut midi_input = midir::MidiInput::new(&format!("meldritch-midi-{}", device.id()))
         .map_err(|error| midi_input_client_error("failed to create MIDI input client", &error))?;
@@ -2030,6 +2038,12 @@ fn connect_midi_control_input(
             &port,
             &format!("meldritch-midi-{}-input", device.id()),
             move |_timestamp, message, _state| {
+                if lua_route
+                    .as_ref()
+                    .is_some_and(|route| route.observe(message))
+                {
+                    return;
+                }
                 let page = active_page
                     .lock()
                     .expect("active page lock poisoned")
@@ -2701,46 +2715,53 @@ fn decode_midi_diagnostic_message(message: &[u8]) -> Option<MidiDiagnosticMessag
     Some(MidiDiagnosticMessage::Raw(message.to_vec()))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum LiveSongControlTarget {
-    DelayFeedback,
-    DelayMix,
-    FilterCutoff(SynthFilterTarget),
-    FilterResonance(SynthFilterTarget),
-    LaneLevel(String),
+fn load_lua_controls(
+    song: &meldritch_dsl::ValidatedSong,
+    source: &Path,
+) -> Result<meldritch_control::LuaProject, String> {
+    let root = song.root().canonicalize().map_err(|e| e.to_string())?;
+    let file_path = root
+        .join(source)
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    if source.is_absolute() || !file_path.starts_with(&root) {
+        return Err("Lua source must be inside the song root".into());
+    }
+    let file = std::fs::File::open(&file_path).map_err(|e| e.to_string())?;
+    let mut source = String::new();
+    std::io::Read::read_to_string(&mut std::io::Read::take(file, 256 * 1024 + 1), &mut source)
+        .map_err(|e| e.to_string())?;
+    let project = meldritch_control::LuaProject::load(&root, &source)?;
+    if project.song.fingerprint() != song.fingerprint() {
+        return Err("Lua project must compose the loaded song".into());
+    }
+    Ok(project)
 }
 
-fn live_song_control_targets(
-    song: &meldritch_dsl::ValidatedSong,
-) -> BTreeMap<String, LiveSongControlTarget> {
-    song.performance()
-        .controls()
-        .iter()
-        .filter_map(|control| {
-            let target = parameter_target_label(control.target());
-            let target = match target.as_str() {
-                "dsp:echo/delay.feedback" => LiveSongControlTarget::DelayFeedback,
-                "dsp:echo/delay.mix" => LiveSongControlTarget::DelayMix,
-                value if value.ends_with("/filter.cutoff_hz") => {
-                    LiveSongControlTarget::FilterCutoff(SynthFilterTarget {
-                        synth_id: control.target().definition_id().to_owned(),
-                        module_id: control.target().module_id().to_owned(),
-                    })
-                }
-                value if value.ends_with("/filter.resonance") => {
-                    LiveSongControlTarget::FilterResonance(SynthFilterTarget {
-                        synth_id: control.target().definition_id().to_owned(),
-                        module_id: control.target().module_id().to_owned(),
-                    })
-                }
-                value if value.starts_with("lane:") && value.ends_with("/level") => {
-                    LiveSongControlTarget::LaneLevel(control.target().definition_id().to_owned())
-                }
-                _ => return None,
-            };
-            Some((control.id().to_owned(), target))
+fn connect_apc_feedback(
+    device: &meldritch_dsl::MidiDeviceDefinition,
+) -> Result<Option<midir::MidiOutputConnection>, String> {
+    let midi = midir::MidiOutput::new("meldritch-lua-feedback").map_err(|e| e.to_string())?;
+    let ports = midi
+        .ports()
+        .into_iter()
+        .filter_map(|port| {
+            let name = midi.port_name(&port).ok()?;
+            midi_port_name_matches(&name, device.name_contains()).then_some((port, name))
         })
-        .collect()
+        .collect::<Vec<_>>();
+    if ports.is_empty() {
+        return Ok(None);
+    }
+    if ports.len() != 1 {
+        return Err("Lua APC output requires one matching Session Control port".into());
+    }
+    let (port, name) = ports.into_iter().next().unwrap();
+    let connection = midi
+        .connect(&port, "meldritch-lua-feedback")
+        .map_err(|e| e.to_string())?;
+    eprintln!("Lua APC feedback connected: {name}");
+    Ok(Some(connection))
 }
 
 fn tui_song(
@@ -2752,8 +2773,12 @@ fn tui_song(
     autoplay: bool,
     midi_debug: bool,
     audio_debug: bool,
+    lua_source: Option<PathBuf>,
 ) -> Result<(), String> {
     let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
+    let lua_project = lua_source
+        .map(|source| load_lua_controls(&song, &source))
+        .transpose()?;
     let patch = CompiledSongPatch::compile_initial(&song)?;
     let scene_bank = song_scene_bank(&song, tempo_from_song(&song)?)?;
     let frame_count = frames.unwrap_or_else(|| {
@@ -2828,7 +2853,6 @@ fn tui_song(
         patch.cutoff_hz(),
         patch.resonance(),
     );
-    let live_control_targets = live_song_control_targets(&song);
     controller.set_curated_controls(controls);
     controller.set_performance_pages(song_performance_pages_for_view(&song));
     controller.set_performance_modifiers(song_performance_modifiers_for_view(&song));
@@ -2841,6 +2865,56 @@ fn tui_song(
             .configure_phrase_variations(phrase_variations)
             .map_err(|error| format!("failed to configure song phrase scenes: {error}"))?;
     }
+    let lua_surface = lua_project
+        .as_ref()
+        .map(|project| {
+            let surfaces = project
+                .surfaces()
+                .filter(|(_, kind)| *kind == meldritch_control::SurfaceKind::ApcMiniMk2)
+                .map(|(id, _)| id.to_owned())
+                .collect::<Vec<_>>();
+            if surfaces.len() != 1 {
+                return Err("live Lua host requires exactly one APC surface".to_owned());
+            }
+            Ok(surfaces[0].clone())
+        })
+        .transpose()?;
+    let (lua_route, lua_receiver) = meldritch_control::devices::ApcInputRoute::new(
+        lua_project
+            .as_ref()
+            .zip(lua_surface.as_deref())
+            .map_or_else(BTreeSet::new, |(project, surface)| {
+                project.surface_cells(surface)
+            }),
+    );
+    let lua_performance = Rc::new(RefCell::new(
+        lua_project
+            .map(|project| {
+                meldritch_control::performance::LuaPerformance::new(project, &controller, tempo)
+            })
+            .transpose()?,
+    ));
+    let input_lua_performance = Rc::clone(&lua_performance);
+    let mut lua_output = if midi_controls {
+        lua_surface
+            .as_deref()
+            .and_then(|surface| {
+                song.performance()
+                    .midi_devices()
+                    .iter()
+                    .find(|device| device.id() == surface)
+            })
+            .and_then(|device| match connect_apc_feedback(device) {
+                Ok(output) => output,
+                Err(error) => {
+                    eprintln!("Lua APC feedback unavailable: {error}");
+                    None
+                }
+            })
+    } else {
+        None
+    };
+    let mut lua_feedback = meldritch_control::devices::ApcFeedback::default();
     let (external_input_sender, external_input_receiver) = mpsc::channel();
     let midi_control_bindings = midi_control_bindings_for_song(&song);
     let midi_modifier_control_bindings = midi_modifier_control_bindings_for_song(&song);
@@ -2864,6 +2938,7 @@ fn tui_song(
                 && modifier_control_bindings.is_empty()
                 && modifier_bindings.is_empty()
                 && action_bindings.is_empty()
+                && lua_surface.as_deref() != Some(device.id())
             {
                 continue;
             }
@@ -2877,6 +2952,7 @@ fn tui_song(
                 Arc::clone(&midi_active_page),
                 Arc::clone(&midi_active_modifiers),
                 midi_debug,
+                (lua_surface.as_deref() == Some(device.id())).then(|| lua_route.clone()),
             )? {
                 Some(connection) => connections.push(connection),
                 None => {
@@ -2903,21 +2979,15 @@ fn tui_song(
             .dispatch(meldritch_app::AppCommand::Play)
             .map_err(|error| format!("failed to start autoplay: {error:?}"))?;
     }
-    let active_patch = Arc::new(Mutex::new(patch));
-    let worker = Arc::new(Mutex::new(SongRerenderWorker::new(frame_count)));
-    let input_worker = Arc::clone(&worker);
-    let submitted_generation = Arc::new(Mutex::new(0_u64));
-    let input_generation = Arc::clone(&submitted_generation);
-    let live_overrides = Arc::new(Mutex::new(SongLiveOverrides::default()));
-    let input_live_overrides = Arc::clone(&live_overrides);
-    let input_active_patch = Arc::clone(&active_patch);
-    let input_song = song.clone();
+    let host = Arc::new(Mutex::new(SongAudioHost::new(
+        song.clone(),
+        patch,
+        song_audio_publisher,
+        frame_count,
+        chunk_frames,
+    )));
+    let input_host = Arc::clone(&host);
     let scene_patches = scene_bank.patches;
-    let lane_patches = scene_bank.lane_patches;
-    let published_generation = Arc::new(Mutex::new(0_u64));
-    let tick_published_generation = Arc::clone(&published_generation);
-    let tick_submitted_generation = Arc::clone(&submitted_generation);
-    let tick_song_audio_publisher = song_audio_publisher.clone();
     let mut last_audio_debug = Instant::now()
         .checked_sub(Duration::from_millis(500))
         .unwrap_or_else(Instant::now);
@@ -2926,33 +2996,58 @@ fn tui_song(
         frame_count,
     )?));
     let input_capture = Arc::clone(&capture);
+    let tick_capture = Arc::clone(&capture);
     let input_midi_active_page = Arc::clone(&midi_active_page);
     let run_result = meldritch_tui::run_with_hooks_and_external_inputs(
         &mut controller,
         Step::new(36),
         move |controller| {
-            let completed = worker
-                .lock()
-                .expect("song render worker lock poisoned")
-                .latest_completed();
-            if let Some((generation, block, overrides)) = completed {
-                let block = block.map_err(|error| format!("song render failed: {error:?}"))?;
-                let submitted = *tick_submitted_generation
-                    .lock()
-                    .expect("song render generation lock poisoned");
-                if generation < submitted {
-                    return Ok(None);
+            let mut message = None;
+            let dropped = lua_route.take_dropped();
+            if dropped != 0 {
+                message = Some(format!(
+                    "Lua APC input queue full: {dropped} observed presses dropped"
+                ));
+            }
+            if let Some(performance) = lua_performance.borrow_mut().as_mut() {
+                for cell in lua_receiver
+                    .try_iter()
+                    .take(meldritch_control::QUEUE_CAPACITY)
+                {
+                    let frame = u64::from(controller.view_model().transport.position);
+                    if let Err(error) = performance.press(
+                        lua_surface.as_deref().unwrap(),
+                        cell,
+                        frame,
+                        controller,
+                        &mut host.lock().expect("song host lock poisoned"),
+                        &mut tick_capture.lock().expect("capture lock poisoned"),
+                    ) {
+                        message = Some(format!("Lua host: {error}"));
+                    }
                 }
-                let mut published = tick_published_generation
-                    .lock()
-                    .expect("song render generation lock poisoned");
-                if generation <= *published {
-                    return Ok(None);
+                if let Err(error) = performance.plane.refresh(controller) {
+                    message = Some(format!("Lua presentation: {error}"));
                 }
-                publish_song_audio(&tick_song_audio_publisher, &block, chunk_frames)
-                    .map_err(|error| format!("song publication failed: {error}"))?;
-                *published = generation;
-                return Ok(Some(format!("Song rerender published: {overrides:?}")));
+                if let Some(output) = lua_output.as_mut()
+                    && let Some(frame) = performance.plane.output(lua_surface.as_deref().unwrap())
+                    && let Err(error) = lua_feedback
+                        .update(frame, |bytes| output.send(bytes).map_err(|e| e.to_string()))
+                {
+                    message = Some(format!("Lua APC feedback: {error}"));
+                }
+            }
+            match host.lock().expect("song host lock poisoned").poll_publish() {
+                Ok(Some(generation)) => {
+                    message = Some(format!("Song rerender published: generation {generation}"));
+                }
+                Err(error) => {
+                    message = Some(error);
+                }
+                Ok(None) => {}
+            }
+            if message.is_some() {
+                return Ok(message);
             }
             if audio_debug && last_audio_debug.elapsed() >= Duration::from_millis(500) {
                 last_audio_debug = Instant::now();
@@ -2980,211 +3075,19 @@ fn tui_song(
                     .lock()
                     .expect("active page lock poisoned") = active_page_id(&controller.view_model());
             }
+            let mut host = input_host.lock().expect("song host lock poisoned");
             if let Some((scene, variation)) = song_scene_selection(input, result)
                 && let Some(patch) = scene_patches.get(&(scene, variation)).cloned()
             {
-                *input_active_patch
-                    .lock()
-                    .expect("song active patch lock poisoned") = patch.clone();
-                let overrides = input_live_overrides
-                    .lock()
-                    .expect("song live override lock poisoned")
-                    .clone();
-                let mut generation = input_generation
-                    .lock()
-                    .expect("song render generation lock poisoned");
-                *generation = generation.saturating_add(1);
-                input_worker
-                    .lock()
-                    .expect("song render worker lock poisoned")
-                    .submit(*generation, patch, overrides);
-                return;
+                host.replace_patch(patch);
+            } else if let Err(error) = host.accepted(&controller.view_model(), result) {
+                eprintln!("song update failed: {error}");
             }
-            if let meldritch_app::AppCommandResult::LaneOctaveSet {
-                lane_id, current, ..
-            } = result
+            if let Some(performance) = input_lua_performance.borrow_mut().as_mut()
+                && let Err(error) = performance.external_accepted(controller, result)
             {
-                let overrides = {
-                    let mut overrides = input_live_overrides
-                        .lock()
-                        .expect("song live override lock poisoned");
-                    if *current == 0 {
-                        overrides.lane_transpose_semitones.remove(lane_id);
-                    } else {
-                        overrides
-                            .lane_transpose_semitones
-                            .insert(lane_id.clone(), current.saturating_mul(12));
-                    }
-                    overrides.clone()
-                };
-                let view = controller.view_model();
-                let active_variations = active_lane_variations(&view);
-                let included_lanes = included_lanes_from_view(&view);
-                let patch = match compile_mixed_song_for_active_lanes(
-                    &input_song,
-                    &active_variations,
-                    &overrides.lane_transpose_semitones,
-                    &included_lanes,
-                ) {
-                    Ok(patch) => patch,
-                    Err(error) => {
-                        eprintln!("{error}");
-                        return;
-                    }
-                };
-                *input_active_patch
-                    .lock()
-                    .expect("song active patch lock poisoned") = patch.clone();
-                let mut generation = input_generation
-                    .lock()
-                    .expect("song render generation lock poisoned");
-                *generation = generation.saturating_add(1);
-                input_worker
-                    .lock()
-                    .expect("song render worker lock poisoned")
-                    .submit(*generation, patch, overrides);
-                return;
+                eprintln!("Lua presentation failed: {error}");
             }
-            if let Some((lane, variation)) = song_lane_selection(result) {
-                let overrides = input_live_overrides
-                    .lock()
-                    .expect("song live override lock poisoned")
-                    .clone();
-                let view = controller.view_model();
-                let included_lanes = included_lanes_from_view(&view);
-                let default_inclusion = default_included_lanes(&input_song);
-                let patch = if overrides.lane_transpose_semitones.is_empty()
-                    && included_lanes == default_inclusion
-                {
-                    lane_patches
-                        .get(&(lane.clone(), variation.clone()))
-                        .cloned()
-                } else {
-                    let active_variations = active_lane_variations(&view);
-                    match compile_mixed_song_for_active_lanes(
-                        &input_song,
-                        &active_variations,
-                        &overrides.lane_transpose_semitones,
-                        &included_lanes,
-                    ) {
-                        Ok(patch) => Some(patch),
-                        Err(error) => {
-                            eprintln!("{error}");
-                            None
-                        }
-                    }
-                };
-                let Some(patch) = patch else {
-                    return;
-                };
-                *input_active_patch
-                    .lock()
-                    .expect("song active patch lock poisoned") = patch.clone();
-                let mut generation = input_generation
-                    .lock()
-                    .expect("song render generation lock poisoned");
-                *generation = generation.saturating_add(1);
-                input_worker
-                    .lock()
-                    .expect("song render worker lock poisoned")
-                    .submit(*generation, patch, overrides);
-                return;
-            }
-            if matches!(
-                result,
-                meldritch_app::AppCommandResult::LaneMuteToggled { .. }
-                    | meldritch_app::AppCommandResult::LaneSoloToggled { .. }
-            ) {
-                let overrides = input_live_overrides
-                    .lock()
-                    .expect("song live override lock poisoned")
-                    .clone();
-                let view = controller.view_model();
-                let active_variations = active_lane_variations(&view);
-                let included_lanes = included_lanes_from_view(&view);
-                let patch = match compile_mixed_song_for_active_lanes(
-                    &input_song,
-                    &active_variations,
-                    &overrides.lane_transpose_semitones,
-                    &included_lanes,
-                ) {
-                    Ok(patch) => patch,
-                    Err(error) => {
-                        eprintln!("{error}");
-                        return;
-                    }
-                };
-                *input_active_patch
-                    .lock()
-                    .expect("song active patch lock poisoned") = patch.clone();
-                let mut generation = input_generation
-                    .lock()
-                    .expect("song render generation lock poisoned");
-                *generation = generation.saturating_add(1);
-                input_worker
-                    .lock()
-                    .expect("song render worker lock poisoned")
-                    .submit(*generation, patch, overrides);
-                return;
-            }
-            let control_id = match input {
-                meldritch_app::AppInput::AdjustCuratedControl { id, .. }
-                | meldritch_app::AppInput::SetCuratedControlNormalized { id, .. } => id,
-                _ => return,
-            };
-            let Some(target) = live_control_targets.get(control_id) else {
-                return;
-            };
-            let Some(value) = controller
-                .view_model()
-                .curated_controls
-                .into_iter()
-                .find(|control| control.id == *control_id)
-                .and_then(|control| control.value)
-            else {
-                return;
-            };
-            let overrides = {
-                let mut overrides = input_live_overrides
-                    .lock()
-                    .expect("song live override lock poisoned");
-                match target {
-                    LiveSongControlTarget::DelayFeedback => overrides.feedback = Some(value),
-                    LiveSongControlTarget::DelayMix => overrides.mix = Some(value),
-                    LiveSongControlTarget::FilterCutoff(target) => {
-                        overrides.cutoff_hz = Some(value);
-                        overrides
-                            .synth_filters
-                            .entry(target.clone())
-                            .or_default()
-                            .cutoff_hz = Some(value);
-                    }
-                    LiveSongControlTarget::FilterResonance(target) => {
-                        overrides.resonance = Some(value);
-                        overrides
-                            .synth_filters
-                            .entry(target.clone())
-                            .or_default()
-                            .resonance = Some(value);
-                    }
-                    LiveSongControlTarget::LaneLevel(lane_id) => {
-                        overrides.lane_levels.insert(lane_id.clone(), value);
-                    }
-                }
-                overrides.clone()
-            };
-            let mut generation = input_generation
-                .lock()
-                .expect("song render generation lock poisoned");
-            *generation = generation.saturating_add(1);
-            let patch = input_active_patch
-                .lock()
-                .expect("song active patch lock poisoned")
-                .clone();
-            input_worker
-                .lock()
-                .expect("song render worker lock poisoned")
-                .submit(*generation, patch, overrides);
         },
     );
     if let Err(error) = run_result {
@@ -3203,141 +3106,6 @@ fn tui_song(
 
 fn effective_song_audio_debug(midi_debug: bool, audio_debug: bool) -> bool {
     midi_debug || audio_debug
-}
-
-fn song_controls_for_view(
-    song: &meldritch_dsl::ValidatedSong,
-    default_feedback: Option<f64>,
-    default_mix: Option<f64>,
-    default_cutoff_hz: Option<f64>,
-    default_resonance: Option<f64>,
-) -> Vec<meldritch_app::CuratedControlView> {
-    song.performance()
-        .controls()
-        .iter()
-        .map(|control| {
-            let (minimum, maximum) = control.range();
-            let target = parameter_target_label(control.target());
-            let value = match target.as_str() {
-                "dsp:echo/delay.feedback" => {
-                    default_feedback.map(|feedback| feedback.clamp(minimum, maximum))
-                }
-                "dsp:echo/delay.mix" => default_mix.map(|mix| mix.clamp(minimum, maximum)),
-                value if value.ends_with("/filter.cutoff_hz") => {
-                    default_cutoff_hz.map(|cutoff| cutoff.clamp(minimum, maximum))
-                }
-                value if value.ends_with("/filter.resonance") => {
-                    default_resonance.map(|resonance| resonance.clamp(minimum, maximum))
-                }
-                _ => None,
-            };
-            meldritch_app::CuratedControlView {
-                id: control.id().to_owned(),
-                label: control.label().to_owned(),
-                target,
-                minimum,
-                maximum,
-                step: control.step(),
-                binding: control.binding().to_owned(),
-                value,
-            }
-        })
-        .collect()
-}
-
-fn song_performance_pages_for_view(
-    song: &meldritch_dsl::ValidatedSong,
-) -> Vec<meldritch_app::PerformancePageView> {
-    let lanes = song
-        .performance()
-        .lanes()
-        .iter()
-        .map(|lane| (lane.id(), lane))
-        .collect::<BTreeMap<_, _>>();
-    song.performance()
-        .pages()
-        .iter()
-        .map(|page| meldritch_app::PerformancePageView {
-            id: page.id().to_owned(),
-            label: page.label().to_owned(),
-            strips: page
-                .strips()
-                .iter()
-                .filter_map(|strip| {
-                    let lane = lanes.get(strip.lane_id())?;
-                    Some(meldritch_app::PerformanceStripView {
-                        strip: strip.strip(),
-                        lane_id: lane.id().to_owned(),
-                        lane_label: lane.label().to_owned(),
-                        lane_role: lane.role().to_owned(),
-                        track_id: lane.track_id().map(str::to_owned),
-                        launch_quantization: lane.launch_quantization().map(str::to_owned),
-                        muted: lane.default_muted(),
-                        soloed: lane.default_soloed(),
-                        active_pattern_bank_id: lane
-                            .pattern_banks()
-                            .first()
-                            .map(|bank| bank.id().to_owned()),
-                        active_variation_id: lane.variation_ids().first().cloned(),
-                        octave: 0,
-                        variation_ids: lane.variation_ids().to_vec(),
-                        pattern_banks: lane
-                            .pattern_banks()
-                            .iter()
-                            .map(|bank| meldritch_app::PerformancePatternBankView {
-                                id: bank.id().to_owned(),
-                                label: bank.label().to_owned(),
-                                variation_ids: bank.variation_ids().to_vec(),
-                            })
-                            .collect(),
-                        pattern_monitors: lane
-                            .variation_ids()
-                            .iter()
-                            .filter_map(|variation_id| {
-                                let pattern = song.note_patterns().get(variation_id)?;
-                                Some(performance_pattern_monitor_for_song_pattern(
-                                    variation_id,
-                                    pattern,
-                                ))
-                            })
-                            .collect(),
-                        control_ids: strip.control_ids().to_vec(),
-                    })
-                })
-                .collect(),
-        })
-        .collect()
-}
-
-fn performance_pattern_monitor_for_song_pattern(
-    variation_id: &str,
-    pattern: &meldritch_dsl::NotePatternDefinition,
-) -> meldritch_app::PerformancePatternMonitorView {
-    let length_steps = 16;
-    let mut active_steps = pattern
-        .events()
-        .iter()
-        .map(|event| {
-            let step = if pattern.length_frames() == 0 {
-                0
-            } else {
-                event.start_frame().saturating_mul(u64::from(length_steps))
-                    / pattern.length_frames()
-            };
-            u32::try_from(step)
-                .unwrap_or(length_steps - 1)
-                .min(length_steps - 1)
-        })
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    active_steps.sort_unstable();
-    meldritch_app::PerformancePatternMonitorView {
-        variation_id: variation_id.to_owned(),
-        length_frames: pattern.length_frames(),
-        length_steps,
-        active_steps,
-    }
 }
 
 fn song_performance_modifiers_for_view(
@@ -3441,6 +3209,7 @@ fn song_audio_debug_line(
 
 struct SongSceneBank {
     patches: BTreeMap<(SceneId, usize), CompiledSongPatch>,
+    #[cfg(test)]
     lane_patches: BTreeMap<(String, String), CompiledSongPatch>,
     phrase_variations: Option<Vec<(SceneId, Vec<Pattern>)>>,
 }
@@ -3457,6 +3226,7 @@ fn song_scene_bank(
     if song.performance().tracks().is_empty() {
         return Ok(SongSceneBank {
             patches: BTreeMap::new(),
+            #[cfg(test)]
             lane_patches: BTreeMap::new(),
             phrase_variations: None,
         });
@@ -3467,13 +3237,17 @@ fn song_scene_bank(
     if pattern_ids.is_empty() {
         return Ok(SongSceneBank {
             patches: BTreeMap::new(),
+            #[cfg(test)]
             lane_patches: BTreeMap::new(),
             phrase_variations: None,
         });
     }
     let mut patches = BTreeMap::new();
+    #[cfg(test)]
     let mut lane_patches = BTreeMap::new();
     let mut phrase_variations = Vec::new();
+    // Retain fixture compiler checks; production recompiles the complete view.
+    #[cfg(test)]
     for lane in song.performance().lanes() {
         let Some(track_id) = lane.track_id() else {
             continue;
@@ -3530,6 +3304,7 @@ fn song_scene_bank(
     if !single_track {
         return Ok(SongSceneBank {
             patches,
+            #[cfg(test)]
             lane_patches,
             phrase_variations: None,
         });
@@ -3567,6 +3342,7 @@ fn song_scene_bank(
     }
     Ok(SongSceneBank {
         patches,
+        #[cfg(test)]
         lane_patches,
         phrase_variations: Some(phrase_variations),
     })
@@ -3652,6 +3428,7 @@ fn song_scene_selection(
     Some((scene, variation))
 }
 
+#[cfg(test)]
 fn song_lane_selection(result: &meldritch_app::AppCommandResult) -> Option<(String, String)> {
     match result {
         meldritch_app::AppCommandResult::LaneVariationSelected {
@@ -3664,95 +3441,6 @@ fn song_lane_selection(result: &meldritch_app::AppCommandResult) -> Option<(Stri
         } => Some((lane_id.clone(), current_variation.clone())),
         _ => None,
     }
-}
-
-fn active_lane_variations(view: &meldritch_app::AppViewModel) -> BTreeMap<String, String> {
-    view.performance
-        .pages
-        .iter()
-        .flat_map(|page| page.strips.iter())
-        .filter_map(|strip| {
-            Some((
-                strip.lane_id.clone(),
-                strip.active_variation_id.as_ref()?.clone(),
-            ))
-        })
-        .collect()
-}
-
-fn included_lanes_from_view(view: &meldritch_app::AppViewModel) -> BTreeSet<String> {
-    let strips = view
-        .performance
-        .pages
-        .iter()
-        .flat_map(|page| page.strips.iter())
-        .collect::<Vec<_>>();
-    let soloed = strips
-        .iter()
-        .filter(|strip| strip.soloed)
-        .map(|strip| strip.lane_id.clone())
-        .collect::<BTreeSet<_>>();
-    if !soloed.is_empty() {
-        return soloed;
-    }
-    strips
-        .into_iter()
-        .filter(|strip| !strip.muted)
-        .map(|strip| strip.lane_id.clone())
-        .collect()
-}
-
-fn default_included_lanes(song: &meldritch_dsl::ValidatedSong) -> BTreeSet<String> {
-    let soloed = song
-        .performance()
-        .lanes()
-        .iter()
-        .filter(|lane| lane.default_soloed())
-        .map(|lane| lane.id().to_owned())
-        .collect::<BTreeSet<_>>();
-    if !soloed.is_empty() {
-        return soloed;
-    }
-    song.performance()
-        .lanes()
-        .iter()
-        .filter(|lane| !lane.default_muted())
-        .map(|lane| lane.id().to_owned())
-        .collect()
-}
-
-fn compile_mixed_song_for_active_lanes(
-    song: &meldritch_dsl::ValidatedSong,
-    active_variations: &BTreeMap<String, String>,
-    lane_transpose_semitones: &BTreeMap<String, i8>,
-    included_lanes: &BTreeSet<String>,
-) -> Result<CompiledSongPatch, String> {
-    let patch = meldritch_render::song_render::compile_mixed_note_song_with_lane_state(
-        song,
-        active_variations,
-        lane_transpose_semitones,
-        included_lanes,
-    )
-    .map_err(|error| format!("failed to compile active mixed song: {error:?}"))?;
-    Ok(CompiledSongPatch::Mixed(patch))
-}
-
-fn parameter_target_label(target: &ParameterTargetDefinition) -> String {
-    if matches!(target.owner(), ParameterOwner::Lane) {
-        return format!("lane:{}/{}", target.definition_id(), target.parameter());
-    }
-    let owner = match target.owner() {
-        ParameterOwner::Synth => "synth",
-        ParameterOwner::Dsp => "dsp",
-        ParameterOwner::Lane => unreachable!("lane targets are formatted above"),
-    };
-    format!(
-        "{}:{}/{}.{}",
-        owner,
-        target.definition_id(),
-        target.module_id(),
-        target.parameter()
-    )
 }
 
 fn validate_project(path: PathBuf) -> Result<(), String> {
@@ -6961,6 +6649,33 @@ mod tests {
         } else {
             manifest.join("../..").join(relative)
         }
+    }
+
+    #[test]
+    fn lua_song_host_loads_confined_source_before_opening_devices() {
+        let root = example_song_path("songs/examples/21-lua-apc-performance");
+        let song = meldritch_dsl::load_song_directory(&root).unwrap();
+        let project = load_lua_controls(&song, Path::new("main.lua")).unwrap();
+        assert_eq!(project.song.fingerprint(), song.fingerprint());
+        assert!(load_lua_controls(&song, &root.join("main.lua").canonicalize().unwrap()).is_err());
+        assert!(load_lua_controls(&song, Path::new("../18-lua-control-plane/main.lua")).is_err());
+        let parsed = Cli::try_parse_from([
+            "meldritch",
+            "tui-song",
+            "songs/examples/21-lua-apc-performance",
+            "--lua",
+            "main.lua",
+            "--no-midi-controls",
+        ])
+        .unwrap();
+        assert!(matches!(
+            parsed.command,
+            Command::TuiSong {
+                lua: Some(_),
+                no_midi_controls: true,
+                ..
+            }
+        ));
     }
 
     #[test]

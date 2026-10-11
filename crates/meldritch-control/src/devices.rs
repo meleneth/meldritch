@@ -3,6 +3,45 @@
 
 use crate::{ControlPlane, Input, Result, SurfaceFrame};
 
+/// Exclusive pad ownership prevents Lua and TOML from applying one press twice.
+/// Bounded observation queue; overflow is counted for control-thread diagnostics.
+#[derive(Clone)]
+pub struct ApcInputRoute {
+    cells: std::collections::BTreeSet<u8>,
+    sender: std::sync::mpsc::SyncSender<u8>,
+    dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+impl ApcInputRoute {
+    pub fn new(cells: std::collections::BTreeSet<u8>) -> (Self, std::sync::mpsc::Receiver<u8>) {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(crate::QUEUE_CAPACITY);
+        (
+            Self {
+                cells,
+                sender,
+                dropped: Default::default(),
+            },
+            receiver,
+        )
+    }
+    /// True means owned, including releases and observed presses under backpressure.
+    pub fn observe(&self, bytes: &[u8]) -> bool {
+        let Some(ApcInput::Grid { cell, pressed }) = decode_apc(0, bytes) else {
+            return false;
+        };
+        if !self.cells.contains(&cell) {
+            return false;
+        }
+        if pressed && self.sender.try_send(cell).is_err() {
+            self.dropped
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        true
+    }
+    pub fn take_dropped(&self) -> u64 {
+        self.dropped.swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum MidiObservation {
     Note {
@@ -111,6 +150,62 @@ pub fn apc_rgb(cell: u8, rgb: [u8; 3]) -> Result<[u8; 16]> {
         rgb[2] & 0x7f,
         0xf7,
     ])
+}
+
+/// Semantic widget colors encoded outside Lua. Commit the diff only after all
+/// sends succeed; a failed send is retried on the next refresh.
+#[derive(Default)]
+pub struct ApcFeedback {
+    sent: std::collections::BTreeMap<u8, [u8; 3]>,
+    force: bool,
+}
+impl ApcFeedback {
+    pub fn update(
+        &mut self,
+        frame: &SurfaceFrame,
+        mut send: impl FnMut(&[u8]) -> Result<()>,
+    ) -> Result<usize> {
+        let mut next = std::collections::BTreeMap::new();
+        for (cell, presentation) in &frame.cells {
+            if *cell >= 64 {
+                return Err("APC presentation cell out of range".into());
+            }
+            let rgb = match presentation.color.as_str() {
+                "off" => [0, 0, 0],
+                "gray" => [24, 24, 24],
+                "green" => [0, 180, 0],
+                "amber" => [180, 70, 0],
+                "yellow" => [180, 180, 0],
+                "red" => [180, 0, 0],
+                "blue" => [0, 0, 180],
+                "white" => [180, 180, 180],
+                color => return Err(format!("unsupported APC presentation color '{color}'")),
+            };
+            next.insert(*cell, rgb);
+        }
+        let cells = self
+            .sent
+            .keys()
+            .chain(next.keys())
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut count = 0;
+        for cell in cells {
+            let rgb = next.get(&cell).copied().unwrap_or([0; 3]);
+            if self.force || self.sent.get(&cell) != Some(&rgb) {
+                send(&apc_rgb(cell, rgb)?)?;
+                count += 1;
+            }
+        }
+        self.sent = next;
+        self.force = false;
+        Ok(count)
+    }
+
+    /// Reconnection must restore desired state even when it is unchanged.
+    pub fn invalidate(&mut self) {
+        self.force = true;
+    }
 }
 
 /// Host must reset on page/context change or external target changes. The

@@ -59,13 +59,44 @@ errors are delivered explicitly. In-flight rendering remains non-cancellable.
 its format and CLI capture/checkpoint behavior are preserved. These are internal
 Rust host APIs, separate from the versioned Lua vocabulary.
 
-The remaining gap is applying accepted app results to this shared host from
-production Lua. App lane/curated control results alone do not schedule audio;
-the headless trace states this explicitly. The legacy session writer still uses
+`meldritch-control::song_host::SongAudioHost` now applies accepted app results
+for both TOML and production Lua. Multi-track compilation reads the entire
+authoritative lane view: selecting one lane no longer restores other lanes to
+their initial variations. The initial view uses each track's authored starting
+pattern. Single-track variation changes retain the delayed/DSP path; mute and
+octave use the existing mixed-render fallback. The legacy session writer still uses
 debug command strings and `u32` frames. The Lua slice adds a typed `u64` command
 outbox and replay journal without pretending to migrate old capture files.
-Connecting the shared host/capture adapters is subsequent work in example 21.
-Only mode commands are exercised across surfaces in example 18; they need no rerender.
+Example 21 connects these adapters through `LuaPerformance`: an observer runs
+immediately after acceptance, before causal follow-up handlers, captures the
+real app history command and schedules the shared worker. Its trace identifies
+the submitted generation. The journal drains only after a successful session
+checkpoint. The legacy host rejects Lua observation frames above `u32::MAX`
+before dispatch, while the independent dispatcher/journal retain `u64` frames.
+
+Run `cargo run -- tui-song songs/examples/21-lua-apc-performance --lua main.lua`.
+The CLI confines this bounded Lua source to the loaded song root and requires
+the same validated song fingerprint. One Lua APC surface is mapped by device
+id to the TOML Session Control port. A 64-slot nonblocking observation queue
+owns bound pads across all Lua pages, including releases, so TOML cannot apply
+the same press twice. Overflow counts observed presses, not accepted command
+facts, and reports on the TUI thread. Other TOML bindings remain active.
+
+Lua, command observers, session writes, graph compilation and semantic RGB
+feedback all execute on the control owner. Output diffs suppress unchanged
+frames and clear removed cells; invalid colors cannot partially send a frame.
+Failed sends retain the diff for retry. Physical discovery/open happens once;
+automatic physical reconnect is unfinished. Missing output is reported and
+does not prevent loading. Headless APC/LCD/TUI projections share one widget,
+and logical disconnect/reconnect reconstructs authoritative state. A green
+launch widget describes selection and global transport, not audio-generation
+acknowledgement. There is no quantized or audible-generation widget state yet.
+
+Production port smoke: example 21 opened the connected Linux APC Control input
+and feedback output with `--no-autoplay --midi-debug`, displayed stopped transport
+with zero reported underruns/misses, and exited cleanly via `q` with a saved
+session. This verifies connection/wiring; no pad interaction, physical color
+observation, listening or automatic reconnection acceptance is claimed.
 
 ## Minimal Lua API
 
@@ -79,16 +110,20 @@ names of at most 64 bytes. They do not depend on enumeration order.
 
 A widget declares `id`, `dependencies`, `interact(state)` and
 `present(state, surface_kind, page)`. Allowed dependencies are `mode`, `page`,
-`controls` and `lanes`. This version refreshes at explicit command/page/host
+`controls`, `lanes` and `transport`. This version refreshes at command/page/host
 boundaries rather than maintaining a subscription graph. `interact` returns
 one command request. `present` returns `{label, color, style}`. Semantically
 unchanged frames are suppressed; outputs replace a complete surface frame so
 removed cells are cleared by the transport. The mode widget is reusable on all
 three surfaces, with LCD, LED and text presentations of authoritative app mode.
-There is no pattern-launch widget in this milestone.
+Example 21 supplies reusable lane launch, mute and solo widgets on all three
+logical surfaces. The existing TUI renders its authoritative lane layout;
+the logical text-widget projection is tested headlessly rather than replacing it.
 
-The authorized state projection exposes `mode`, `frame`, `page`,
-`controls[id]` and `lanes[id].muted/variation`. These tables have read-only
+The authorized state projection exposes `mode`, `frame`, `page`, `playing`,
+`controls[id]` and `lanes[id].muted/soloed/audible/variation`. `audible` follows
+the renderer's mute/solo inclusion rule; it does not report device-clock receipt.
+These tables have read-only
 proxies; modifying a local script variable never edits app state. Lua receives
 no app pointer or audio publication handle.
 
@@ -101,6 +136,7 @@ Supported command request tables:
 | `select_page` | `id` | `SelectPerformancePage` |
 | `select_lane_variation` | `lane`, `variation` | `SelectLaneVariation` |
 | `toggle_lane_mute` | `lane` | `ToggleLaneMute` |
+| `toggle_lane_solo` | `lane` | `ToggleLaneSolo` |
 | `set_control` | `id`, finite `value` in 0..1 | `SetCuratedControlNormalized` |
 
 Unknown request names/fields are errors. IDs and parameter values are checked
@@ -299,5 +335,6 @@ crate is strict-Clippy clean.
 No historical fixtures, LaunchControl code, DSP code or callback/publication
 code were changed. No functional compatibility regressions were observed in
 these tests. No device/realtime soak or throughput measurements were performed.
-Production Lua song playback, physical transports, complete session fidelity
-and crash-tolerant checkpointing remain partial/deferred as detailed above.
+The subsequent example 21 production host integration is accepted headlessly;
+physical listening/LED acceptance, automatic reconnect, complete session
+fidelity and crash-tolerant checkpointing remain partial/deferred as above.
