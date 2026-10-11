@@ -99,6 +99,34 @@ impl PlaybackControl {
     }
 }
 
+/// Device startup policy, measured in output frames (independent of transport).
+/// Four seconds muted, then a 100 ms linear rise to unity.
+struct StartupGain {
+    remaining_mute: u64,
+    fade_frames: u64,
+    fade_position: u64,
+}
+impl StartupGain {
+    fn new(sample_rate: SampleRate) -> Self {
+        Self {
+            remaining_mute: u64::from(sample_rate) * 4,
+            fade_frames: (u64::from(sample_rate) / 10).max(1),
+            fade_position: 0,
+        }
+    }
+    fn next(&mut self) -> f64 {
+        if self.remaining_mute > 0 {
+            self.remaining_mute -= 1;
+            return 0.0;
+        }
+        self.fade_position = (self.fade_position + 1).min(self.fade_frames);
+        self.fade_position as f64 / self.fade_frames as f64
+    }
+    fn complete(&self) -> bool {
+        self.remaining_mute == 0 && self.fade_position == self.fade_frames
+    }
+}
+
 pub struct PublishedAudioRenderer {
     audio: AudioSnapshotReader,
     device_channels: usize,
@@ -109,6 +137,7 @@ pub struct PublishedAudioRenderer {
     status_monitor: RealtimeStatusMonitor,
     error_reporter: StreamErrorReporter,
     last_missing_chunk: Option<usize>,
+    startup_gain: Option<StartupGain>,
 }
 
 impl PublishedAudioRenderer {
@@ -177,7 +206,13 @@ impl PublishedAudioRenderer {
             status_monitor,
             error_reporter,
             last_missing_chunk: None,
+            startup_gain: None,
         })
+    }
+
+    /// Live output only; does not change authored mixer values or rendered artifacts.
+    fn mute_device_startup(&mut self, sample_rate: SampleRate) {
+        self.startup_gain = Some(StartupGain::new(sample_rate));
     }
 
     /// Headless and device rendering share this same callback implementation.
@@ -195,6 +230,15 @@ impl PublishedAudioRenderer {
         let mut callback_underrun = false;
         let mut rendered = false;
         for output_frame in output.chunks_mut(self.device_channels) {
+            let gain = if let Some(startup) = &mut self.startup_gain {
+                let gain = startup.next();
+                if startup.complete() {
+                    self.startup_gain = None;
+                }
+                gain
+            } else {
+                1.0
+            };
             let Some(frame) = self.transport.next_frame() else {
                 for sample in output_frame {
                     *sample = T::from_sample(0.0);
@@ -209,7 +253,11 @@ impl PublishedAudioRenderer {
                     self.last_missing_chunk = None;
                     for (channel, output_sample) in output_frame.iter_mut().enumerate() {
                         let source_channel = channel.min(source_frame.len() - 1);
-                        let sample = source_frame[source_channel].clamp(-1.0, 1.0);
+                        let sample = if gain == 0.0 {
+                            0.0
+                        } else {
+                            source_frame[source_channel].clamp(-1.0, 1.0) * gain
+                        };
                         *output_sample = T::from_sample(sample);
                     }
                 }
@@ -297,7 +345,8 @@ impl RealtimePlaybackSession {
         let counters = Arc::new(PlaybackCounters::default());
         let command_monitor = control.command_monitor.clone();
         let status_monitor = control.status_monitor.clone();
-        let state = PublishedAudioRenderer::from_engine(audio, config.channels, loops, engine)?;
+        let mut state = PublishedAudioRenderer::from_engine(audio, config.channels, loops, engine)?;
+        state.mute_device_startup(config.sample_rate);
         let error_reporter = state.error_reporter();
         let stream = build_stream(
             &device,
@@ -482,6 +531,61 @@ fn build_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn live_startup_mutes_four_seconds_then_fades_without_changing_source() {
+        for sample_rate in [44_100, 48_000] {
+            let mut block = AudioBlock::silent(2, 1);
+            block.samples_mut().copy_from_slice(&[0.5, -0.25]);
+            let source = block.clone();
+            let mut renderer = PublishedAudioRenderer::new(&block, 2, u32::MAX).unwrap();
+            renderer.mute_device_startup(sample_rate);
+            // Irregular callback sizes must not change the frame-based deadline.
+            let muted_frames = sample_rate * 4;
+            let mut muted = vec![9.0; (muted_frames as usize - 1) * 2];
+            renderer.render_f64(&mut muted);
+            assert!(muted.iter().all(|s| *s == 0.0));
+            let mut boundary = [9.0; 4];
+            renderer.render_f64(&mut boundary);
+            assert_eq!(&boundary[..2], &[0.0, 0.0]);
+            let fade_frames = sample_rate / 10;
+            assert_eq!(boundary[2], 0.5 / f64::from(fade_frames));
+            assert_eq!(boundary[3], -0.25 / f64::from(fade_frames));
+            let mut fade = vec![0.0; (fade_frames as usize - 1) * 2];
+            renderer.render_f64(&mut fade);
+            assert!(
+                fade.chunks_exact(2)
+                    .all(|f| f[0] > 0.0 && f[0] <= 0.5 && f[1] == -f[0] * 0.5)
+            );
+            assert_eq!(&fade[fade.len() - 2..], &[0.5, -0.25]);
+            assert!(renderer.startup_gain.is_none());
+            let mut full = [0.0; 4];
+            renderer.render_f64(&mut full);
+            assert_eq!(full, [0.5, -0.25, 0.5, -0.25]);
+            assert_eq!(block, source);
+        }
+    }
+    #[test]
+    fn startup_clock_advances_while_stopped_and_does_not_restart_on_rewind() {
+        let mut block = AudioBlock::silent(1, 1);
+        block.samples_mut()[0] = 0.5;
+        let audio = PublishedAudio::from_block(&block, 1).unwrap();
+        let (_, reader) = audio_publication(audio);
+        let (control, engine) = playback_session_parts(16).unwrap();
+        let mut renderer =
+            PublishedAudioRenderer::from_engine(reader, 2, u32::MAX, engine).unwrap();
+        renderer.mute_device_startup(100);
+        let mut silence = [1.0; 820]; // 4s + 100ms, stopped.
+        renderer.render_f64(&mut silence);
+        assert!(silence.iter().all(|s| *s == 0.0));
+        control.play().unwrap();
+        let mut output = [0.0; 2];
+        renderer.render_f64(&mut output);
+        assert_eq!(output, [0.5, 0.5]);
+        control.rewind().unwrap();
+        control.play().unwrap();
+        renderer.render_f64(&mut output);
+        assert_eq!(output, [0.5, 0.5]);
+    }
 
     #[test]
     fn looping_callback_finishes_without_allocating_new_audio() {

@@ -13,6 +13,8 @@ Explore all 24 bundled [Plaits model choices](PLAITS.md):
 `cargo run -- tui-song songs/examples/33-plaits-models --lua main.lua`.
 In Ctrl-E, select the model and cycle it with Left/Right; Ctrl-S saves the patch.
 Physical listening acceptance remains pending.
+Live device output starts muted for four seconds, then fades up over 100 ms.
+See [audio output startup](AUDIO_OUTPUT.md); authored mixer values are preserved.
 
 Compose notes with the [Lua APC piano roll](PIANO_ROLL.md):
 `cargo run -- tui-song songs/examples/26-apc-note-pattern --lua main.lua`.

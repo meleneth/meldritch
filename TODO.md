@@ -63,8 +63,17 @@ historical Lua definitions remain compatible. Physical listening is pending.
 - [ ] Example 29: complete composed round-trip across patterns, synths, cables,
   mappings and mixer settings; deterministic source/audio, atomic save failures
 - [x] Run relevant full crate/compatibility suites for the instrument slice
+- [x] Default live device output to zero gain for four seconds, then a 100 ms
+  rise to unity; device-frame clock independent of transport, unchanged authored
+  values/offline renders, 44.1/48 kHz headless boundary tests
 - [ ] Record physical APC pad/hold/fader/listening results separately from
   headless acceptance
+
+Current catalog/startup verification: all 408 workspace tests pass, including
+historical compatibility. Formatting, diff checks, workspace Clippy with existing
+lint allowances, documentation build, and example 33 validation pass. Startup
+mute is headless verified; reported static's cause and physical listening remain
+unverified. See [AUDIO_OUTPUT.md](AUDIO_OUTPUT.md).
 
 Instrument-slice verification: `cargo test --workspace --offline` passed all
 350 tests, including 11 instrument-authoring tests. The checked-in Lua export

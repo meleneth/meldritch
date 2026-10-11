@@ -19,6 +19,7 @@ export default defineConfig({
         { text: 'Controllers', link: '/guide/controllers' },
         { text: 'Instrument editor', link: '/INSTRUMENT_EDITOR' },
         { text: 'Plaits module', link: '/PLAITS' },
+        { text: 'Audio output startup', link: '/AUDIO_OUTPUT' },
         { text: 'Patch composition', link: '/PATCH_EDITOR' },
         { text: 'Fader assignments and mixer', link: '/CONTROL_ASSIGNMENTS' },
         { text: 'Drum editor', link: '/DRUM_EDITOR' },
