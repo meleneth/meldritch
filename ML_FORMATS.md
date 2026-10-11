@@ -13,6 +13,13 @@ authored instrument Lua representation is defined in
 and independent validation/render commands. Existing TOML entry points and
 Lua composition v1 remain compatible; exports do not rewrite them.
 
+Examples 26/27 now accept the first note-pattern authoring subset. Its separate
+version-1 Lua pattern representation, stable IDs, musical tick/duration semantics,
+ownership limits and independent reload/render commands are documented in
+[PIANO_ROLL.md](PIANO_ROLL.md). The `.mlpattern` TOML importer remains compatible;
+implicit historical note identities derive from source event order. New identity
+allocation state is included in fingerprints without changing historical imports.
+
 ## Example-first rule
 
 For every capability:

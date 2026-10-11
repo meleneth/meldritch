@@ -2,6 +2,8 @@
 
 mod instrument;
 pub use instrument::*;
+mod notes;
+pub use notes::*;
 
 use meldritch_audio::device_output::PlaybackControl;
 use meldritch_audio::realtime_queue::{QueueDiagnostics, QueueFull};
@@ -9,7 +11,8 @@ use meldritch_audio::realtime_status::RealtimeStatusSnapshot;
 use meldritch_audio::transport::TransportState;
 use meldritch_core::{
     Arrangement, AutomationInterpolation, AutomationLane, AutomationTarget, AutomationValue,
-    DirtyRange, Frame, Pattern, PatternId, Probability, SceneId, Step, StepIndex, Tempo, TrackId,
+    DirtyRange, EntityId, Frame, FrameRange, Pattern, PatternId, Probability, SceneId, Step,
+    StepIndex, Tempo, TrackId,
 };
 use meldritch_render::coordinator::{RenderCoordinator, RenderCoordinatorDiagnostics};
 use meldritch_render::dsp::{BassVoiceSettings, Waveform, synthesize_bass_sample};
@@ -58,6 +61,22 @@ impl CockpitMode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommand {
+    CreateNotePattern {
+        track: String,
+        id: String,
+        length_ticks: u64,
+        looped: bool,
+    },
+    EditNote {
+        pattern: String,
+        edit: NoteEdit,
+    },
+    SelectNote {
+        pattern: String,
+        id: String,
+    },
+    SavePattern,
+    TogglePatternEditor,
     EditInstrument(InstrumentEdit),
     ToggleInstrumentEditor,
     NavigateInstrument {
@@ -121,6 +140,14 @@ pub struct CommandRecord {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommandResult {
+    PatternEdited {
+        pattern: String,
+        selected_note: Option<String>,
+        changed: bool,
+        dirty_ranges: Vec<FrameRange>,
+    },
+    PatternSelectionChanged,
+    PatternSaveRequested,
     InstrumentEdited {
         edit: InstrumentEdit,
         previous: InstrumentValue,
@@ -443,6 +470,7 @@ pub struct CuratedControlView {
 
 #[derive(Clone, Debug)]
 pub struct AppViewModel {
+    pub pattern_editor: Option<PatternEditorView>,
     pub instrument_editor: Option<InstrumentEditorView>,
     pub song_audio: Option<SongAudioView>,
     pub cockpit_mode: CockpitMode,
@@ -482,6 +510,8 @@ pub struct LaneAudioView {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppInput {
+    SavePattern,
+    TogglePatternEditor,
     ToggleInstrumentEditor,
     NavigateInstrument {
         synth_delta: i32,
@@ -895,6 +925,7 @@ impl Drop for PerformanceFxWorker {
 }
 
 pub struct AppController {
+    pattern_selection: Option<PatternSelection>,
     instrument_editor: Option<InstrumentEditor>,
     song_audio: Option<SongAudioView>,
     cockpit_mode: CockpitMode,
@@ -942,6 +973,7 @@ impl AppController {
         history_capacity: usize,
     ) -> Self {
         Self {
+            pattern_selection: None,
             instrument_editor: None,
             song_audio: None,
             cockpit_mode: CockpitMode::Performance,
@@ -1355,12 +1387,45 @@ impl AppController {
 
     pub fn dispatch(&mut self, command: AppCommand) -> Result<AppCommandResult, AppCommandError> {
         let result = match &command {
+            AppCommand::CreateNotePattern {
+                track,
+                id,
+                length_ticks,
+                looped,
+            } => self.create_pattern(track, id, *length_ticks, *looped)?,
+            AppCommand::EditNote { pattern, edit } => self.edit_note(pattern, edit)?,
+            AppCommand::SelectNote { pattern, id } => self.select_note(pattern, id)?,
+            AppCommand::TogglePatternEditor => {
+                let selection = self.pattern_selection.as_mut().ok_or_else(|| {
+                    AppCommandError::Instrument("no selected note pattern".into())
+                })?;
+                selection.visible = !selection.visible;
+                if selection.visible
+                    && let Some(editor) = self.instrument_editor.as_mut()
+                {
+                    editor.visible = false;
+                }
+                AppCommandResult::PatternSelectionChanged
+            }
+            AppCommand::SavePattern => {
+                if self.pattern_selection.is_none() {
+                    return Err(AppCommandError::Instrument(
+                        "no selected note pattern".into(),
+                    ));
+                }
+                AppCommandResult::PatternSaveRequested
+            }
             AppCommand::EditInstrument(edit) => self.edit_instrument(edit)?,
             AppCommand::ToggleInstrumentEditor => {
                 let editor = self.instrument_editor.as_mut().ok_or_else(|| {
                     AppCommandError::Instrument("no loaded instrument editor".into())
                 })?;
                 editor.visible = !editor.visible;
+                if editor.visible
+                    && let Some(selection) = self.pattern_selection.as_mut()
+                {
+                    selection.visible = false;
+                }
                 AppCommandResult::InstrumentEditorChanged
             }
             AppCommand::NavigateInstrument {
@@ -1650,6 +1715,34 @@ impl AppController {
             }
         };
         let (changed, dirty_ranges) = match &result {
+            AppCommandResult::PatternEdited {
+                pattern,
+                changed,
+                dirty_ranges,
+                ..
+            } => {
+                let owner = self.instrument_editor.as_ref().unwrap();
+                let track = owner.source.authored_pattern(pattern).unwrap().track;
+                let index = owner
+                    .source
+                    .performance()
+                    .tracks()
+                    .iter()
+                    .position(|t| t.id() == track)
+                    .unwrap();
+                (
+                    *changed,
+                    dirty_ranges
+                        .iter()
+                        .map(|range| {
+                            DirtyRange::new(EntityId::Track(TrackId::new(index as u64 + 1)), *range)
+                        })
+                        .collect(),
+                )
+            }
+            AppCommandResult::PatternSelectionChanged | AppCommandResult::PatternSaveRequested => {
+                (false, Vec::new())
+            }
             AppCommandResult::InstrumentEdited { changed, .. } => (*changed, Vec::new()),
             AppCommandResult::InstrumentEditorChanged
             | AppCommandResult::InstrumentSaveRequested => (false, Vec::new()),
@@ -1739,6 +1832,7 @@ impl AppController {
             })
             .collect();
         AppViewModel {
+            pattern_editor: self.pattern_view(),
             instrument_editor: self.instrument_view(),
             song_audio: self.song_audio.clone(),
             cockpit_mode: self.cockpit_mode,
@@ -1893,6 +1987,8 @@ impl AppController {
     pub fn handle_input(&mut self, input: AppInput) -> Result<AppCommandResult, AppCommandError> {
         let pattern_length = self.editor.state().pattern().length_steps();
         let command = match input {
+            AppInput::SavePattern => AppCommand::SavePattern,
+            AppInput::TogglePatternEditor => AppCommand::TogglePatternEditor,
             AppInput::ToggleInstrumentEditor => AppCommand::ToggleInstrumentEditor,
             AppInput::NavigateInstrument {
                 synth_delta,

@@ -54,6 +54,9 @@ pub struct LivePatternEditor {
 }
 
 impl LivePatternEditor {
+    pub const fn timeline_frames(&self) -> u64 {
+        self.timeline_frames as u64
+    }
     #[must_use]
     pub const fn new(state: SampleRenderState, timeline_frames: u32) -> Self {
         Self {

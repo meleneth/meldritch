@@ -15,20 +15,21 @@ use std::fmt;
 mod song;
 
 pub use song::{
-    ActionControlDefinition, CableDefinition, ControlBindingAction, ControlBindingDefinition,
-    CuratedControlDefinition, DspDefinition, InstrumentEdit, InstrumentParameter,
-    InstrumentParameterDefinition, InstrumentParameterId, InstrumentParameterOwner,
-    InstrumentRange, InstrumentValue, InstrumentWaveform, MidiDeviceDefinition,
-    ModifierControlActionDefinition, ModifierControlDefinition, ModuleDefinition, ModuleKind,
-    NoteEventDefinition, NotePatternDefinition, ParameterInterpolation, ParameterLaneDefinition,
-    ParameterOwner, ParameterPatternDefinition, ParameterPointDefinition,
-    ParameterTargetDefinition, PatchInput, PerformanceActionDefinition, PerformanceDefinition,
-    PerformanceLaneDefinition, PerformanceModifierDefinition, PerformancePageDefinition,
-    PerformancePageStripDefinition, PerformancePatternBankDefinition, PerformanceUiDefinition,
-    PerformanceUiKeyHintDefinition, PerformanceUiSectionDefinition, PerformanceUiSectionKind,
-    SampleBankDefinition, SamplePlaybackMode, SampleSliceDefinition, SampleSlotDefinition,
-    SamplerDefinition, SamplerPitchEnvelopeDefinition, SignalType, SongDiagnostic, SongLoadError,
-    SynthDefinition, TrackDefinition, ValidatedSong, load_song_directory,
+    AUTHORING_PPQ, ActionControlDefinition, AuthoredNote, AuthoredPattern, CableDefinition,
+    ControlBindingAction, ControlBindingDefinition, CuratedControlDefinition, DspDefinition,
+    InstrumentEdit, InstrumentParameter, InstrumentParameterDefinition, InstrumentParameterId,
+    InstrumentParameterOwner, InstrumentRange, InstrumentValue, InstrumentWaveform,
+    MidiDeviceDefinition, ModifierControlActionDefinition, ModifierControlDefinition,
+    ModuleDefinition, ModuleKind, NoteEdit, NoteEventDefinition, NotePatternDefinition,
+    ParameterInterpolation, ParameterLaneDefinition, ParameterOwner, ParameterPatternDefinition,
+    ParameterPointDefinition, ParameterTargetDefinition, PatchInput, PerformanceActionDefinition,
+    PerformanceDefinition, PerformanceLaneDefinition, PerformanceModifierDefinition,
+    PerformancePageDefinition, PerformancePageStripDefinition, PerformancePatternBankDefinition,
+    PerformanceUiDefinition, PerformanceUiKeyHintDefinition, PerformanceUiSectionDefinition,
+    PerformanceUiSectionKind, SampleBankDefinition, SamplePlaybackMode, SampleSliceDefinition,
+    SampleSlotDefinition, SamplerDefinition, SamplerPitchEnvelopeDefinition, SignalType,
+    SongDiagnostic, SongLoadError, SynthDefinition, TrackDefinition, ValidatedSong,
+    load_song_directory, note_name,
 };
 
 #[derive(Clone, Debug, PartialEq)]

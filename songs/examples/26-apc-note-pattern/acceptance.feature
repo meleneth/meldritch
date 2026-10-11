@@ -1,9 +1,10 @@
-@design @headless
+@headless
 Feature: Create and assign notes using APC or TUI input
   Background:
     Given the synth from example "01-synth-note-pattern" at 120 BPM and 48000 Hz
-    And a new blank looping one-bar pattern is assigned to its track
-    And the example grid uses eight eighth-note columns and chromatic rows from C3
+    # Bound by crates/meldritch-control/tests/piano_roll.rs, not a Gherkin runner.
+    And Lua NEW creates a blank looping two-bar pattern assigned to its track
+    And the grid uses eight eighth-note columns per page and chromatic rows from C3
 
   Scenario Outline: Two presses author pitched events
     When "<surface>" enters grid cells 0 and 9 with velocity 0.8
@@ -22,10 +23,12 @@ Feature: Create and assign notes using APC or TUI input
       | APC     |
       | TUI     |
 
-  Scenario: Toggle an existing note once
+  Scenario: Select an existing note without deleting it
     Given cell 0 already contains the authored C3 event
     When APC packets "90 00 7f" then "80 00 00" arrive on the declared Control port
-    Then C3 is removed exactly once and the release makes no change
+    Then C3 is selected and retained and the release makes no change
+    When the authored DELETE modifier is held and C3 is pressed
+    Then C3 is removed exactly once and either release order makes no change
 
   Scenario Outline: Reject invalid or unrelated input
     When the pattern receives "<input>"

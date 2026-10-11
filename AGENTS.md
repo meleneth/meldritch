@@ -89,7 +89,10 @@ human-readable Lua. Read `AUTHORING.md` and examples 25–30 before that work.
 Example 25 now has headless `accept` status; example 29's instrument persistence
 foundation is `compile`, with its composed contract unfinished. The supported
 editor and versioned instrument Lua exports are documented in
-`INSTRUMENT_EDITOR.md`. Examples 26–28 and 30 remain `design`.
+`INSTRUMENT_EDITOR.md`. Examples 26/27 now have automated headless `accept`
+status for Lua piano-roll gestures, typed note edits, publication and independent
+Lua pattern reload; read `PIANO_ROLL.md`. Physical APC gesture/LED/listening
+acceptance remains pending. Examples 28 and 30 remain `design`.
 Section 19's unfinished performance infrastructure is retained
 but no longer determines the next implementation slice.
 

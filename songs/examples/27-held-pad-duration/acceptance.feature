@@ -1,4 +1,4 @@
-@design @headless
+@headless
 Feature: Held onset selects an explicit duration endpoint
   Background:
     Given example 26 contains C3 at step 0 with duration one eighth note
@@ -22,19 +22,25 @@ Feature: Held onset selects an explicit duration endpoint
       | event                    |
       | APC disconnect           |
       | MIDI observation overflow|
-      | page switch              |
+      | pitch-range switch       |
       | pattern switch           |
       | selected note deletion   |
 
   Scenario Outline: Reject an invalid endpoint
     Given C3 at step 2 is held
     When endpoint "<endpoint>" is selected
-    Then the invalid endpoint is diagnosed and the note duration is unchanged
+    Then the invalid endpoint is consumed without creating a note or changing duration
     Examples:
       | endpoint           |
       | C3 step 1          |
       | C#3 step 3         |
-      | C3 beyond bar end  |
+      | C3 beyond pattern end |
+
+  Scenario: Extend through a second time page
+    Given C3 at step 0 is held
+    When Lua navigates to time page 1 and endpoint step 9 is pressed
+    Then C3 ends exclusively at step 10 and remains one note
+    And either release order makes no further edit
 
   Scenario: Transport position does not order held gestures
     Given the C3 onset pad is held while playing

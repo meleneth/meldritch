@@ -1,11 +1,15 @@
 # Persist and reload musical edits as Lua
 
-Status: `compile` for the instrument-only foundation; the full composed contract
+Status: `compile` for separate instrument and pattern foundations; the full composed contract
 below remains unimplemented. Example 25's `edited-instrument.lua` and
 `cargo test -p meldritch-control --test instrument_authoring` prove seven-parameter
 exports, independent reload/render, deterministic text, base validation, atomic
-unique saves and failure recovery. Pattern/graph/mapping/mixer authoring remains
-unimplemented.
+unique saves and failure recovery. Examples 26/27 now independently accept
+selected note-pattern exports, stable IDs/counters, musical ticks, assignment,
+gesture cleanup and reload/render via `cargo test -p meldritch-control --test piano_roll`.
+Instrument and pattern exports remain separate definitions; unrelated source
+edits reject selected-pattern export rather than disappear silently. Composed
+exports and graph/mapping/mixer authoring remain unimplemented.
 Use [shared rules](../../../AUTHORING.md#acceptance-execution-contract).
 
 The first subset uses example 25's bass with authored cutoff/release edits. Export

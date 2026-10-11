@@ -1,0 +1,33 @@
+# Uses example 26's source and Lua policy.
+press 116
+release 116
+press 0
+release 0
+press 0
+press 3
+release 0
+release 3
+expect_count 1
+expect_note note-1 C3 0 1920 0.8
+# Invalid cross-row endpoint is consumed; no C#3 insertion.
+press 0
+press 9
+release 9
+cancel
+release 0
+expect_count 1
+# Duplicate note-ons do not toggle or insert.
+press 0
+press 0
+disconnect
+connect
+zero 0
+expect_count 1
+# Rewind cannot reorder physical pad events or invalidate musical coordinates.
+press 0
+rewind
+press 4
+zero 4
+release 0
+expect_note note-1 C3 0 2400 0.8
+wait

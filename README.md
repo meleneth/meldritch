@@ -9,6 +9,10 @@ Edit an existing synth with **Ctrl-E** in `tui-song`, then save a readable Lua
 definition with **Ctrl-S**. See [the instrument editor guide](INSTRUMENT_EDITOR.md)
 for the supported parameters, independent reload/render commands and test scope.
 
+Compose notes with the [Lua APC piano roll](PIANO_ROLL.md):
+`cargo run -- tui-song songs/examples/26-apc-note-pattern --lua main.lua`.
+Physical gesture/LED/listening acceptance is still pending.
+
 For the connected APC Mini MK2, start the four-lane playground:
 
 ```sh

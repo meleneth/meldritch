@@ -28,10 +28,10 @@ Status values:
 | `23-midi-reconnect` | Paced production MIDI input/output recovery, stale-observation rejection, pickup/layer release and RGB reconstruction; failure composition accepted headlessly using immutable example 22, physical cable acceptance pending | accept |
 | `24-audio-aware-widgets` | Generation-tagged song publication, production callback acknowledgement, reusable queued/ready/playing/error Lua widgets and shared native TUI projection; rapid supersession, failure, readonly API, reconnect and compatibility accepted headlessly, hardware/listening pending | accept |
 | `25-edit-existing-synth` | Typed oscillator/ADSR/low-pass inspection and keyboard/Lua source edits, worker publication, unique Lua export and independent reload/render; automated headless acceptance, physical listening untested | accept |
-| `26-apc-note-pattern` | APC/TUI creation of a pitched one-bar note pattern, assignment and Lua persistence contract; unimplemented, hardware pending | design |
-| `27-held-pad-duration` | Held-pad endpoint editing of explicit multi-step note duration and lost-release cleanup contract; unimplemented, hardware pending | design |
+| `26-apc-note-pattern` | Lua grid policy creates/assigns and edits typed synth notes, velocity/delete modifiers, time/pitch navigation, shared native inspection, LED projections and versioned Lua persistence; automated headless acceptance, physical gestures/listening pending | accept |
+| `27-held-pad-duration` | Release-aware held-start inclusive endpoint/exclusive end, cross-page duration, interruption/duplicate/rewind handling and deterministic reload/render via example 26; automated headless acceptance, physical holds/LEDs/listening pending | accept |
 | `28-author-fader-mappings` | Editable cutoff/lane-level physical mappings, pickup and Lua persistence contract; unimplemented, hardware pending | design |
-| `29-lua-authored-roundtrip` | Instrument-only v1 Lua export/reload, confined base validation and atomic saves accepted via example 25; composed patterns/cables/mappings/mixer authoring unimplemented | compile |
+| `29-lua-authored-roundtrip` | Separate instrument and note-pattern v1 Lua export/reload, confined base validation and atomic saves accepted via examples 25/26; composed patterns/instruments/cables/mappings/mixer export unimplemented | compile |
 | `30-compose-typed-patch` | Existing oscillator/ADSR/VCA/low-pass graph composition, inspection and Lua persistence contract; unimplemented | design |
 
 An implementation may advance a row only when all earlier statuses for that row

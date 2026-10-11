@@ -250,7 +250,7 @@ impl ApcFeedback {
     ) -> Result<usize> {
         let mut next = std::collections::BTreeMap::new();
         for (cell, presentation) in &frame.cells {
-            if *cell >= 64 {
+            if !crate::SurfaceKind::ApcMiniMk2.accepts_cell(*cell) {
                 return Err("APC presentation cell out of range".into());
             }
             let rgb = match presentation.color.as_str() {
@@ -276,7 +276,11 @@ impl ApcFeedback {
         for cell in cells {
             let rgb = next.get(&cell).copied().unwrap_or([0; 3]);
             if self.force || self.sent.get(&cell) != Some(&rgb) {
-                send(&apc_rgb(cell, rgb)?)?;
+                if cell < 64 {
+                    send(&apc_rgb(cell, rgb)?)?;
+                } else {
+                    send(&[0x90, cell, if rgb == [0, 0, 0] { 0 } else { 127 }])?;
+                }
                 count += 1;
             }
         }

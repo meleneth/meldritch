@@ -1,0 +1,16 @@
+[meldritch]
+kind = "performance"
+version = 1
+[performance]
+id = "piano-roll"
+title = "Lua Piano Roll"
+bpm = 120.0
+sample_rate = 48000
+[[tracks]]
+id = "bass"
+synth = "synths/bass.mlsynth"
+patterns = ["patterns/seed.mlpattern"]
+initial_pattern = "seed"
+[[midi_devices]]
+id = "apc-mini"
+name_contains = "APC mini mk2 Control"

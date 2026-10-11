@@ -21,7 +21,7 @@ struct Definition {
     parameters: Vec<InstrumentEdit>,
 }
 
-fn quote(value: &str) -> String {
+pub(crate) fn quote(value: &str) -> String {
     let mut out = String::from("\"");
     for ch in value.chars() {
         match ch {
@@ -121,9 +121,26 @@ pub fn load_instrument_file(root: impl AsRef<Path>, relative: &Path) -> Result<V
 /// Atomic, create-new exports. Never overwrite a script, TOML or performance journal.
 pub fn save_instrument(view: &InstrumentEditorView) -> Result<PathBuf> {
     let source = encode_instrument(view)?;
-    let root = view.source.root().canonicalize().map_err(error)?;
-    if load_song_directory(&root).map_err(error)?.fingerprint() != view.base_fingerprint {
-        return Err("cannot save instrument: base song fingerprint changed".into());
+    save_definition(
+        view.source.root(),
+        view.base_fingerprint,
+        "instrument",
+        &source,
+    )
+}
+
+pub(crate) fn save_definition(
+    root: &Path,
+    base_fingerprint: u64,
+    kind: &str,
+    source: &str,
+) -> Result<PathBuf> {
+    if source.len() > 256 * 1024 {
+        return Err("authored export exceeds Lua source size limit".into());
+    }
+    let root = root.canonicalize().map_err(error)?;
+    if load_song_directory(&root).map_err(error)?.fingerprint() != base_fingerprint {
+        return Err(format!("cannot save {kind}: base song fingerprint changed"));
     }
     let directory = root.join("authored");
     fs::create_dir_all(&directory).map_err(error)?;
@@ -140,8 +157,8 @@ pub fn save_instrument(view: &InstrumentEditorView) -> Result<PathBuf> {
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     );
-    let temporary = directory.join(format!(".instrument-{token}.tmp"));
-    let destination = directory.join(format!("instrument-{token}.lua"));
+    let temporary = directory.join(format!(".{kind}-{token}.tmp"));
+    let destination = directory.join(format!("{kind}-{token}.lua"));
     let result = (|| {
         let mut file = fs::OpenOptions::new()
             .write(true)

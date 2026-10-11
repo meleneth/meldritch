@@ -340,6 +340,8 @@ enum Command {
         /// Reload a confined authored instrument Lua definition over this TOML song.
         #[arg(long)]
         instrument: Option<PathBuf>,
+        #[arg(long, conflicts_with = "instrument")]
+        pattern: Option<PathBuf>,
     },
     /// Independently reload an authored instrument and render using the song compiler.
     RenderInstrument {
@@ -348,6 +350,15 @@ enum Command {
         #[arg(long)]
         output: PathBuf,
         #[arg(long, default_value_t = 96000)]
+        frames: u64,
+    },
+    /// Reload a Lua-authored pattern and render through the existing compiler.
+    RenderPattern {
+        song: PathBuf,
+        pattern: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = 192000)]
         frames: u64,
     },
     /// List MIDI ports and monitor script-defined MIDI control bindings.
@@ -682,6 +693,8 @@ enum Command {
         /// Confined authored instrument definition; historical TOML stays the base.
         #[arg(long)]
         instrument: Option<PathBuf>,
+        #[arg(long, conflicts_with = "instrument")]
+        pattern: Option<PathBuf>,
         #[arg(long)]
         frames: Option<u64>,
         #[arg(long, default_value_t = 4096)]
@@ -861,7 +874,22 @@ fn run(cli: Cli) -> Result<(), String> {
             clear,
         } => apc_lua_colors(source, dry_run, port, clear),
         Command::Validate { project } => validate_project(project),
-        Command::ValidateSong { song, instrument } => validate_song(song, instrument),
+        Command::ValidateSong {
+            song,
+            instrument,
+            pattern,
+        } => {
+            if let Some(file) = pattern {
+                let (loaded, _) = meldritch_control::pattern::load_pattern_file(&song, &file)?;
+                println!(
+                    "valid authored pattern song · fingerprint {:016x}",
+                    loaded.fingerprint()
+                );
+                Ok(())
+            } else {
+                validate_song(song, instrument)
+            }
+        }
         Command::RenderInstrument {
             song,
             instrument,
@@ -874,6 +902,19 @@ fn run(cli: Cli) -> Result<(), String> {
                 .map_err(|error| format!("{error:?}"))?;
             meldritch_audio::write_wav_f32(output, &block, song.performance().sample_rate())
                 .map_err(|error| error.to_string())
+        }
+        Command::RenderPattern {
+            song,
+            pattern,
+            output,
+            frames,
+        } => {
+            let (loaded, _) = meldritch_control::pattern::load_pattern_file(song, &pattern)?;
+            let block = CompiledSongPatch::compile_initial(&loaded)?
+                .render_default(FrameRange::new(0, frames).map_err(|e| format!("{e:?}"))?)
+                .map_err(|e| format!("{e:?}"))?;
+            meldritch_audio::write_wav_f32(output, &block, loaded.performance().sample_rate())
+                .map_err(|e| e.to_string())
         }
         Command::MidiControlsCheck { song, seconds } => midi_controls_check(song, seconds),
         Command::TransformChunk {
@@ -1103,6 +1144,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::TuiSong {
             song,
             instrument,
+            pattern,
             frames,
             chunk_frames,
             workers,
@@ -1126,6 +1168,7 @@ fn run(cli: Cli) -> Result<(), String> {
             lua,
             soft_takeover,
             instrument,
+            pattern,
         ),
         Command::TuiBassline {
             project,
@@ -2989,10 +3032,17 @@ fn tui_song(
     lua_source: Option<PathBuf>,
     soft_takeover: bool,
     instrument: Option<PathBuf>,
+    authored_pattern: Option<PathBuf>,
 ) -> Result<(), String> {
     let base = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
+    let restored_pattern = authored_pattern
+        .map(|file| meldritch_control::pattern::load_pattern_file(&path, &file))
+        .transpose()?;
+    let selected_pattern = restored_pattern.as_ref().map(|(_, id)| id.clone());
     let song = if let Some(file) = instrument {
         meldritch_control::instrument::load_instrument_file(&path, &file)?
+    } else if let Some((song, _)) = restored_pattern {
+        song
     } else {
         base.clone()
     };
@@ -3068,7 +3118,21 @@ fn tui_song(
         256,
     );
     if !song.synths().is_empty() {
-        controller.enable_instrument_editor_from(base, song.clone())?;
+        if let Some(pattern) = &selected_pattern {
+            controller.enable_pattern_authoring_from(base, song.clone(), pattern)?;
+        } else {
+            controller.enable_instrument_editor_from(base, song.clone())?;
+            if let Some(id) = song
+                .performance()
+                .tracks()
+                .iter()
+                .find_map(|t| t.initial_pattern())
+            {
+                if song.authored_pattern(id).is_ok() {
+                    controller.enable_pattern_editor(id)?;
+                }
+            }
+        }
     }
     let mut controls = song_controls_for_view(
         &song,
@@ -3333,6 +3397,18 @@ fn tui_song(
                 }
             }
             let dropped_control = control_queue.take_dropped();
+            if dropped_control > 0
+                && let Some(performance) = lua_performance.borrow_mut().as_mut()
+            {
+                if let Err(error) = performance.cancel(
+                    lua_surface.as_deref().unwrap(),
+                    controller,
+                    &mut host.lock().expect("song host lock poisoned"),
+                    &mut tick_capture.lock().expect("capture lock poisoned"),
+                ) {
+                    message = Some(format!("Lua gesture cancellation: {error}"));
+                }
+            }
             let mut stale_control = 0;
             for _ in 0..meldritch_control::QUEUE_CAPACITY {
                 let Some(observed) = control_queue.next() else {
@@ -3343,15 +3419,27 @@ fn tui_song(
                     continue;
                 }
                 if lua_surface.as_deref() == Some(observed.device.as_ref())
-                    && let Some(meldritch_control::devices::ApcInput::Grid { cell, pressed }) =
-                        meldritch_control::devices::decode_apc(0, &observed.bytes)
+                    && let Some((cell, pressed)) =
+                        match meldritch_control::devices::decode_apc(0, &observed.bytes) {
+                            Some(meldritch_control::devices::ApcInput::Grid { cell, pressed }) => {
+                                Some((cell, pressed))
+                            }
+                            Some(meldritch_control::devices::ApcInput::Button {
+                                note,
+                                pressed,
+                            }) => Some((note, pressed)),
+                            _ => None,
+                        }
                     && lua_route.owns_cell(cell)
                 {
-                    if pressed && let Some(performance) = lua_performance.borrow_mut().as_mut() {
+                    if dropped_control == 0
+                        && let Some(performance) = lua_performance.borrow_mut().as_mut()
+                    {
                         let frame = u64::from(controller.view_model().transport.position);
-                        if let Err(error) = performance.press(
+                        if let Err(error) = performance.pad(
                             &observed.device,
                             cell,
+                            pressed,
                             frame,
                             controller,
                             &mut host.lock().expect("song host lock poisoned"),
@@ -3564,7 +3652,9 @@ fn song_scene_bank(
     let single_track = song.performance().tracks().len() == 1;
     let track = &song.performance().tracks()[0];
     let pattern_ids = track.pattern_ids();
-    if pattern_ids.is_empty() {
+    // The legacy scene bank assumes a delayed single-track graph. Plain note
+    // authoring uses the existing mixed compiler and its authored assignment.
+    if pattern_ids.is_empty() || (single_track && track.dsp_ids().is_empty()) {
         return Ok(SongSceneBank {
             patches: BTreeMap::new(),
             #[cfg(test)]
@@ -6970,6 +7060,63 @@ fn resolve_project_path(project_path: &Path, relative_or_absolute: &str) -> Path
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn piano_roll_loads_before_devices_and_preserves_legacy_toml_entrypoint() {
+        let root = example_song_path("songs/examples/26-apc-note-pattern");
+        let base = meldritch_dsl::load_song_directory(&root).unwrap();
+        assert_eq!(format!("{:016x}", base.fingerprint()), "0972153104a6ee74");
+        assert!(
+            song_scene_bank(&base, tempo_from_song(&base).unwrap())
+                .unwrap()
+                .patches
+                .is_empty()
+        );
+        let parsed = Cli::try_parse_from([
+            "meldritch",
+            "tui-song",
+            root.to_str().unwrap(),
+            "--lua",
+            "main.lua",
+            "--pattern",
+            "edited-pattern.lua",
+            "--no-midi-controls",
+        ])
+        .unwrap();
+        assert!(matches!(
+            parsed.command,
+            Command::TuiSong {
+                pattern: Some(_),
+                ..
+            }
+        ));
+        let (loaded, _) =
+            meldritch_control::pattern::load_pattern_file(&root, Path::new("edited-pattern.lua"))
+                .unwrap();
+        let project = load_lua_controls(&base, Path::new("main.lua")).unwrap();
+        assert_eq!(project.song.fingerprint(), base.fingerprint());
+        assert_ne!(loaded.fingerprint(), base.fingerprint());
+        assert!(
+            CompiledSongPatch::compile_initial(&loaded)
+                .unwrap()
+                .render_default(FrameRange::new(0, 192000).unwrap())
+                .unwrap()
+                .peak_abs()
+                > 0.01
+        );
+        assert!(
+            Cli::try_parse_from([
+                "meldritch",
+                "validate-song",
+                root.to_str().unwrap(),
+                "--pattern",
+                "edited-pattern.lua",
+                "--instrument",
+                "other.lua"
+            ])
+            .is_err()
+        );
+    }
 
     fn example_song_path(relative: &str) -> PathBuf {
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));

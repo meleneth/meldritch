@@ -13,6 +13,7 @@ use std::rc::Rc;
 pub type Result<T> = std::result::Result<T, String>;
 pub mod instrument;
 pub mod led_demo;
+pub mod pattern;
 pub mod performance;
 pub mod pickup;
 pub mod reconnect;
@@ -33,6 +34,16 @@ pub enum SurfaceKind {
 }
 
 impl SurfaceKind {
+    pub fn accepts_cell(self, cell: u8) -> bool {
+        cell < self.cells()
+            || match self {
+                Self::ApcMiniMk2 => {
+                    (100..=107).contains(&cell) || (112..=119).contains(&cell) || cell == 122
+                }
+                Self::Tui => cell < 128,
+                Self::StreamDeckXl => false,
+            }
+    }
     pub fn cells(self) -> u8 {
         match self {
             Self::ApcMiniMk2 => 64,
@@ -70,16 +81,47 @@ struct Binding {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "name", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CommandRequest {
-    EditInstrument { edit: meldritch_dsl::InstrumentEdit },
-    SetMode { mode: Mode },
+    CreateNotePattern {
+        track: String,
+        id: String,
+        length_ticks: u64,
+        looped: bool,
+    },
+    EditNote {
+        pattern: String,
+        edit: meldritch_dsl::NoteEdit,
+    },
+    SelectNote {
+        pattern: String,
+        id: String,
+    },
+    SavePattern,
+    EditInstrument {
+        edit: meldritch_dsl::InstrumentEdit,
+    },
+    SetMode {
+        mode: Mode,
+    },
     Play,
     Stop,
     Rewind,
-    SelectPage { id: String },
-    SelectLaneVariation { lane: String, variation: String },
-    ToggleLaneMute { lane: String },
-    ToggleLaneSolo { lane: String },
-    SetControl { id: String, value: f64 },
+    SelectPage {
+        id: String,
+    },
+    SelectLaneVariation {
+        lane: String,
+        variation: String,
+    },
+    ToggleLaneMute {
+        lane: String,
+    },
+    ToggleLaneSolo {
+        lane: String,
+    },
+    SetControl {
+        id: String,
+        value: f64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -101,6 +143,26 @@ impl CommandRequest {
             _ => {}
         }
         Ok(match self {
+            Self::CreateNotePattern {
+                track,
+                id,
+                length_ticks,
+                looped,
+            } => AppCommand::CreateNotePattern {
+                track: track.clone(),
+                id: id.clone(),
+                length_ticks: *length_ticks,
+                looped: *looped,
+            },
+            Self::EditNote { pattern, edit } => AppCommand::EditNote {
+                pattern: pattern.clone(),
+                edit: edit.clone(),
+            },
+            Self::SelectNote { pattern, id } => AppCommand::SelectNote {
+                pattern: pattern.clone(),
+                id: id.clone(),
+            },
+            Self::SavePattern => AppCommand::SavePattern,
             Self::EditInstrument { edit } => AppCommand::EditInstrument(edit.clone()),
             Self::SetMode { mode } => AppCommand::SetCockpitMode(match mode {
                 Mode::Performance => CockpitMode::Performance,
@@ -130,6 +192,7 @@ impl CommandRequest {
 }
 
 struct Widget {
+    events: bool,
     dependencies: BTreeSet<String>,
     interact: Function,
     present: Function,
@@ -208,7 +271,10 @@ fn identity(id: &str) -> Result<()> {
     }
 }
 fn tables(table: Table) -> Result<Vec<Table>> {
-    if table.raw_len() > MAX_DEFINITIONS {
+    tables_limit(table, MAX_DEFINITIONS)
+}
+fn tables_limit(table: Table, maximum: usize) -> Result<Vec<Table>> {
+    if table.raw_len() > maximum {
         return Err("too many definitions".into());
     }
     let count = table.clone().pairs::<Value, Value>().count();
@@ -334,6 +400,7 @@ impl LuaProject {
                         "transport",
                         "audio",
                         "instrument",
+                        "pattern",
                     ]
                     .contains(&d.as_str())
                 })
@@ -346,6 +413,10 @@ impl LuaProject {
                 Widget {
                     dependencies: dependencies.into_iter().collect(),
                     interact: table.get("interact").map_err(error)?,
+                    events: table
+                        .get::<Option<bool>>("events")
+                        .map_err(error)?
+                        .unwrap_or(false),
                     present: table.get("present").map_err(error)?,
                 },
             )?;
@@ -358,7 +429,7 @@ impl LuaProject {
                 return Err("too many transitions".into());
             }
             let bindings = match table.get::<Option<Table>>("bindings").map_err(error)? {
-                Some(table) => tables(table)?
+                Some(table) => tables_limit(table, 256)?
                     .into_iter()
                     .map(|t| lua.from_value(Value::Table(t)).map_err(error))
                     .collect::<Result<Vec<Binding>>>()?,
@@ -407,7 +478,7 @@ impl LuaProject {
                     .surfaces
                     .get(&binding.surface)
                     .ok_or_else(|| format!("unknown surface '{}'", binding.surface))?;
-                if binding.cell >= surface.kind.cells()
+                if !surface.kind.accepts_cell(binding.cell)
                     || !cells.insert((&binding.surface, binding.cell))
                 {
                     return Err(format!("invalid/duplicate binding in '{id}'"));
@@ -455,6 +526,39 @@ impl LuaProject {
 
     fn projection(&self, view: &AppViewModel) -> Result<Table> {
         let values = self.lua.create_table().map_err(error)?;
+        if let Some(editor) = &view.pattern_editor {
+            let pattern = self
+                .lua
+                .to_value(&editor.pattern)
+                .map_err(error)?
+                .as_table()
+                .unwrap()
+                .clone();
+            pattern
+                .set("selected_note", editor.selected_note.clone())
+                .map_err(error)?;
+            pattern
+                .set(
+                    "fingerprint",
+                    format!("{:016x}", editor.source.fingerprint()),
+                )
+                .map_err(error)?;
+            let position = u64::from(view.transport.position);
+            let frame = if editor.pattern.looped {
+                position % editor.source.note_patterns()[&editor.pattern.id].length_frames()
+            } else {
+                position
+            };
+            let tick = (frame as f64
+                * editor.source.performance().bpm()
+                * meldritch_dsl::AUTHORING_PPQ as f64
+                / (f64::from(editor.source.performance().sample_rate()) * 60.0))
+                .floor() as u64;
+            pattern.set("playhead_tick", tick).map_err(error)?;
+            values
+                .set("pattern", self.readonly_tree(pattern)?)
+                .map_err(error)?;
+        }
         if let Some(editor) = &view.instrument_editor {
             let instrument = self.lua.create_table().map_err(error)?;
             instrument.set("id", editor.synth.clone()).map_err(error)?;
@@ -656,6 +760,8 @@ impl LuaProject {
 
 #[derive(Clone, Debug)]
 pub enum Input {
+    Pad { cell: u8, pressed: bool },
+    Cancel,
     Press(u8),
     Named(String),
     Connection(bool),
@@ -851,6 +957,17 @@ pub struct ControlPlane {
 }
 
 impl ControlPlane {
+    /// Missing release/overflow invalidates queued pad observations, not accepted facts.
+    pub fn interrupt_surface(&mut self, source: &str, frame: u64) -> Result<()> {
+        self.queue.retain(|e| {
+            !(e.source == source
+                && matches!(
+                    e.payload,
+                    EventPayload::Observed(Input::Pad { .. } | Input::Press(_))
+                ))
+        });
+        self.enqueue(source, frame, Input::Cancel)
+    }
     pub fn new(project: LuaProject, app: &AppController) -> Result<Self> {
         let active = project.initial.clone();
         let connected = project.surfaces.keys().cloned().collect();
@@ -911,7 +1028,12 @@ impl ControlPlane {
         }
         // Availability is not a scheduled musical action. A rewound/stopped
         // playhead must not prevent a disconnect from removing its surface.
-        if frame < self.last_frame && !matches!(&input, Input::Connection(_)) {
+        if frame < self.last_frame
+            && !matches!(
+                &input,
+                Input::Connection(_) | Input::Pad { .. } | Input::Cancel
+            )
+        {
             return Err("input frame moved backwards".into());
         }
         self.last_frame = self.last_frame.max(frame);
@@ -996,6 +1118,37 @@ impl ControlPlane {
             u64,
         ) -> Result<Option<String>>,
     ) -> Result<()> {
+        if matches!(
+            event.payload,
+            EventPayload::Observed(Input::Connection(false) | Input::Cancel)
+        ) {
+            // Physical availability is authoritative even if a Lua cancel
+            // handler fails. Bad presentation must not retain a disconnected surface.
+            if matches!(
+                event.payload,
+                EventPayload::Observed(Input::Connection(false))
+            ) {
+                self.connected.remove(&event.source);
+                self.outputs.remove(&event.source);
+            }
+            let projection = self.project.projection(&app.view_model())?;
+            for widget in self.project.widgets.values().filter(|w| w.events) {
+                let input = self.project.lua.create_table().map_err(error)?;
+                input.set("kind", "cancel").map_err(error)?;
+                input.set("source", event.source.as_str()).map_err(error)?;
+                self.project.arm();
+                let result: Value = widget
+                    .interact
+                    .call((projection.clone(), input))
+                    .map_err(error)?;
+                if !result.is_nil() {
+                    return Err("cancel handlers cannot mutate musical state".into());
+                }
+            }
+            if matches!(event.payload, EventPayload::Observed(Input::Cancel)) {
+                return self.refresh_at(app, event.frame);
+            }
+        }
         if let EventPayload::Observed(Input::Connection(connected)) = event.payload {
             if connected {
                 self.connected.insert(event.source.clone());
@@ -1022,7 +1175,7 @@ impl ControlPlane {
         }
         let projection = self.project.projection(&app.view_model())?;
         let (decision, handler) = match &event.payload {
-            EventPayload::Observed(Input::Press(cell)) => {
+            EventPayload::Observed(Input::Press(cell) | Input::Pad { cell, .. }) => {
                 let binding = self.project.states[&self.active]
                     .bindings
                     .iter()
@@ -1030,21 +1183,45 @@ impl ControlPlane {
                     .ok_or("unbound surface cell")?
                     .clone();
                 if let Some(widget) = binding.widget {
+                    let pressed = !matches!(
+                        event.payload,
+                        EventPayload::Observed(Input::Pad { pressed: false, .. })
+                    );
+                    if !pressed && !self.project.widgets[&widget].events {
+                        return self.refresh_at(app, event.frame);
+                    }
                     self.log(event, Phase::Handler, format!("widget {widget}"));
                     self.project.arm();
+                    let input = self.project.lua.create_table().map_err(error)?;
+                    input
+                        .set("kind", if pressed { "press" } else { "release" })
+                        .map_err(error)?;
+                    input.set("cell", *cell).map_err(error)?;
+                    input.set("source", event.source.as_str()).map_err(error)?;
+                    input.set("frame", event.frame.to_string()).map_err(error)?;
                     let value: Value = self.project.widgets[&widget]
                         .interact
-                        .call(projection)
+                        .call((projection, input))
                         .map_err(error)?;
-                    let command = self.project.lua.from_value(value).map_err(error)?;
+                    let command = if value.is_nil() {
+                        None
+                    } else {
+                        Some(self.project.lua.from_value(value).map_err(error)?)
+                    };
                     (
                         Decision {
-                            command: Some(command),
+                            command,
                             ..Decision::default()
                         },
                         None,
                     )
                 } else {
+                    if matches!(
+                        event.payload,
+                        EventPayload::Observed(Input::Pad { pressed: false, .. })
+                    ) {
+                        return self.refresh_at(app, event.frame);
+                    }
                     self.handle_named(binding.event.as_deref().unwrap(), projection, event)?
                 }
             }
@@ -1052,6 +1229,7 @@ impl ControlPlane {
                 self.handle_named(name, projection, event)?
             }
             EventPayload::Observed(Input::Connection(_)) => unreachable!(),
+            EventPayload::Observed(Input::Cancel) => unreachable!(),
             EventPayload::Fact(DomainEvent::CommandAccepted) => {
                 self.handle_named("command_accepted", projection, event)?
             }
@@ -1252,7 +1430,12 @@ impl ControlPlane {
                     self.project.arm();
                     let result: Value = widget
                         .present
-                        .call((projection.clone(), kind.name(), self.active.as_str()))
+                        .call((
+                            projection.clone(),
+                            kind.name(),
+                            self.active.as_str(),
+                            binding.cell,
+                        ))
                         .map_err(error)?;
                     let presentation: Presentation =
                         self.project.lua.from_value(result).map_err(error)?;

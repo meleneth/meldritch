@@ -6,6 +6,8 @@ use std::path::{Component, Path, PathBuf};
 
 mod instrument;
 pub use instrument::*;
+mod notes;
+pub use notes::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SignalType {
@@ -297,6 +299,7 @@ impl TrackDefinition {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NoteEventDefinition {
+    id: String,
     start_frame: u64,
     duration_frames: u64,
     note: u8,
@@ -308,6 +311,9 @@ pub struct NoteEventDefinition {
 }
 
 impl NoteEventDefinition {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
     #[must_use]
     pub const fn start_frame(&self) -> u64 {
         self.start_frame
@@ -351,6 +357,7 @@ impl NoteEventDefinition {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NotePatternDefinition {
+    next_note_id: u64,
     id: String,
     length_frames: u64,
     looped: bool,
@@ -3778,6 +3785,7 @@ fn load_note_pattern(
             ));
         }
         events.push(NoteEventDefinition {
+            id: format!("note-{}", events.len() + 1),
             start_frame,
             duration_frames,
             note: parse_note(path, &raw_event.note)?,
@@ -3793,6 +3801,7 @@ fn load_note_pattern(
         });
     }
     Ok(NotePatternDefinition {
+        next_note_id: events.len() as u64 + 1,
         id: raw.pattern.id,
         length_frames,
         looped: raw.pattern.looped,
@@ -4657,7 +4666,17 @@ fn fingerprint_song(
         fingerprint.string(&pattern.id);
         fingerprint.u64(pattern.length_frames);
         fingerprint.u64(u64::from(pattern.looped));
-        for event in &pattern.events {
+        // Historical implicit identities derive from event order. Extra identity
+        // state is fingerprinted only when it differs from that canonical import.
+        if pattern.next_note_id != pattern.events.len() as u64 + 1 {
+            fingerprint.string("next_note_id");
+            fingerprint.u64(pattern.next_note_id);
+        }
+        for (index, event) in pattern.events.iter().enumerate() {
+            if event.id != format!("note-{}", index + 1) {
+                fingerprint.string("note_id");
+                fingerprint.string(&event.id);
+            }
             fingerprint.u64(event.start_frame);
             fingerprint.u64(event.duration_frames);
             fingerprint.u64(u64::from(event.note));

@@ -156,6 +156,10 @@ impl PerformanceSessionCapture {
         use crate::CommandRequest as R;
         use meldritch_app::AppInput as I;
         let input = match request {
+            R::CreateNotePattern { .. } | R::EditNote { .. } | R::SelectNote { .. } => {
+                I::TogglePatternEditor
+            }
+            R::SavePattern => I::SavePattern,
             R::EditInstrument { edit } => I::EditInstrument(edit.clone()),
             R::SetMode { .. } => I::ToggleCockpitMode,
             R::Play => I::TogglePlayback,
@@ -377,6 +381,22 @@ pub fn session_result_fields(
     result: &meldritch_app::AppCommandResult,
 ) -> (String, Option<String>, Option<String>, Option<String>) {
     match result {
+        meldritch_app::AppCommandResult::PatternEdited {
+            pattern,
+            selected_note,
+            ..
+        } => (
+            "note_pattern".into(),
+            Some(pattern.clone()),
+            None,
+            selected_note.clone(),
+        ),
+        meldritch_app::AppCommandResult::PatternSelectionChanged => {
+            ("note_selection".into(), None, None, None)
+        }
+        meldritch_app::AppCommandResult::PatternSaveRequested => {
+            ("authored_pattern_save".into(), None, None, None)
+        }
         meldritch_app::AppCommandResult::InstrumentEdited { edit, previous, .. } => (
             "instrument_definition".to_owned(),
             Some(format!("{:?}", edit.target)),

@@ -1,19 +1,36 @@
 # Create a note pattern on an APC Mini MK2
 
-Status: `design`; authoring and feature bindings are unimplemented. Baseline:
-`../01-synth-note-pattern`, using its existing synth and a newly created blank
-pattern. Apply [shared rules](../../../AUTHORING.md#acceptance-execution-contract).
+Status: `accept` for the scoped automated headless contract. Physical gestures,
+orientation, LEDs and listening remain untested. Run
+`cargo test -p meldritch-control --test piano_roll` or
+`cargo run -p meldritch-control --example piano_roll`. The readable feature file
+indexes scenarios bound by these Rust tests; there is no separate Gherkin runner.
 
-The authored interaction maps the Session grid's eight columns to eighth-note
-steps in one bar and rows from bottom upward to C3..G3 chromatically. This is
-example policy, not hard-coded Rust controller behavior. Bottom-left note 0
-creates C3 at step 0; note 9 creates C#3 at step 1. TUI equivalent inputs produce
-the same notes. Initial duration is 1/8 and velocity 0.8. A press toggles a note;
-its release never toggles it again. Display pitch, onset, duration and assignment
-in the TUI and derive APC feedback from authoritative notes.
+The Lua policy maps eight eighth-note columns and chromatic C3..G3 rows. It
+starts with a blank two-bar seed; NEW creates/assigns `roll`. Two bars allow
+cross-page endpoints. Pad 0 creates C3 at step 0; pad 9 creates C#3 at step 1,
+both at velocity 0.8 with one-step duration. Existing starts select, never toggle.
+Bodies select without starting a duration gesture. Explicit held controls delete
+and change velocity. Release creates no commands. These policies live in Lua;
+Rust validates typed note/selection/create commands against the single song
+source. Actual MIDI packet decoding, wrong-channel/malformed rejection, logical
+terminal equivalence and native 80×24 inspection are verified headlessly.
 
-Persist new pattern identity, bar length, looping, notes with musical positions/
-durations/velocity and track assignment in Lua. At 120 BPM/48 kHz the first
-onset is frame 0, second 12000, each duration 12000. Reload has equal source/audio.
-These are note events, not lane variation launch buttons. Physical tests must
-confirm Session orientation, press/release, displayed notes and listening.
+`scripts/compose.pads` asserts creation, duration, velocity, time navigation,
+cross-page extension, deletion and save. Every edit changes finite rendered audio;
+rapid edits publish only the latest generation. Tests prove the unchanged prefix
+before an affected onset, dirty ranges through voice/filter/tail/loop dependencies,
+exact publication samples, ongoing transport, callback consumption and split
+render identity. The APC and logical terminal project equal note labels/colors;
+native TUI shows the same selected pattern, note IDs, pitches, starts and ends.
+
+Persistence saves the entire selected pattern, length/loop, readable note names,
+960-PPQ onset/duration/velocity, stable IDs/counter and track assignment over the
+unchanged base fingerprint. Independent `edited-pattern.lua` reload compiles and
+renders identical audio without hardware/journal. Unique atomic saves preserve
+TOML, scripts, previous exports and journals; failures retain source. Invalid
+versions, values, ranges, IDs/counters, paths and bases reject. Unsupported
+sample/ownership/time translation and unrelated source edits refuse lossy export.
+Full composed-song exports and native keyboard grid creation remain outside this
+slice. See [PIANO_ROLL.md](../../../PIANO_ROLL.md) for controls, duration policy,
+commands, persistence syntax, independent validation/render and physical limits.

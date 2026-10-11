@@ -32,6 +32,7 @@ fn historical_song_directories_load_compile_and_retain_range_identical_audio() {
         ("22-midi-soft-takeover", "mix"),
         ("24-audio-aware-widgets", "mix"),
         ("25-edit-existing-synth", "mix"),
+        ("26-apc-note-pattern", "blank_mix"),
     ];
     for (fixture, compiler) in fixtures {
         let path = repository().join("songs/examples").join(fixture);
@@ -65,7 +66,7 @@ fn historical_song_directories_load_compile_and_retain_range_identical_audio() {
                 let p = compile_automated_delayed_note_song(&song).unwrap();
                 Box::new(move |r| p.render(r).unwrap())
             }
-            "mix" => {
+            "mix" | "blank_mix" => {
                 let p = compile_mixed_note_song(&song).unwrap();
                 Box::new(move |r| p.render(r).unwrap())
             }
@@ -74,10 +75,14 @@ fn historical_song_directories_load_compile_and_retain_range_identical_audio() {
         let whole = render(FrameRange::new(0, 24000).unwrap());
         let left = render(FrameRange::new(0, 7331).unwrap());
         let right = render(FrameRange::new(7331, 24000).unwrap());
-        assert!(
-            whole.peak_abs() > 0.0,
-            "{fixture}: previously playable audio is silent"
-        );
+        if compiler == "blank_mix" {
+            assert_eq!(whole.peak_abs(), 0.0, "authoring seed must start blank");
+        } else {
+            assert!(
+                whole.peak_abs() > 0.0,
+                "{fixture}: previously playable audio is silent"
+            );
+        }
         assert!(whole.samples().iter().all(|s| s.is_finite()), "{fixture}");
         assert_eq!(
             left.samples()

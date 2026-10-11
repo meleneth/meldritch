@@ -1,0 +1,50 @@
+# NEW creates and assigns a two-bar looping pattern.
+press 116
+release 116
+# Single press/release; the selected onset remains after release.
+press 0
+release 0
+press 9
+zero 9
+expect_count 2
+expect_note note-1 C3 0 480 0.8
+expect_note note-2 C#3 480 480 0.8
+# Hold start, extend through step 3; endpoint release first.
+press 0
+press 3
+release 3
+release 0
+expect_count 2
+expect_note note-1 C3 0 1920 0.8
+# Velocity modifier; never inserts into an empty pad.
+press 114
+press 9
+release 114
+release 9
+expect_note note-2 C#3 480 480 0.9
+# Navigate to the next time page and compose another onset.
+press 107
+release 107
+press 2
+release 2
+expect_note note-3 C3 4800 480 0.8
+# Navigate back, hold start, then go forward to choose a cross-page end.
+press 106
+release 106
+press 0
+press 107
+release 107
+press 1
+release 0
+zero 1
+expect_count 3
+expect_note note-1 C3 0 4800 0.8
+# Delete the later onset with an explicit modifier.
+press 112
+press 2
+release 2
+release 112
+expect_count 2
+press 115
+release 115
+wait

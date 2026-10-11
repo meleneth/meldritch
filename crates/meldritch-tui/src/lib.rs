@@ -124,6 +124,31 @@ pub fn map_key_for_view(
     if key.kind != KeyEventKind::Press {
         return None;
     }
+    if view.pattern_editor.is_some()
+        && key.code == KeyCode::Char('n')
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+    {
+        return Some(TuiAction::Input(AppInput::TogglePatternEditor));
+    }
+    if view.pattern_editor.as_ref().is_some_and(|e| e.visible) {
+        if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Some(TuiAction::Input(AppInput::SavePattern));
+        }
+        if key.code == KeyCode::Esc {
+            return Some(TuiAction::Input(AppInput::TogglePatternEditor));
+        }
+        if key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Some(TuiAction::Input(AppInput::ToggleInstrumentEditor));
+        }
+        return match key.code {
+            KeyCode::Char('p' | 's' | 'r' | 'q') | KeyCode::Tab
+                if key.code != KeyCode::Tab || key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                map_key(key, default_step)
+            }
+            _ => None,
+        };
+    }
     if view.instrument_editor.is_some()
         && key.code == KeyCode::Char('e')
         && key.modifiers.contains(KeyModifiers::CONTROL)
@@ -538,6 +563,74 @@ pub fn draw_with_status(
     view: &AppViewModel,
     status: &StatusMessage,
 ) {
+    if let Some(editor) = &view.pattern_editor
+        && editor.visible
+    {
+        let mut lines = vec![
+            format!(
+                "Pattern: {}  Track: {}  960 PPQ",
+                editor.pattern.id, editor.pattern.track
+            ),
+            format!(
+                "Length: {} ticks | loop: {} | selection: {:?}",
+                editor.pattern.length_ticks, editor.pattern.looped, editor.selected_note
+            ),
+            "Ctrl-S save Lua | Ctrl-N/Esc close | p transport | Lua owns pad gestures".into(),
+            format!(
+                "Source: {:016x} | audio: {}",
+                editor.source.fingerprint(),
+                view.song_audio
+                    .as_ref()
+                    .map_or("unknown", |a| if a.error.is_some() {
+                        "render error"
+                    } else if a.requested_generation != a.published_generation {
+                        "pending"
+                    } else {
+                        "published"
+                    })
+            ),
+            "     Identity     Pitch  Start tick  End (exclusive)  Velocity".into(),
+        ];
+        let visible_notes = usize::from(frame.area().height.saturating_sub(9)).max(1);
+        let selected_index = editor
+            .pattern
+            .notes
+            .iter()
+            .position(|n| Some(&n.id) == editor.selected_note.as_ref())
+            .unwrap_or(0);
+        let first = selected_index.saturating_sub(visible_notes - 1);
+        for note in editor.pattern.notes.iter().skip(first).take(visible_notes) {
+            lines.push(format!(
+                "{} {:12} {:5} {:10} {:16} {:8.3}",
+                if editor.selected_note.as_ref() == Some(&note.id) {
+                    ">"
+                } else {
+                    " "
+                },
+                note.id,
+                note.note,
+                note.start_tick,
+                note.start_tick + note.duration_ticks,
+                note.velocity
+            ));
+        }
+        lines.push(
+            editor
+                .save_status
+                .clone()
+                .unwrap_or_else(|| "Ctrl-S saves a new authored/pattern-*.lua".into()),
+        );
+        lines.push(status.text.clone());
+        frame.render_widget(
+            Paragraph::new(lines.join("\n")).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Note pattern editor"),
+            ),
+            frame.area(),
+        );
+        return;
+    }
     if let Some(editor) = &view.instrument_editor
         && editor.visible
     {
@@ -1696,6 +1789,11 @@ fn draw_status_with_title(
 
 fn command_result_text(result: &AppCommandResult) -> String {
     match result {
+        AppCommandResult::PatternEdited {
+            pattern, changed, ..
+        } => format!("Pattern {pattern} edited (changed: {changed})"),
+        AppCommandResult::PatternSelectionChanged => "Note selection updated".into(),
+        AppCommandResult::PatternSaveRequested => "Authored pattern save requested".into(),
         AppCommandResult::InstrumentEdited { edit, changed, .. } => format!(
             "{} {:?} = {:?}{}",
             edit.target.module,
@@ -1843,6 +1941,7 @@ mod tests {
         };
         AppViewModel {
             instrument_editor: None,
+            pattern_editor: None,
             song_audio: None,
             cockpit_mode: meldritch_app::CockpitMode::AllParameters,
             curated_controls: Vec::new(),

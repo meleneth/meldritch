@@ -11,8 +11,9 @@ The completed showcase milestones remain completion history.
 Investigation and ownership decisions: [AUTHORING.md](AUTHORING.md). The first
 implemented slice is [the instrument editor](INSTRUMENT_EDITOR.md): example 25
 has automated headless acceptance; example 29 has its instrument persistence
-foundation, with composed musical authoring still unfinished. Examples 26–28
-and 30 remain design contracts. No new synthesis dependency is required.
+foundation, with composed musical authoring still unfinished. The
+[Lua piano roll](PIANO_ROLL.md) now accepts examples 26/27 headlessly; examples
+28 and 30 remain design contracts. No new synthesis dependency is required.
 
 - [x] Inventory actual synthesis/compiler, notes/commands, MIDI, Lua, mixer and
   publication boundaries; verify Plaits absence and audit the proposed port
@@ -23,9 +24,10 @@ and 30 remain design contracts. No new synthesis dependency is required.
   reload and confined base validation, without duplicating graph semantics
 - [x] Example 25: inspect and edit existing oscillator, low-pass and ADSR through TUI;
   validate typed source edits, rerender publication and Lua persistence
-- [ ] Example 26: create/assign a one-bar note pattern with APC grid and TUI;
-  persist musical positions/pitches/velocities and stable identities
-- [ ] Example 27: held-pad explicit note duration, release/lost-release cleanup,
+- [x] Example 26: create/assign a synth note pattern through Lua APC grid policy,
+  inspect through native TUI and persist musical positions/pitches/velocities/
+  stable identities; two-bar fixture proves eight-step page crossing
+- [x] Example 27: held-pad explicit note duration, release/lost-release cleanup,
   rewind/loop-safe interaction ordering and persistence beyond one step
 - [ ] Example 28: author fader bindings to existing synth cutoff and lane level;
   shared inspection, pickup rearming and persistent mappings/mixer settings
@@ -43,7 +45,15 @@ validated and independently rendered through `render-instrument`. Formatting,
 diff checks, the documentation build and changed-crate Clippy checks passed
 (existing workspace lint allowances: collapsible_if, if_same_then_else,
 manual_checked_ops, too_many_arguments). No physical controller/listening test
-was performed. Wider example 29 persistence and examples 26–28/30 remain open.
+was performed. Wider example 29 persistence and examples 28/30 remain open.
+
+Piano-roll verification: `cargo test --workspace --offline` passed all 361
+tests, including nine piano-roll acceptance tests. Independent `validate-song
+--pattern` / `render-pattern` passed for the checked-in Lua definition, and the
+historical example 09 still validates. Formatting, diff checks, documentation
+build and changed-crate Clippy checks passed with the above existing allowances
+plus `chunks_exact_to_as_chunks` for pre-existing DSP tests on the host compiler.
+Physical APC gestures, orientation, LED states and listening remain untested.
 
 Done when a musician can create/edit these example instruments, patterns,
 patches, mappings and lane levels, save readable Lua, and reload equivalent

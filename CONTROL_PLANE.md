@@ -7,8 +7,14 @@ the new version-1 authored instrument definition. See
 [INSTRUMENT_EDITOR.md](INSTRUMENT_EDITOR.md) for the supported parameter subset,
 read-only `instrument` dependency/projection, `edit_instrument` typed request,
 keyboard saves and independent reload/render. Those commands mutate the app's
-validated Rust source, not a Lua-owned copy. Pattern/graph/mapping authoring
-commands remain design contracts.
+validated Rust source, not a Lua-owned copy. Graph/mapping authoring commands
+remain design contracts. The additive release-aware widget API, typed note
+requests and separate version-1 pattern definition are implemented in
+[PIANO_ROLL.md](PIANO_ROLL.md). Existing press-only widgets are not invoked on
+releases/cancellation. The production control-owner MIDI path forwards grid and
+script-bound button presses/releases, clears gestures on disconnect/overflow
+and keeps Lua/TOML input ownership exclusive. Physical piano-roll acceptance
+remains pending.
 
 This milestone implements the headless vertical slice in
 `songs/examples/18-lua-control-plane`. Run it with:

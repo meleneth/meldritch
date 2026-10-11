@@ -11,7 +11,14 @@ before committing a revision. The song host consumes immutable derived source
 revisions and invalidates the full render horizon through its existing worker;
 Lua and the TUI read projections and dispatch the same commands. The backing
 legacy pattern editor does not own these instrument defaults. Broader loaded-song
-pattern, graph and mapping authoring remains planned.
+graph and mapping authoring remains planned. The initial
+[piano-roll subset](PIANO_ROLL.md) now shares the same editable song source with
+instrument commands. Pattern selection stores UI identity only. Rust validates
+typed notes, stable note identities/counters and musical ticks, while Lua owns
+transient pad holds, modifiers, grid orientation and pages. Immutable app
+projections drive the APC and TUI. Derived render/source snapshots never gain
+independent mutation authority. Authored Lua pattern exports validate over the
+immutable TOML base and remain separate from performance journals.
 
 The current Lua/control-plane reuse boundaries, API and implementation limits
 are documented in [CONTROL_PLANE.md](CONTROL_PLANE.md). Lua composes the existing

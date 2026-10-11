@@ -126,8 +126,9 @@ impl AppController {
             .source
             .edit_instrument(edit)
             .map_err(AppCommandError::Instrument)?;
-        let next =
-            source_from_parameters(&editor.base, &next).map_err(AppCommandError::Instrument)?;
+        let next = next
+            .canonicalize_instrument_defaults(&editor.base)
+            .map_err(AppCommandError::Instrument)?;
         // Reuse executable lowering as well as DSL parameter validation before acceptance.
         meldritch_render::song_host::CompiledSongPatch::compile_initial(&next)
             .map_err(AppCommandError::Instrument)?;

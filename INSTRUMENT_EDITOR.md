@@ -3,8 +3,9 @@
 The first authoring slice edits existing oscillator, ADSR and low-pass parameters
 in a validated `.mlsynth`. Rust owns the song source; keyboard and Lua commands
 both change that source through the same typed validation and existing compiler.
-TOML songs remain loadable. Patch construction, pattern editing, mapping editing
-and Plaits integration remain future work.
+TOML songs remain loadable. [The Lua piano roll](PIANO_ROLL.md) now edits the
+initial note-pattern subset. Patch construction, mapping editing and Plaits
+integration remain future work.
 
 Start the small supported bass patch without a physical controller:
 

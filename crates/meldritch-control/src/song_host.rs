@@ -118,6 +118,48 @@ impl SongAudioHost {
         view: &AppViewModel,
         result: &AppCommandResult,
     ) -> Result<bool, String> {
+        if matches!(result, AppCommandResult::PatternSaveRequested) {
+            let editor = view
+                .pattern_editor
+                .as_ref()
+                .ok_or("no selected note pattern")?;
+            let saved = crate::pattern::save_pattern(editor);
+            self.authoring_save = Some(match &saved {
+                Ok(path) => format!(
+                    "Pattern saved: {}",
+                    path.strip_prefix(editor.source.root())
+                        .unwrap_or(path)
+                        .display()
+                ),
+                Err(error) => format!("Pattern save failed; edits remain unsaved: {error}"),
+            });
+            saved?;
+            return Ok(false);
+        }
+        if let AppCommandResult::PatternEdited { changed, .. } = result {
+            if !changed {
+                return Ok(false);
+            }
+            self.song = view
+                .pattern_editor
+                .as_ref()
+                .ok_or("missing authoritative pattern source")?
+                .source
+                .as_ref()
+                .clone();
+            self.generation += 1;
+            self.error = None;
+            self.submitted = AudioRevision {
+                generation: self.generation,
+                lanes: lane_audio_state(&view.performance.pages),
+            };
+            self.compile_failed = true;
+            let prepared = self.prepare(view, result);
+            if let Err(error) = &prepared {
+                self.error = Some(error.clone());
+            }
+            return prepared;
+        }
         if matches!(result, AppCommandResult::InstrumentSaveRequested) {
             let editor = view
                 .instrument_editor
@@ -251,7 +293,9 @@ impl SongAudioHost {
                 }
                 false
             }
-            AppCommandResult::InstrumentEdited { .. } => true,
+            AppCommandResult::InstrumentEdited { .. } | AppCommandResult::PatternEdited { .. } => {
+                true
+            }
             _ => return Ok(false),
         };
         if recompile || self.compile_failed {
@@ -341,7 +385,11 @@ impl SongAudioHost {
 
     pub fn refresh_view(&mut self, app: &mut AppController) -> bool {
         if let Some(status) = self.authoring_save.take() {
-            app.observe_instrument_save(status);
+            if status.starts_with("Pattern") {
+                app.observe_pattern_save(status);
+            } else {
+                app.observe_instrument_save(status);
+            }
         }
         let callback_generation = self.observe_callback();
         let view = app.view_model();
