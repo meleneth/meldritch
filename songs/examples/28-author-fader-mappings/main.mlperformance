@@ -1,0 +1,19 @@
+[meldritch]
+kind = "performance"
+version = 1
+[performance]
+id = "control-authoring"
+title = "Editable Faders and Mixer"
+bpm = 120.0
+sample_rate = 48000
+[[tracks]]
+id = "bass"
+synth = "synths/bass.mlsynth"
+dsp = ["dsp/echo.mldsp"]
+patterns = ["patterns/bass-line.mlpattern"]
+initial_pattern = "bass-line"
+volume = 1.0
+pan = 0.0
+[[midi_devices]]
+id = "apc-mini"
+name_contains = "APC mini mk2 Control"

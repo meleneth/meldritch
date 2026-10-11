@@ -1,5 +1,13 @@
 # Interactive musical authoring investigation
 
+Implementation update: [example 28 / editable faders and mixer](CONTROL_ASSIGNMENTS.md)
+now implements source-owned cutoff/resonance, single-track delay mix/feedback,
+track volume/stereo balance, interactive Lua/TUI assignments, pickup and control
+snapshot persistence. The historical inventory below records the earlier
+investigation; its pan/mapping gaps are superseded for this supported subset.
+General routing, catalog/device editing and composed example 29 persistence
+remain unfinished. Physical fader/listening acceptance remains pending.
+
 This inventory records the pre-implementation investigation. The subsequent
 [instrument editor slice](INSTRUMENT_EDITOR.md) implements example 25 and the
 instrument-only persistence foundation of example 29. Statements below about

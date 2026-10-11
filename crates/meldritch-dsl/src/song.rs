@@ -8,6 +8,8 @@ mod instrument;
 pub use instrument::*;
 mod notes;
 pub use notes::*;
+mod parameters;
+pub use parameters::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SignalType {
@@ -225,8 +227,10 @@ impl SynthDefinition {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TrackDefinition {
+    volume: f64,
+    pan: Option<f64>,
     id: String,
     synth_path: PathBuf,
     synth_id: String,
@@ -241,6 +245,12 @@ pub struct TrackDefinition {
 }
 
 impl TrackDefinition {
+    pub const fn volume(&self) -> f64 {
+        self.volume
+    }
+    pub const fn pan(&self) -> Option<f64> {
+        self.pan
+    }
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
@@ -1395,6 +1405,9 @@ struct RawPerformanceUiKeyHint {
 
 #[derive(Debug, Deserialize)]
 struct RawTrack {
+    #[serde(default = "unity_volume")]
+    volume: f64,
+    pan: Option<f64>,
     id: String,
     synth: PathBuf,
     sampler: Option<PathBuf>,
@@ -1843,6 +1856,20 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
     let mut parameter_patterns = BTreeMap::new();
     let mut dsps = BTreeMap::new();
     for raw_track in raw_performance.tracks {
+        if !raw_track.volume.is_finite()
+            || !(0.0..=2.0).contains(&raw_track.volume)
+            || raw_track
+                .pan
+                .is_some_and(|p| !p.is_finite() || !(-1.0..=1.0).contains(&p))
+        {
+            return Err(SongLoadError::one(
+                &entry,
+                format!(
+                    "track '{}': volume must be 0..2 and pan -1..1, finite",
+                    raw_track.id
+                ),
+            ));
+        }
         if !track_ids.insert(raw_track.id.clone()) {
             return Err(SongLoadError::one(
                 &entry,
@@ -2034,6 +2061,8 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
             }
         }
         tracks.push(TrackDefinition {
+            volume: raw_track.volume,
+            pan: raw_track.pan,
             id: raw_track.id,
             synth_path: synth_path
                 .strip_prefix(&root)
@@ -4405,6 +4434,11 @@ fn fingerprint_song(
         fingerprint.string(&device.name_contains);
     }
     for track in &performance.tracks {
+        if track.volume != 1.0 || track.pan.is_some() {
+            fingerprint.string("track_mixer");
+            fingerprint.u64(track.volume.to_bits());
+            fingerprint.u64(track.pan.map_or(u64::MAX, f64::to_bits));
+        }
         fingerprint.string(&track.id);
         fingerprint.string(&track.synth_path.to_string_lossy());
         fingerprint.string(&track.synth_id);

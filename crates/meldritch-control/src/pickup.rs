@@ -36,7 +36,10 @@ fn target(view: &AppViewModel, id: &str) -> Result<f64> {
         || control.maximum <= control.minimum
         || !(control.minimum..=control.maximum).contains(&value)
     {
-        return Err("invalid pickup control range/value".into());
+        return Err(format!(
+            "pickup '{id}' has invalid value {value} or declared range {}..{}; choose a compatible range or edit the authoritative value",
+            control.minimum, control.maximum
+        ));
     }
     Ok((value - control.minimum) / (control.maximum - control.minimum))
 }
@@ -61,6 +64,17 @@ impl MidiPickup {
                 continue;
             }
             match &record.command {
+                AppCommand::AssignFader { .. } | AppCommand::AssignmentPage(_) => {
+                    self.states.clear()
+                }
+                AppCommand::EditParameter(edit) => {
+                    self.states.retain(|physical, state| {
+                        own == Some(physical)
+                            || !view.curated_controls.iter().any(|c| {
+                                c.id == state.control && c.target == edit.target.identity()
+                            })
+                    });
+                }
                 AppCommand::EditInstrument(edit) => {
                     let target = format!(
                         "synth:{}/{}.{}",

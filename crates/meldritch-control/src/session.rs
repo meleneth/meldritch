@@ -156,6 +156,13 @@ impl PerformanceSessionCapture {
         use crate::CommandRequest as R;
         use meldritch_app::AppInput as I;
         let input = match request {
+            R::EditParameter { edit } => I::EditParameter(edit.clone()),
+            R::AssignFader { id, target } => I::AssignFader {
+                id: id.clone(),
+                target: target.clone(),
+            },
+            R::AssignmentPage { id } => I::AssignmentPage(id.clone()),
+            R::SaveAssignments => I::SaveAssignments,
             R::CreateNotePattern { .. } | R::EditNote { .. } | R::SelectNote { .. } => {
                 I::TogglePatternEditor
             }
@@ -381,6 +388,18 @@ pub fn session_result_fields(
     result: &meldritch_app::AppCommandResult,
 ) -> (String, Option<String>, Option<String>, Option<String>) {
     match result {
+        meldritch_app::AppCommandResult::ParameterEdited { target, .. } => (
+            "authored_parameter".into(),
+            Some(target.identity()),
+            None,
+            None,
+        ),
+        meldritch_app::AppCommandResult::AssignmentsChanged { .. } => {
+            ("control_assignment".into(), None, None, None)
+        }
+        meldritch_app::AppCommandResult::AssignmentSaveRequested => {
+            ("authored_controls_save".into(), None, None, None)
+        }
         meldritch_app::AppCommandResult::PatternEdited {
             pattern,
             selected_note,

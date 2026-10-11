@@ -5,6 +5,11 @@ song trees under `songs/examples/` define the behavior we want to support. The
 format grows only when an accepted example requires it.
 
 Interactive authoring is now the immediate priority (TODO section 20).
+
+Example 28 implements [Lua fader assignments and mixer authoring](CONTROL_ASSIGNMENTS.md).
+Track `volume` defaults to unity and optional `pan` explicitly opts into stereo
+balance. Their source values and supported synth/DSP assignments persist in a
+separate version-1 `kind="controls"` Lua snapshot over the unchanged TOML base.
 [AUTHORING.md](AUTHORING.md) specifies the source ownership and minimum Lua
 persistence direction. Example 25 accepts the initial instrument subset;
 example 29's larger composed round-trip is unfinished. The separate version-1

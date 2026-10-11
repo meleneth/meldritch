@@ -376,7 +376,7 @@ impl ValidatedSong {
         next.refresh_authoring_fingerprint();
         Ok(next)
     }
-    fn refresh_authoring_fingerprint(&mut self) {
+    pub(super) fn refresh_authoring_fingerprint(&mut self) {
         self.fingerprint = fingerprint_song(
             &self.performance,
             &self.synths,

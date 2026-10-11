@@ -1,0 +1,33 @@
+# CC / raw value / pickup accepted. Waiting observations create no musical edit.
+cc 48 0 false
+cc 48 127 true
+cc 49 127 true
+cc 49 0 true
+cc 49 64 true
+cc 50 0 false
+cc 50 127 true
+cc 51 0 false
+cc 51 127 true
+cc 52 0 false
+cc 52 127 true
+# Cycle first fader from cutoff to resonance; remapping rearms pickup.
+press 0
+release 0
+cc 48 0 false
+cc 48 127 true
+# Remove that mapping, then use the same CC on the tone page.
+press 16
+release 16
+cc 48 0 false
+press 106
+release 106
+cc 48 0 false
+cc 48 127 true
+cc 48 64 true
+press 106
+release 106
+cc 51 0 false
+cc 51 64 true
+press 115
+release 115
+wait

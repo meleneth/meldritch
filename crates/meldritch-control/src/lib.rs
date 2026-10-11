@@ -11,6 +11,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 pub type Result<T> = std::result::Result<T, String>;
+pub mod assignments;
 pub mod instrument;
 pub mod led_demo;
 pub mod pattern;
@@ -81,6 +82,17 @@ struct Binding {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "name", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CommandRequest {
+    EditParameter {
+        edit: meldritch_app::ParameterEdit,
+    },
+    AssignFader {
+        id: String,
+        target: Option<String>,
+    },
+    AssignmentPage {
+        id: String,
+    },
+    SaveAssignments,
     CreateNotePattern {
         track: String,
         id: String,
@@ -134,7 +146,8 @@ pub enum Mode {
 impl CommandRequest {
     pub fn command(&self) -> Result<AppCommand> {
         match self {
-            Self::SelectPage { id } | Self::SetControl { id, .. } => identity(id)?,
+            Self::SelectPage { id } => identity(id)?,
+            Self::SetControl { id, .. } => identity(id.strip_prefix("assignment:").unwrap_or(id))?,
             Self::ToggleLaneMute { lane } | Self::ToggleLaneSolo { lane } => identity(lane)?,
             Self::SelectLaneVariation { lane, variation } => {
                 identity(lane)?;
@@ -143,6 +156,13 @@ impl CommandRequest {
             _ => {}
         }
         Ok(match self {
+            Self::EditParameter { edit } => AppCommand::EditParameter(edit.clone()),
+            Self::AssignFader { id, target } => AppCommand::AssignFader {
+                id: id.clone(),
+                target: target.clone(),
+            },
+            Self::AssignmentPage { id } => AppCommand::AssignmentPage(id.clone()),
+            Self::SaveAssignments => AppCommand::SaveAssignments,
             Self::CreateNotePattern {
                 track,
                 id,
@@ -244,6 +264,7 @@ pub struct SavedProject {
 
 /// Owns a fresh VM and validated song. No Send/Sync feature is enabled for Lua.
 pub struct LuaProject {
+    pub assignments: Option<meldritch_app::AssignmentDefinition>,
     lua: Lua,
     budget: Rc<Cell<u32>>,
     source: String,
@@ -401,6 +422,7 @@ impl LuaProject {
                         "audio",
                         "instrument",
                         "pattern",
+                        "assignments",
                     ]
                     .contains(&d.as_str())
                 })
@@ -455,6 +477,15 @@ impl LuaProject {
             return Err("unknown initial state".into());
         }
         let project = Self {
+            assignments: match definition.get::<Value>("assignments").map_err(error)? {
+                Value::Nil => None,
+                v => {
+                    let a: meldritch_app::AssignmentDefinition =
+                        lua.from_value(v).map_err(error)?;
+                    a.validate(&song)?;
+                    Some(a)
+                }
+            },
             lua,
             budget,
             source: source.into(),
@@ -526,6 +557,26 @@ impl LuaProject {
 
     fn projection(&self, view: &AppViewModel) -> Result<Table> {
         let values = self.lua.create_table().map_err(error)?;
+        if let Some(a) = &view.assignments {
+            let data = self.lua.create_table().map_err(error)?;
+            data.set("page", a.page.clone()).map_err(error)?;
+            data.set(
+                "definition",
+                self.lua.to_value(&a.definition).map_err(error)?,
+            )
+            .map_err(error)?;
+            let observations = self.lua.create_table().map_err(error)?;
+            for (id, (raw, acquired)) in &a.observations {
+                let o = self.lua.create_table().map_err(error)?;
+                o.set("raw", *raw).map_err(error)?;
+                o.set("acquired", *acquired).map_err(error)?;
+                observations.set(id.clone(), o).map_err(error)?;
+            }
+            data.set("observations", observations).map_err(error)?;
+            values
+                .set("assignments", self.readonly_tree(data)?)
+                .map_err(error)?;
+        }
         if let Some(editor) = &view.pattern_editor {
             let pattern = self
                 .lua
@@ -700,6 +751,14 @@ impl LuaProject {
     fn readonly(&self, values: Table) -> Result<Table> {
         let proxy = self.lua.create_table().map_err(error)?;
         let meta = self.lua.create_table().map_err(error)?;
+        let length = values.raw_len();
+        meta.set(
+            "__len",
+            self.lua
+                .create_function(move |_, _: Value| Ok(length))
+                .map_err(error)?,
+        )
+        .map_err(error)?;
         meta.set("__index", values).map_err(error)?;
         meta.set(
             "__newindex",

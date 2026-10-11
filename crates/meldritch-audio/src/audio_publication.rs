@@ -58,6 +58,11 @@ pub fn audio_publication(initial: PublishedAudio) -> (AudioSnapshotPublisher, Au
 }
 
 impl AudioSnapshotPublisher {
+    /// Fixed publication layout established before opening the device stream.
+    #[must_use]
+    pub const fn channels(&self) -> u16 {
+        self.channels
+    }
     pub fn playback_monitor(&self) -> AudioPlaybackMonitor {
         AudioPlaybackMonitor(Arc::clone(&self.played))
     }

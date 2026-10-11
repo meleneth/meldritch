@@ -1104,6 +1104,7 @@ dependencies = [
  "meldritch-core",
  "meldritch-dsl",
  "meldritch-render",
+ "serde",
 ]
 
 [[package]]

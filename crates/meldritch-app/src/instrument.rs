@@ -152,6 +152,13 @@ impl AppController {
                 }
             }
         }
+        if changed {
+            self.rearm_assignment_target(&crate::EditableTarget::Synth {
+                id: edit.target.synth.clone(),
+                module: edit.target.module.clone(),
+                parameter: edit.target.parameter,
+            });
+        }
         Ok(AppCommandResult::InstrumentEdited {
             edit: edit.clone(),
             previous: previous.unwrap(),

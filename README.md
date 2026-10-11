@@ -17,6 +17,11 @@ Compose drum hits with the [APC drum editor](DRUM_EDITOR.md):
 `cargo run -- tui-song songs/examples/31-apc-drum-editor --lua main.lua`.
 Its generated kit is 909-inspired; a native TR-909 engine is not implemented.
 
+Assign APC faders interactively to synth, delay and mixer parameters with
+[the control assignment editor](CONTROL_ASSIGNMENTS.md):
+`cargo run -- tui-song songs/examples/28-author-fader-mappings --lua main.lua`.
+**Ctrl-M** opens assignments; **Ctrl-S** saves readable Lua mappings and values.
+
 For the connected APC Mini MK2, start the four-lane playground:
 
 ```sh

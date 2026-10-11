@@ -68,15 +68,41 @@ impl Harness {
         }
         copy(fixture, &root);
         let base = meldritch_dsl::load_song_directory(&root).unwrap();
+        let source = std::fs::read_to_string(root.join("main.lua")).unwrap();
+        let project = LuaProject::load(&root, &source).unwrap();
         let patch = CompiledSongPatch::compile_initial(&base).unwrap();
-        let audio = patch
+        let mut audio = patch
             .render_default(FrameRange::new(0, 192000).unwrap())
             .unwrap();
+        if audio.channels() == 1
+            && project.assignments.as_ref().is_some_and(|a| {
+                a.targets.iter().any(|t| {
+                    matches!(
+                        t.target,
+                        EditableTarget::Track {
+                            parameter: meldritch_dsl::MixerParameter::Pan,
+                            ..
+                        }
+                    )
+                })
+            })
+        {
+            let mut stereo = meldritch_audio::AudioBlock::silent(2, audio.frames());
+            for (pair, sample) in stereo
+                .samples_mut()
+                .chunks_exact_mut(2)
+                .zip(audio.samples())
+            {
+                pair.fill(*sample);
+            }
+            audio = stereo;
+        }
         let (publisher, reader): (AudioSnapshotPublisher, AudioSnapshotReader) =
             audio_publication(PublishedAudio::from_block(&audio, 1024).unwrap());
         let (playback, engine) = playback_session_parts(64).unwrap();
         let renderer =
-            PublishedAudioRenderer::from_engine(reader.clone(), 1, u32::MAX, engine).unwrap();
+            PublishedAudioRenderer::from_engine(reader.clone(), audio.channels(), u32::MAX, engine)
+                .unwrap();
         let state = SampleRenderState::new(
             Pattern::new(PatternId::new(1), 1, 16).unwrap(),
             Tempo::new(120.0, 48000).unwrap(),
@@ -101,14 +127,13 @@ impl Harness {
             256,
         );
         app.enable_instrument_editor(base.clone()).unwrap();
-        app.enable_pattern_editor("seed").unwrap();
-        let source = std::fs::read_to_string(root.join("main.lua")).unwrap();
-        let performance = LuaPerformance::new(
-            LuaProject::load(&root, &source).unwrap(),
-            &app,
-            Tempo::new(120.0, 48000).unwrap(),
-        )
-        .unwrap();
+        app.enable_pattern_editor(base.performance().tracks()[0].initial_pattern().unwrap())
+            .unwrap();
+        if let Some(a) = project.assignments.clone() {
+            app.enable_assignments(a).unwrap();
+        }
+        let performance =
+            LuaPerformance::new(project, &app, Tempo::new(120.0, 48000).unwrap()).unwrap();
         let capture = PerformanceSessionCapture::create(&base, 192000).unwrap();
         let host = SongAudioHost::new(base.clone(), patch, publisher, 192000, 1024);
         Self {

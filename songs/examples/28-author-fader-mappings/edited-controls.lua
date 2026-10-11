@@ -1,0 +1,43 @@
+-- MELDRITCH authored control assignments and parameter values.
+return {
+  kind = "controls", version = 1,
+  base_fingerprint = "157358eedef90fc0",
+  assignments = {
+    pages = { "main", "tone" },
+    targets = {
+      { id = "cutoff", label = "Filter cutoff", target = { kind = "synth", id = "bass", module = "filter", parameter = "cutoff_hz" }, minimum = 80.0, maximum = 6000.0, step = 10.0 },
+      { id = "resonance", label = "Filter resonance", target = { kind = "synth", id = "bass", module = "filter", parameter = "resonance" }, minimum = 0.0, maximum = 1.0, step = 0.01 },
+      { id = "volume", label = "Track volume", target = { kind = "track", id = "bass", parameter = "volume" }, minimum = 0.0, maximum = 1.0, step = 0.01 },
+      { id = "pan", label = "Track pan", target = { kind = "track", id = "bass", parameter = "pan" }, minimum = -1.0, maximum = 1.0, step = 0.01 },
+      { id = "delay-mix", label = "Delay mix", target = { kind = "dsp", id = "echo", module = "delay", parameter = "mix" }, minimum = 0.0, maximum = 1.0, step = 0.01 },
+      { id = "delay-feedback", label = "Delay feedback", target = { kind = "dsp", id = "echo", module = "delay", parameter = "feedback" }, minimum = 0.0, maximum = 0.99, step = 0.01 },
+    },
+    faders = {
+      { id = "main-1", device = "apc-mini", channel = 1, cc = 48, page = "main", target = nil },
+      { id = "main-2", device = "apc-mini", channel = 1, cc = 49, page = "main", target = "volume" },
+      { id = "main-3", device = "apc-mini", channel = 1, cc = 50, page = "main", target = "pan" },
+      { id = "main-4", device = "apc-mini", channel = 1, cc = 51, page = "main", target = "resonance" },
+      { id = "main-5", device = "apc-mini", channel = 1, cc = 52, page = "main", target = "delay-mix" },
+      { id = "main-6", device = "apc-mini", channel = 1, cc = 53, page = "main", target = nil },
+      { id = "main-7", device = "apc-mini", channel = 1, cc = 54, page = "main", target = nil },
+      { id = "main-8", device = "apc-mini", channel = 1, cc = 55, page = "main", target = nil },
+      { id = "main-9", device = "apc-mini", channel = 1, cc = 56, page = "main", target = nil },
+      { id = "tone-1", device = "apc-mini", channel = 1, cc = 48, page = "tone", target = "resonance" },
+      { id = "tone-2", device = "apc-mini", channel = 1, cc = 49, page = "tone", target = "cutoff" },
+      { id = "tone-3", device = "apc-mini", channel = 1, cc = 50, page = "tone", target = "delay-mix" },
+      { id = "tone-4", device = "apc-mini", channel = 1, cc = 51, page = "tone", target = "volume" },
+      { id = "tone-5", device = "apc-mini", channel = 1, cc = 52, page = "tone", target = "pan" },
+      { id = "tone-6", device = "apc-mini", channel = 1, cc = 53, page = "tone", target = nil },
+      { id = "tone-7", device = "apc-mini", channel = 1, cc = 54, page = "tone", target = nil },
+      { id = "tone-8", device = "apc-mini", channel = 1, cc = 55, page = "tone", target = nil },
+      { id = "tone-9", device = "apc-mini", channel = 1, cc = 56, page = "tone", target = nil },
+    },
+  },
+  values = {
+    { target = { kind = "synth", id = "bass", module = "filter", parameter = "cutoff_hz" }, value = 6000.0 },
+    { target = { kind = "synth", id = "bass", module = "filter", parameter = "resonance" }, value = 0.5 },
+    { target = { kind = "track", id = "bass", parameter = "volume" }, value = 0.5 },
+    { target = { kind = "track", id = "bass", parameter = "pan" }, value = 1.0 },
+    { target = { kind = "dsp", id = "echo", module = "delay", parameter = "mix" }, value = 1.0 },
+  },
+}

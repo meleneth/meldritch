@@ -18,6 +18,7 @@ export default defineConfig({
         { text: 'Getting started', link: '/guide/getting-started' },
         { text: 'Controllers', link: '/guide/controllers' },
         { text: 'Instrument editor', link: '/INSTRUMENT_EDITOR' },
+        { text: 'Fader assignments and mixer', link: '/CONTROL_ASSIGNMENTS' },
         { text: 'Drum editor', link: '/DRUM_EDITOR' },
         { text: 'APC piano roll', link: '/PIANO_ROLL' },
         { text: 'APC Mini MK2 playground', link: '/examples/apc-playground' },

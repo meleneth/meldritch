@@ -54,6 +54,8 @@ pub struct CompiledFilteredNotePatch {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompiledDelayedNotePatch {
+    volume: f64,
+    pan: Option<f64>,
     source: CompiledNotePatch,
     delay_frames: u64,
     feedback: f64,
@@ -63,6 +65,58 @@ pub struct CompiledDelayedNotePatch {
     feedback_points: Vec<CompiledParameterPoint>,
 }
 
+/// Stereo balance, unity at center. Authored pan promotes mono by duplication.
+fn apply_track_mixer(block: AudioBlock, volume: f64, pan: Option<f64>) -> AudioBlock {
+    if volume == 1.0 && pan.is_none() {
+        return block;
+    }
+    let channels = if pan.is_some() { 2 } else { block.channels() };
+    let mut out = AudioBlock::silent(channels, block.frames());
+    let balance = pan.unwrap_or(0.0);
+    for frame in 0..block.frames() as usize {
+        for channel in 0..usize::from(channels) {
+            let input = block.samples()[frame * usize::from(block.channels())
+                + channel.min(usize::from(block.channels()) - 1)];
+            let gain = if channel == 0 {
+                1.0 - balance.max(0.0)
+            } else {
+                1.0 + balance.min(0.0)
+            };
+            out.samples_mut()[frame * usize::from(channels) + channel] = input * volume * gain;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod mixer_tests {
+    use super::*;
+    #[test]
+    fn unity_center_balance_retains_stereo_channels_and_promotes_mono() {
+        let mut stereo = AudioBlock::silent(2, 2);
+        stereo
+            .samples_mut()
+            .copy_from_slice(&[0.8, -0.4, -0.2, 0.6]);
+        assert_eq!(apply_track_mixer(stereo.clone(), 1.0, None), stereo);
+        assert_eq!(apply_track_mixer(stereo.clone(), 1.0, Some(0.0)), stereo);
+        assert_eq!(
+            apply_track_mixer(stereo.clone(), 0.5, Some(-1.0)).samples(),
+            &[0.4, -0.0, -0.1, 0.0]
+        );
+        assert_eq!(
+            apply_track_mixer(stereo, 1.0, Some(0.5)).samples(),
+            &[0.4, -0.4, -0.1, 0.6]
+        );
+        let mut mono = AudioBlock::silent(1, 2);
+        mono.samples_mut().copy_from_slice(&[0.8, -0.4]);
+        assert_eq!(apply_track_mixer(mono.clone(), 1.0, None).channels(), 1);
+        assert_eq!(
+            apply_track_mixer(mono.clone(), 1.0, Some(0.0)).samples(),
+            &[0.8, 0.8, -0.4, -0.4]
+        );
+        assert_eq!(apply_track_mixer(mono, 0.0, Some(1.0)).peak_abs(), 0.0);
+    }
+}
 impl CompiledDelayedNotePatch {
     #[must_use]
     pub const fn delay_frames(&self) -> u64 {
@@ -174,7 +228,7 @@ impl CompiledDelayedNotePatch {
                 }
             }
         }
-        Ok(output)
+        Ok(apply_track_mixer(output, self.volume, self.pan))
     }
 }
 
@@ -265,6 +319,7 @@ pub struct CompiledNotePatch {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompiledMixedNoteSong {
+    mixers: Vec<(f64, Option<f64>)>,
     song_fingerprint: u64,
     sample_rate: u32,
     channels: u16,
@@ -579,8 +634,17 @@ impl CompiledMixedNoteSong {
             return Err(SongRenderError::InvalidLaneLevelOverride);
         }
         let gain = 1.0 / (self.tracks.len() as f64).sqrt();
-        for track in &self.tracks {
-            let block = track.render(range, filter_overrides, lane_level_overrides)?;
+        for (track, (volume, pan)) in self.tracks.iter().zip(&self.mixers) {
+            let block = apply_track_mixer(
+                track.render(range, filter_overrides, lane_level_overrides)?,
+                *volume,
+                *pan,
+            );
+            let block = if block.channels() == 1 && self.channels == 2 {
+                apply_track_mixer(block, 1.0, Some(0.0))
+            } else {
+                block
+            };
             if block.channels() != self.channels || block.frames() != frames {
                 return Err(SongRenderError::IncompatibleTrackRender);
             }
@@ -1337,6 +1401,7 @@ fn compile_mixed_note_song_with_track_patterns_transposes_and_included_lanes(
     included_lanes: Option<&BTreeSet<String>>,
 ) -> Result<CompiledMixedNoteSong, SongRenderError> {
     let mut tracks = Vec::with_capacity(song.performance().tracks().len());
+    let mut mixers = Vec::new();
     let mut channels = None;
     for track in song.performance().tracks() {
         if let Some(included_lanes) = included_lanes {
@@ -1365,18 +1430,26 @@ fn compile_mixed_note_song_with_track_patterns_transposes_and_included_lanes(
             }
         };
         if let Some(channels) = channels {
-            if patch.channels() != channels {
+            if patch.channels() != channels && !(patch.channels() <= 2 && channels <= 2) {
                 return Err(SongRenderError::IncompatibleTrackRender);
             }
-        } else {
-            channels = Some(patch.channels());
         }
+        if track.pan().is_some() && patch.channels() > 2 {
+            return Err(SongRenderError::IncompatibleTrackRender);
+        }
+        channels = Some(channels.unwrap_or(0).max(patch.channels()));
         tracks.push(patch);
+        mixers.push((track.volume(), track.pan()));
     }
     Ok(CompiledMixedNoteSong {
+        channels: if mixers.iter().any(|(_, pan)| pan.is_some()) {
+            2
+        } else {
+            channels.unwrap_or(1)
+        },
+        mixers,
         song_fingerprint: song.fingerprint(),
         sample_rate: song.performance().sample_rate(),
-        channels: channels.unwrap_or(1),
         tracks,
     })
 }
@@ -1721,6 +1794,9 @@ fn compile_delayed_note_song_from_source(
             found: track.dsp_ids().len(),
         });
     };
+    if track.pan().is_some() && source.channels > 2 {
+        return Err(SongRenderError::IncompatibleTrackRender);
+    }
     let dsp = song
         .dsps()
         .get(dsp_id)
@@ -1747,6 +1823,8 @@ fn compile_delayed_note_song_from_source(
         / song.performance().bpm())
     .round() as u64;
     Ok(CompiledDelayedNotePatch {
+        volume: track.volume(),
+        pan: track.pan(),
         source,
         delay_frames,
         feedback: delay.feedback().unwrap_or(0.0),

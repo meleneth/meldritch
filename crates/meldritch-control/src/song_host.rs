@@ -118,6 +118,72 @@ impl SongAudioHost {
         view: &AppViewModel,
         result: &AppCommandResult,
     ) -> Result<bool, String> {
+        if matches!(result, AppCommandResult::AssignmentSaveRequested) {
+            let saved = crate::assignments::save_controls(
+                view.assignments.as_ref().ok_or("no assignments")?,
+            );
+            self.authoring_save = Some(match &saved {
+                Ok(p) => format!("Controls saved: {}", p.display()),
+                Err(e) => format!("Controls save failed; edits remain unsaved: {e}"),
+            });
+            saved?;
+            return Ok(false);
+        }
+        if let AppCommandResult::ParameterEdited { target, changed } = result {
+            if !changed {
+                return Ok(false);
+            }
+            self.song = view
+                .instrument_editor
+                .as_ref()
+                .ok_or("no authoritative source")?
+                .source
+                .as_ref()
+                .clone();
+            // Source edits supersede earlier live overrides for the same parameters.
+            match target {
+                meldritch_dsl::EditableTarget::Dsp { parameter, .. } => {
+                    if *parameter == meldritch_dsl::DelayParameter::Mix {
+                        self.overrides.mix = None
+                    } else {
+                        self.overrides.feedback = None
+                    }
+                }
+                meldritch_dsl::EditableTarget::Synth {
+                    id,
+                    module,
+                    parameter,
+                } => {
+                    let key = SynthFilterTarget {
+                        synth_id: id.clone(),
+                        module_id: module.clone(),
+                    };
+                    if let Some(filter) = self.overrides.synth_filters.get_mut(&key) {
+                        if *parameter == meldritch_dsl::InstrumentParameter::CutoffHz {
+                            filter.cutoff_hz = None
+                        } else {
+                            filter.resonance = None
+                        }
+                    }
+                    if *parameter == meldritch_dsl::InstrumentParameter::CutoffHz {
+                        self.overrides.cutoff_hz = None
+                    } else {
+                        self.overrides.resonance = None
+                    }
+                }
+                _ => {}
+            }
+            self.generation += 1;
+            self.error = None;
+            self.compile_failed = true;
+            self.submitted = AudioRevision {
+                generation: self.generation,
+                lanes: lane_audio_state(&view.performance.pages),
+            };
+            return self.prepare(view, result).inspect_err(|error| {
+                self.error = Some(error.chars().take(512).collect());
+            });
+        }
         if matches!(result, AppCommandResult::PatternSaveRequested) {
             let editor = view
                 .pattern_editor
@@ -293,9 +359,9 @@ impl SongAudioHost {
                 }
                 false
             }
-            AppCommandResult::InstrumentEdited { .. } | AppCommandResult::PatternEdited { .. } => {
-                true
-            }
+            AppCommandResult::InstrumentEdited { .. }
+            | AppCommandResult::PatternEdited { .. }
+            | AppCommandResult::ParameterEdited { .. } => true,
             _ => return Ok(false),
         };
         if recompile || self.compile_failed {
@@ -347,6 +413,21 @@ impl SongAudioHost {
         let result = block
             .map_err(|e| format!("song render failed: {e:?}"))
             .and_then(|block| {
+                // The stream's layout is fixed. A pan-capable authoring host
+                // opens stereo up front; pre-pan mono rerenders duplicate here.
+                let block = if block.channels() == 1 && self.publisher.channels() == 2 {
+                    let mut stereo = meldritch_audio::AudioBlock::silent(2, block.frames());
+                    for (pair, sample) in stereo
+                        .samples_mut()
+                        .chunks_exact_mut(2)
+                        .zip(block.samples())
+                    {
+                        pair.fill(*sample);
+                    }
+                    stereo
+                } else {
+                    block
+                };
                 let snapshot = PublishedAudio::from_block(&block, self.chunk_frames)
                     .map_err(|e| format!("invalid song audio snapshot: {e:?}"))?;
                 self.publisher
@@ -385,7 +466,9 @@ impl SongAudioHost {
 
     pub fn refresh_view(&mut self, app: &mut AppController) -> bool {
         if let Some(status) = self.authoring_save.take() {
-            if status.starts_with("Pattern") {
+            if status.starts_with("Controls") {
+                app.observe_assignment_save(status);
+            } else if status.starts_with("Pattern") {
                 app.observe_pattern_save(status);
             } else {
                 app.observe_instrument_save(status);

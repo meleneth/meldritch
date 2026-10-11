@@ -13,7 +13,8 @@ implemented slice is [the instrument editor](INSTRUMENT_EDITOR.md): example 25
 has automated headless acceptance; example 29 has its instrument persistence
 foundation, with composed musical authoring still unfinished. The
 [Lua piano roll](PIANO_ROLL.md) now accepts examples 26/27 headlessly; examples
-28 and 30 remain design contracts. No new synthesis dependency is required.
+28 now accepts [editable faders and mixer](CONTROL_ASSIGNMENTS.md) headlessly;
+30 remains a design contract. No new synthesis dependency is required.
 
 - [x] Inventory actual synthesis/compiler, notes/commands, MIDI, Lua, mixer and
   publication boundaries; verify Plaits absence and audit the proposed port
@@ -36,8 +37,10 @@ foundation, with composed musical authoring still unfinished. The
 - [x] Add an inspectable generated 909-inspired sample kit for the drum editor
 - [ ] Implement and evaluate a faithful modular TR-909 voice/kit model;
   no native 909 engine, hat choke groups or live drum voice controls exist yet
-- [ ] Example 28: author fader bindings to existing synth cutoff and lane level;
-  shared inspection, pickup rearming and persistent mappings/mixer settings
+- [x] Example 28: author/reassign/remove declared fader bindings to source-owned
+  cutoff/resonance, track volume/pan and single-track delay mix/feedback;
+  shared Lua/TUI inspection, pickup rearming, audible source edits and versioned
+  Lua mapping/value save/reload with unchanged TOML and journals
 - [ ] Example 30: compose the supported oscillator/ADSR/VCA/low-pass patch;
   inspect typed cables, reject invalid/unsupported graphs and export/reload
 - [ ] Example 29: complete composed round-trip across patterns, synths, cables,
@@ -52,7 +55,7 @@ validated and independently rendered through `render-instrument`. Formatting,
 diff checks, the documentation build and changed-crate Clippy checks passed
 (existing workspace lint allowances: collapsible_if, if_same_then_else,
 manual_checked_ops, too_many_arguments). No physical controller/listening test
-was performed. Wider example 29 persistence and examples 28/30 remain open.
+was performed. Wider example 29 persistence and example 30 remain open.
 
 Piano-roll verification: `cargo test --workspace --offline` passed all 361
 tests, including nine piano-roll acceptance tests. Independent `validate-song
@@ -70,10 +73,22 @@ diff checks and the documentation build passed. The original generated kit
 is a 909-inspired approximation; faithful 909 voices and physical acceptance
 remain open.
 
+Control/mixer-slice verification: `cargo test --workspace --offline` passed all
+376 tests, including nine control assignment integration tests and a stereo
+balance unit test. Physical MIDI observation/pickup, source edits, dirty ranges,
+worker publication/callback consumption, projections, read-only Lua and unique
+save/reload are tested headlessly. Each catalog parameter renders changed audio
+and reloads exact source/audio at its range endpoints and midpoint. Historical
+mono compatibility and first-pan stereo publication pass. The checked-in
+control export independently validates and renders through `render-controls`;
+example 09 still validates. Formatting, diff checks, the documentation build
+and workspace Clippy pass with the existing allowances above. Physical
+faders/LEDs/listening and composed example 29 persistence remain open.
+
 Done when a musician can create/edit these example instruments, patterns,
 patches, mappings and lane levels, save readable Lua, and reload equivalent
 music without hardware or replaying a session. Existing-module authoring comes
-before Plaits integration, a generalized editor, pan/bus schema, full runtime
+before Plaits integration, a generalized editor, bus routing, full runtime
 replay or scheduler work. Necessary authoring clock/capture correctness remains
 part of each slice. Physical acceptance stays pending until actually tested.
 

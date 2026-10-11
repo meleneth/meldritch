@@ -11,6 +11,9 @@ pub struct LuaPerformance {
 }
 
 impl LuaPerformance {
+    pub(crate) fn tempo(&self) -> Tempo {
+        self.tempo
+    }
     pub fn pad(
         &mut self,
         source: &str,

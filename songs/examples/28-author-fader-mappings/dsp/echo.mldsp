@@ -1,0 +1,31 @@
+[meldritch]
+kind = "dsp"
+version = 1
+
+[dsp]
+id = "echo"
+
+[[inputs]]
+id = "audio"
+type = "audio"
+channels = 1
+
+[[modules]]
+id = "delay"
+type = "tempo_delay"
+time = "1/8"
+feedback = 0.35
+mix = 0.25
+
+[[modules]]
+id = "out"
+type = "audio_output"
+channels = 1
+
+[[cables]]
+from = "input.audio"
+to = "delay.audio"
+
+[[cables]]
+from = "delay.audio"
+to = "out.audio"

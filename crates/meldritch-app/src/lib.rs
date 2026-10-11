@@ -4,6 +4,8 @@ mod instrument;
 pub use instrument::*;
 mod notes;
 pub use notes::*;
+mod assignments;
+pub use assignments::*;
 
 use meldritch_audio::device_output::PlaybackControl;
 use meldritch_audio::realtime_queue::{QueueDiagnostics, QueueFull};
@@ -61,6 +63,18 @@ impl CockpitMode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommand {
+    EditParameter(ParameterEdit),
+    AssignFader {
+        id: String,
+        target: Option<String>,
+    },
+    AssignmentPage(String),
+    ToggleAssignmentEditor,
+    NavigateAssignment {
+        fader_delta: i32,
+        target_delta: i32,
+    },
+    SaveAssignments,
     CreateNotePattern {
         track: String,
         id: String,
@@ -140,6 +154,14 @@ pub struct CommandRecord {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommandResult {
+    ParameterEdited {
+        target: EditableTarget,
+        changed: bool,
+    },
+    AssignmentsChanged {
+        changed: bool,
+    },
+    AssignmentSaveRequested,
     PatternEdited {
         pattern: String,
         selected_note: Option<String>,
@@ -470,6 +492,7 @@ pub struct CuratedControlView {
 
 #[derive(Clone, Debug)]
 pub struct AppViewModel {
+    pub assignments: Option<AssignmentEditorView>,
     pub pattern_editor: Option<PatternEditorView>,
     pub instrument_editor: Option<InstrumentEditorView>,
     pub song_audio: Option<SongAudioView>,
@@ -510,6 +533,18 @@ pub struct LaneAudioView {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppInput {
+    EditParameter(ParameterEdit),
+    AssignFader {
+        id: String,
+        target: Option<String>,
+    },
+    AssignmentPage(String),
+    ToggleAssignmentEditor,
+    NavigateAssignment {
+        fader_delta: i32,
+        target_delta: i32,
+    },
+    SaveAssignments,
     SavePattern,
     TogglePatternEditor,
     ToggleInstrumentEditor,
@@ -925,6 +960,7 @@ impl Drop for PerformanceFxWorker {
 }
 
 pub struct AppController {
+    assignment_editor: Option<AssignmentEditor>,
     pattern_selection: Option<PatternSelection>,
     instrument_editor: Option<InstrumentEditor>,
     song_audio: Option<SongAudioView>,
@@ -974,6 +1010,7 @@ impl AppController {
     ) -> Self {
         Self {
             pattern_selection: None,
+            assignment_editor: None,
             instrument_editor: None,
             song_audio: None,
             cockpit_mode: CockpitMode::Performance,
@@ -1386,6 +1423,14 @@ impl AppController {
     }
 
     pub fn dispatch(&mut self, command: AppCommand) -> Result<AppCommandResult, AppCommandError> {
+        if let AppCommand::SetCuratedControlNormalized { id, value } = &command
+            && id.starts_with("assignment:")
+        {
+            return self.dispatch(self.assignment_input(id, *value)?);
+        }
+        if let Some(edit) = self.catalog_control_command(&command)? {
+            return self.dispatch(edit);
+        }
         let result = match &command {
             AppCommand::CreateNotePattern {
                 track,
@@ -1395,7 +1440,16 @@ impl AppController {
             } => self.create_pattern(track, id, *length_ticks, *looped)?,
             AppCommand::EditNote { pattern, edit } => self.edit_note(pattern, edit)?,
             AppCommand::SelectNote { pattern, id } => self.select_note(pattern, id)?,
+            AppCommand::EditParameter(_)
+            | AppCommand::AssignFader { .. }
+            | AppCommand::AssignmentPage(_)
+            | AppCommand::ToggleAssignmentEditor
+            | AppCommand::NavigateAssignment { .. }
+            | AppCommand::SaveAssignments => self.assignment_command(&command)?,
             AppCommand::TogglePatternEditor => {
+                if let Some(a) = self.assignment_editor.as_mut() {
+                    a.visible = false;
+                }
                 let selection = self.pattern_selection.as_mut().ok_or_else(|| {
                     AppCommandError::Instrument("no selected note pattern".into())
                 })?;
@@ -1417,6 +1471,9 @@ impl AppController {
             }
             AppCommand::EditInstrument(edit) => self.edit_instrument(edit)?,
             AppCommand::ToggleInstrumentEditor => {
+                if let Some(a) = self.assignment_editor.as_mut() {
+                    a.visible = false;
+                }
                 let editor = self.instrument_editor.as_mut().ok_or_else(|| {
                     AppCommandError::Instrument("no loaded instrument editor".into())
                 })?;
@@ -1701,11 +1758,12 @@ impl AppController {
                     .find(|control| control.id == *id)
                     .ok_or_else(|| AppCommandError::UnknownCuratedControl(id.clone()))?;
                 let previous = control.value.unwrap_or(control.minimum);
-                let normalized = value.clamp(0.0, 1.0);
-                let raw = control.minimum + normalized * (control.maximum - control.minimum);
-                let current_index = ((raw - control.minimum) / control.step).round();
-                let current = (control.minimum + control.step * current_index)
-                    .clamp(control.minimum, control.maximum);
+                let current = normalized_parameter_value(
+                    control.minimum,
+                    control.maximum,
+                    control.step,
+                    *value,
+                );
                 control.value = Some(current);
                 AppCommandResult::CuratedControlAdjusted {
                     id: id.clone(),
@@ -1715,6 +1773,35 @@ impl AppController {
             }
         };
         let (changed, dirty_ranges) = match &result {
+            AppCommandResult::ParameterEdited { target, changed } => (
+                *changed,
+                if *changed {
+                    self.instrument_editor
+                        .as_ref()
+                        .unwrap()
+                        .source
+                        .performance()
+                        .tracks()
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, t)| match target {
+                            EditableTarget::Synth { id, .. } => t.synth_id() == id,
+                            EditableTarget::Dsp { id, .. } => t.dsp_ids().contains(id),
+                            EditableTarget::Track { id, .. } => t.id() == id,
+                        })
+                        .map(|(i, _)| {
+                            DirtyRange::new(
+                                EntityId::Track(TrackId::new(i as u64 + 1)),
+                                FrameRange::new(0, self.editor.timeline_frames()).unwrap(),
+                            )
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                },
+            ),
+            AppCommandResult::AssignmentsChanged { changed } => (*changed, vec![]),
+            AppCommandResult::AssignmentSaveRequested => (false, vec![]),
             AppCommandResult::PatternEdited {
                 pattern,
                 changed,
@@ -1832,11 +1919,17 @@ impl AppController {
             })
             .collect();
         AppViewModel {
+            assignments: self.assignment_view(),
             pattern_editor: self.pattern_view(),
             instrument_editor: self.instrument_view(),
             song_audio: self.song_audio.clone(),
             cockpit_mode: self.cockpit_mode,
-            curated_controls: self.curated_controls.clone(),
+            curated_controls: self
+                .curated_controls
+                .iter()
+                .cloned()
+                .chain(self.assignment_controls())
+                .collect(),
             transport: TransportView {
                 state: diagnostics.playback.state,
                 position: diagnostics.playback.position,
@@ -1988,6 +2081,18 @@ impl AppController {
         let pattern_length = self.editor.state().pattern().length_steps();
         let command = match input {
             AppInput::SavePattern => AppCommand::SavePattern,
+            AppInput::EditParameter(edit) => AppCommand::EditParameter(edit),
+            AppInput::AssignFader { id, target } => AppCommand::AssignFader { id, target },
+            AppInput::AssignmentPage(page) => AppCommand::AssignmentPage(page),
+            AppInput::ToggleAssignmentEditor => AppCommand::ToggleAssignmentEditor,
+            AppInput::NavigateAssignment {
+                fader_delta,
+                target_delta,
+            } => AppCommand::NavigateAssignment {
+                fader_delta,
+                target_delta,
+            },
+            AppInput::SaveAssignments => AppCommand::SaveAssignments,
             AppInput::TogglePatternEditor => AppCommand::TogglePatternEditor,
             AppInput::ToggleInstrumentEditor => AppCommand::ToggleInstrumentEditor,
             AppInput::NavigateInstrument {
@@ -2007,6 +2112,9 @@ impl AppController {
                 AppCommand::AdjustCuratedControl { id, steps }
             }
             AppInput::SetCuratedControlNormalized { id, value } => {
+                if id.starts_with("assignment:") {
+                    return self.dispatch(self.assignment_input(&id, value)?);
+                }
                 AppCommand::SetCuratedControlNormalized { id, value }
             }
             AppInput::MoveLeft => AppCommand::Select(Selection {

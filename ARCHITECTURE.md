@@ -1,5 +1,13 @@
 # Architecture
 
+Interactive fader/mixer authoring uses DSL `EditableTarget` and `ParameterEdit`
+against the existing validated song source. App assignment state owns mappings;
+Lua supplies declarations/policy and reads projections. The existing song
+renderer applies post-DSP track volume/stereo balance and the existing host
+publishes rerenders. Pickup observations and publication telemetry are transient,
+separate from musical source and `kind="controls"` authoring snapshots. See
+[CONTROL_ASSIGNMENTS.md](CONTROL_ASSIGNMENTS.md).
+
 The immediate authoring roadmap is in [AUTHORING.md](AUTHORING.md). Its target
 is a single editable Rust source/relation model, shared typed commands and
 readonly projections for TUI/Lua/hardware, with host-owned Lua source export.

@@ -124,6 +124,70 @@ pub fn map_key_for_view(
     if key.kind != KeyEventKind::Press {
         return None;
     }
+    if view.assignments.is_some()
+        && key.code == KeyCode::Char('m')
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+    {
+        return Some(TuiAction::Input(AppInput::ToggleAssignmentEditor));
+    }
+    if let Some(a) = &view.assignments
+        && a.visible
+    {
+        let input = match key.code {
+            KeyCode::Esc => AppInput::ToggleAssignmentEditor,
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                AppInput::SaveAssignments
+            }
+            KeyCode::Up => AppInput::NavigateAssignment {
+                fader_delta: -1,
+                target_delta: 0,
+            },
+            KeyCode::Down => AppInput::NavigateAssignment {
+                fader_delta: 1,
+                target_delta: 0,
+            },
+            KeyCode::Left => AppInput::NavigateAssignment {
+                fader_delta: 0,
+                target_delta: -1,
+            },
+            KeyCode::Right => AppInput::NavigateAssignment {
+                fader_delta: 0,
+                target_delta: 1,
+            },
+            KeyCode::Enter | KeyCode::Delete => {
+                let f = a
+                    .definition
+                    .faders
+                    .iter()
+                    .filter(|f| f.page == a.page)
+                    .nth(a.selected_fader)?;
+                AppInput::AssignFader {
+                    id: f.id.clone(),
+                    target: if key.code == KeyCode::Delete {
+                        None
+                    } else {
+                        Some(a.definition.targets[a.selected_target].id.clone())
+                    },
+                }
+            }
+            KeyCode::PageUp | KeyCode::PageDown => {
+                let i = a.definition.pages.iter().position(|p| p == &a.page)?;
+                let delta = if key.code == KeyCode::PageDown { 1 } else { -1 };
+                AppInput::AssignmentPage(
+                    a.definition.pages
+                        [(i as i32 + delta).rem_euclid(a.definition.pages.len() as i32) as usize]
+                        .clone(),
+                )
+            }
+            _ => {
+                return match key.code {
+                    KeyCode::Char('p' | 's' | 'r' | 'q') => map_key(key, default_step),
+                    _ => None,
+                };
+            }
+        };
+        return Some(TuiAction::Input(input));
+    }
     if view.pattern_editor.is_some()
         && key.code == KeyCode::Char('n')
         && key.modifiers.contains(KeyModifiers::CONTROL)
@@ -563,6 +627,90 @@ pub fn draw_with_status(
     view: &AppViewModel,
     status: &StatusMessage,
 ) {
+    if let Some(a) = &view.assignments
+        && a.visible
+    {
+        let mut lines = vec![
+            format!(
+                "Assignments | page {} | up/down fader | left/right target",
+                a.page
+            ),
+            "Enter assign | Delete remove | PgUp/PgDown page | Ctrl-S save | Esc close".into(),
+        ];
+        let target = &a.definition.targets[a.selected_target];
+        lines.push(format!(
+            "Candidate: {} {} [{}..{}] step {} {}",
+            target.label,
+            target.target.identity(),
+            target.minimum,
+            target.maximum,
+            target.step,
+            a.source
+                .editable_parameter(&target.target)
+                .map(|p| p.unit)
+                .unwrap_or("unknown")
+        ));
+        if let Some(audio) = &view.song_audio {
+            lines.push(format!(
+                "Audio generation {} / published {} {}",
+                audio.requested_generation,
+                audio.published_generation,
+                if audio.error.is_some() {
+                    "failed"
+                } else if audio.requested_generation != audio.published_generation {
+                    "pending publication"
+                } else {
+                    "applied to published audio"
+                }
+            ));
+        }
+        for (index, f) in a
+            .definition
+            .faders
+            .iter()
+            .filter(|f| f.page == a.page)
+            .enumerate()
+        {
+            let t = a
+                .definition
+                .targets
+                .iter()
+                .find(|t| Some(&t.id) == f.target.as_ref());
+            let value = t
+                .and_then(|t| a.source.editable_parameter(&t.target).ok())
+                .map(|p| p.value);
+            let observation = a.observations.get(&f.id);
+            lines.push(format!(
+                "{} {} {}/ch{} CC{} -> {} value {:?} raw {:?} {}",
+                if index == a.selected_fader { ">" } else { " " },
+                f.id,
+                f.device,
+                f.channel,
+                f.cc,
+                t.map_or("unassigned".into(), |t| t.target.identity()),
+                value,
+                observation.map(|o| o.0),
+                if observation.is_some_and(|o| o.1) {
+                    "acquired"
+                } else {
+                    "pickup pending"
+                }
+            ));
+        }
+        lines.push(
+            a.save_status
+                .clone()
+                .unwrap_or_else(|| "Authored controls: Ctrl-S saves Lua".into()),
+        );
+        frame.render_widget(
+            panel(
+                "Fader assignments and mixer",
+                Paragraph::new(lines.join("\n")),
+            ),
+            frame.area(),
+        );
+        return;
+    }
     if let Some(editor) = &view.pattern_editor
         && editor.visible
     {
@@ -747,7 +895,9 @@ fn draw_curated_performance_mode(
     frame.render_widget(
         panel(
             "Performance Keys",
-            Paragraph::new(if view.instrument_editor.is_some() {
+            Paragraph::new(if view.assignments.is_some() {
+                "Ctrl-M assignments · Ctrl-E instrument · Ctrl-Tab all parameters · p play/stop · r rewind · q quit"
+            } else if view.instrument_editor.is_some() {
                 "Ctrl-E instrument · Ctrl-Tab all parameters · p play/stop · r rewind · q quit"
             } else {
                 "Ctrl-Tab all parameters · p play/stop · r rewind · q quit"
@@ -1013,6 +1163,9 @@ fn draw_performance_key_hints(
     };
     if view.instrument_editor.is_some() {
         text.push_str(" · Ctrl-E instrument");
+    }
+    if view.assignments.is_some() {
+        text.push_str(" · Ctrl-M assignments");
     }
     frame.render_widget(
         panel(title.unwrap_or("Performance Keys"), Paragraph::new(text)),
@@ -1790,6 +1943,13 @@ fn draw_status_with_title(
 
 fn command_result_text(result: &AppCommandResult) -> String {
     match result {
+        AppCommandResult::ParameterEdited { target, changed } => {
+            format!("{} edited (changed: {changed})", target.identity())
+        }
+        AppCommandResult::AssignmentsChanged { changed } => {
+            format!("Assignment state changed: {changed}")
+        }
+        AppCommandResult::AssignmentSaveRequested => "Authored controls save requested".into(),
         AppCommandResult::PatternEdited {
             pattern, changed, ..
         } => format!("Pattern {pattern} edited (changed: {changed})"),
@@ -1941,6 +2101,7 @@ mod tests {
             missed_artifacts: 1,
         };
         AppViewModel {
+            assignments: None,
             instrument_editor: None,
             pattern_editor: None,
             song_audio: None,

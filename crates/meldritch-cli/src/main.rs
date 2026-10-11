@@ -342,6 +342,8 @@ enum Command {
         instrument: Option<PathBuf>,
         #[arg(long, conflicts_with = "instrument")]
         pattern: Option<PathBuf>,
+        #[arg(long, conflicts_with_all = ["instrument", "pattern"])]
+        controls: Option<PathBuf>,
     },
     /// Independently reload an authored instrument and render using the song compiler.
     RenderInstrument {
@@ -356,6 +358,16 @@ enum Command {
     RenderPattern {
         song: PathBuf,
         pattern: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = 192000)]
+        frames: u64,
+    },
+    /// Independently reload authored mappings and mixer/parameter values.
+    RenderControls {
+        song: PathBuf,
+        #[arg(long)]
+        controls: PathBuf,
         #[arg(long)]
         output: PathBuf,
         #[arg(long, default_value_t = 192000)]
@@ -695,6 +707,8 @@ enum Command {
         instrument: Option<PathBuf>,
         #[arg(long, conflicts_with = "instrument")]
         pattern: Option<PathBuf>,
+        #[arg(long, conflicts_with_all = ["instrument", "pattern"], requires = "lua")]
+        controls: Option<PathBuf>,
         #[arg(long)]
         frames: Option<u64>,
         #[arg(long, default_value_t = 4096)]
@@ -878,8 +892,16 @@ fn run(cli: Cli) -> Result<(), String> {
             song,
             instrument,
             pattern,
+            controls,
         } => {
-            if let Some(file) = pattern {
+            if let Some(file) = controls {
+                let (song, _) = meldritch_control::assignments::load_controls_file(&song, &file)?;
+                println!(
+                    "valid authored controls song · fingerprint {:016x}",
+                    song.fingerprint()
+                );
+                Ok(())
+            } else if let Some(file) = pattern {
                 let (loaded, _) = meldritch_control::pattern::load_pattern_file(&song, &file)?;
                 println!(
                     "valid authored pattern song · fingerprint {:016x}",
@@ -889,6 +911,19 @@ fn run(cli: Cli) -> Result<(), String> {
             } else {
                 validate_song(song, instrument)
             }
+        }
+        Command::RenderControls {
+            song,
+            controls,
+            output,
+            frames,
+        } => {
+            let (song, _) = meldritch_control::assignments::load_controls_file(&song, &controls)?;
+            let audio = CompiledSongPatch::compile_initial(&song)?
+                .render_default(FrameRange::new(0, frames).map_err(|e| format!("{e:?}"))?)
+                .map_err(|e| format!("{e:?}"))?;
+            meldritch_audio::write_wav_f32(output, &audio, song.performance().sample_rate())
+                .map_err(|e| e.to_string())
         }
         Command::RenderInstrument {
             song,
@@ -1145,6 +1180,7 @@ fn run(cli: Cli) -> Result<(), String> {
             song,
             instrument,
             pattern,
+            controls,
             frames,
             chunk_frames,
             workers,
@@ -1169,6 +1205,7 @@ fn run(cli: Cli) -> Result<(), String> {
             soft_takeover,
             instrument,
             pattern,
+            controls,
         ),
         Command::TuiBassline {
             project,
@@ -3033,13 +3070,20 @@ fn tui_song(
     soft_takeover: bool,
     instrument: Option<PathBuf>,
     authored_pattern: Option<PathBuf>,
+    authored_controls: Option<PathBuf>,
 ) -> Result<(), String> {
     let base = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
     let restored_pattern = authored_pattern
         .map(|file| meldritch_control::pattern::load_pattern_file(&path, &file))
         .transpose()?;
     let selected_pattern = restored_pattern.as_ref().map(|(_, id)| id.clone());
-    let song = if let Some(file) = instrument {
+    let restored_controls = authored_controls
+        .map(|file| meldritch_control::assignments::load_controls_file(&path, &file))
+        .transpose()?;
+    let assignments = restored_controls.as_ref().map(|(_, a)| a.clone());
+    let song = if let Some((song, _)) = restored_controls {
+        song
+    } else if let Some(file) = instrument {
         meldritch_control::instrument::load_instrument_file(&path, &file)?
     } else if let Some((song, _)) = restored_pattern {
         song
@@ -3061,9 +3105,37 @@ fn tui_song(
     });
     let frame_count = u32::try_from(frame_count)
         .map_err(|_| "TUI song frame count exceeds u32::MAX".to_owned())?;
-    let initial = patch
+    let mut initial = patch
         .render_default(FrameRange::new(0, u64::from(frame_count)).expect("song range is ordered"))
         .map_err(|error| format!("failed to render initial song audio: {error:?}"))?;
+    // A declared pan target needs stereo-capable device output before its first
+    // edit; the source render and legacy mono definitions remain unchanged.
+    if initial.channels() == 1
+        && (assignments
+            .as_ref()
+            .or_else(|| lua_project.as_ref().and_then(|p| p.assignments.as_ref())))
+        .is_some_and(|a| {
+            a.targets.iter().any(|t| {
+                matches!(
+                    t.target,
+                    meldritch_dsl::EditableTarget::Track {
+                        parameter: meldritch_dsl::MixerParameter::Pan,
+                        ..
+                    }
+                )
+            })
+        })
+    {
+        let mut stereo = meldritch_audio::AudioBlock::silent(2, initial.frames());
+        for (pair, sample) in stereo
+            .samples_mut()
+            .chunks_exact_mut(2)
+            .zip(initial.samples())
+        {
+            pair.fill(*sample);
+        }
+        initial = stereo;
+    }
     eprintln!(
         "initial song render: frames={}, channels={}, peak={:.3}",
         initial.frames(),
@@ -3118,7 +3190,9 @@ fn tui_song(
         256,
     );
     if !song.synths().is_empty() {
-        if let Some(pattern) = &selected_pattern {
+        if let Some(a) = assignments.clone() {
+            controller.enable_assignment_authoring_from(base.clone(), song.clone(), a)?;
+        } else if let Some(pattern) = &selected_pattern {
             controller.enable_pattern_authoring_from(base, song.clone(), pattern)?;
         } else {
             controller.enable_instrument_editor_from(base, song.clone())?;
@@ -3133,6 +3207,11 @@ fn tui_song(
                 }
             }
         }
+    }
+    if assignments.is_none()
+        && let Some(a) = lua_project.as_ref().and_then(|p| p.assignments.clone())
+    {
+        controller.enable_assignments(a)?;
     }
     let mut controls = song_controls_for_view(
         &song,
@@ -3351,6 +3430,7 @@ fn tui_song(
                     message = Some(format!("MIDI {}: {change:?}", device.id()));
                     if !connected {
                         pickup.disconnect(device.id());
+                        controller.disconnect_assignments(device.id());
                     }
                     if lua_surface.as_deref() == Some(device.id())
                         && let Some(performance) = lua_performance.borrow_mut().as_mut()
@@ -3397,6 +3477,12 @@ fn tui_song(
                 }
             }
             let dropped_control = control_queue.take_dropped();
+            if dropped_control > 0 {
+                for device in song.performance().midi_devices() {
+                    pickup.disconnect(device.id());
+                    controller.disconnect_assignments(device.id());
+                }
+            }
             if dropped_control > 0
                 && let Some(performance) = lua_performance.borrow_mut().as_mut()
             {
@@ -3449,6 +3535,33 @@ fn tui_song(
                         }
                     }
                     continue;
+                }
+                if dropped_control > 0
+                    && matches!(
+                        meldritch_control::devices::decode_midi(&observed.bytes),
+                        Some(meldritch_control::devices::MidiObservation::Control { .. })
+                    )
+                {
+                    continue;
+                }
+                if let Some(performance) = lua_performance.borrow_mut().as_mut() {
+                    let frame = u64::from(controller.view_model().transport.position);
+                    match performance.fader(
+                        &observed.device,
+                        &observed.bytes,
+                        frame,
+                        controller,
+                        &mut pickup,
+                        &mut host.lock().expect("song host lock poisoned"),
+                        &mut tick_capture.lock().expect("capture lock poisoned"),
+                    ) {
+                        Ok(Some(_)) => continue,
+                        Ok(None) => {}
+                        Err(error) => {
+                            message = Some(format!("Fader assignment: {error}"));
+                            continue;
+                        }
+                    }
                 }
                 match mapper.apply(&observed, controller, &mut pickup) {
                     Ok(MidiMappedOutcome::Applied(mapped, result)) => {

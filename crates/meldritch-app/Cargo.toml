@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+serde.workspace = true
 meldritch-dsl = { path = "../meldritch-dsl" }
 meldritch-audio = { path = "../meldritch-audio" }
 meldritch-core = { path = "../meldritch-core" }
