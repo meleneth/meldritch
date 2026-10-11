@@ -983,6 +983,7 @@ impl Drop for PerformanceFxWorker {
 }
 
 pub struct AppController {
+    project_source: Option<project::ProjectSource>,
     assignment_editor: Option<AssignmentEditor>,
     pattern_selection: Option<PatternSelection>,
     instrument_editor: Option<InstrumentEditor>,
@@ -1032,6 +1033,7 @@ impl AppController {
         history_capacity: usize,
     ) -> Self {
         Self {
+            project_source: None,
             pattern_selection: None,
             assignment_editor: None,
             instrument_editor: None,
@@ -1847,7 +1849,7 @@ impl AppController {
             AppCommandResult::ParameterEdited { target, changed } => (
                 *changed,
                 if *changed {
-                    self.instrument_editor
+                    self.project_source
                         .as_ref()
                         .unwrap()
                         .source
@@ -1879,7 +1881,7 @@ impl AppController {
                 dirty_ranges,
                 ..
             } => {
-                let owner = self.instrument_editor.as_ref().unwrap();
+                let owner = self.project_source.as_ref().unwrap();
                 let track = owner.source.authored_pattern(pattern).unwrap().track;
                 let index = owner
                     .source
@@ -1905,7 +1907,7 @@ impl AppController {
             AppCommandResult::PatchEdited { synth, changed, .. } => (
                 *changed,
                 if *changed {
-                    self.instrument_editor
+                    self.project_source
                         .as_ref()
                         .unwrap()
                         .source
@@ -2815,6 +2817,109 @@ mod tests {
             ),
             engine,
         )
+    }
+
+    #[test]
+    fn project_source_accepts_pattern_and_patch_commands_without_instrument_panel() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../songs/examples/09-curated-performance-controls");
+        let source = meldritch_dsl::load_song_directory(root).unwrap();
+        let track = source.performance().tracks()[0].id().to_owned();
+        let synth = source.synths().keys().next().unwrap().clone();
+        let (mut app, _engine) = controller(16);
+        app.enable_project_source(source.clone()).unwrap();
+        assert!(app.instrument_view().is_none());
+        let before = app.authored_source().unwrap();
+        assert!(
+            app.dispatch(AppCommand::CreateNotePattern {
+                track: "missing".into(),
+                id: "new-pattern".into(),
+                length_ticks: 3840,
+                looped: true,
+            })
+            .is_err()
+        );
+        assert!(Arc::ptr_eq(&before, &app.authored_source().unwrap()));
+        app.dispatch(AppCommand::CreateNotePattern {
+            track,
+            id: "new-pattern".into(),
+            length_ticks: 3840,
+            looped: true,
+        })
+        .unwrap();
+        app.dispatch(AppCommand::EditNote {
+            pattern: "new-pattern".into(),
+            edit: NoteEdit::Insert {
+                start_tick: 0,
+                duration_ticks: 480,
+                pitch: 48,
+                velocity: 0.8,
+            },
+        })
+        .unwrap();
+        let accepted = app.authored_source().unwrap();
+        assert_eq!(
+            accepted
+                .authored_pattern("new-pattern")
+                .unwrap()
+                .notes
+                .len(),
+            1
+        );
+        assert!(Arc::ptr_eq(&accepted, &app.pattern_view().unwrap().source));
+        assert!(
+            app.dispatch(AppCommand::EditPatch(PatchEdit {
+                synth: synth.clone(),
+                operations: vec![PatchOperation::Remove {
+                    id: "missing".into(),
+                    cables: meldritch_dsl::DependentCables::Reject,
+                }],
+            }))
+            .is_err()
+        );
+        assert!(Arc::ptr_eq(&accepted, &app.authored_source().unwrap()));
+        let parameter = accepted
+            .instrument_parameters(&synth)
+            .unwrap()
+            .into_iter()
+            .find(|p| p.id.parameter == InstrumentParameter::Waveform)
+            .unwrap();
+        app.dispatch(AppCommand::EditPatch(PatchEdit {
+            synth,
+            operations: vec![PatchOperation::SetParameter {
+                module: parameter.id.module.clone(),
+                parameter: InstrumentParameter::Waveform,
+                value: InstrumentValue::Waveform(InstrumentWaveform::Triangle),
+            }],
+        }))
+        .unwrap();
+        assert_ne!(
+            accepted.fingerprint(),
+            app.authored_source().unwrap().fingerprint()
+        );
+        app.dispatch(AppCommand::EditInstrument(InstrumentEdit {
+            target: parameter.id,
+            value: InstrumentValue::Waveform(InstrumentWaveform::Saw),
+        }))
+        .unwrap();
+        assert_eq!(app.history.len(), 4);
+        assert_eq!(
+            accepted
+                .authored_pattern("new-pattern")
+                .unwrap()
+                .notes
+                .len(),
+            1
+        );
+        assert_eq!(
+            app.pattern_view().unwrap().source.fingerprint(),
+            app.authored_source().unwrap().fingerprint()
+        );
+        assert!(app.instrument_view().is_none());
+        assert_eq!(
+            app.project_source.as_ref().unwrap().base.fingerprint(),
+            source.fingerprint()
+        );
     }
 
     #[test]

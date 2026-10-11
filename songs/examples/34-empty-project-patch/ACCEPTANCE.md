@@ -4,7 +4,13 @@ Status: **design for the complete workflow**. The read-only opening checkpoint
 is implemented: DSL `project_directory`, CLI project-opening tests and native TUI
 tests cover empty/legacy roots, diagnostics and presentation. `opening.txt` and
 `invalid/malformed-entry.toml` specify that checkpoint. Construction, bindings,
-playback and self-contained save/reopen remain unimplemented. No new authored
+playback and self-contained save/reopen remain unimplemented. An additional
+ownership checkpoint moves accepted definitions/provenance into app-owned
+`ProjectSource`. Headless commands create/edit a pattern and edit a patch without
+an instrument panel; their views observe the same accepted revision, rejected
+commands preserve it, and immutable provenance stays unchanged. Run
+`cargo test -p meldritch-app project_source` for this checkpoint. It uses legacy
+example 09 as import provenance, not as an empty-project seed. No new authored
 format exists; add readable authored fixtures before extending its schema. See
 [the roadmap](../../../ROADMAP.md) and
 [implementation prompt](../../../AUTHORING.md#recommended-immediate-implementation-prompt).

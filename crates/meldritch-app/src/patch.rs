@@ -5,11 +5,11 @@ impl AppController {
         &mut self,
         edit: &PatchEdit,
     ) -> Result<AppCommandResult, AppCommandError> {
-        let editor = self
-            .instrument_editor
+        let owner = self
+            .project_source
             .as_ref()
             .ok_or_else(|| AppCommandError::Instrument("no loaded synth".into()))?;
-        let next = editor
+        let next = owner
             .source
             .edit_patch(edit)
             .map_err(AppCommandError::Instrument)?;
@@ -25,19 +25,20 @@ impl AppController {
                     .map_err(AppCommandError::Instrument)?;
             }
         }
-        let previous = editor
+        let previous = owner
             .source
             .instrument_parameters(&edit.synth)
             .map_err(AppCommandError::Instrument)?;
         let parameters = next
             .instrument_parameters(&edit.synth)
             .map_err(AppCommandError::Instrument)?;
-        let changed = next.fingerprint() != editor.source.fingerprint();
+        let changed = next.fingerprint() != owner.source.fingerprint();
         if changed {
-            let editor = self.instrument_editor.as_mut().unwrap();
-            editor.source = Arc::new(next);
-            editor.parameter = 0;
-            editor.save_status = None;
+            self.project_source.as_mut().unwrap().source = Arc::new(next);
+            if let Some(editor) = self.instrument_editor.as_mut() {
+                editor.parameter = 0;
+                editor.save_status = None;
+            }
             for parameter in parameters {
                 if previous
                     .iter()
@@ -76,11 +77,12 @@ impl AppController {
             .instrument_editor
             .as_ref()
             .ok_or_else(|| AppCommandError::Instrument("no loaded synth".into()))?;
+        let owner = self.project_source.as_ref().unwrap();
         let line = editor.patch_input.clone();
         let words: Vec<_> = line.split_whitespace().collect();
         if words.as_slice() == ["commit"] {
             if !editor.patch_operations.is_empty()
-                && editor.patch_base_fingerprint != editor.source.fingerprint()
+                && editor.patch_base_fingerprint != owner.source.fingerprint()
             {
                 return Err(AppCommandError::Instrument(
                     "draft base changed; clear and restage against the current source".into(),
@@ -115,11 +117,11 @@ impl AppController {
             synth: editor.synth.clone(),
             operations: operations.clone(),
         };
-        editor
+        owner
             .source
             .preview_patch(&edit)
             .map_err(AppCommandError::Instrument)?;
-        let validation = editor.source.edit_patch(&edit).and_then(|next| {
+        let validation = owner.source.edit_patch(&edit).and_then(|next| {
             next.validate_executable_patch(&edit.synth)?;
             meldritch_render::song_host::CompiledSongPatch::compile_initial(&next).map(|_| ())
         });
@@ -129,7 +131,7 @@ impl AppController {
         };
         let e = self.instrument_editor.as_mut().unwrap();
         if e.patch_operations.is_empty() {
-            e.patch_base_fingerprint = e.source.fingerprint();
+            e.patch_base_fingerprint = owner.source.fingerprint();
         }
         e.patch_operations = operations;
         e.patch_input.clear();

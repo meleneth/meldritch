@@ -24,6 +24,9 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 1 opening checkpoint: root adapter, no-subcommand empty overview,
   explicit headless `open-project --check`, unchanged legacy loader/cockpit,
   no initialization/files/devices on empty open and entry diagnostics
+- [x] Slice 1 ownership checkpoint: app-owned provenance/accepted source,
+  source-only loading, typed pattern/parameter/patch commands independent of an
+  instrument panel; existing detached views and save/reload formats preserved
 - [ ] Slice 2: shared palette, two compositions and independent pattern sources
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
@@ -61,6 +64,16 @@ if_same_then_else, manual_checked_ops, too_many_arguments,
 chunks_exact_to_as_chunks). No callback/DSP/MIDI code or historical musical
 fixtures changed. Empty opening is read-only; editable project ownership,
 construction/bindings and standalone persistence remain the next checkpoints.
+
+Ownership checkpoint verification: the workspace suite, then the final app and
+control suites pass, including source-only typed pattern creation/note editing,
+patch and instrument edits, rejection without source/history changes, shared
+view revisions and immutable provenance. Historical Lua/project persistence,
+patch drafts, Plaits and pickup acceptance remain green. Formatting/diff checks,
+app all-targets Clippy with the existing allowances and docs build pass. This
+does not yet provide empty editable definitions or construction in the empty
+cockpit; those and explicit bindings/standalone saves remain open. No formats,
+historical examples, rendering algorithms or callback code changed.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

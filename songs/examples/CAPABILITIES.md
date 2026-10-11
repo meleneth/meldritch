@@ -10,7 +10,7 @@ Status values:
 
 | Example | Capability | Status |
 | --- | --- | --- |
-| `34-empty-project-patch` | Read-only empty/legacy project opening accepted headlessly; construction, independent pitch/gate bindings and self-contained save/reopen contract unfinished | design |
+| `34-empty-project-patch` | Read-only empty/legacy opening and app-owned source independent of instrument panel checked headlessly; construction, independent pitch/gate bindings and self-contained save/reopen unfinished | design |
 | `00-minimal-synth` | Explicit oscillator-to-output patch | accept |
 | `01-synth-note-pattern` | Note pattern drives pitch and gate | accept |
 | `02-synth-parameter-pattern` | Pattern drives a synth parameter port | accept |

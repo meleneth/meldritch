@@ -1,6 +1,41 @@
 //! Detached project-root presentation, derived from the existing source model.
 use meldritch_dsl::ProjectDirectory;
+use meldritch_dsl::ValidatedSong;
 use std::path::PathBuf;
+use std::sync::Arc;
+
+/// Immutable import provenance and the single accepted authored revision.
+/// Editor panels hold selection/draft state, never a competing musical source.
+pub(crate) struct ProjectSource {
+    pub base: Arc<ValidatedSong>,
+    pub source: Arc<ValidatedSong>,
+}
+
+impl super::AppController {
+    /// Load accepted authored definitions without requiring an instrument panel.
+    /// This is a load boundary, not a recorded musical edit. Failed compilation
+    /// leaves the existing source, selections and assignment state intact.
+    pub fn enable_project_source(&mut self, song: ValidatedSong) -> Result<(), String> {
+        meldritch_render::song_host::CompiledSongPatch::compile_initial(&song)?;
+        let source = Arc::new(song);
+        self.project_source = Some(ProjectSource {
+            base: source.clone(),
+            source,
+        });
+        self.instrument_editor = None;
+        self.pattern_selection = None;
+        self.assignment_editor = None;
+        Ok(())
+    }
+
+    /// Detached accepted source, available independently of editor visibility.
+    #[must_use]
+    pub fn authored_source(&self) -> Option<Arc<ValidatedSong>> {
+        self.project_source
+            .as_ref()
+            .map(|owner| owner.source.clone())
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectOverview {

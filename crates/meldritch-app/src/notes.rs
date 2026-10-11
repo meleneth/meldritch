@@ -18,7 +18,7 @@ pub(crate) struct PatternSelection {
 }
 impl AppController {
     pub fn enable_pattern_editor(&mut self, pattern: &str) -> Result<(), String> {
-        self.instrument_editor
+        self.project_source
             .as_ref()
             .ok_or("no authored song source")?
             .source
@@ -43,12 +43,12 @@ impl AppController {
         }
         self.enable_instrument_editor(base)?;
         meldritch_render::song_host::CompiledSongPatch::compile_initial(&source)?;
-        self.instrument_editor.as_mut().unwrap().source = Arc::new(source);
+        self.project_source.as_mut().unwrap().source = Arc::new(source);
         self.enable_pattern_editor(pattern)
     }
     pub(crate) fn pattern_view(&self) -> Option<PatternEditorView> {
         let selection = self.pattern_selection.as_ref()?;
-        let source = self.instrument_editor.as_ref()?;
+        let source = self.project_source.as_ref()?;
         Some(PatternEditorView {
             pattern: source.source.authored_pattern(&selection.pattern).ok()?,
             selected_note: selection.note.clone(),
@@ -71,7 +71,7 @@ impl AppController {
         looped: bool,
     ) -> Result<AppCommandResult, AppCommandError> {
         let owner = self
-            .instrument_editor
+            .project_source
             .as_mut()
             .ok_or_else(|| AppCommandError::Instrument("no authored song source".into()))?;
         let source = owner
@@ -81,7 +81,9 @@ impl AppController {
         meldritch_render::song_host::CompiledSongPatch::compile_initial(&source)
             .map_err(AppCommandError::Instrument)?;
         owner.source = Arc::new(source);
-        owner.visible = false;
+        if let Some(editor) = self.instrument_editor.as_mut() {
+            editor.visible = false;
+        }
         self.pattern_selection = Some(PatternSelection {
             pattern: id.into(),
             note: None,
@@ -101,7 +103,7 @@ impl AppController {
         edit: &NoteEdit,
     ) -> Result<AppCommandResult, AppCommandError> {
         let owner = self
-            .instrument_editor
+            .project_source
             .as_mut()
             .ok_or_else(|| AppCommandError::Instrument("no authored song source".into()))?;
         let (next, selected_note, earliest) = owner
@@ -120,7 +122,9 @@ impl AppController {
             Vec::new()
         };
         owner.source = Arc::new(next);
-        owner.visible = false;
+        if let Some(editor) = self.instrument_editor.as_mut() {
+            editor.visible = false;
+        }
         self.pattern_selection = Some(PatternSelection {
             pattern: pattern.into(),
             note: selected_note.clone(),
@@ -140,7 +144,7 @@ impl AppController {
         id: &str,
     ) -> Result<AppCommandResult, AppCommandError> {
         let owner = self
-            .instrument_editor
+            .project_source
             .as_mut()
             .ok_or_else(|| AppCommandError::Instrument("no authored song source".into()))?;
         if !owner
@@ -155,7 +159,9 @@ impl AppController {
                 "unknown note '{id}' in '{pattern}'"
             )));
         }
-        owner.visible = false;
+        if let Some(editor) = self.instrument_editor.as_mut() {
+            editor.visible = false;
+        }
         self.pattern_selection = Some(PatternSelection {
             pattern: pattern.into(),
             note: Some(id.into()),

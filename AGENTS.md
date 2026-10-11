@@ -260,7 +260,7 @@ inspection remains open after that.
 Example `28-author-fader-mappings` now accepts Lua/TUI assignment editing and
 source-owned filter, single-track tempo-delay and track volume/pan parameters
 headlessly. See `CONTROL_ASSIGNMENTS.md`: mappings are app-owned, musical values
-share the instrument editor's validated source, and readable `kind="controls"`
+share the app-owned validated project source, and readable `kind="controls"`
 Lua snapshots remain separate from journals. Native stereo balance retains
 left/right content; authored pan promotes mono. Unchanged mono imports preserve
 their samples and fingerprints. Physical fader/listening acceptance remains open;

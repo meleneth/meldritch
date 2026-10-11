@@ -5,10 +5,8 @@ pub use meldritch_dsl::{
     ValidatedSong,
 };
 
-/// Baseline is immutable import provenance. `source` is the only editable song.
+/// Selection, presentation and staged patch operations only.
 pub(crate) struct InstrumentEditor {
-    pub base: Arc<ValidatedSong>,
-    pub source: Arc<ValidatedSong>,
     pub synth: String,
     pub parameter: usize,
     pub visible: bool,
@@ -83,9 +81,11 @@ impl AppController {
             .clone();
         song.instrument_parameters(&synth)?;
         let source = Arc::new(song);
-        self.instrument_editor = Some(InstrumentEditor {
+        self.project_source = Some(project::ProjectSource {
             base: Arc::new(base),
             source,
+        });
+        self.instrument_editor = Some(InstrumentEditor {
             synth,
             parameter: 0,
             visible: false,
@@ -107,20 +107,21 @@ impl AppController {
     }
 
     pub(crate) fn instrument_view(&self) -> Option<InstrumentEditorView> {
+        let owner = self.project_source.as_ref()?;
         self.instrument_editor
             .as_ref()
             .map(|editor| InstrumentEditorView {
-                base: editor.base.clone(),
-                source: editor.source.clone(),
-                base_fingerprint: editor.base.fingerprint(),
+                base: owner.base.clone(),
+                source: owner.source.clone(),
+                base_fingerprint: owner.base.fingerprint(),
                 synth: editor.synth.clone(),
                 selected_parameter: editor.parameter,
                 visible: editor.visible,
-                parameters: editor
+                parameters: owner
                     .source
                     .instrument_parameters(&editor.synth)
                     .unwrap_or_default(),
-                defaults: editor
+                defaults: owner
                     .base
                     .instrument_parameters(&editor.synth)
                     .unwrap_or_default(),
@@ -138,11 +139,11 @@ impl AppController {
         &mut self,
         edit: &InstrumentEdit,
     ) -> Result<AppCommandResult, AppCommandError> {
-        let editor = self
-            .instrument_editor
+        let owner = self
+            .project_source
             .as_mut()
-            .ok_or_else(|| AppCommandError::Instrument("no loaded instrument editor".into()))?;
-        let parameters = editor
+            .ok_or_else(|| AppCommandError::Instrument("no authored song source".into()))?;
+        let parameters = owner
             .source
             .instrument_parameters(&edit.target.synth)
             .map_err(AppCommandError::Instrument)?;
@@ -150,12 +151,12 @@ impl AppController {
             .iter()
             .find(|p| p.id == edit.target)
             .map(|p| p.value.clone());
-        let next = editor
+        let next = owner
             .source
             .edit_instrument(edit)
             .map_err(AppCommandError::Instrument)?;
         let next = next
-            .canonicalize_instrument_defaults(&editor.base)
+            .canonicalize_instrument_defaults(&owner.base)
             .map_err(AppCommandError::Instrument)?;
         // Reuse executable lowering as well as DSL parameter validation before acceptance.
         meldritch_render::song_host::CompiledSongPatch::compile_initial(&next)
@@ -164,8 +165,10 @@ impl AppController {
             .as_ref()
             .is_none_or(|previous| !previous.same_as(&edit.value));
         if changed {
-            editor.source = Arc::new(next);
-            editor.save_status = None;
+            owner.source = Arc::new(next);
+            if let Some(editor) = self.instrument_editor.as_mut() {
+                editor.save_status = None;
+            }
             let target = format!(
                 "synth:{}/{}.{}",
                 edit.target.synth,
@@ -203,7 +206,8 @@ impl AppController {
             .instrument_editor
             .as_mut()
             .ok_or_else(|| AppCommandError::Instrument("no loaded instrument editor".into()))?;
-        let ids: Vec<_> = editor.source.synths().keys().cloned().collect();
+        let owner = self.project_source.as_ref().unwrap();
+        let ids: Vec<_> = owner.source.synths().keys().cloned().collect();
         if synth_delta != 0 {
             let index = ids.iter().position(|id| id == &editor.synth).unwrap();
             editor.synth = ids
@@ -214,7 +218,7 @@ impl AppController {
             editor.patch_input.clear();
             editor.patch_status = "Instrument changed; draft cleared".into();
         }
-        let count = editor
+        let count = owner
             .source
             .instrument_parameters(&editor.synth)
             .map_err(AppCommandError::Instrument)?

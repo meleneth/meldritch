@@ -10,8 +10,11 @@ self-contained save/reopen in [ROADMAP.md](ROADMAP.md),
 required installed dependency; a project need not be a Git repository.
 
 Example 34's first checkpoint implements read-only empty-directory startup and
-legacy entrypoint adaptation, with no created files/devices. Next: project-owned
-editable source, patch/pattern creation, independent bindings and standalone saves.
+legacy entrypoint adaptation, with no created files/devices. The ownership
+checkpoint now moves accepted definitions/provenance to `AppController`;
+pattern, parameter and patch mutations no longer require an instrument panel.
+Next: empty editable definitions, patch/pattern creation, independent bindings
+and standalone saves.
 The full example retains `design` status.
 
 ## Recommended immediate implementation prompt

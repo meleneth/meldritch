@@ -200,8 +200,8 @@ impl AppController {
         }
         meldritch_render::song_host::CompiledSongPatch::compile_initial(&source)?;
         self.enable_instrument_editor(base)?;
+        self.project_source.as_mut().unwrap().source = Arc::new(source);
         let editor = self.instrument_editor.as_mut().unwrap();
-        editor.source = Arc::new(source);
         editor.synth = synth.into();
         self.enable_pattern_editor(pattern)?;
         self.enable_assignments(definition)
@@ -231,7 +231,7 @@ impl AppController {
         else {
             return Ok(None);
         };
-        let owner = self.instrument_editor.as_ref().unwrap();
+        let owner = self.project_source.as_ref().unwrap();
         let current = owner
             .source
             .editable_parameter(&target.target)
@@ -282,12 +282,12 @@ impl AppController {
         }
         meldritch_render::song_host::CompiledSongPatch::compile_initial(&source)?;
         self.enable_instrument_editor(base)?;
-        self.instrument_editor.as_mut().unwrap().source = Arc::new(source);
+        self.project_source.as_mut().unwrap().source = Arc::new(source);
         self.enable_assignments(definition)
     }
     pub fn enable_assignments(&mut self, definition: AssignmentDefinition) -> Result<(), String> {
         let owner = self
-            .instrument_editor
+            .project_source
             .as_ref()
             .ok_or("no authoring song source")?;
         definition.validate(&owner.source)?;
@@ -304,7 +304,7 @@ impl AppController {
     }
     pub fn assignment_view(&self) -> Option<AssignmentEditorView> {
         let a = self.assignment_editor.as_ref()?;
-        let owner = self.instrument_editor.as_ref()?;
+        let owner = self.project_source.as_ref()?;
         Some(AssignmentEditorView {
             definition: a.definition.clone(),
             page: a.page.clone(),
@@ -386,7 +386,7 @@ impl AppController {
         let err = |s: String| AppCommandError::Instrument(s);
         if let AppCommand::EditParameter(edit) = command {
             let owner = self
-                .instrument_editor
+                .project_source
                 .as_mut()
                 .ok_or_else(|| err("no authoring source".into()))?;
             let next = owner

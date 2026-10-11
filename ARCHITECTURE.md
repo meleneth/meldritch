@@ -38,10 +38,14 @@ filesystem-order guessing. Captured session documents are never compositions.
 
 Empty-directory state should exist in the same Rust definition model before
 files exist. Do not generate a secret seed song or repurpose the unrelated
-backing showcase pattern as project truth. Move authoring ownership out of
-`InstrumentEditor` only as needed to represent zero instruments; its current
-`base`/`source` Arcs become provenance/current-source handles, with editors as
-views. Compilers may receive a selected composition projection, but that view
+backing showcase pattern as project truth. `AppController.project_source` now
+owns immutable `base` provenance and the accepted `source` revision;
+`InstrumentEditor` holds selection, presentation and staged patch operations.
+`enable_project_source` loads executable definitions without creating an
+instrument panel. Pattern, parameter and patch commands use that shared owner.
+The owner still contains a legacy `ValidatedSong`: empty editable definitions,
+creation of instruments and independent composition bindings remain proposed.
+Compilers may receive a selected composition projection, but that view
 must not become another mutable palette.
 
 Git may be required installed. Opening local music must not need `.git`, a
@@ -213,7 +217,7 @@ the missing behavior is implemented. Required tests are acceptance obligations.
 | Desired capability | Existing implementation / reuse | Missing boundary and risk | Required acceptance |
 | --- | --- | --- | --- |
 | Empty project / palette / compositions | DSL `song/project_directory.rs`: `load_project_directory`, `ProjectDirectory`; app `ProjectOverview`; CLI no-subcommand and `open_project`; existing `load_song_directory`, `ValidatedSong`, `PerformanceDefinition` | Read-only empty/legacy opening exists. Loaded musical source still needs `main.mlperformance`; palette construction, self-contained save and multiple composition selection are missing. Avoid hidden templates and wholesale renaming. | Opening/diagnostics/no-file behavior accepted in the first checkpoint; construct/save/fresh reopen and multiple compositions still require acceptance. |
-| Authoritative state and modes | `meldritch-app/src/instrument.rs`: `InstrumentEditor.base/source`; `lib.rs`: `AppController::dispatch`, `CockpitMode`; render host `SongLiveOverrides` | Source lives inside an editor requiring a synth. Mapping faders write authored values. Separate root ownership, interaction mode and instance overlays without duplicate state. | Mode switch keeps audio/transport; performance moves leave authored fingerprint/export unchanged; explicit promotion reconstructs edits; failed promotion is atomic. |
+| Authoritative state and modes | `meldritch-app/src/project.rs`: `ProjectSource.base/source`, `enable_project_source`; `lib.rs`: `AppController::dispatch`, `CockpitMode`; render host `SongLiveOverrides` | Accepted source is app-owned independently of an instrument panel; empty editable definitions are missing. Mapping faders still write authored values. Separate interaction mode and instance overlays without duplicate state. | Mode switch keeps audio/transport; performance moves leave authored fingerprint/export unchanged; explicit promotion reconstructs edits; failed promotion is atomic. |
 | Patch scope / independent signals | DSL `SignalType`, `ModuleKind`, `resolve_port`, `CableDefinition`; render `compile_note_track_for_pattern`, `CompiledNotePatch::render_with_filter_overrides` | Only four signal families, validated string endpoints, endpoint-pair cables; fixed topology and pitch/gate event coupling. Validation is broader than execution. | Distinct pitch/gate traces and routing; reject cross-family cables; non-amplitude envelope example; unsupported graphs reject, never silently ignore cables. |
 | Patchable patterns / transforms | DSL `NotePatternDefinition`, `NoteEventDefinition`; `song/notes.rs`: `AuthoredPattern.track`, `create_note_pattern`; core `Pattern::events_between`, `EventOccurrence` | Authoring requires one track owner; no output-port binding or transform graph. Legacy step and duration semantics differ; polyphonic occurrence identity must survive transformation. | One pattern reused by two instances; independent gate source; adjacent/overlapping notes, loop/rewind and deterministic probability/ratchet bounds; source reload equivalence. |
 | LFOs / rates / combination | `meldritch-render/src/modulation.rs`: `Lfo`, `LfoRate`, `ModulationMatrix`; DSP envelope/follower kernels | Fixed destinations and implicit route sum; no graph LFO/parameter ports, integrated variable-rate phase, scope or reset contract. | Shared fan-out equals one source; per-voice phases differ as authored; rate modulation/reset/tempo, split render and feedback-delay tests; reject units/rate/combination ambiguity. |
