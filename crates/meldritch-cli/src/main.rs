@@ -302,7 +302,7 @@ impl PerformerOverrideGrace {
 #[command(about = "Headless Meldritch project tooling")]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -315,6 +315,14 @@ enum TransformKindArg {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Open a project root; an empty directory needs no initialization.
+    OpenProject {
+        #[arg(default_value = ".", value_name = "PROJECT_DIRECTORY")]
+        project: PathBuf,
+        /// Inspect the root without opening a terminal, audio or MIDI.
+        #[arg(long)]
+        check: bool,
+    },
     /// Run a bounded Lua-authored APC Mini MK2 LED animation (no audio).
     ApcLuaColors {
         #[arg(value_name = "LUA_FILE")]
@@ -894,7 +902,11 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<(), String> {
-    match cli.command {
+    match cli.command.unwrap_or(Command::OpenProject {
+        project: PathBuf::from("."),
+        check: false,
+    }) {
+        Command::OpenProject { project, check } => open_project(project, check),
         Command::ApcLuaColors {
             source,
             dry_run,
@@ -3092,6 +3104,48 @@ fn connect_apc_feedback(
         port_id,
         port_name: name,
     }))
+}
+
+fn open_project(path: PathBuf, check: bool) -> Result<(), String> {
+    let project = meldritch_dsl::load_project_directory(path).map_err(|error| error.to_string())?;
+    let view = meldritch_app::ProjectOverview::from_project(&project);
+    if check {
+        if let Some(song) = project.composition() {
+            println!(
+                "valid project · {} · composition '{}' · fingerprint {:016x}",
+                project.root().display(),
+                song.performance().id(),
+                song.fingerprint()
+            );
+        } else {
+            println!(
+                "valid project · {} · no composition loaded",
+                project.root().display()
+            );
+        }
+        return Ok(());
+    }
+    if project.composition().is_some() {
+        tui_song(
+            project.root().to_owned(),
+            None,
+            1024,
+            1,
+            true,
+            false,
+            false,
+            false,
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        )
+    } else {
+        meldritch_tui::run_empty_project(&view)
+            .map_err(|error| format!("failed to open project cockpit: {error}"))
+    }
 }
 
 fn tui_song(
@@ -7239,6 +7293,50 @@ fn resolve_project_path(project_path: &Path, relative_or_absolute: &str) -> Path
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_opening_accepts_no_subcommand_and_preserves_explicit_commands() {
+        use super::*;
+        assert!(
+            Cli::try_parse_from(["meldritch"])
+                .unwrap()
+                .command
+                .is_none()
+        );
+        let checked =
+            Cli::try_parse_from(["meldritch", "open-project", "/tmp", "--check"]).unwrap();
+        assert!(matches!(
+            checked.command,
+            Some(Command::OpenProject { check: true, .. })
+        ));
+        assert!(Cli::try_parse_from(["meldritch", "not-a-command"]).is_err());
+        assert!(Cli::try_parse_from(["meldritch", "validate-song"]).is_err());
+    }
+
+    #[test]
+    fn project_opening_check_has_no_filesystem_or_device_side_effects() {
+        use super::*;
+        let path = std::env::temp_dir().join(format!(
+            "meldritch-project-check-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        let cli = Cli::try_parse_from([
+            "meldritch",
+            "open-project",
+            path.to_str().unwrap(),
+            "--check",
+        ])
+        .unwrap();
+        let result = run(cli);
+        let count = std::fs::read_dir(&path).unwrap().count();
+        std::fs::remove_dir(&path).unwrap();
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(count, 0);
+    }
     use super::*;
 
     #[test]
@@ -7326,7 +7424,7 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(
-            parsed.command,
+            parsed.command.unwrap(),
             Command::TuiSong {
                 pattern: Some(_),
                 ..
@@ -7571,7 +7669,7 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(
-            direct.command,
+            direct.command.unwrap(),
             Command::TuiSong {
                 soft_takeover: false,
                 ..
@@ -7585,7 +7683,7 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(
-            enabled.command,
+            enabled.command.unwrap(),
             Command::TuiSong {
                 soft_takeover: true,
                 ..
@@ -7611,7 +7709,7 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(
-            parsed.command,
+            parsed.command.unwrap(),
             Command::TuiSong {
                 lua: Some(_),
                 no_midi_controls: true,
@@ -8029,7 +8127,7 @@ mod tests {
             autoplay,
             no_autoplay,
             ..
-        } = default.command
+        } = default.command.unwrap()
         else {
             panic!("expected tui-song command");
         };
@@ -8048,7 +8146,7 @@ mod tests {
             autoplay,
             no_autoplay,
             ..
-        } = stopped.command
+        } = stopped.command.unwrap()
         else {
             panic!("expected tui-song command");
         };

@@ -1,0 +1,7 @@
+# First checkpoint only. No fixture seed or project initialization.
+mkdir black-cathedral
+cd black-cathedral
+meldritch open-project --check
+meldritch
+# Inspect the empty project, then press q. No files should have been created.
+# Existing main.mlperformance directories open through the current song loader.

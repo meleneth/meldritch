@@ -7,6 +7,8 @@ mod notes;
 pub use notes::*;
 mod assignments;
 pub use assignments::*;
+mod project;
+pub use project::*;
 
 use meldritch_audio::device_output::PlaybackControl;
 use meldritch_audio::realtime_queue::{QueueDiagnostics, QueueFull};

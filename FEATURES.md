@@ -21,7 +21,8 @@ vertical slices are planned in [ROADMAP.md](ROADMAP.md).
   performance; a project is not a composition. Relationships are explicit.
 - `mkdir black-cathedral; cd black-cathedral; meldritch` must open an empty
   project without initialization, mandatory manifest/database/template or Git
-  repository. This workflow is unimplemented. Git is allowed as an external
+  repository. Read-only empty opening is implemented; construction and standalone
+  save/reopen remain unimplemented. Git is allowed as an external
   dependency and may be required installed; a repository, commit or network
   operation is unnecessary merely to open/play local music.
 - Construction edits authored definitions. Performance edits active instances

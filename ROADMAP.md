@@ -3,13 +3,16 @@
 ## Next architecture: planned vertical slices (2026-10-11)
 
 This sequence supersedes the original phases below as the active direction.
-All slices here are **proposed/unimplemented**. Historical examples 25–33 remain
+All full slices here remain **proposed/unimplemented**. Slice 1's read-only
+empty/legacy opening checkpoint is implemented, without accepting its complete
+workflow. Historical examples 25–33 remain
 accepted within their scopes. Requirements live in [FEATURES.md](FEATURES.md),
 the code/reuse audit in [ARCHITECTURE.md](ARCHITECTURE.md), and the active queue
 in [TODO.md](TODO.md). Each slice starts with a readable scenario and invalid
 neighbors, then binds acceptance to actual app/compiler/host boundaries.
 
-Only example 34's design contract is added now. Example names 35–41 below are
+Example 34 has an opening script, invalid entry fixture and scoped opening tests.
+Its full construction/persistence contract remains design. Names 35–41 below are
 reserved planning names, not existing files, schema or capability claims.
 No slice requires rewriting working examples or introducing another engine.
 

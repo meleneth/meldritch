@@ -21,6 +21,9 @@ an empty project requires no Git repository or initialization.
   as design only; select the immediate implementation prompt in AUTHORING.md
 - [ ] Slice 1: empty-directory project, create supported patch/pattern, independent
   pitch/gate bindings, keyboard authoring, play/edit/self-contained save/reopen
+- [x] Slice 1 opening checkpoint: root adapter, no-subcommand empty overview,
+  explicit headless `open-project --check`, unchanged legacy loader/cockpit,
+  no initialization/files/devices on empty open and entry diagnostics
 - [ ] Slice 2: shared palette, two compositions and independent pattern sources
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
@@ -45,6 +48,19 @@ remains enabled. Offline tests passed: DSL `ml_examples` 11, render `song_exampl
 parent). Historical example 09 validates with fingerprint `41472b38b65b60ed`.
 These checks protect existing support; they do not implement or accept example
 34, physical interaction, DSP-state migration or realtime deadlines.
+
+Opening checkpoint verification: `cargo test --workspace --offline` passes,
+including four new DSL root tests, two CLI checks (both binary targets) and two
+native TUI tests. A real no-subcommand 80×24 PTY run displays the empty root,
+quits via q, restores the alternate screen and leaves the directory untouched;
+the explicit headless check also creates nothing. Legacy example 29 opens through
+the same validator with fingerprint `54745c74a42665cf`; example 09 retains
+`41472b38b65b60ed`. Formatting/diff checks and docs build pass. Changed-crate
+all-targets Clippy passes with the existing workspace allowances (collapsible_if,
+if_same_then_else, manual_checked_ops, too_many_arguments,
+chunks_exact_to_as_chunks). No callback/DSP/MIDI code or historical musical
+fixtures changed. Empty opening is read-only; editable project ownership,
+construction/bindings and standalone persistence remain the next checkpoints.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

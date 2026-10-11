@@ -13,7 +13,11 @@ projections, compile-before-accept patch batches, controller pickup, background
 rendering and base-bound deterministic Lua persistence. Example 29 is accepted
 headlessly for its bounded composed workflow, not just its earlier parameter
 foundation. It cannot open an empty directory or save a standalone palette.
-Examples 31–33 add sampler-slot authoring and standalone Plaits engines without
+The first example 34 checkpoint adds `load_project_directory`/`ProjectDirectory`
+around the existing importer, `ProjectOverview` as a detached app projection,
+and no-subcommand/read-only empty startup. It creates no seed, files or devices.
+Legacy roots use the same song cockpit; palette construction and standalone
+persistence remain missing. Examples 31–33 add sampler-slot authoring and standalone Plaits engines without
 changing those ownership boundaries. Physical acceptance is still separate.
 
 ### Project boundary and compatibility
@@ -208,7 +212,7 @@ the missing behavior is implemented. Required tests are acceptance obligations.
 
 | Desired capability | Existing implementation / reuse | Missing boundary and risk | Required acceptance |
 | --- | --- | --- | --- |
-| Empty project / palette / compositions | `meldritch-dsl/src/song.rs`: `load_song_directory`, `ValidatedSong`, `PerformanceDefinition`; CLI `Cli.command` requires a subcommand | Mandatory `main.mlperformance`; root owns one performance. Introduce empty source and composition adapters; avoid hidden templates and wholesale renaming. | Empty open is silent and creates no files; construct/save/fresh reopen; legacy entrypoints/hashes unchanged; ambiguous/missing composition diagnostics. |
+| Empty project / palette / compositions | DSL `song/project_directory.rs`: `load_project_directory`, `ProjectDirectory`; app `ProjectOverview`; CLI no-subcommand and `open_project`; existing `load_song_directory`, `ValidatedSong`, `PerformanceDefinition` | Read-only empty/legacy opening exists. Loaded musical source still needs `main.mlperformance`; palette construction, self-contained save and multiple composition selection are missing. Avoid hidden templates and wholesale renaming. | Opening/diagnostics/no-file behavior accepted in the first checkpoint; construct/save/fresh reopen and multiple compositions still require acceptance. |
 | Authoritative state and modes | `meldritch-app/src/instrument.rs`: `InstrumentEditor.base/source`; `lib.rs`: `AppController::dispatch`, `CockpitMode`; render host `SongLiveOverrides` | Source lives inside an editor requiring a synth. Mapping faders write authored values. Separate root ownership, interaction mode and instance overlays without duplicate state. | Mode switch keeps audio/transport; performance moves leave authored fingerprint/export unchanged; explicit promotion reconstructs edits; failed promotion is atomic. |
 | Patch scope / independent signals | DSL `SignalType`, `ModuleKind`, `resolve_port`, `CableDefinition`; render `compile_note_track_for_pattern`, `CompiledNotePatch::render_with_filter_overrides` | Only four signal families, validated string endpoints, endpoint-pair cables; fixed topology and pitch/gate event coupling. Validation is broader than execution. | Distinct pitch/gate traces and routing; reject cross-family cables; non-amplitude envelope example; unsupported graphs reject, never silently ignore cables. |
 | Patchable patterns / transforms | DSL `NotePatternDefinition`, `NoteEventDefinition`; `song/notes.rs`: `AuthoredPattern.track`, `create_note_pattern`; core `Pattern::events_between`, `EventOccurrence` | Authoring requires one track owner; no output-port binding or transform graph. Legacy step and duration semantics differ; polyphonic occurrence identity must survive transformation. | One pattern reused by two instances; independent gate source; adjacent/overlapping notes, loop/rewind and deterministic probability/ratchet bounds; source reload equivalence. |

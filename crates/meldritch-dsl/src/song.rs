@@ -15,6 +15,8 @@ mod notes;
 pub use notes::*;
 mod parameters;
 pub use parameters::*;
+mod project_directory;
+pub use project_directory::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]

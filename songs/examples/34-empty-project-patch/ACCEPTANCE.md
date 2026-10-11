@@ -1,11 +1,19 @@
 # Empty project → construct → pattern → independent signals → play → save → reopen
 
-Status: **design only; unimplemented**. This directory contains a behavior
-contract, not loadable musical files or a passing acceptance runner. No new
-format fields are specified here. Implementation must add the smallest readable
-authored output and invalid neighbors before extending schema/runtime. See
+Status: **design for the complete workflow**. The read-only opening checkpoint
+is implemented: DSL `project_directory`, CLI project-opening tests and native TUI
+tests cover empty/legacy roots, diagnostics and presentation. `opening.txt` and
+`invalid/malformed-entry.toml` specify that checkpoint. Construction, bindings,
+playback and self-contained save/reopen remain unimplemented. No new authored
+format exists; add readable authored fixtures before extending its schema. See
 [the roadmap](../../../ROADMAP.md) and
 [implementation prompt](../../../AUTHORING.md#recommended-immediate-implementation-prompt).
+
+Opening checks: `cargo test -p meldritch-dsl --test project_directory`,
+`cargo test -p meldritch-cli project_opening` and
+`cargo test -p meldritch-tui empty_project`. An actual no-subcommand 80×24 PTY
+draw/quit and alternate-screen restoration smoke also passes without files.
+This evidence accepts only opening; it does not accept construction or music.
 
 ## Scenario and observable behavior
 
@@ -77,8 +85,8 @@ Preserve examples 25–33 and historical compatibility fixtures, hashes and
 base-bound instrument v1/v2, pattern/controls/project v1. Preserve Plaits f32/RNG
 exceptions. Run focused then affected full crate suites and format/diff/docs checks.
 
-Completion requires the whole workflow and negatives/compatibility. Remain
-`design` until automated proof exists. Two-pattern routing, polyphonic signals,
+Completion requires the whole workflow and negatives/compatibility. The opening
+checkpoint does not advance the complete example beyond `design`. Two-pattern routing, polyphonic signals,
 LFOs, normalization, libraries, quantized graph changes and DSP-state migration
 are deferred. PCM replacement proves rendered behavior, not continuous DSP state.
 Physical sound/gestures and deadlines require separate evidence.

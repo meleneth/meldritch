@@ -9,10 +9,13 @@ The intended model is project-oriented: reusable definitions and compositions
 built from explicit typed relationships, with the machine itself as a playable
 compositional instrument. **Coherence under composition** governs design. See
 [requirements](FEATURES.md), [architecture/code audit](ARCHITECTURE.md) and
-[next roadmap](ROADMAP.md). Empty-directory startup, patchable pattern routing
-and stateful graph transitions are proposed, not supported today. Commands below
-remain valid. Git is allowed as a required installed dependency; the proposed
-empty-project workflow needs no Git repository or initialization.
+[next roadmap](ROADMAP.md). `meldritch` now opens the current directory: an empty
+root shows a read-only project overview, while `main.mlperformance` roots use the
+existing song cockpit. `meldritch open-project PATH --check` validates opening
+without terminal/audio/MIDI. Creation from empty, patchable pattern routing and
+stateful graph transitions remain proposed. Existing commands remain valid.
+Git is allowed as a required installed dependency; opening needs no repository
+or initialization. Empty opening creates no files or audio/MIDI streams.
 
 Create, change and return to music with [composed authoring](MUSICAL_AUTHORING.md):
 

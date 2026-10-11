@@ -1,5 +1,8 @@
 //! Ratatui/Crossterm frontend for the headless application controller.
 
+mod project;
+pub use project::*;
+
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{

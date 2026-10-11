@@ -9,6 +9,11 @@ self-contained save/reopen in [ROADMAP.md](ROADMAP.md),
 [ARCHITECTURE.md](ARCHITECTURE.md) and TODO section 21. Git is permitted as a
 required installed dependency; a project need not be a Git repository.
 
+Example 34's first checkpoint implements read-only empty-directory startup and
+legacy entrypoint adaptation, with no created files/devices. Next: project-owned
+editable source, patch/pattern creation, independent bindings and standalone saves.
+The full example retains `design` status.
+
 ## Recommended immediate implementation prompt
 
 Implement only [example 34](songs/examples/34-empty-project-patch/ACCEPTANCE.md):

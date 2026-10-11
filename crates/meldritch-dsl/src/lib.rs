@@ -28,10 +28,11 @@ pub use song::{
     PerformanceDefinition, PerformanceLaneDefinition, PerformanceModifierDefinition,
     PerformancePageDefinition, PerformancePageStripDefinition, PerformancePatternBankDefinition,
     PerformanceUiDefinition, PerformanceUiKeyHintDefinition, PerformanceUiSectionDefinition,
-    PerformanceUiSectionKind, PlaitsModel, PlaitsSettings, PortDirection, SampleBankDefinition,
-    SamplePlaybackMode, SampleSliceDefinition, SampleSlotDefinition, SamplerDefinition,
-    SamplerPitchEnvelopeDefinition, SignalType, SongDiagnostic, SongLoadError, SynthDefinition,
-    TrackDefinition, ValidatedSong, load_song_directory, note_name,
+    PerformanceUiSectionKind, PlaitsModel, PlaitsSettings, PortDirection, ProjectDirectory,
+    SampleBankDefinition, SamplePlaybackMode, SampleSliceDefinition, SampleSlotDefinition,
+    SamplerDefinition, SamplerPitchEnvelopeDefinition, SignalType, SongDiagnostic, SongLoadError,
+    SynthDefinition, TrackDefinition, ValidatedSong, load_project_directory, load_song_directory,
+    note_name,
 };
 
 #[derive(Clone, Debug, PartialEq)]
