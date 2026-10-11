@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// Control-thread owner of render caches; musical state belongs to AppController.
 pub struct SongAudioHost {
+    authoring_save: Option<String>,
     song: ValidatedSong,
     patch: CompiledSongPatch,
     overrides: SongLiveOverrides,
@@ -71,6 +72,7 @@ impl SongAudioHost {
             lanes: lane_audio_state(&song_performance_pages_for_view(&song)),
         };
         Self {
+            authoring_save: None,
             monitor: publisher.playback_monitor(),
             submitted: initial.clone(),
             published: initial,
@@ -116,6 +118,65 @@ impl SongAudioHost {
         view: &AppViewModel,
         result: &AppCommandResult,
     ) -> Result<bool, String> {
+        if matches!(result, AppCommandResult::InstrumentSaveRequested) {
+            let editor = view
+                .instrument_editor
+                .as_ref()
+                .ok_or("no loaded instrument editor")?;
+            let saved = crate::instrument::save_instrument(editor);
+            self.authoring_save = Some(match &saved {
+                Ok(path) => format!(
+                    "Saved {}: {}",
+                    editor.synth,
+                    path.strip_prefix(editor.source.root())
+                        .unwrap_or(path)
+                        .display()
+                ),
+                Err(error) => format!("Save failed; edits remain unsaved: {error}"),
+            });
+            saved?;
+            return Ok(false);
+        }
+        if let AppCommandResult::InstrumentEdited { edit, changed, .. } = result {
+            if !changed {
+                return Ok(false);
+            }
+            let editor = view
+                .instrument_editor
+                .as_ref()
+                .ok_or("missing authoritative instrument source")?;
+            // A derived immutable source revision, never an independent editable model.
+            self.song = editor.source.as_ref().clone();
+            self.generation += 1;
+            self.error = None;
+            self.submitted = AudioRevision {
+                generation: self.generation,
+                lanes: lane_audio_state(&view.performance.pages),
+            };
+            let target = SynthFilterTarget {
+                synth_id: edit.target.synth.clone(),
+                module_id: edit.target.module.clone(),
+            };
+            if let Some(filter) = self.overrides.synth_filters.get_mut(&target) {
+                match edit.target.parameter {
+                    meldritch_dsl::InstrumentParameter::CutoffHz => filter.cutoff_hz = None,
+                    meldritch_dsl::InstrumentParameter::Resonance => filter.resonance = None,
+                    _ => {}
+                }
+            }
+            match edit.target.parameter {
+                meldritch_dsl::InstrumentParameter::CutoffHz => self.overrides.cutoff_hz = None,
+                meldritch_dsl::InstrumentParameter::Resonance => self.overrides.resonance = None,
+                _ => {}
+            }
+            // Reuse the current lane selection/mute/transpose path; publish only latest work.
+            self.compile_failed = true;
+            let prepared = self.prepare(view, result);
+            if let Err(error) = &prepared {
+                self.error = Some(error.clone());
+            }
+            return prepared;
+        }
         let relevant = match result {
             AppCommandResult::LaneOctaveSet { .. }
             | AppCommandResult::LaneVariationSelected { .. }
@@ -190,13 +251,17 @@ impl SongAudioHost {
                 }
                 false
             }
+            AppCommandResult::InstrumentEdited { .. } => true,
             _ => return Ok(false),
         };
         if recompile || self.compile_failed {
             self.compile_failed = true;
             let variations = active_lane_variations(view);
             // Keep the delayed single-track path, including its DSP graph.
-            self.patch = if self.song.performance().tracks().len() == 1
+            self.patch = if self.song.performance().lanes().is_empty() {
+                CompiledSongPatch::compile_initial(&self.song)?
+            } else if self.song.performance().tracks().len() == 1
+                && self.song.performance().tracks()[0].dsp_ids().len() == 1
                 && self.overrides.lane_transpose_semitones.is_empty()
                 && included_lanes_from_view(view) == default_included_lanes(&self.song)
             {
@@ -275,6 +340,9 @@ impl SongAudioHost {
     }
 
     pub fn refresh_view(&mut self, app: &mut AppController) -> bool {
+        if let Some(status) = self.authoring_save.take() {
+            app.observe_instrument_save(status);
+        }
         let callback_generation = self.observe_callback();
         let view = app.view_model();
         let playing = view.transport.state == meldritch_audio::transport::TransportState::Playing;

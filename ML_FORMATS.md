@@ -6,9 +6,12 @@ format grows only when an accepted example requires it.
 
 Interactive authoring is now the immediate priority (TODO section 20).
 [AUTHORING.md](AUTHORING.md) specifies the source ownership and minimum Lua
-persistence direction; examples 25–30 remain `design`. Existing TOML loading and
-Lua v1 entrypoint behavior are unchanged in this documentation slice. Future
-Lua export must reconstruct accepted musical edits, beyond saving script text.
+persistence direction. Example 25 accepts the initial instrument subset;
+example 29's larger composed round-trip is unfinished. The separate version-1
+authored instrument Lua representation is defined in
+[INSTRUMENT_EDITOR.md](INSTRUMENT_EDITOR.md), with a complete checked-in example
+and independent validation/render commands. Existing TOML entry points and
+Lua composition v1 remain compatible; exports do not rewrite them.
 
 ## Example-first rule
 

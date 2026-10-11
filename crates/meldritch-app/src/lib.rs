@@ -1,5 +1,8 @@
 //! Headless application state and command dispatch for UI frontends.
 
+mod instrument;
+pub use instrument::*;
+
 use meldritch_audio::device_output::PlaybackControl;
 use meldritch_audio::realtime_queue::{QueueDiagnostics, QueueFull};
 use meldritch_audio::realtime_status::RealtimeStatusSnapshot;
@@ -55,6 +58,13 @@ impl CockpitMode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommand {
+    EditInstrument(InstrumentEdit),
+    ToggleInstrumentEditor,
+    NavigateInstrument {
+        synth_delta: i32,
+        parameter_delta: i32,
+    },
+    SaveInstrument,
     Play,
     Stop,
     Rewind,
@@ -111,6 +121,13 @@ pub struct CommandRecord {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommandResult {
+    InstrumentEdited {
+        edit: InstrumentEdit,
+        previous: InstrumentValue,
+        changed: bool,
+    },
+    InstrumentEditorChanged,
+    InstrumentSaveRequested,
     TransportQueued,
     SelectionChanged {
         previous: Selection,
@@ -176,6 +193,7 @@ pub enum AppCommandResult {
 
 #[derive(Debug)]
 pub enum AppCommandError {
+    Instrument(String),
     QueueFull(QueueFull),
     LiveEdit(LiveEditError),
     NoStepSelected,
@@ -425,6 +443,7 @@ pub struct CuratedControlView {
 
 #[derive(Clone, Debug)]
 pub struct AppViewModel {
+    pub instrument_editor: Option<InstrumentEditorView>,
     pub song_audio: Option<SongAudioView>,
     pub cockpit_mode: CockpitMode,
     pub curated_controls: Vec<CuratedControlView>,
@@ -463,6 +482,14 @@ pub struct LaneAudioView {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppInput {
+    ToggleInstrumentEditor,
+    NavigateInstrument {
+        synth_delta: i32,
+        parameter_delta: i32,
+    },
+    AdjustInstrument(i32),
+    EditInstrument(InstrumentEdit),
+    SaveInstrument,
     ToggleCockpitMode,
     AdjustCuratedControl {
         id: String,
@@ -868,6 +895,7 @@ impl Drop for PerformanceFxWorker {
 }
 
 pub struct AppController {
+    instrument_editor: Option<InstrumentEditor>,
     song_audio: Option<SongAudioView>,
     cockpit_mode: CockpitMode,
     curated_controls: Vec<CuratedControlView>,
@@ -914,6 +942,7 @@ impl AppController {
         history_capacity: usize,
     ) -> Self {
         Self {
+            instrument_editor: None,
             song_audio: None,
             cockpit_mode: CockpitMode::Performance,
             curated_controls: Vec::new(),
@@ -1326,6 +1355,26 @@ impl AppController {
 
     pub fn dispatch(&mut self, command: AppCommand) -> Result<AppCommandResult, AppCommandError> {
         let result = match &command {
+            AppCommand::EditInstrument(edit) => self.edit_instrument(edit)?,
+            AppCommand::ToggleInstrumentEditor => {
+                let editor = self.instrument_editor.as_mut().ok_or_else(|| {
+                    AppCommandError::Instrument("no loaded instrument editor".into())
+                })?;
+                editor.visible = !editor.visible;
+                AppCommandResult::InstrumentEditorChanged
+            }
+            AppCommand::NavigateInstrument {
+                synth_delta,
+                parameter_delta,
+            } => self.instrument_navigation(*synth_delta, *parameter_delta)?,
+            AppCommand::SaveInstrument => {
+                if self.instrument_editor.is_none() {
+                    return Err(AppCommandError::Instrument(
+                        "no loaded instrument editor".into(),
+                    ));
+                }
+                AppCommandResult::InstrumentSaveRequested
+            }
             AppCommand::Play => {
                 self.playback.play().map_err(AppCommandError::QueueFull)?;
                 AppCommandResult::TransportQueued
@@ -1601,6 +1650,9 @@ impl AppController {
             }
         };
         let (changed, dirty_ranges) = match &result {
+            AppCommandResult::InstrumentEdited { changed, .. } => (*changed, Vec::new()),
+            AppCommandResult::InstrumentEditorChanged
+            | AppCommandResult::InstrumentSaveRequested => (false, Vec::new()),
             AppCommandResult::TransportQueued => (true, Vec::new()),
             AppCommandResult::SelectionChanged { previous, current } => {
                 (previous != current, Vec::new())
@@ -1687,6 +1739,7 @@ impl AppController {
             })
             .collect();
         AppViewModel {
+            instrument_editor: self.instrument_view(),
             song_audio: self.song_audio.clone(),
             cockpit_mode: self.cockpit_mode,
             curated_controls: self.curated_controls.clone(),
@@ -1840,6 +1893,19 @@ impl AppController {
     pub fn handle_input(&mut self, input: AppInput) -> Result<AppCommandResult, AppCommandError> {
         let pattern_length = self.editor.state().pattern().length_steps();
         let command = match input {
+            AppInput::ToggleInstrumentEditor => AppCommand::ToggleInstrumentEditor,
+            AppInput::NavigateInstrument {
+                synth_delta,
+                parameter_delta,
+            } => AppCommand::NavigateInstrument {
+                synth_delta,
+                parameter_delta,
+            },
+            AppInput::AdjustInstrument(delta) => {
+                AppCommand::EditInstrument(self.instrument_adjustment(delta)?)
+            }
+            AppInput::EditInstrument(edit) => AppCommand::EditInstrument(edit),
+            AppInput::SaveInstrument => AppCommand::SaveInstrument,
             AppInput::ToggleCockpitMode => AppCommand::SetCockpitMode(self.cockpit_mode.toggled()),
             AppInput::AdjustCuratedControl { id, steps } => {
                 AppCommand::AdjustCuratedControl { id, steps }

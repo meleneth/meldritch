@@ -61,6 +61,20 @@ impl MidiPickup {
                 continue;
             }
             match &record.command {
+                AppCommand::EditInstrument(edit) => {
+                    let target = format!(
+                        "synth:{}/{}.{}",
+                        edit.target.synth,
+                        edit.target.module,
+                        edit.target.parameter.name()
+                    );
+                    self.states.retain(|_, state| {
+                        !view
+                            .curated_controls
+                            .iter()
+                            .any(|control| control.id == state.control && control.target == target)
+                    });
+                }
                 AppCommand::SelectPerformancePage(_)
                 | AppCommand::SetPerformanceModifier { .. } => self.states.clear(),
                 AppCommand::SetCuratedControlNormalized { id, .. }

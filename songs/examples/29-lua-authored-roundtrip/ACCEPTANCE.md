@@ -1,13 +1,17 @@
 # Persist and reload musical edits as Lua
 
-Status: `design`; the existing Lua save envelope does not satisfy this example.
+Status: `compile` for the instrument-only foundation; the full composed contract
+below remains unimplemented. Example 25's `edited-instrument.lua` and
+`cargo test -p meldritch-control --test instrument_authoring` prove seven-parameter
+exports, independent reload/render, deterministic text, base validation, atomic
+unique saves and failure recovery. Pattern/graph/mapping/mixer authoring remains
+unimplemented.
 Use [shared rules](../../../AUTHORING.md#acceptance-execution-contract).
 
-Start minimally with a copied example 02 and one authored cutoff edit. Export
+The first subset uses example 25's bass with authored cutoff/release edits. Export
 human-readable Lua referencing the confined immutable base plus deterministic
-absolute source edits. The implementation must define its minimum versioned
-syntax alongside failing tests; this contract intentionally specifies no new
-schema fields or unimplemented Lua command names. The base identity/fingerprint
+absolute source edits. The implemented minimum versioned syntax is documented
+in [INSTRUMENT_EDITOR.md](../../../INSTRUMENT_EDITOR.md). The base identity/fingerprint
 is required so a changed external source cannot silently change the saved music.
 
 Then compose examples 25–28 and 30. Save reconstructs synth defaults, note

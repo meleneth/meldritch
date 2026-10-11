@@ -11,6 +11,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 pub type Result<T> = std::result::Result<T, String>;
+pub mod instrument;
 pub mod led_demo;
 pub mod performance;
 pub mod pickup;
@@ -69,6 +70,7 @@ struct Binding {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "name", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CommandRequest {
+    EditInstrument { edit: meldritch_dsl::InstrumentEdit },
     SetMode { mode: Mode },
     Play,
     Stop,
@@ -99,6 +101,7 @@ impl CommandRequest {
             _ => {}
         }
         Ok(match self {
+            Self::EditInstrument { edit } => AppCommand::EditInstrument(edit.clone()),
             Self::SetMode { mode } => AppCommand::SetCockpitMode(match mode {
                 Mode::Performance => CockpitMode::Performance,
                 Mode::AllParameters => CockpitMode::AllParameters,
@@ -323,8 +326,16 @@ impl LuaProject {
                 .map_err(error)?;
             if dependencies.len() > MAX_DEFINITIONS
                 || dependencies.iter().any(|d| {
-                    !["mode", "page", "controls", "lanes", "transport", "audio"]
-                        .contains(&d.as_str())
+                    ![
+                        "mode",
+                        "page",
+                        "controls",
+                        "lanes",
+                        "transport",
+                        "audio",
+                        "instrument",
+                    ]
+                    .contains(&d.as_str())
                 })
             {
                 return Err(format!("unknown dependency for widget '{id}'"));
@@ -444,6 +455,49 @@ impl LuaProject {
 
     fn projection(&self, view: &AppViewModel) -> Result<Table> {
         let values = self.lua.create_table().map_err(error)?;
+        if let Some(editor) = &view.instrument_editor {
+            let instrument = self.lua.create_table().map_err(error)?;
+            instrument.set("id", editor.synth.clone()).map_err(error)?;
+            instrument
+                .set(
+                    "fingerprint",
+                    format!("{:016x}", editor.source.fingerprint()),
+                )
+                .map_err(error)?;
+            instrument
+                .set("selected_parameter", editor.selected_parameter + 1)
+                .map_err(error)?;
+            // Recursively readonly proxies, using the same typed parameter projection.
+            instrument
+                .set(
+                    "parameters",
+                    self.readonly_tree(
+                        self.lua
+                            .to_value(&editor.parameters)
+                            .map_err(error)?
+                            .as_table()
+                            .unwrap()
+                            .clone(),
+                    )?,
+                )
+                .map_err(error)?;
+            instrument
+                .set(
+                    "defaults",
+                    self.readonly_tree(
+                        self.lua
+                            .to_value(&editor.defaults)
+                            .map_err(error)?
+                            .as_table()
+                            .unwrap()
+                            .clone(),
+                    )?,
+                )
+                .map_err(error)?;
+            values
+                .set("instrument", self.readonly(instrument)?)
+                .map_err(error)?;
+        }
         values
             .set(
                 "mode",
@@ -524,6 +578,18 @@ impl LuaProject {
                     .map(|p| p.id.clone()),
             )
             .map_err(error)?;
+        self.readonly(values)
+    }
+
+    fn readonly_tree(&self, values: Table) -> Result<Table> {
+        for pair in values.clone().pairs::<Value, Value>() {
+            let (key, value) = pair.map_err(error)?;
+            if let Value::Table(nested) = value {
+                values
+                    .set(key, self.readonly_tree(nested)?)
+                    .map_err(error)?;
+            }
+        }
         self.readonly(values)
     }
 

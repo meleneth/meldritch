@@ -2,8 +2,13 @@
 
 Immediate priority has changed to interactive musical authoring; see
 [AUTHORING.md](AUTHORING.md) and TODO section 20. The API described here remains
-the implemented v1 boundary: its saved source envelope is not persistence of
-musical edits. New authoring examples are design contracts, not new API support.
+the implemented v1 boundary. Its composition source envelope is distinct from
+the new version-1 authored instrument definition. See
+[INSTRUMENT_EDITOR.md](INSTRUMENT_EDITOR.md) for the supported parameter subset,
+read-only `instrument` dependency/projection, `edit_instrument` typed request,
+keyboard saves and independent reload/render. Those commands mutate the app's
+validated Rust source, not a Lua-owned copy. Pattern/graph/mapping authoring
+commands remain design contracts.
 
 This milestone implements the headless vertical slice in
 `songs/examples/18-lua-control-plane`. Run it with:

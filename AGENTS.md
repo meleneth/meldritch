@@ -86,8 +86,11 @@ Preserve `INVARIANTS.md`. In particular:
 The immediate priority is section 20 of `TODO.md`: interactive instrument,
 pattern, patch, mapping and mixer authoring through TUI/hardware, persisted as
 human-readable Lua. Read `AUTHORING.md` and examples 25–30 before that work.
-Their status is `design`; Lua v1 currently composes TOML songs and does not save
-musical edits. Section 19's unfinished performance infrastructure is retained
+Example 25 now has headless `accept` status; example 29's instrument persistence
+foundation is `compile`, with its composed contract unfinished. The supported
+editor and versioned instrument Lua exports are documented in
+`INSTRUMENT_EDITOR.md`. Examples 26–28 and 30 remain `design`.
+Section 19's unfinished performance infrastructure is retained
 but no longer determines the next implementation slice.
 
 Implemented foundations include:

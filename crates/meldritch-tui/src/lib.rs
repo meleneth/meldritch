@@ -124,6 +124,59 @@ pub fn map_key_for_view(
     if key.kind != KeyEventKind::Press {
         return None;
     }
+    if view.instrument_editor.is_some()
+        && key.code == KeyCode::Char('e')
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+    {
+        return Some(TuiAction::Input(AppInput::ToggleInstrumentEditor));
+    }
+    if let Some(editor) = &view.instrument_editor
+        && editor.visible
+    {
+        if key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return map_key(key, default_step);
+        }
+        return match key.code {
+            KeyCode::Esc => Some(TuiAction::Input(AppInput::ToggleInstrumentEditor)),
+            KeyCode::Up | KeyCode::Char('k') => {
+                Some(TuiAction::Input(AppInput::NavigateInstrument {
+                    synth_delta: 0,
+                    parameter_delta: -1,
+                }))
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                Some(TuiAction::Input(AppInput::NavigateInstrument {
+                    synth_delta: 0,
+                    parameter_delta: 1,
+                }))
+            }
+            KeyCode::Left | KeyCode::Char('-') => {
+                Some(TuiAction::Input(AppInput::AdjustInstrument(-1)))
+            }
+            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => {
+                Some(TuiAction::Input(AppInput::AdjustInstrument(1)))
+            }
+            KeyCode::Tab => Some(TuiAction::Input(AppInput::NavigateInstrument {
+                synth_delta: 1,
+                parameter_delta: 0,
+            })),
+            KeyCode::BackTab => Some(TuiAction::Input(AppInput::NavigateInstrument {
+                synth_delta: -1,
+                parameter_delta: 0,
+            })),
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(TuiAction::Input(AppInput::SaveInstrument))
+            }
+            KeyCode::Home => editor.defaults.get(editor.selected_parameter).map(|p| {
+                TuiAction::Input(AppInput::EditInstrument(meldritch_app::InstrumentEdit {
+                    target: p.id.clone(),
+                    value: p.value.clone(),
+                }))
+            }),
+            KeyCode::Char('q' | 'p' | 's' | 'r') => map_key(key, default_step),
+            _ => None,
+        };
+    }
     if view.cockpit_mode == meldritch_app::CockpitMode::Performance {
         if let KeyCode::Char(character) = key.code {
             let normalized = character.to_ascii_lowercase().to_string();
@@ -358,6 +411,104 @@ pub fn draw(frame: &mut ratatui::Frame<'_>, view: &AppViewModel) {
     draw_with_status(frame, view, &StatusMessage::info("Ready"));
 }
 
+fn draw_instrument_editor(
+    frame: &mut ratatui::Frame<'_>,
+    view: &AppViewModel,
+    editor: &meldritch_app::InstrumentEditorView,
+    status: &StatusMessage,
+) {
+    use meldritch_app::{InstrumentRange, InstrumentValue};
+    let state = view
+        .song_audio
+        .as_ref()
+        .map_or("audio state unknown", |audio| {
+            if audio.error.is_some() {
+                "render error; previous audio retained"
+            } else if audio.requested_generation != audio.published_generation {
+                "pending publication"
+            } else {
+                "applied to published audio"
+            }
+        });
+    let selected = editor.parameters.get(editor.selected_parameter);
+    let mut lines = vec![
+        format!("Instrument: {} | {}", editor.synth, state),
+        selected.map_or_else(String::new, |p| {
+            format!(
+                "Module: {} ({}) | Parameter: {:?}",
+                p.id.module, p.module_kind, p.id.parameter
+            )
+        }),
+        "Up/Down parameter  Left/Right edit  Tab instrument  Home imported default".into(),
+        "Ctrl-S save Lua  Esc/Ctrl-E close  p play  s stop  r rewind  q quit".into(),
+        format!("Source fingerprint: {:016x}", editor.source.fingerprint()),
+    ];
+    for (index, parameter) in editor.parameters.iter().enumerate() {
+        let value = match &parameter.value {
+            InstrumentValue::Number(n) => format!("{n:.5}"),
+            InstrumentValue::Waveform(w) => w.name().to_owned(),
+        };
+        let range = match &parameter.range {
+            InstrumentRange::Number {
+                minimum,
+                maximum,
+                minimum_inclusive,
+            } => format!(
+                "{}{}..{}",
+                if *minimum_inclusive { "" } else { ">" },
+                minimum,
+                maximum.map_or_else(|| "inf".into(), |n| n.to_string())
+            ),
+            InstrumentRange::Waveform => "sine/triangle/saw/pulse/square".into(),
+        };
+        lines.push(format!(
+            "{} {}.{:?} = {} {} [{}]",
+            if index == editor.selected_parameter {
+                ">"
+            } else {
+                " "
+            },
+            parameter.id.module,
+            parameter.id.parameter,
+            value,
+            parameter.unit,
+            range
+        ));
+    }
+    if let Some(default) = editor.defaults.get(editor.selected_parameter) {
+        lines.push(format!(
+            "Imported default: {:?}; owner: {:?}",
+            default.value, default.owner
+        ));
+    }
+    if let Some(synth) = editor.source.synths().get(&editor.synth) {
+        lines.push("Explicit cables:".into());
+        for cable in synth.cables() {
+            lines.push(format!(
+                "  {} -> {} ({:?})",
+                cable.from(),
+                cable.to(),
+                cable.signal()
+            ));
+        }
+    }
+    lines.push(
+        editor
+            .save_status
+            .clone()
+            .unwrap_or_else(|| "Ctrl-S writes a new authored/instrument-*.lua definition".into()),
+    );
+    lines.push(status.text.clone());
+    frame.render_widget(
+        Paragraph::new(lines.join("\n")).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Instrument editor"),
+        ),
+        frame.area(),
+    );
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StatusMessage {
     pub text: String,
@@ -387,6 +538,12 @@ pub fn draw_with_status(
     view: &AppViewModel,
     status: &StatusMessage,
 ) {
+    if let Some(editor) = &view.instrument_editor
+        && editor.visible
+    {
+        draw_instrument_editor(frame, view, editor, status);
+        return;
+    }
     if view.cockpit_mode == meldritch_app::CockpitMode::Performance {
         draw_curated_performance_mode(frame, view, status);
         return;
@@ -496,7 +653,11 @@ fn draw_curated_performance_mode(
     frame.render_widget(
         panel(
             "Performance Keys",
-            Paragraph::new("Ctrl-Tab all parameters · p play/stop · r rewind · q quit"),
+            Paragraph::new(if view.instrument_editor.is_some() {
+                "Ctrl-E instrument · Ctrl-Tab all parameters · p play/stop · r rewind · q quit"
+            } else {
+                "Ctrl-Tab all parameters · p play/stop · r rewind · q quit"
+            }),
         ),
         rows[5],
     );
@@ -746,7 +907,7 @@ fn draw_performance_key_hints(
     view: &AppViewModel,
     title: Option<&str>,
 ) {
-    let text = if view.performance.key_hints.is_empty() {
+    let mut text = if view.performance.key_hints.is_empty() {
         "Ctrl-Tab all parameters · p play/stop · r rewind · q quit".to_owned()
     } else {
         view.performance
@@ -756,6 +917,9 @@ fn draw_performance_key_hints(
             .collect::<Vec<_>>()
             .join(" · ")
     };
+    if view.instrument_editor.is_some() {
+        text.push_str(" · Ctrl-E instrument");
+    }
     frame.render_widget(
         panel(title.unwrap_or("Performance Keys"), Paragraph::new(text)),
         area,
@@ -1532,6 +1696,19 @@ fn draw_status_with_title(
 
 fn command_result_text(result: &AppCommandResult) -> String {
     match result {
+        AppCommandResult::InstrumentEdited { edit, changed, .. } => format!(
+            "{} {:?} = {:?}{}",
+            edit.target.module,
+            edit.target.parameter,
+            edit.value,
+            if *changed {
+                " (render requested)"
+            } else {
+                " (unchanged)"
+            }
+        ),
+        AppCommandResult::InstrumentEditorChanged => "Instrument selection updated".to_owned(),
+        AppCommandResult::InstrumentSaveRequested => "Authored Lua save requested".to_owned(),
         AppCommandResult::TransportQueued => "Transport command queued".to_owned(),
         AppCommandResult::SelectionChanged { current, .. } => format!(
             "Selected track {} step {}",
@@ -1665,6 +1842,7 @@ mod tests {
             missed_artifacts: 1,
         };
         AppViewModel {
+            instrument_editor: None,
             song_audio: None,
             cockpit_mode: meldritch_app::CockpitMode::AllParameters,
             curated_controls: Vec::new(),

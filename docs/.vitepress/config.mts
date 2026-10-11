@@ -17,6 +17,7 @@ export default defineConfig({
       { text: 'Play & explore', items: [
         { text: 'Getting started', link: '/guide/getting-started' },
         { text: 'Controllers', link: '/guide/controllers' },
+        { text: 'Instrument editor', link: '/INSTRUMENT_EDITOR' },
         { text: 'APC Mini MK2 playground', link: '/examples/apc-playground' },
         { text: 'Lua APC color demo', link: '/examples/apc-colors' },
         { text: 'Lua APC performance widgets', link: '/examples/lua-apc-performance' },

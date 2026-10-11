@@ -4,6 +4,9 @@ use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+mod instrument;
+pub use instrument::*;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SignalType {
     Audio,

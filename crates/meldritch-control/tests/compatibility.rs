@@ -31,6 +31,7 @@ fn historical_song_directories_load_compile_and_retain_range_identical_audio() {
         ("21-lua-apc-performance", "mix"),
         ("22-midi-soft-takeover", "mix"),
         ("24-audio-aware-widgets", "mix"),
+        ("25-edit-existing-synth", "mix"),
     ];
     for (fixture, compiler) in fixtures {
         let path = repository().join("songs/examples").join(fixture);

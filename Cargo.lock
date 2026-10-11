@@ -1102,6 +1102,7 @@ version = "0.1.0"
 dependencies = [
  "meldritch-audio",
  "meldritch-core",
+ "meldritch-dsl",
  "meldritch-render",
 ]
 
@@ -1137,6 +1138,7 @@ dependencies = [
 name = "meldritch-control"
 version = "0.1.0"
 dependencies = [
+ "crossterm",
  "meldritch-app",
  "meldritch-audio",
  "meldritch-core",

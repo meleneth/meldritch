@@ -5,6 +5,10 @@ controller mappings and behavior may change. See the
 [documentation](https://meleneth.github.io/meldritch/),
 [capability matrix](songs/examples/CAPABILITIES.md) and [active queue](TODO.md).
 
+Edit an existing synth with **Ctrl-E** in `tui-song`, then save a readable Lua
+definition with **Ctrl-S**. See [the instrument editor guide](INSTRUMENT_EDITOR.md)
+for the supported parameters, independent reload/render commands and test scope.
+
 For the connected APC Mini MK2, start the four-lane playground:
 
 ```sh

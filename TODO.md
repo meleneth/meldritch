@@ -8,20 +8,20 @@ The completed showcase milestones remain completion history.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 
-Investigation and ownership decisions: [AUTHORING.md](AUTHORING.md). Examples
-25–30 are `design`: executable-form acceptance specifications with concrete
-vectors, but authoring commands, Lua export and test step bindings are not yet
-implemented. No new synthesis dependency or speculative schema is authorized
-by this documentation milestone.
+Investigation and ownership decisions: [AUTHORING.md](AUTHORING.md). The first
+implemented slice is [the instrument editor](INSTRUMENT_EDITOR.md): example 25
+has automated headless acceptance; example 29 has its instrument persistence
+foundation, with composed musical authoring still unfinished. Examples 26–28
+and 30 remain design contracts. No new synthesis dependency is required.
 
 - [x] Inventory actual synthesis/compiler, notes/commands, MIDI, Lua, mixer and
   publication boundaries; verify Plaits absence and audit the proposed port
 - [x] Specify six initial authoring examples, invalid cases, observable criteria
   and required Lua persistence; retain all older unfinished work
-- [ ] Bind example 29's first parameter round-trip to failing headless tests;
+- [x] Bind example 29's first parameter round-trip to headless tests;
   establish one editable Rust song source, minimum versioned Lua edit export/
   reload and confined base validation, without duplicating graph semantics
-- [ ] Example 25: inspect and edit existing low-pass and ADSR through TUI;
+- [x] Example 25: inspect and edit existing oscillator, low-pass and ADSR through TUI;
   validate typed source edits, rerender publication and Lua persistence
 - [ ] Example 26: create/assign a one-bar note pattern with APC grid and TUI;
   persist musical positions/pitches/velocities and stable identities
@@ -33,8 +33,17 @@ by this documentation milestone.
   inspect typed cables, reject invalid/unsupported graphs and export/reload
 - [ ] Example 29: complete composed round-trip across patterns, synths, cables,
   mappings and mixer settings; deterministic source/audio, atomic save failures
-- [ ] Run relevant full crate/compatibility suites and record physical APC
-  pad/hold/fader/listening results separately from headless acceptance
+- [x] Run relevant full crate/compatibility suites for the instrument slice
+- [ ] Record physical APC pad/hold/fader/listening results separately from
+  headless acceptance
+
+Instrument-slice verification: `cargo test --workspace --offline` passed all
+350 tests, including 11 instrument-authoring tests. The checked-in Lua export
+validated and independently rendered through `render-instrument`. Formatting,
+diff checks, the documentation build and changed-crate Clippy checks passed
+(existing workspace lint allowances: collapsible_if, if_same_then_else,
+manual_checked_ops, too_many_arguments). No physical controller/listening test
+was performed. Wider example 29 persistence and examples 26–28/30 remain open.
 
 Done when a musician can create/edit these example instruments, patterns,
 patches, mappings and lane levels, save readable Lua, and reload equivalent

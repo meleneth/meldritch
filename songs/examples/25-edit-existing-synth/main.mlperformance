@@ -1,0 +1,19 @@
+[meldritch]
+kind = "performance"
+version = 1
+
+[performance]
+id = "instrument-editor"
+title = "Edit Existing Synth"
+bpm = 120.0
+sample_rate = 48000
+
+[[tracks]]
+id = "bass"
+synth = "synths/edited-bass.mlsynth"
+patterns = ["patterns/bass-line.mlpattern"]
+initial_pattern = "bass-line"
+
+[[midi_devices]]
+id = "apc-mini"
+name_contains = "APC mini mk2 Control"

@@ -156,6 +156,7 @@ impl PerformanceSessionCapture {
         use crate::CommandRequest as R;
         use meldritch_app::AppInput as I;
         let input = match request {
+            R::EditInstrument { edit } => I::EditInstrument(edit.clone()),
             R::SetMode { .. } => I::ToggleCockpitMode,
             R::Play => I::TogglePlayback,
             R::Stop => I::Stop,
@@ -376,6 +377,18 @@ pub fn session_result_fields(
     result: &meldritch_app::AppCommandResult,
 ) -> (String, Option<String>, Option<String>, Option<String>) {
     match result {
+        meldritch_app::AppCommandResult::InstrumentEdited { edit, previous, .. } => (
+            "instrument_definition".to_owned(),
+            Some(format!("{:?}", edit.target)),
+            Some(format!("{previous:?}")),
+            Some(format!("{:?}", edit.value)),
+        ),
+        meldritch_app::AppCommandResult::InstrumentEditorChanged => {
+            ("instrument_selection".into(), None, None, None)
+        }
+        meldritch_app::AppCommandResult::InstrumentSaveRequested => {
+            ("authored_save".into(), None, None, None)
+        }
         meldritch_app::AppCommandResult::CuratedControlAdjusted {
             id,
             previous,

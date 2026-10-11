@@ -1,5 +1,11 @@
 # Interactive musical authoring investigation
 
+This inventory records the pre-implementation investigation. The subsequent
+[instrument editor slice](INSTRUMENT_EDITOR.md) implements example 25 and the
+instrument-only persistence foundation of example 29. Statements below about
+missing parameter commands/inspection/export describe the original baseline;
+the linked guide and capability matrix describe the current supported subset.
+
 This is a documentation/design slice, based on the repository inspected on
 2026-10-10. Interactive authoring is the immediate priority. Section 20 of
 [TODO.md](TODO.md) supersedes the older next-step recommendations without

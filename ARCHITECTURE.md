@@ -3,8 +3,15 @@
 The immediate authoring roadmap is in [AUTHORING.md](AUTHORING.md). Its target
 is a single editable Rust source/relation model, shared typed commands and
 readonly projections for TUI/Lua/hardware, with host-owned Lua source export.
-This is planned: the current loaded `ValidatedSong`, backing TUI pattern and
-song-host caches do not yet form a loaded-song authoring path.
+The first instrument subset is implemented; see [INSTRUMENT_EDITOR.md](INSTRUMENT_EDITOR.md).
+`AppController` owns the editable `Arc<ValidatedSong>` and immutable import
+provenance. DSL parameter descriptors/edits preserve source identity and enforce
+types, ranges and automation ownership. App commands compile validated edits
+before committing a revision. The song host consumes immutable derived source
+revisions and invalidates the full render horizon through its existing worker;
+Lua and the TUI read projections and dispatch the same commands. The backing
+legacy pattern editor does not own these instrument defaults. Broader loaded-song
+pattern, graph and mapping authoring remains planned.
 
 The current Lua/control-plane reuse boundaries, API and implementation limits
 are documented in [CONTROL_PLANE.md](CONTROL_PLANE.md). Lua composes the existing

@@ -337,6 +337,18 @@ enum Command {
     ValidateSong {
         #[arg(value_name = "SONG_DIRECTORY")]
         song: PathBuf,
+        /// Reload a confined authored instrument Lua definition over this TOML song.
+        #[arg(long)]
+        instrument: Option<PathBuf>,
+    },
+    /// Independently reload an authored instrument and render using the song compiler.
+    RenderInstrument {
+        song: PathBuf,
+        instrument: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = 96000)]
+        frames: u64,
     },
     /// List MIDI ports and monitor script-defined MIDI control bindings.
     MidiControlsCheck {
@@ -667,6 +679,9 @@ enum Command {
     TuiSong {
         #[arg(value_name = "SONG_DIRECTORY")]
         song: PathBuf,
+        /// Confined authored instrument definition; historical TOML stays the base.
+        #[arg(long)]
+        instrument: Option<PathBuf>,
         #[arg(long)]
         frames: Option<u64>,
         #[arg(long, default_value_t = 4096)]
@@ -846,7 +861,20 @@ fn run(cli: Cli) -> Result<(), String> {
             clear,
         } => apc_lua_colors(source, dry_run, port, clear),
         Command::Validate { project } => validate_project(project),
-        Command::ValidateSong { song } => validate_song(song),
+        Command::ValidateSong { song, instrument } => validate_song(song, instrument),
+        Command::RenderInstrument {
+            song,
+            instrument,
+            output,
+            frames,
+        } => {
+            let song = meldritch_control::instrument::load_instrument_file(song, &instrument)?;
+            let block = CompiledSongPatch::compile_initial(&song)?
+                .render_default(FrameRange::new(0, frames).map_err(|error| format!("{error:?}"))?)
+                .map_err(|error| format!("{error:?}"))?;
+            meldritch_audio::write_wav_f32(output, &block, song.performance().sample_rate())
+                .map_err(|error| error.to_string())
+        }
         Command::MidiControlsCheck { song, seconds } => midi_controls_check(song, seconds),
         Command::TransformChunk {
             input,
@@ -1074,6 +1102,7 @@ fn run(cli: Cli) -> Result<(), String> {
         ),
         Command::TuiSong {
             song,
+            instrument,
             frames,
             chunk_frames,
             workers,
@@ -1096,6 +1125,7 @@ fn run(cli: Cli) -> Result<(), String> {
             effective_song_audio_debug(midi_debug, audio_debug),
             lua,
             soft_takeover,
+            instrument,
         ),
         Command::TuiBassline {
             project,
@@ -1755,8 +1785,12 @@ fn summarize_project_json(path: PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_song(path: PathBuf) -> Result<(), String> {
-    let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
+fn validate_song(path: PathBuf, instrument: Option<PathBuf>) -> Result<(), String> {
+    let song = if let Some(file) = instrument {
+        meldritch_control::instrument::load_instrument_file(&path, &file)?
+    } else {
+        meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?
+    };
     println!(
         "valid song '{}' · {} track(s) · {} synth(s) · {} sample bank(s) · {} DSP graph(s) · {} note pattern(s) · {} parameter pattern(s) · fingerprint {:016x}",
         song.performance().title(),
@@ -2954,10 +2988,16 @@ fn tui_song(
     audio_debug: bool,
     lua_source: Option<PathBuf>,
     soft_takeover: bool,
+    instrument: Option<PathBuf>,
 ) -> Result<(), String> {
-    let song = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
+    let base = meldritch_dsl::load_song_directory(&path).map_err(|error| error.to_string())?;
+    let song = if let Some(file) = instrument {
+        meldritch_control::instrument::load_instrument_file(&path, &file)?
+    } else {
+        base.clone()
+    };
     let lua_project = lua_source
-        .map(|source| load_lua_controls(&song, &source))
+        .map(|source| load_lua_controls(&base, &source))
         .transpose()?;
     let soft_takeover = soft_takeover || lua_project.is_some();
     let patch = CompiledSongPatch::compile_initial(&song)?;
@@ -3027,6 +3067,9 @@ fn tui_song(
         },
         256,
     );
+    if !song.synths().is_empty() {
+        controller.enable_instrument_editor_from(base, song.clone())?;
+    }
     let mut controls = song_controls_for_view(
         &song,
         patch.feedback(),
@@ -3186,10 +3229,21 @@ fn tui_song(
                     .expect("active page lock poisoned") = active_page_id(&controller.view_model());
             }
             let mut host = input_host.lock().expect("song host lock poisoned");
-            if let Some((scene, variation)) = song_scene_selection(input, result)
-                && let Some(patch) = scene_patches.get(&(scene, variation)).cloned()
-            {
-                host.replace_patch(patch);
+            if let Some((scene, variation)) = song_scene_selection(input, result) {
+                let view = controller.view_model();
+                let patch = if let Some(editor) = view.instrument_editor.as_ref()
+                    && editor.source.fingerprint() != editor.base_fingerprint
+                {
+                    song_scene_bank(&editor.source, tempo)
+                        .map(|bank| bank.patches.get(&(scene, variation)).cloned())
+                } else {
+                    Ok(scene_patches.get(&(scene, variation)).cloned())
+                };
+                match patch {
+                    Ok(Some(patch)) => host.replace_patch(patch),
+                    Ok(None) => {}
+                    Err(error) => eprintln!("authored song scene compile failed: {error}"),
+                }
             } else if let Err(error) = host.accepted(&controller.view_model(), result) {
                 eprintln!("song update failed: {error}");
             }

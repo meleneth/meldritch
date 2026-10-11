@@ -16,17 +16,19 @@ mod song;
 
 pub use song::{
     ActionControlDefinition, CableDefinition, ControlBindingAction, ControlBindingDefinition,
-    CuratedControlDefinition, DspDefinition, MidiDeviceDefinition, ModifierControlActionDefinition,
-    ModifierControlDefinition, ModuleDefinition, ModuleKind, NoteEventDefinition,
-    NotePatternDefinition, ParameterInterpolation, ParameterLaneDefinition, ParameterOwner,
-    ParameterPatternDefinition, ParameterPointDefinition, ParameterTargetDefinition, PatchInput,
-    PerformanceActionDefinition, PerformanceDefinition, PerformanceLaneDefinition,
-    PerformanceModifierDefinition, PerformancePageDefinition, PerformancePageStripDefinition,
-    PerformancePatternBankDefinition, PerformanceUiDefinition, PerformanceUiKeyHintDefinition,
-    PerformanceUiSectionDefinition, PerformanceUiSectionKind, SampleBankDefinition,
-    SamplePlaybackMode, SampleSliceDefinition, SampleSlotDefinition, SamplerDefinition,
-    SamplerPitchEnvelopeDefinition, SignalType, SongDiagnostic, SongLoadError, SynthDefinition,
-    TrackDefinition, ValidatedSong, load_song_directory,
+    CuratedControlDefinition, DspDefinition, InstrumentEdit, InstrumentParameter,
+    InstrumentParameterDefinition, InstrumentParameterId, InstrumentParameterOwner,
+    InstrumentRange, InstrumentValue, InstrumentWaveform, MidiDeviceDefinition,
+    ModifierControlActionDefinition, ModifierControlDefinition, ModuleDefinition, ModuleKind,
+    NoteEventDefinition, NotePatternDefinition, ParameterInterpolation, ParameterLaneDefinition,
+    ParameterOwner, ParameterPatternDefinition, ParameterPointDefinition,
+    ParameterTargetDefinition, PatchInput, PerformanceActionDefinition, PerformanceDefinition,
+    PerformanceLaneDefinition, PerformanceModifierDefinition, PerformancePageDefinition,
+    PerformancePageStripDefinition, PerformancePatternBankDefinition, PerformanceUiDefinition,
+    PerformanceUiKeyHintDefinition, PerformanceUiSectionDefinition, PerformanceUiSectionKind,
+    SampleBankDefinition, SamplePlaybackMode, SampleSliceDefinition, SampleSlotDefinition,
+    SamplerDefinition, SamplerPitchEnvelopeDefinition, SignalType, SongDiagnostic, SongLoadError,
+    SynthDefinition, TrackDefinition, ValidatedSong, load_song_directory,
 };
 
 #[derive(Clone, Debug, PartialEq)]
