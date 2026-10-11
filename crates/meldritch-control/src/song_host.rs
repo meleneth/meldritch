@@ -245,6 +245,33 @@ impl SongAudioHost {
             saved?;
             return Ok(false);
         }
+        if let AppCommandResult::PatchEdited { synth, changed, .. } = result {
+            if !changed {
+                return Ok(false);
+            }
+            self.song = view
+                .instrument_editor
+                .as_ref()
+                .ok_or("missing source")?
+                .source
+                .as_ref()
+                .clone();
+            self.generation += 1;
+            self.error = None;
+            self.submitted = AudioRevision {
+                generation: self.generation,
+                lanes: lane_audio_state(&view.performance.pages),
+            };
+            self.overrides
+                .synth_filters
+                .retain(|target, _| target.synth_id != *synth);
+            self.overrides.cutoff_hz = None;
+            self.overrides.resonance = None;
+            self.compile_failed = true;
+            return self
+                .prepare(view, result)
+                .inspect_err(|error| self.error = Some(error.chars().take(512).collect()));
+        }
         if let AppCommandResult::InstrumentEdited { edit, changed, .. } = result {
             if !changed {
                 return Ok(false);
@@ -360,6 +387,7 @@ impl SongAudioHost {
                 false
             }
             AppCommandResult::InstrumentEdited { .. }
+            | AppCommandResult::PatchEdited { .. }
             | AppCommandResult::PatternEdited { .. }
             | AppCommandResult::ParameterEdited { .. } => true,
             _ => return Ok(false),

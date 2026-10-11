@@ -36,6 +36,11 @@ It uses the existing instrument Lua export and explicit pitch/main/aux ports.
 Omitted performance/project sample rates now default to 48 kHz; explicit rates
 remain authored, while this initial Plaits subset requires 48 kHz.
 
+Example 30 adds [typed patch composition](PATCH_EDITOR.md) with the existing
+SynthDefinition and ports; changed topology uses version-2 `kind="instrument"`
+Lua graph snapshots. Parameter-only exports retain version 1. No alternate graph
+language/compiler or automatic source-file migration is introduced.
+
 ## Example-first rule
 
 For every capability:

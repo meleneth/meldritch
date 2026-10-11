@@ -14,7 +14,7 @@ has automated headless acceptance; example 29 has its instrument persistence
 foundation, with composed musical authoring still unfinished. The
 [Lua piano roll](PIANO_ROLL.md) now accepts examples 26/27 headlessly; examples
 28 now accepts [editable faders and mixer](CONTROL_ASSIGNMENTS.md) headlessly;
-30 remains a design contract. Example 32 adds the pinned Plaits crate subset;
+30 now accepts typed patch composition and version-2 graph persistence headlessly. Example 32 adds the pinned Plaits crate subset;
 see [PLAITS.md](PLAITS.md).
 
 - [x] Inventory actual synthesis/compiler, notes/commands, MIDI, Lua, mixer and
@@ -45,8 +45,10 @@ see [PLAITS.md](PLAITS.md).
 - [x] Example 32: pinned crate FM/harmonic typed module, editor, Lua persistence,
   source/publication tests, direct port-reference blocks and allocation checks;
   authorized native f32/RNG exceptions, global omitted-rate default 48 kHz
-- [ ] Example 30: compose the supported oscillator/ADSR/VCA/low-pass patch;
-  inspect typed cables, reject invalid/unsupported graphs and export/reload
+- [x] Example 30: compose the supported oscillator/ADSR/VCA/low-pass patch;
+  inspect typed cables, reject invalid/unsupported graphs and export/reload;
+  reuse SynthDefinition/typed port validation/compiler, bounded drafts, atomic
+  Lua batches, main/aux Plaits replacement and continued transport/publication
 - [ ] Example 29: complete composed round-trip across patterns, synths, cables,
   mappings and mixer settings; deterministic source/audio, atomic save failures
 - [x] Run relevant full crate/compatibility suites for the instrument slice
@@ -95,6 +97,18 @@ formatting and diff checks pass with the existing allowances. Direct pinned-port
 main/aux comparison and zero-allocation construction/processing are headless
 checks, not independent firmware/hardware certification. Physical listening and
 additional engines remain open.
+
+Patch verification: all 398 workspace tests pass, including eleven patch-authoring
+tests and the declared VCA/filter execution regression. Keyboard/Lua composition,
+stale and invalid batches, continued callback audio, independent graph reload,
+version-1 compatibility and zero-allocation Plaits reference tests pass headlessly.
+Workspace Clippy with the existing allowances, formatting/diff checks and the
+documentation build pass. The checked-in version-2 graph independently validates
+and renders through render-instrument.
+Filtered note PCM changes intentionally to follow the previously declared
+VCA-before-filter cables; source fingerprints and file compatibility remain.
+General DAG/DSP graph authoring, combined example 29 snapshots and physical
+acceptance remain open.
 
 Done when a musician can create/edit these example instruments, patterns,
 patches, mappings and lane levels, save readable Lua, and reload equivalent

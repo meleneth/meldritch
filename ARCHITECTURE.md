@@ -1,5 +1,11 @@
 # Architecture
 
+The pinned [Plaits module](PLAITS.md) uses standalone upstream FM/harmonic engines
+on the existing render worker, explicit external envelopes/cables and the normal
+atomic publication path. Native f32 and Plaits RNG are authorized exceptions;
+all surrounding source/DSP/mix state remains f64. Preferred/default omitted song
+and project sample rate is 48 kHz.
+
 Interactive fader/mixer authoring uses DSL `EditableTarget` and `ParameterEdit`
 against the existing validated song source. App assignment state owns mappings;
 Lua supplies declarations/policy and reads projections. The existing song
@@ -19,7 +25,9 @@ before committing a revision. The song host consumes immutable derived source
 revisions and invalidates the full render horizon through its existing worker;
 Lua and the TUI read projections and dispatch the same commands. The backing
 legacy pattern editor does not own these instrument defaults. Broader loaded-song
-graph and mapping authoring remains planned. The initial
+graph authoring now reuses that same SynthDefinition/importer/compiler through
+bounded PatchEdit batches and version-2 Lua graph snapshots; see
+[PATCH_EDITOR.md](PATCH_EDITOR.md). Mapping authoring is also implemented. The initial
 [piano-roll subset](PIANO_ROLL.md) now shares the same editable song source with
 instrument commands. Pattern selection stores UI identity only. Rust validates
 typed notes, stable note identities/counters and musical ticks, while Lua owns

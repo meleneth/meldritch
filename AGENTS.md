@@ -92,7 +92,10 @@ editor and versioned instrument Lua exports are documented in
 `INSTRUMENT_EDITOR.md`. Examples 26/27 now have automated headless `accept`
 status for Lua piano-roll gestures, typed note edits, publication and independent
 Lua pattern reload; read `PIANO_ROLL.md`. Physical APC gesture/LED/listening
-acceptance remains pending. Example 28 accepts fader/mixer authoring headlessly; example 30 remains `design`.
+acceptance remains pending. Examples 28 and 30 accept fader/mixer and typed patch authoring headlessly.
+Read `PATCH_EDITOR.md`: Ctrl-G typed command drafts, atomic Lua patch batches,
+readonly graph/ports and version-2 instrument graph snapshots reuse the existing
+source model, importer and compiler. General DAG/DSP graph authoring remains open.
 Example 32 integrates the pinned mi-plaits-dsp crate's FM/harmonic module with
 headless editor/publication/persistence and port-reference/allocation tests.
 Read `PLAITS.md`: native f32 and Plaits RNG are authorized exceptions; the global

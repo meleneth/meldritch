@@ -364,6 +364,30 @@ impl ValidatedSong {
     pub fn canonicalize_instrument_defaults(&self, base: &Self) -> Result<Self, String> {
         let mut canonical = base.clone();
         for id in self.synths.keys() {
+            let graph = &self.synths[id];
+            let original = base
+                .synths
+                .get(id)
+                .ok_or_else(|| format!("unknown base synth '{id}'"))?;
+            let same_topology = graph.inputs == original.inputs
+                && graph.cables == original.cables
+                && graph
+                    .modules
+                    .iter()
+                    .map(|m| (&m.id, m.kind))
+                    .eq(original.modules.iter().map(|m| (&m.id, m.kind)));
+            let same_structural_values =
+                graph.modules.iter().zip(&original.modules).all(|(a, b)| {
+                    a.frequency_hz == b.frequency_hz
+                        && a.channels == b.channels
+                        && a.time == b.time
+                        && a.feedback == b.feedback
+                        && a.mix == b.mix
+                });
+            if !same_topology || !same_structural_values {
+                canonical.synths.insert(id.clone(), graph.clone());
+                continue;
+            }
             for p in self.instrument_parameters(id)? {
                 canonical = canonical.edit_instrument(&InstrumentEdit {
                     target: p.id,

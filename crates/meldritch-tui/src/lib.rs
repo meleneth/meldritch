@@ -225,6 +225,25 @@ pub fn map_key_for_view(
         if key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::CONTROL) {
             return map_key(key, default_step);
         }
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('g') {
+            return Some(TuiAction::Input(AppInput::TogglePatchEditor));
+        }
+        if editor.patch_visible {
+            return match key.code {
+                KeyCode::Esc => Some(TuiAction::Input(AppInput::TogglePatchEditor)),
+                KeyCode::Enter => Some(TuiAction::Input(AppInput::PatchSubmit)),
+                KeyCode::Backspace => Some(TuiAction::Input(AppInput::PatchBackspace)),
+                KeyCode::PageUp => Some(TuiAction::Input(AppInput::PatchScroll(-8))),
+                KeyCode::PageDown => Some(TuiAction::Input(AppInput::PatchScroll(8))),
+                KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(TuiAction::Input(AppInput::SaveInstrument))
+                }
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    Some(TuiAction::Input(AppInput::PatchCharacter(c)))
+                }
+                _ => None,
+            };
+        }
         return match key.code {
             KeyCode::Esc => Some(TuiAction::Input(AppInput::ToggleInstrumentEditor)),
             KeyCode::Up | KeyCode::Char('k') => {
@@ -256,12 +275,16 @@ pub fn map_key_for_view(
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(TuiAction::Input(AppInput::SaveInstrument))
             }
-            KeyCode::Home => editor.defaults.get(editor.selected_parameter).map(|p| {
-                TuiAction::Input(AppInput::EditInstrument(meldritch_app::InstrumentEdit {
-                    target: p.id.clone(),
-                    value: p.value.clone(),
-                }))
-            }),
+            KeyCode::Home => editor
+                .parameters
+                .get(editor.selected_parameter)
+                .and_then(|selected| editor.defaults.iter().find(|p| p.id == selected.id))
+                .map(|p| {
+                    TuiAction::Input(AppInput::EditInstrument(meldritch_app::InstrumentEdit {
+                        target: p.id.clone(),
+                        value: p.value.clone(),
+                    }))
+                }),
             KeyCode::Char('q' | 'p' | 's' | 'r') => map_key(key, default_step),
             _ => None,
         };
@@ -519,6 +542,100 @@ fn draw_instrument_editor(
                 "applied to published audio"
             }
         });
+    if editor.patch_visible {
+        let draft = editor.source.preview_patch(&meldritch_app::PatchEdit {
+            synth: editor.synth.clone(),
+            operations: editor.patch_operations.clone(),
+        });
+        let mut lines = vec![
+            format!(
+                "Patch: {} | {} | {} staged operations",
+                editor.synth,
+                state,
+                editor.patch_operations.len()
+            ),
+            "add ID TYPE | remove ID reject/disconnect | connect FROM TO".into(),
+            "disconnect FROM TO | set MODULE PARAM VALUE | commit | clear | save".into(),
+            "Enter stage/commit · PgUp/PgDn inspect · Ctrl-S save · Esc parameters".into(),
+        ];
+        match draft {
+            Ok(source) => {
+                let graph = &source.synths()[&editor.synth];
+                for m in graph.modules() {
+                    lines.push(format!("{} ({})", m.id(), m.kind().name()));
+                    lines.push(
+                        m.ports()
+                            .iter()
+                            .map(|p| format!("{} {:?}/{:?}", p.endpoint, p.direction, p.signal))
+                            .collect::<Vec<_>>()
+                            .join(" | "),
+                    );
+                    for p in source
+                        .instrument_parameters(&editor.synth)
+                        .unwrap_or_default()
+                        .iter()
+                        .filter(|p| p.id.module == m.id())
+                    {
+                        lines.push(format!(
+                            "  {} = {:?} {:?}",
+                            p.id.parameter.name(),
+                            p.value,
+                            p.range
+                        ));
+                    }
+                }
+                for cable in graph.cables() {
+                    lines.push(format!(
+                        "{} -> {} ({:?})",
+                        cable.from(),
+                        cable.to(),
+                        cable.signal()
+                    ));
+                }
+                lines.push(
+                    if !editor.patch_operations.is_empty()
+                        && editor.patch_base_fingerprint != editor.source.fingerprint()
+                    {
+                        "Draft base changed; clear and restage".into()
+                    } else {
+                        editor.patch_status.clone()
+                    },
+                );
+            }
+            Err(e) => lines.push(format!("Draft error: {e}")),
+        }
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title("Typed patch commands");
+        let inner = block.inner(frame.area());
+        frame.render_widget(block, frame.area());
+        let areas = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(4),
+                Constraint::Min(1),
+                Constraint::Length(3),
+            ])
+            .split(inner);
+        frame.render_widget(Paragraph::new(lines[..4].join("\n")), areas[0]);
+        frame.render_widget(
+            Paragraph::new(lines[4..].join("\n")).scroll((editor.patch_scroll, 0)),
+            areas[1],
+        );
+        frame.render_widget(
+            Paragraph::new(format!(
+                "> {}\n{}\n{}",
+                editor.patch_input,
+                status.text,
+                editor
+                    .save_status
+                    .as_deref()
+                    .unwrap_or("Draft is not published until commit")
+            )),
+            areas[2],
+        );
+        return;
+    }
     let selected = editor.parameters.get(editor.selected_parameter);
     let mut lines = vec![
         format!("Instrument: {} | {}", editor.synth, state),
@@ -529,7 +646,7 @@ fn draw_instrument_editor(
             )
         }),
         "Up/Down parameter  Left/Right edit  Tab instrument  Home imported default".into(),
-        "Ctrl-S save Lua  Esc/Ctrl-E close  p play  s stop  r rewind  q quit".into(),
+        "Ctrl-G patch commands  Ctrl-S save Lua  Esc close  p play  r rewind".into(),
         format!("Source fingerprint: {:016x}", editor.source.fingerprint()),
     ];
     for (index, parameter) in editor.parameters.iter().enumerate() {
@@ -566,7 +683,7 @@ fn draw_instrument_editor(
             range
         ));
     }
-    if let Some(default) = editor.defaults.get(editor.selected_parameter) {
+    if let Some(default) = selected.and_then(|p| editor.defaults.iter().find(|d| d.id == p.id)) {
         lines.push(format!(
             "Imported default: {:?}; owner: {:?}",
             default.value, default.owner
@@ -1968,6 +2085,9 @@ fn command_result_text(result: &AppCommandResult) -> String {
                 " (unchanged)"
             }
         ),
+        AppCommandResult::PatchEdited { synth, changed, .. } => {
+            format!("Patch {synth} committed (changed: {changed})")
+        }
         AppCommandResult::InstrumentEditorChanged => "Instrument selection updated".to_owned(),
         AppCommandResult::InstrumentSaveRequested => "Authored Lua save requested".to_owned(),
         AppCommandResult::TransportQueued => "Transport command queued".to_owned(),

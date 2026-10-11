@@ -1,6 +1,7 @@
 //! Headless application state and command dispatch for UI frontends.
 
 mod instrument;
+mod patch;
 pub use instrument::*;
 mod notes;
 pub use notes::*;
@@ -91,6 +92,12 @@ pub enum AppCommand {
     },
     SavePattern,
     TogglePatternEditor,
+    EditPatch(meldritch_dsl::PatchEdit),
+    TogglePatchEditor,
+    PatchCharacter(char),
+    PatchBackspace,
+    PatchScroll(i32),
+    PatchSubmit,
     EditInstrument(InstrumentEdit),
     ToggleInstrumentEditor,
     NavigateInstrument {
@@ -173,6 +180,11 @@ pub enum AppCommandResult {
     InstrumentEdited {
         edit: InstrumentEdit,
         previous: InstrumentValue,
+        changed: bool,
+    },
+    PatchEdited {
+        synth: String,
+        operations: Vec<meldritch_dsl::PatchOperation>,
         changed: bool,
     },
     InstrumentEditorChanged,
@@ -553,6 +565,12 @@ pub enum AppInput {
         parameter_delta: i32,
     },
     AdjustInstrument(i32),
+    EditPatch(meldritch_dsl::PatchEdit),
+    TogglePatchEditor,
+    PatchCharacter(char),
+    PatchBackspace,
+    PatchScroll(i32),
+    PatchSubmit,
     EditInstrument(InstrumentEdit),
     SaveInstrument,
     ToggleCockpitMode,
@@ -1469,6 +1487,43 @@ impl AppController {
                 }
                 AppCommandResult::PatternSaveRequested
             }
+            AppCommand::EditPatch(edit) => self.edit_patch(edit)?,
+            AppCommand::TogglePatchEditor => {
+                let e = self
+                    .instrument_editor
+                    .as_mut()
+                    .ok_or_else(|| AppCommandError::Instrument("no loaded synth".into()))?;
+                e.patch_visible = !e.patch_visible;
+                e.visible = true;
+                AppCommandResult::InstrumentEditorChanged
+            }
+            AppCommand::PatchCharacter(c) => {
+                let e = self
+                    .instrument_editor
+                    .as_mut()
+                    .ok_or_else(|| AppCommandError::Instrument("no loaded synth".into()))?;
+                if !c.is_control() && e.patch_input.len() < 256 {
+                    e.patch_input.push(*c);
+                }
+                AppCommandResult::InstrumentEditorChanged
+            }
+            AppCommand::PatchScroll(delta) => {
+                let e = self
+                    .instrument_editor
+                    .as_mut()
+                    .ok_or_else(|| AppCommandError::Instrument("no loaded synth".into()))?;
+                e.patch_scroll = (i32::from(e.patch_scroll) + delta).clamp(0, 256) as u16;
+                AppCommandResult::InstrumentEditorChanged
+            }
+            AppCommand::PatchBackspace => {
+                self.instrument_editor
+                    .as_mut()
+                    .ok_or_else(|| AppCommandError::Instrument("no loaded synth".into()))?
+                    .patch_input
+                    .pop();
+                AppCommandResult::InstrumentEditorChanged
+            }
+            AppCommand::PatchSubmit => self.patch_submit()?,
             AppCommand::EditInstrument(edit) => self.edit_instrument(edit)?,
             AppCommand::ToggleInstrumentEditor => {
                 if let Some(a) = self.assignment_editor.as_mut() {
@@ -1831,6 +1886,29 @@ impl AppController {
                 (false, Vec::new())
             }
             AppCommandResult::InstrumentEdited { changed, .. } => (*changed, Vec::new()),
+            AppCommandResult::PatchEdited { synth, changed, .. } => (
+                *changed,
+                if *changed {
+                    self.instrument_editor
+                        .as_ref()
+                        .unwrap()
+                        .source
+                        .performance()
+                        .tracks()
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, t)| t.synth_id() == synth)
+                        .map(|(index, _)| {
+                            DirtyRange::new(
+                                EntityId::Track(TrackId::new(index as u64 + 1)),
+                                FrameRange::new(0, self.editor.timeline_frames()).unwrap(),
+                            )
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                },
+            ),
             AppCommandResult::InstrumentEditorChanged
             | AppCommandResult::InstrumentSaveRequested => (false, Vec::new()),
             AppCommandResult::TransportQueued => (true, Vec::new()),
@@ -2105,6 +2183,12 @@ impl AppController {
             AppInput::AdjustInstrument(delta) => {
                 AppCommand::EditInstrument(self.instrument_adjustment(delta)?)
             }
+            AppInput::EditPatch(edit) => AppCommand::EditPatch(edit),
+            AppInput::TogglePatchEditor => AppCommand::TogglePatchEditor,
+            AppInput::PatchCharacter(c) => AppCommand::PatchCharacter(c),
+            AppInput::PatchBackspace => AppCommand::PatchBackspace,
+            AppInput::PatchScroll(delta) => AppCommand::PatchScroll(delta),
+            AppInput::PatchSubmit => AppCommand::PatchSubmit,
             AppInput::EditInstrument(edit) => AppCommand::EditInstrument(edit),
             AppInput::SaveInstrument => AppCommand::SaveInstrument,
             AppInput::ToggleCockpitMode => AppCommand::SetCockpitMode(self.cockpit_mode.toggled()),

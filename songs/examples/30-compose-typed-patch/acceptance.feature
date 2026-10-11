@@ -1,17 +1,17 @@
-@design @headless
+@accept @headless
 Feature: Author an executable graph from existing modules
   Scenario: Create the supported filtered note patch
-    Given a new synth draft with pitch and gate inputs
-    And modules osc oscillator, env ADSR, amp VCA, filter low-pass and out audio-output use example 02 defaults
+    Given a replacement synth draft under the existing track identity with pitch and gate inputs
+    And modules source oscillator, contour ADSR, gain VCA, tone low-pass and out audio-output use inspectable supported defaults as authored in keyboard-script.txt
     When the TUI connects and commits these cables
-      | from        | to           | signal  |
-      | input.pitch | osc.pitch    | pitch   |
-      | input.gate  | env.gate     | gate    |
-      | osc.audio   | amp.audio    | audio   |
-      | env.control | amp.level    | control |
-      | amp.audio   | filter.audio | audio   |
-      | filter.audio| out.audio    | audio   |
-    And assigns the synth to the existing note pattern
+      | from            | to            | signal  |
+      | input.pitch     | source.pitch  | pitch   |
+      | input.gate      | contour.gate  | gate    |
+      | source.audio    | gain.audio    | audio   |
+      | contour.control | gain.level    | control |
+      | gain.audio      | tone.audio    | audio   |
+      | tone.audio      | out.audio     | audio   |
+    And retains the synth assignment to the existing note pattern
     Then the inspector shows exactly these typed modules and cables
     And the source graph validates and compiles using the existing note compiler
     And completed audio is gated, finite, non-silent and split-range identical
@@ -20,7 +20,7 @@ Feature: Author an executable graph from existing modules
 
   Scenario: Reconnect a removed cable in the draft
     Given the last valid patch is playing
-    When filter.audio to out.audio is removed in the draft
+    When the base filter.audio to out.audio cable is removed in the draft
     Then the missing output diagnostic prevents publication of the incomplete draft
     When that cable is reconnected and the draft is committed
     Then the inspector and compiled audio again match the supported graph
@@ -32,7 +32,7 @@ Feature: Author an executable graph from existing modules
     And the authoritative committed source and published audio remain unchanged
     Examples:
       | invalid                              |
-      | duplicate osc identity               |
+      | duplicate osc identity in the base   |
       | cable to nonexistent port            |
       | input.pitch to out.audio             |
       | audio cycle without supported delay  |

@@ -111,6 +111,10 @@ pub enum CommandRequest {
     EditInstrument {
         edit: meldritch_dsl::InstrumentEdit,
     },
+    EditPatch {
+        edit: meldritch_dsl::PatchEdit,
+    },
+    SaveInstrument,
     SetMode {
         mode: Mode,
     },
@@ -184,6 +188,8 @@ impl CommandRequest {
             },
             Self::SavePattern => AppCommand::SavePattern,
             Self::EditInstrument { edit } => AppCommand::EditInstrument(edit.clone()),
+            Self::EditPatch { edit } => AppCommand::EditPatch(edit.clone()),
+            Self::SaveInstrument => AppCommand::SaveInstrument,
             Self::SetMode { mode } => AppCommand::SetCockpitMode(match mode {
                 Mode::Performance => CockpitMode::Performance,
                 Mode::AllParameters => CockpitMode::AllParameters,
@@ -621,6 +627,37 @@ impl LuaProject {
                 .map_err(error)?;
             instrument
                 .set("selected_parameter", editor.selected_parameter + 1)
+                .map_err(error)?;
+            instrument
+                .set(
+                    "graph",
+                    self.readonly_tree(
+                        self.lua
+                            .to_value(&editor.source.synths()[&editor.synth])
+                            .map_err(error)?
+                            .as_table()
+                            .unwrap()
+                            .clone(),
+                    )?,
+                )
+                .map_err(error)?;
+            let ports = editor.source.synths()[&editor.synth]
+                .modules()
+                .iter()
+                .flat_map(|m| m.ports())
+                .collect::<Vec<_>>();
+            instrument
+                .set(
+                    "ports",
+                    self.readonly_tree(
+                        self.lua
+                            .to_value(&ports)
+                            .map_err(error)?
+                            .as_table()
+                            .unwrap()
+                            .clone(),
+                    )?,
+                )
                 .map_err(error)?;
             // Recursively readonly proxies, using the same typed parameter projection.
             instrument

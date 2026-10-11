@@ -1,5 +1,11 @@
 # Interactive musical authoring investigation
 
+Implementation update: [typed patch composition](PATCH_EDITOR.md) and the
+[pinned Plaits subset](PLAITS.md) now supersede the earlier topology/Plaits gaps.
+Example 30 reuses the existing source graph/importer/compiler and exports changed
+graphs as version-2 Lua instrument snapshots; example 32 verifies FM/harmonic
+engines with authorized native f32/RNG exceptions and 48 kHz preference.
+
 Implementation update: [example 28 / editable faders and mixer](CONTROL_ASSIGNMENTS.md)
 now implements source-owned cutoff/resonance, single-track delay mix/feedback,
 track volume/stereo balance, interactive Lua/TUI assignments, pickup and control

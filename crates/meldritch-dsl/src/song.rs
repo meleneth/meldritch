@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
@@ -9,12 +9,15 @@ use plaits::validate_plaits;
 pub use plaits::*;
 mod instrument;
 pub use instrument::*;
+mod patch;
+pub use patch::*;
 mod notes;
 pub use notes::*;
 mod parameters;
 pub use parameters::*;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SignalType {
     Audio,
     Pitch,
@@ -22,7 +25,8 @@ pub enum SignalType {
     Control,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ModuleKind {
     Oscillator,
     Adsr,
@@ -33,7 +37,8 @@ pub enum ModuleKind {
     Plaits,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PatchInput {
     id: String,
     signal: SignalType,
@@ -51,7 +56,8 @@ impl PatchInput {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModuleDefinition {
     id: String,
     kind: ModuleKind,
@@ -147,7 +153,8 @@ impl ModuleDefinition {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CableDefinition {
     from: String,
     to: String,
@@ -171,7 +178,8 @@ impl CableDefinition {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SynthDefinition {
     id: String,
     polyphony: u16,
@@ -1822,8 +1830,9 @@ struct RawParameterPoint {
     value: f64,
 }
 
-#[derive(Clone, Copy)]
-enum PortDirection {
+#[derive(Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PortDirection {
     Input,
     Output,
 }
@@ -3160,6 +3169,10 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
 
 fn load_synth(path: &Path) -> Result<SynthDefinition, SongLoadError> {
     let raw: RawSynthFile = read_toml(path)?;
+    parse_synth(path, raw)
+}
+
+fn parse_synth(path: &Path, raw: RawSynthFile) -> Result<SynthDefinition, SongLoadError> {
     validate_header(path, &raw.meldritch, "synth")?;
     if raw.synth.id.trim().is_empty() {
         return Err(SongLoadError::one(path, "synth.id must not be empty"));

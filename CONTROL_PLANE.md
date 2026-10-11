@@ -7,8 +7,10 @@ the new version-1 authored instrument definition. See
 [INSTRUMENT_EDITOR.md](INSTRUMENT_EDITOR.md) for the supported parameter subset,
 read-only `instrument` dependency/projection, `edit_instrument` typed request,
 keyboard saves and independent reload/render. Those commands mutate the app's
-validated Rust source, not a Lua-owned copy. Graph authoring remains a design
-contract. [Fader assignments and mixer](CONTROL_ASSIGNMENTS.md) now add typed
+validated Rust source, not a Lua-owned copy. [Patch composition](PATCH_EDITOR.md)
+adds `edit_patch` atomic typed batches, `save_instrument`, read-only
+`view.instrument.graph`/`ports`, and version-2 graph snapshots through the
+same instrument authoring save/load boundary. [Fader assignments and mixer](CONTROL_ASSIGNMENTS.md) now add typed
 `assign_fader`, `assignment_page`, `edit_parameter` and `save_assignments`
 requests, the read-only `assignments` dependency and version-1 control snapshots.
 The additive release-aware widget API, typed note

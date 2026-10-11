@@ -1,7 +1,7 @@
 use super::*;
 pub use meldritch_dsl::{
     InstrumentEdit, InstrumentParameter, InstrumentParameterDefinition, InstrumentParameterId,
-    InstrumentRange, InstrumentValue, InstrumentWaveform, ValidatedSong,
+    InstrumentRange, InstrumentValue, InstrumentWaveform, PatchEdit, PatchOperation, ValidatedSong,
 };
 
 /// Baseline is immutable import provenance. `source` is the only editable song.
@@ -12,10 +12,17 @@ pub(crate) struct InstrumentEditor {
     pub parameter: usize,
     pub visible: bool,
     pub save_status: Option<String>,
+    pub patch_visible: bool,
+    pub patch_base_fingerprint: u64,
+    pub patch_scroll: u16,
+    pub patch_input: String,
+    pub patch_status: String,
+    pub patch_operations: Vec<meldritch_dsl::PatchOperation>,
 }
 
 #[derive(Clone, Debug)]
 pub struct InstrumentEditorView {
+    pub base: Arc<ValidatedSong>,
     pub source: Arc<ValidatedSong>,
     pub base_fingerprint: u64,
     pub synth: String,
@@ -24,21 +31,28 @@ pub struct InstrumentEditorView {
     pub parameters: Vec<InstrumentParameterDefinition>,
     pub defaults: Vec<InstrumentParameterDefinition>,
     pub save_status: Option<String>,
+    pub patch_visible: bool,
+    pub patch_base_fingerprint: u64,
+    pub patch_scroll: u16,
+    pub patch_input: String,
+    pub patch_status: String,
+    pub patch_operations: Vec<meldritch_dsl::PatchOperation>,
 }
 
-/// Rebuild absolute edits over immutable provenance. Returning to an imported
-/// implicit default restores its original representation and semantic fingerprint.
+/// Revalidate synth graph changes over immutable provenance without permitting
+/// changes to unrelated song definitions through the instrument reload boundary.
 fn source_from_parameters(
     base: &ValidatedSong,
     source: &ValidatedSong,
 ) -> Result<ValidatedSong, String> {
     let mut reconstructed = base.clone();
     for id in source.synths().keys() {
-        for parameter in source.instrument_parameters(id)? {
-            reconstructed = reconstructed.edit_instrument(&InstrumentEdit {
-                target: parameter.id,
-                value: parameter.value,
-            })?;
+        let imported = base
+            .synths()
+            .get(id)
+            .ok_or_else(|| format!("instrument reload contains unknown synth '{id}'"))?;
+        if &source.synths()[id] != imported {
+            reconstructed = reconstructed.replace_patch(source.synths()[id].clone())?;
         }
     }
     Ok(reconstructed)
@@ -75,6 +89,12 @@ impl AppController {
             parameter: 0,
             visible: false,
             save_status: None,
+            patch_visible: false,
+            patch_base_fingerprint: 0,
+            patch_scroll: 0,
+            patch_input: String::new(),
+            patch_status: "Committed graph; no staged edits".into(),
+            patch_operations: vec![],
         });
         Ok(())
     }
@@ -89,6 +109,7 @@ impl AppController {
         self.instrument_editor
             .as_ref()
             .map(|editor| InstrumentEditorView {
+                base: editor.base.clone(),
                 source: editor.source.clone(),
                 base_fingerprint: editor.base.fingerprint(),
                 synth: editor.synth.clone(),
@@ -103,6 +124,12 @@ impl AppController {
                     .instrument_parameters(&editor.synth)
                     .unwrap_or_default(),
                 save_status: editor.save_status.clone(),
+                patch_visible: editor.patch_visible,
+                patch_base_fingerprint: editor.patch_base_fingerprint,
+                patch_scroll: editor.patch_scroll,
+                patch_input: editor.patch_input.clone(),
+                patch_status: editor.patch_status.clone(),
+                patch_operations: editor.patch_operations.clone(),
             })
     }
 
@@ -182,6 +209,9 @@ impl AppController {
                 [(index as i64 + i64::from(synth_delta)).rem_euclid(ids.len() as i64) as usize]
                 .clone();
             editor.parameter = 0;
+            editor.patch_operations.clear();
+            editor.patch_input.clear();
+            editor.patch_status = "Instrument changed; draft cleared".into();
         }
         let count = editor
             .source

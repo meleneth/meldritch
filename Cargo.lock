@@ -1155,6 +1155,7 @@ dependencies = [
  "mlua",
  "ratatui",
  "serde",
+ "serde_json",
  "toml",
 ]
 

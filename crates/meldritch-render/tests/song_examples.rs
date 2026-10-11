@@ -18,6 +18,37 @@ fn example(name: &str) -> PathBuf {
 }
 
 #[test]
+fn note_compiler_executes_declared_vca_before_filter_including_release_tail() {
+    use meldritch_render::dsp::{
+        AdsrEnvelope, AdsrSettings, FilterMode, Oscillator, StateVariableFilter, Waveform,
+    };
+    let song = load_song_directory(example("30-compose-typed-patch")).unwrap();
+    let patch = compile_note_song(&song).unwrap();
+    let audio = patch.render(FrameRange::new(0, 20000).unwrap()).unwrap();
+    let mut oscillator = Oscillator::new(Waveform::Saw);
+    let mut env = AdsrEnvelope::new(
+        AdsrSettings {
+            attack_seconds: 0.004,
+            decay_seconds: 0.16,
+            sustain_level: 0.55,
+            release_seconds: 0.09,
+        },
+        48000,
+    );
+    let mut filter = StateVariableFilter::new();
+    env.note_on();
+    let frequency = 440.0 * 2.0_f64.powf((48.0 - 69.0) / 12.0);
+    for (frame, sample) in audio.samples().iter().enumerate() {
+        if frame == 12000 {
+            env.note_off();
+        }
+        let gained = oscillator.next(frequency, 48000) * env.next_value() * 0.8;
+        let expected = filter.process(gained, 1200.0, 0.25, FilterMode::LowPass, 48000);
+        assert_eq!(*sample, expected, "declared VCA → filter at frame {frame}");
+    }
+}
+
+#[test]
 fn apc_playground_renders_coherent_variations_levels_mute_and_solo() {
     let song = load_song_directory(example("19-apc-mini-mk2-playground")).unwrap();
     let range = FrameRange::new(0, 48_000).unwrap();

@@ -5,8 +5,8 @@ in a validated `.mlsynth`. Rust owns the song source; keyboard and Lua commands
 both change that source through the same typed validation and existing compiler.
 TOML songs remain loadable. [The Lua piano roll](PIANO_ROLL.md) now edits the
 initial note-pattern subset. [Fader/mixer assignments](CONTROL_ASSIGNMENTS.md)
-and the [Plaits FM/harmonic module](PLAITS.md) are implemented; patch construction
-is the next slice.
+and the [Plaits FM/harmonic module](PLAITS.md) are implemented.
+[Typed patch composition](PATCH_EDITOR.md) now uses Ctrl-G in this editor.
 
 Start the small supported bass patch without a physical controller:
 
@@ -36,8 +36,8 @@ Ctrl-Tab retains the existing cockpit mode command.
 `square` preserves the historical pulse alias as a distinct authored value.
 The existing DSP clamps effective cutoff to 0.49 times sample rate and resonance
 to 0.99; the source retains the valid authored values. Polyphony, output channels,
-frequency, VCA routing, modules and cables are preserved and cannot be edited in
-this slice. A parameter targeted by a loaded automation pattern is inspected
+frequency and output layout remain outside parameter editing. Ctrl-G exposes
+the separate typed module/cable command draft; see the patch guide. A parameter targeted by a loaded automation pattern is inspected
 with its owner and rejects a changed source value. A no-op remains a no-op.
 
 Accepted edits compile before replacing the source. They invalidate the full
@@ -87,8 +87,9 @@ The base is the same song root's unchanged `main.mlperformance` and referenced
 TOML definitions. Its semantic fingerprint preserves graph IDs, cables, patterns
 and references; the Lua file requires that base and is not a standalone patch
 language. A missing or changed base, duplicate/unknown parameter, unsupported
-type/range/version or extra field rejects reload. No lossy topology translation
-or arbitrary script rewriting occurs. Serialization uses round-trip `f64`
+type/range/version or extra field rejects reload. Changed topology uses the version-2 graph snapshot documented in
+[PATCH_EDITOR.md](PATCH_EDITOR.md). No lossy topology translation or arbitrary
+script rewriting occurs. Serialization uses round-trip `f64`
 numbers, escaped strings and stable ordering; identical source exports identical
 text, while filenames remain unique. Source size and sandbox budgets are bounded.
 

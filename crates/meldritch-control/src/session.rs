@@ -168,6 +168,8 @@ impl PerformanceSessionCapture {
             }
             R::SavePattern => I::SavePattern,
             R::EditInstrument { edit } => I::EditInstrument(edit.clone()),
+            R::EditPatch { edit } => I::EditPatch(edit.clone()),
+            R::SaveInstrument => I::SaveInstrument,
             R::SetMode { .. } => I::ToggleCockpitMode,
             R::Play => I::TogglePlayback,
             R::Stop => I::Stop,
@@ -421,6 +423,14 @@ pub fn session_result_fields(
             Some(format!("{:?}", edit.target)),
             Some(format!("{previous:?}")),
             Some(format!("{:?}", edit.value)),
+        ),
+        meldritch_app::AppCommandResult::PatchEdited {
+            synth, operations, ..
+        } => (
+            "patch_definition".into(),
+            Some(synth.clone()),
+            None,
+            Some(format!("{operations:?}")),
         ),
         meldritch_app::AppCommandResult::InstrumentEditorChanged => {
             ("instrument_selection".into(), None, None, None)

@@ -766,7 +766,9 @@ impl CompiledNotePatch {
                 envelope.note_on();
                 active_end = Some(absolute_frame + (event.end - event.start));
             }
-            let mut sample = oscillator.next(frequency, self.sample_rate);
+            // The compiled cables route VCA into the optional filter.
+            let mut sample =
+                oscillator.next(frequency, self.sample_rate) * envelope.next_value() * velocity;
             if let Some(filter_settings) = &self.filter {
                 sample = filter.process(
                     sample,
@@ -776,7 +778,6 @@ impl CompiledNotePatch {
                     self.sample_rate,
                 );
             }
-            let sample = sample * envelope.next_value() * velocity;
             if absolute_frame < range.start() {
                 continue;
             }
@@ -851,7 +852,9 @@ impl CompiledNotePatch {
             }
             let mut sample = 0.0;
             for voice in &mut voices {
-                let mut voice_sample = voice.oscillator.next(voice.frequency, self.sample_rate);
+                let mut voice_sample = voice.oscillator.next(voice.frequency, self.sample_rate)
+                    * voice.envelope.next_value()
+                    * voice.velocity;
                 if let Some(filter_settings) = &self.filter {
                     voice_sample = voice.filter.process(
                         voice_sample,
@@ -861,7 +864,7 @@ impl CompiledNotePatch {
                         self.sample_rate,
                     );
                 }
-                sample += voice_sample * voice.envelope.next_value() * voice.velocity;
+                sample += voice_sample;
             }
             voices.retain(|voice| voice.envelope.stage() != EnvelopeStage::Idle);
             let sample = sample / f64::from(self.polyphony).sqrt();

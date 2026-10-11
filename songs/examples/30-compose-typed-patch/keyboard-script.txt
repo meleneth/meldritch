@@ -1,0 +1,24 @@
+# Open Ctrl-E then Ctrl-G. Each line is entered followed by Enter.
+# Draft replaces the existing instrument under its existing track reference.
+remove osc disconnect
+remove env disconnect
+remove amp disconnect
+remove filter disconnect
+remove out disconnect
+add source oscillator
+add contour adsr
+add gain vca
+add tone low_pass
+add out audio_output
+set source waveform saw
+set contour attack 0.01
+set contour release 0.2
+set tone cutoff_hz 800
+set tone resonance 0.2
+connect input.pitch source.pitch
+connect input.gate contour.gate
+connect source.audio gain.audio
+connect contour.control gain.level
+connect gain.audio tone.audio
+connect tone.audio out.audio
+commit

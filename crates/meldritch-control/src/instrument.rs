@@ -18,7 +18,9 @@ struct Definition {
     version: u32,
     base_fingerprint: String,
     instrument: String,
+    #[serde(default)]
     parameters: Vec<InstrumentEdit>,
+    graph: Option<meldritch_dsl::SynthDefinition>,
 }
 
 pub(crate) fn quote(value: &str) -> String {
@@ -42,8 +44,82 @@ pub(crate) fn quote(value: &str) -> String {
     out
 }
 
+fn encode_graph_value(value: &serde_json::Value, depth: usize) -> Result<String> {
+    use serde_json::Value;
+    let indent = "  ".repeat(depth);
+    match value {
+        Value::Null => Ok("nil".into()),
+        Value::Bool(v) => Ok(v.to_string()),
+        Value::Number(v) => Ok(v.to_string()),
+        Value::String(v) => Ok(quote(v)),
+        Value::Array(values) => {
+            let mut out = String::from("{\n");
+            for v in values {
+                out.push_str(&format!(
+                    "{}  {},\n",
+                    indent,
+                    encode_graph_value(v, depth + 1)?
+                ));
+            }
+            out.push_str(&format!("{indent}}}"));
+            Ok(out)
+        }
+        Value::Object(fields) => {
+            let mut out = String::from("{\n");
+            for (name, v) in fields {
+                if !v.is_null() {
+                    out.push_str(&format!(
+                        "{}  {} = {},\n",
+                        indent,
+                        name,
+                        encode_graph_value(v, depth + 1)?
+                    ));
+                }
+            }
+            out.push_str(&format!("{indent}}}"));
+            Ok(out)
+        }
+    }
+}
+
+fn validate_executable_patch(song: &ValidatedSong, synth: &str) -> Result<()> {
+    meldritch_render::song_host::CompiledSongPatch::compile_initial(song)?;
+    song.validate_executable_patch(synth)?;
+    Ok(())
+}
+
 /// Stable ordering, round-trip f64 formatting, explicit absolute values. No toggles.
 pub fn encode_instrument(view: &InstrumentEditorView) -> Result<String> {
+    let graph = &view.source.synths()[&view.synth];
+    // Use v1 only if ordinary parameter replay can represent the exact graph.
+    // This catches structural defaults as well as module/cable identity changes.
+    let mut replay = view.base.as_ref().clone();
+    let mut representable = true;
+    for parameter in view.source.instrument_parameters(&view.synth)? {
+        match replay.edit_instrument(&InstrumentEdit {
+            target: parameter.id,
+            value: parameter.value,
+        }) {
+            Ok(next) => replay = next,
+            Err(_) => {
+                representable = false;
+                break;
+            }
+        }
+    }
+    if !representable || replay.synths()[&view.synth] != *graph {
+        let value = serde_json::to_value(graph).map_err(error)?;
+        let text = format!(
+            "-- MELDRITCH authored patch; immutable TOML base and journals are unchanged.\nreturn {{\n  kind = \"instrument\",\n  version = 2,\n  base_fingerprint = \"{:016x}\",\n  instrument = {},\n  graph = {},\n}}\n",
+            view.base_fingerprint,
+            quote(&view.synth),
+            encode_graph_value(&value, 2)?
+        );
+        if text.len() > 256 * 1024 {
+            return Err("patch export exceeds source size limit".into());
+        }
+        return Ok(text);
+    }
     let parameters = view.source.instrument_parameters(&view.synth)?;
     let mut text = format!(
         "-- MELDRITCH authored instrument; base song remains unchanged.\nreturn {{\n  kind = \"instrument\",\n  version = 1,\n  base_fingerprint = \"{:016x}\",\n  instrument = {},\n  parameters = {{\n",
@@ -83,12 +159,28 @@ pub fn load_instrument(root: impl AsRef<Path>, source: &str) -> Result<Validated
         .eval()
         .map_err(error)?;
     let definition: Definition = lua.from_value(value).map_err(error)?;
-    if definition.kind != "instrument" || definition.version != 1 {
+    if definition.kind != "instrument" || ![1, 2].contains(&definition.version) {
         return Err("unsupported authored instrument kind/version".into());
     }
     let mut song = load_song_directory(root).map_err(error)?;
     if definition.base_fingerprint != format!("{:016x}", song.fingerprint()) {
         return Err("authored instrument base fingerprint changed".into());
+    }
+    if definition.version == 2 {
+        if !definition.parameters.is_empty() {
+            return Err("patch definition cannot also declare parameter overrides".into());
+        }
+        let graph = definition.graph.ok_or("version 2 requires a graph")?;
+        if graph.id() != definition.instrument {
+            return Err("patch graph identity differs from selected instrument".into());
+        }
+        song = song.replace_patch(graph)?;
+        // Match the exact app acceptance boundary, including no silently ignored modules/cables.
+        validate_executable_patch(&song, &definition.instrument)?;
+        return Ok(song);
+    }
+    if definition.graph.is_some() {
+        return Err("version 1 does not support graph fields".into());
     }
     let descriptors = song.instrument_parameters(&definition.instrument)?;
     if definition.parameters.len() != descriptors.len() {
