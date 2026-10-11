@@ -18,6 +18,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
+mod project_playback;
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -3142,7 +3143,9 @@ fn open_project(path: PathBuf, check: bool) -> Result<(), String> {
             None,
         )
     } else {
-        meldritch_tui::run_empty_project(&project)
+        let (mut app, engine) = meldritch_app::AppController::new_empty_project(&project)?;
+        let mut host = project_playback::NativeProjectAudio::new(&app, engine)?;
+        meldritch_tui::run_project_with_host(&mut app, &project, &mut host)
             .map_err(|error| format!("failed to open project cockpit: {error}"))
     }
 }

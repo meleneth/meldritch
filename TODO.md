@@ -37,8 +37,10 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 1 binding checkpoint: independent mono pattern pitch/gate relationships,
   native v/p/g inspection, shared voice rendering, worker/publication/callback
   headless checks; explicit held pitch and end-exclusive gate fallbacks
-- [ ] Slice 1 next: native device playback/runtime overlay and mode transitions,
-  self-contained save/fresh reload and capture
+- [x] Slice 1 native playback checkpoint: lazy device opening via existing
+  SongAudioHost, worker and immutable publication; typed transport and mode
+  transitions with native construction gestures blocked in performance
+- [ ] Slice 1 next: exposed runtime level, capture, self-contained save/fresh reload
 - [ ] Slice 2: shared palette, two compositions and independent pattern sources
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
@@ -116,6 +118,17 @@ the declared order. The existing worker publishes audible/disconnected/reconnect
 PCM consumed by the production callback without resetting transport. Native
 v/p/g inspect both bindings and fallbacks; device playback and capture/save remain
 unfinished. No historical example/format or callback implementation is changed.
+
+Native playback checkpoint verification: workspace tests pass for both CLI binary
+targets; the adapter is tested against the existing worker, generation-tagged
+publisher and production callback without opening a device. Mode switches retain
+source/publication/playhead, independent gate disconnect updates consumed PCM,
+and unsupported native clocks retain host generation/publication. Native 80×24
+PTY opening, empty play diagnostic, patch/pattern/binding gestures, every cable,
+mode switching, blocked performance edits and clean quit/restoration pass with
+zero files and no audio device. Formatting/diff checks, affected-crate Clippy
+(existing allowances) and docs build pass. Physical listening/deadlines remain
+unverified; exposed runtime level, capture and self-contained save are still next.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

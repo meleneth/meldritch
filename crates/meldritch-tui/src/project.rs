@@ -13,6 +13,7 @@ pub fn project_binding_command(
 ) -> Option<AppCommand> {
     if key.kind != KeyEventKind::Press
         || key.modifiers != KeyModifiers::NONE
+        || view.cockpit_mode == meldritch_app::CockpitMode::Performance
         || view
             .instrument_editor
             .as_ref()
@@ -77,7 +78,9 @@ pub fn project_pattern_command(
     source: &ValidatedSong,
 ) -> Option<AppCommand> {
     use meldritch_app::NoteEdit;
-    if key.kind != KeyEventKind::Press {
+    if key.kind != KeyEventKind::Press
+        || view.cockpit_mode == meldritch_app::CockpitMode::Performance
+    {
         return None;
     }
     let editor = view.palette_pattern_editor.as_ref();
@@ -205,9 +208,9 @@ pub fn draw_project_pattern(
                 voice.pitch_pattern.as_deref() == Some(&editor.pattern.id)
                     || voice.gate_pattern.as_deref() == Some(&editor.pattern.id)
             }) {
-                "Unsaved project · Bindings at overview · Device playback pending"
+                "Unsaved project · Bindings/playback at overview"
             } else {
-                "Unsaved source: no composition bindings · Device playback pending"
+                "Unsaved source: no composition bindings · Bind at overview"
             },
         ),
         Line::from(status.to_owned()),
@@ -248,6 +251,9 @@ pub fn empty_project_quit(key: KeyEvent) -> bool {
 /// Reuse accepted editor bindings while the project has no playable composition.
 /// Transport/backing showcase actions are not exposed by this silent cockpit.
 pub fn project_editor_action(key: KeyEvent, view: &AppViewModel) -> Option<TuiAction> {
+    if view.cockpit_mode == meldritch_app::CockpitMode::Performance {
+        return None;
+    }
     if key.kind == KeyEventKind::Press
         && key.code == KeyCode::Char('c')
         && key.modifiers.contains(KeyModifiers::CONTROL)
@@ -321,6 +327,18 @@ fn draw_project_construction_selected(
 ) {
     if source.synths().is_empty() && source.note_patterns().is_empty() {
         draw_empty_project(frame, view);
+        let area = frame.area();
+        if !status.is_empty() && area.height > 2 {
+            frame.render_widget(
+                Paragraph::new(status),
+                ratatui::layout::Rect::new(
+                    area.x + 1,
+                    area.y + area.height - 2,
+                    area.width.saturating_sub(2),
+                    1,
+                ),
+            );
+        }
         return;
     }
     let mut lines = vec![
@@ -331,7 +349,9 @@ fn draw_project_construction_selected(
             source.note_patterns().len(),
             source.pattern_voices().len(),
         )),
-        Line::from("n: voice · c: pattern · Ctrl-E/N: editors · q/Esc: quit"),
+        Line::from(
+            "n/c: patch/pattern · Ctrl-E/N: editors · Space: play · Ctrl-Tab mode · q: quit",
+        ),
         Line::from("Unsaved construction: quitting discards it"),
         Line::from(status.to_owned()),
     ];
@@ -418,15 +438,83 @@ fn draw_project_construction_selected(
 /// No files, audio devices or MIDI are touched. In-memory control scaffolding
 /// remains separate from the empty authoritative project definitions.
 pub fn run_empty_project(project: &ProjectDirectory) -> io::Result<()> {
-    let view = ProjectOverview::from_project(project);
     let (mut app, _engine) = AppController::new_empty_project(project).map_err(io::Error::other)?;
+    struct SilentHost;
+    impl ProjectPlaybackHost for SilentHost {
+        fn poll(&mut self, _: &mut AppController) -> Result<(), String> {
+            Ok(())
+        }
+        fn toggle_playback(&mut self, _: &mut AppController) -> Result<(), String> {
+            Err("No playback host attached".into())
+        }
+    }
+    run_project_with_host(&mut app, project, &mut SilentHost)
+}
+
+/// Host adapters own devices and the existing song renderer; the TUI owns neither.
+pub trait ProjectPlaybackHost {
+    fn poll(&mut self, app: &mut AppController) -> Result<(), String>;
+    fn toggle_playback(&mut self, app: &mut AppController) -> Result<(), String>;
+}
+
+fn draw_project_performance(
+    frame: &mut ratatui::Frame<'_>,
+    project: &ProjectDirectory,
+    source: &ValidatedSong,
+    model: &AppViewModel,
+    status: &str,
+) {
+    let lines = vec![
+        Line::from(project.root().display().to_string()),
+        Line::from(format!(
+            "Performance · {:?} · frame {}",
+            model.transport.state, model.transport.position
+        )),
+        Line::from(format!(
+            "{} active patch instances · Authored definitions retained",
+            source.pattern_voices().len()
+        )),
+        Line::from("Space: play/stop · Ctrl-Tab: construction · q/Esc: quit"),
+        Line::from("No performance controls declared yet"),
+        Line::from("Unsaved project; quitting discards authored edits"),
+        Line::from(status.to_owned()),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("MELDRITCH · Project performance"),
+            )
+            .wrap(Wrap { trim: false }),
+        frame.area(),
+    );
+}
+
+pub fn run_project_with_host<H: ProjectPlaybackHost>(
+    app: &mut AppController,
+    project: &ProjectDirectory,
+    host: &mut H,
+) -> io::Result<()> {
+    let view = ProjectOverview::from_project(project);
     let mut status = String::new();
     let mut terminal = TerminalGuard::enter()?;
     let result = (|| {
         loop {
+            if let Err(error) = host.poll(app) {
+                status = format!("Audio unchanged: {error}");
+            }
             let model = app.view_model();
             terminal.terminal.draw(|frame| {
-                if let Some(editor) = &model.instrument_editor
+                if model.cockpit_mode == meldritch_app::CockpitMode::Performance {
+                    draw_project_performance(
+                        frame,
+                        project,
+                        &app.authored_source().unwrap(),
+                        &model,
+                        &status,
+                    );
+                } else if let Some(editor) = &model.instrument_editor
                     && editor.visible
                 {
                     draw_instrument_editor(
@@ -460,14 +548,45 @@ pub fn run_empty_project(project: &ProjectDirectory) -> io::Result<()> {
                 if !editing && empty_project_quit(key) {
                     return Ok(());
                 }
+                if !editing
+                    && key.kind == KeyEventKind::Press
+                    && key.code == KeyCode::Char(' ')
+                    && key.modifiers == KeyModifiers::NONE
+                {
+                    status = match host.toggle_playback(app) {
+                        Ok(()) => "Transport request accepted; project remains unsaved".into(),
+                        Err(error) => format!("Playback unavailable: {error}"),
+                    };
+                    continue;
+                }
+                if key.kind == KeyEventKind::Press
+                    && key.code == KeyCode::Tab
+                    && key.modifiers == KeyModifiers::CONTROL
+                {
+                    if editing {
+                        if model.instrument_editor.as_ref().is_some_and(|e| e.visible) {
+                            app.dispatch(AppCommand::ToggleInstrumentEditor)
+                                .map_err(|e| io::Error::other(format!("{e:?}")))?;
+                        } else {
+                            app.dispatch(AppCommand::TogglePatternEditor)
+                                .map_err(|e| io::Error::other(format!("{e:?}")))?;
+                        }
+                    }
+                    app.handle_input(AppInput::ToggleCockpitMode)
+                        .map_err(|e| io::Error::other(format!("{e:?}")))?;
+                    status = "Mode changed; transport and authored source retained".into();
+                    continue;
+                }
+                if model.cockpit_mode == meldritch_app::CockpitMode::Performance {
+                    continue;
+                }
                 if let Some(command) =
                     project_binding_command(key, &model, &app.authored_source().unwrap())
                 {
                     status = match app.dispatch(command) {
-                        Ok(result) => format!(
-                            "{} · Device playback is not implemented",
-                            command_result_text(&result)
-                        ),
+                        Ok(result) => {
+                            format!("{} · Rendering requested", command_result_text(&result))
+                        }
                         Err(e) => format!("Binding rejected; source retained: {e:?}"),
                     };
                 } else if let Some(command) =
@@ -622,6 +741,51 @@ mod tests {
         );
         app.dispatch(AppCommand::TogglePatternEditor).unwrap();
         assert!(app.view_model().palette_pattern_editor.unwrap().visible);
+        app.handle_input(AppInput::ToggleCockpitMode).unwrap();
+        assert!(
+            project_binding_command(
+                press('g'),
+                &app.view_model(),
+                &app.authored_source().unwrap()
+            )
+            .is_none()
+        );
+        assert!(
+            project_pattern_command(
+                press('c'),
+                &app.view_model(),
+                &app.authored_source().unwrap()
+            )
+            .is_none()
+        );
+        assert!(
+            project_editor_action(
+                KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
+                &app.view_model()
+            )
+            .is_none()
+        );
+        terminal
+            .draw(|frame| {
+                draw_project_performance(
+                    frame,
+                    &project,
+                    &app.authored_source().unwrap(),
+                    &app.view_model(),
+                    "",
+                )
+            })
+            .unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(screen.contains("Project performance"));
+        assert!(screen.contains("Ctrl-Tab: construction"));
+        assert!(!screen.contains("amp.audio"));
     }
 
     #[test]

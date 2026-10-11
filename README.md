@@ -20,9 +20,13 @@ notes, **[ ]** change duration, **- +** change velocity, and Delete removes note
 Esc closes an editor; **Ctrl-N** reopens the pattern. With a patch and pattern
 selected, **v** creates an unbound mono instance; **p** and **g** separately
 connect/disconnect pattern pitch and gate. Its inspector shows pitch's C3 fallback
-and gate's low fallback. These bindings render headlessly through the existing
-engine; device playback from this cockpit remains unfinished. Construction is
-in memory only; quitting discards it. Runtime controls, save/reopen and stateful
+and gate's low fallback. **Space** starts/stops native one-bar playback once the
+worker has prepared audio; the output device opens only on the first play request.
+**Ctrl-Tab** switches construction/performance while playback continues;
+performance hides internal editing and blocks construction gestures.
+This path is checked headlessly through the production callback; physical
+listening remains unverified. Construction is in memory only; quitting discards
+it. Runtime controls, save/reopen and stateful
 graph transitions remain proposed. Existing commands remain valid.
 Git is allowed as a required installed dependency; opening needs no repository
 or initialization. Empty opening creates no files or audio/MIDI streams.

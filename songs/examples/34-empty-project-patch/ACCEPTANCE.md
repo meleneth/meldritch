@@ -6,7 +6,9 @@ tests cover empty/legacy roots, diagnostics and presentation. `opening.txt` and
 `invalid/malformed-entry.toml` specify that checkpoint. Native patch and independent
 note authoring and independent mono binding checkpoints are implemented.
 Bindings render through the existing worker and production callback headlessly;
-native device playback, runtime controls and self-contained save/reopen remain unimplemented.
+native lazy-output playback and mode transitions are implemented with headless
+host/callback checks. Physical listening remains unverified; runtime controls,
+capture and self-contained save/reopen remain unimplemented.
 An additional
 ownership checkpoint moves accepted definitions/provenance into app-owned
 `ProjectSource`. Headless commands create/edit a pattern and edit a patch without
@@ -96,7 +98,25 @@ suite. Tests prove pitch changes under a held gate, exact split/full rendering,
 independent disconnect/reconnect, native inspection, typed in-memory replay and
 worker publication consumed by the production callback without transport reset.
 This evidence does not open a physical device or establish DSP-state migration.
-The native cockpit still reports unfinished device playback and unsupported save.
+The native cockpit reports unsupported save; device playback is specified below.
+
+Native playback checkpoint: `keyboard-playback.txt` binds Space and Ctrl-Tab to
+the actual CLI/TUI adapter over SongAudioHost. Opening starts construction through
+existing AllParameters mode, creates no streams/files and remains silent. Space
+requires an explicit instance and current prepared audio before opening default
+48 kHz output; later Space toggles typed transport. Ctrl-Tab hides construction
+internals and blocks its native gestures in performance; authored source,
+publication and playhead are retained. This initial stream has fixed stereo
+one-bar looping PCM. Unsupported clocks preserve publication/worker generation;
+device errors preserve in-memory edits and report failure. Failed stream setup
+consumes its engine, so retry in that cockpit is not yet supported.
+
+`cargo test -p meldritch-cli native_host` and
+`cargo test -p meldritch-cli unsupported_native_clock` check the real adapter
+headlessly, including callback audio, mode/source/publication identity and gate
+disconnect while the playhead advances. The TUI suite checks performance hides
+graph internals and suppresses native editing. Device/listening and deadline
+evidence remain separate; these checks do not accept the whole example.
 
 1. In a temporary empty directory execute `meldritch` with no subcommand. Open
    a silent valid project in a usable TUI without writing files or initializing
@@ -167,7 +187,7 @@ base-bound instrument v1/v2, pattern/controls/project v1. Preserve Plaits f32/RN
 exceptions. Run focused then affected full crate suites and format/diff/docs checks.
 
 Completion requires the whole workflow and negatives/compatibility. The opening
-checkpoint does not advance the complete example beyond `design`. Two-pattern routing, polyphonic signals,
+checkpoint does not advance the complete example beyond `design`. General transformed/multi-composition routing, polyphonic signals,
 LFOs, normalization, libraries, quantized graph changes and DSP-state migration
 are deferred. PCM replacement proves rendered behavior, not continuous DSP state.
 Physical sound/gestures and deadlines require separate evidence.

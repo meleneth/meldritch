@@ -1,0 +1,9 @@
+# Native device playback checkpoint; starting the empty cockpit opens no device.
+# Construct n, c, Enter C3, Esc, v, p, g; let the worker publish the accepted revision.
+# Space opens default output at 48 kHz and starts the one-bar loop; Space stops it.
+# Ctrl-Tab changes construction/performance without stopping or rewinding audio.
+# Construction p/g change authored bindings and rerender; performance mode blocks those edits.
+# Return to construction and disconnect g: the new PCM is silent; reconnect restores it.
+# Publication retains transport; it rerenders DSP from frame zero and does not migrate DSP state.
+# Device opening failure leaves authored edits in memory and reports the failure.
+# Actual device/listening and timing acceptance must be recorded separately.

@@ -1,0 +1,248 @@
+//! Native project adapter to the same song worker/publication/device boundary.
+use meldritch_app::{AppCommand, AppController};
+use meldritch_audio::{
+    AudioBlock,
+    audio_publication::{AudioSnapshotReader, audio_publication},
+    device_output::{PlaybackEngine, RealtimePlaybackSession},
+    published_audio::PublishedAudio,
+    transport::TransportState,
+};
+use meldritch_control::song_host::SongAudioHost;
+use meldritch_render::song_host::CompiledSongPatch;
+use meldritch_tui::ProjectPlaybackHost;
+
+pub(crate) struct NativeProjectAudio {
+    host: SongAudioHost,
+    reader: AudioSnapshotReader,
+    engine: Option<PlaybackEngine>,
+    stream: Option<RealtimePlaybackSession>,
+    submitted_fingerprint: u64,
+    ready_generation: Option<u64>,
+    frames: u32,
+}
+
+impl NativeProjectAudio {
+    pub(crate) fn new(app: &AppController, engine: PlaybackEngine) -> Result<Self, String> {
+        let source = app.authored_source().ok_or("no authored project source")?;
+        let frames = u32::try_from(source.authoring_frame(3840)?)
+            .map_err(|_| "project loop exceeds PCM capacity")?;
+        let initial = PublishedAudio::from_block(&AudioBlock::silent(2, frames), 6000)
+            .map_err(|error| format!("invalid project publication: {error:?}"))?;
+        let (publisher, reader) = audio_publication(initial);
+        let patch = CompiledSongPatch::compile_initial(&source)?;
+        let host = SongAudioHost::new(source.as_ref().clone(), patch, publisher, frames, 6000);
+        Ok(Self {
+            host,
+            reader,
+            engine: Some(engine),
+            stream: None,
+            submitted_fingerprint: source.fingerprint(),
+            ready_generation: None,
+            frames,
+        })
+    }
+}
+
+impl ProjectPlaybackHost for NativeProjectAudio {
+    fn poll(&mut self, app: &mut AppController) -> Result<(), String> {
+        let source = app.authored_source().ok_or("no authored project source")?;
+        if source.fingerprint() != self.submitted_fingerprint {
+            // This first native playback slice has one fixed one-bar PCM layout.
+            // Other clocks must not silently be truncated or repeat incorrectly.
+            for voice in source.pattern_voices().values() {
+                if !voice.looped
+                    || source.authoring_frame(voice.length_ticks)? != u64::from(self.frames)
+                {
+                    return Err(
+                        "native playback currently requires looping one-bar instances".into(),
+                    );
+                }
+            }
+            self.host.replace_source(source.as_ref().clone())?;
+            self.submitted_fingerprint = source.fingerprint();
+        }
+        if let Some(generation) = self.host.poll_publish()? {
+            self.ready_generation = Some(generation);
+        }
+        self.host.refresh_view(app);
+        Ok(())
+    }
+
+    fn toggle_playback(&mut self, app: &mut AppController) -> Result<(), String> {
+        if app.playback_control().status_monitor().snapshot().state == TransportState::Playing {
+            return app
+                .dispatch(AppCommand::Stop)
+                .map(|_| ())
+                .map_err(|error| format!("{error:?}"));
+        }
+        self.poll(app)?;
+        let source = app.authored_source().ok_or("no authored project source")?;
+        if source.pattern_voices().is_empty() {
+            return Err("create an explicit patch instance with v before playback".into());
+        }
+        if self.ready_generation != Some(self.host.generation()) {
+            return Err("latest audio is still preparing; press Space again when ready".into());
+        }
+        if self.stream.is_none() {
+            let engine = self.engine.take().ok_or("device initialization failed; playback is unavailable in this cockpit; authored edits are retained")?;
+            self.stream = Some(RealtimePlaybackSession::open_default(
+                self.reader.clone(),
+                source.performance().sample_rate(),
+                u32::MAX,
+                app.playback_control(),
+                engine,
+            )?);
+        }
+        app.dispatch(AppCommand::Play)
+            .map(|_| ())
+            .map_err(|error| format!("{error:?}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use meldritch_app::{AppInput, NoteEdit, PatchCreation, PatternSignal, PatternVoiceDefinition};
+    use meldritch_audio::device_output::PublishedAudioRenderer;
+    use std::{
+        path::Path,
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    fn project() -> meldritch_dsl::ProjectDirectory {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let relative = "songs/examples/34-empty-project-patch";
+        let path = if manifest.join(relative).exists() {
+            manifest.join(relative)
+        } else {
+            manifest.join("../..").join(relative)
+        };
+        meldritch_dsl::load_project_directory(path).unwrap()
+    }
+
+    #[test]
+    fn native_host_reuses_worker_and_callback_without_opening_devices_or_resetting_mode_transport()
+    {
+        let project = project();
+        let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
+        let mut host = NativeProjectAudio::new(&app, engine).unwrap();
+        assert!(host.stream.is_none());
+        assert!(
+            host.toggle_playback(&mut app)
+                .unwrap_err()
+                .contains("instance")
+        );
+        assert!(host.engine.is_some());
+        app.dispatch(AppCommand::CreatePatch(PatchCreation::mono_voice(
+            "voice-1",
+        )))
+        .unwrap();
+        app.dispatch(AppCommand::CreatePalettePattern {
+            id: "pattern-1".into(),
+            length_ticks: 3840,
+            looped: true,
+        })
+        .unwrap();
+        app.dispatch(AppCommand::EditNote {
+            pattern: "pattern-1".into(),
+            edit: NoteEdit::Insert {
+                start_tick: 0,
+                duration_ticks: 480,
+                pitch: 48,
+                velocity: 0.8,
+            },
+        })
+        .unwrap();
+        app.dispatch(AppCommand::CreatePatternVoice(PatternVoiceDefinition {
+            id: "voice-1-instance".into(),
+            synth: "voice-1".into(),
+            length_ticks: 3840,
+            looped: true,
+            initial_pitch: 48,
+            level: 0.8,
+            pitch_pattern: Some("pattern-1".into()),
+            gate_pattern: Some("pattern-1".into()),
+        }))
+        .unwrap();
+        let wait_ready = |host: &mut NativeProjectAudio, app: &mut AppController| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                host.poll(app).unwrap();
+                if host.ready_generation == Some(host.host.generation()) {
+                    break;
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        wait_ready(&mut host, &mut app);
+        let snapshot = host.reader.snapshot();
+        let source = app.authored_source().unwrap();
+        let mut callback = PublishedAudioRenderer::from_engine(
+            host.reader.clone(),
+            2,
+            u32::MAX,
+            host.engine.take().unwrap(),
+        )
+        .unwrap();
+        app.dispatch(AppCommand::Play).unwrap();
+        let mut samples = vec![0.0; 512];
+        callback.render_f64(&mut samples);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.01));
+        for _ in 0..2 {
+            app.handle_input(AppInput::ToggleCockpitMode).unwrap();
+            host.poll(&mut app).unwrap();
+            assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+            assert!(Arc::ptr_eq(&snapshot, &host.reader.snapshot()));
+            assert_eq!(
+                app.playback_control().status_monitor().snapshot().position,
+                256
+            );
+        }
+        app.dispatch(AppCommand::BindPatternVoice {
+            voice: "voice-1-instance".into(),
+            signal: PatternSignal::Gate,
+            pattern: None,
+        })
+        .unwrap();
+        wait_ready(&mut host, &mut app);
+        callback.render_f64(&mut samples);
+        assert!(samples.iter().all(|sample| *sample == 0.0));
+        assert_eq!(
+            app.playback_control().status_monitor().snapshot().position,
+            512
+        );
+        assert!(host.stream.is_none());
+    }
+
+    #[test]
+    fn unsupported_native_clock_leaves_the_last_publication_and_worker_generation_unchanged() {
+        let project = project();
+        let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
+        let mut host = NativeProjectAudio::new(&app, engine).unwrap();
+        app.dispatch(AppCommand::CreatePatch(PatchCreation::mono_voice(
+            "voice-1",
+        )))
+        .unwrap();
+        app.dispatch(AppCommand::CreatePatternVoice(PatternVoiceDefinition {
+            id: "short".into(),
+            synth: "voice-1".into(),
+            length_ticks: 1920,
+            looped: true,
+            initial_pitch: 48,
+            level: 0.8,
+            pitch_pattern: None,
+            gate_pattern: None,
+        }))
+        .unwrap();
+        let audio = host.reader.snapshot();
+        let source = app.authored_source().unwrap();
+        let generation = host.host.generation();
+        assert!(host.poll(&mut app).unwrap_err().contains("one-bar"));
+        assert_eq!(host.host.generation(), generation);
+        assert!(Arc::ptr_eq(&audio, &host.reader.snapshot()));
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        assert!(host.stream.is_none());
+    }
+}

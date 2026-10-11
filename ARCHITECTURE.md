@@ -70,7 +70,17 @@ does not implicitly travel through either binding. Simultaneous pitch starts,
 overlapping gates, sample-event translation, clock mismatch and polyphonic
 instances diagnose instead of gaining hidden combination semantics. Legacy
 compilation and fingerprints are unchanged when no new instances exist.
-Native device playback, runtime overlays and standalone saves remain proposed.
+CLI `project_playback.rs::NativeProjectAudio` adapts accepted root revisions to
+the existing `SongAudioHost::replace_source`, rerender worker and generation-tagged
+immutable publication. TUI `ProjectPlaybackHost` keeps devices outside presentation;
+Space opens output only after an explicit instance and prepared current audio.
+This initial native stream has a fixed stereo, one-bar PCM layout; other clocks
+diagnose before submission. Mono renders promote through the existing host.
+Mode changes reuse CockpitMode and preserve source/publication/transport;
+performance blocks native construction gestures. Device setup failure retains
+authored memory, but a failed stream setup consumes the current engine and cannot
+retry in that cockpit. Physical listening/deadlines remain unverified. Runtime
+overlays, capture and standalone saves remain proposed.
 Compilers may receive a selected composition projection, but that view
 must not become another mutable palette.
 
@@ -242,7 +252,7 @@ the missing behavior is implemented. Required tests are acceptance obligations.
 
 | Desired capability | Existing implementation / reuse | Missing boundary and risk | Required acceptance |
 | --- | --- | --- | --- |
-| Empty project / palette / compositions | DSL `song/project_directory.rs`: `load_project_directory`, `authoring_source`; `song/patch.rs`: `PatchCreation`, `create_patch`; `song/notes.rs`: `PatternMaterial`, `create_palette_pattern`; `song/voices.rs`: `PatternVoiceDefinition`; app `new_empty_project`; TUI native authoring/binding commands; CLI no-subcommand and `open_project` | Opening, palette/native authoring and independent mono bindings exist without files or a track. Native device playback, runtime overlay/capture, self-contained save and multiple compositions are missing. Avoid hidden templates and wholesale renaming. | Opening/authoring/native inspection and worker/callback rendering have scoped checks; native play/save/fresh reopen and multiple compositions still require acceptance. |
+| Empty project / palette / compositions | DSL project/palette/voice definitions; app `new_empty_project`; TUI native authoring/binding commands and `ProjectPlaybackHost`; CLI `open_project`, `NativeProjectAudio`; control `SongAudioHost::replace_source` | Native authoring/binding/playback/mode paths exist without files or a track, reusing the existing host. Runtime overlay/capture, self-contained save and multiple compositions are missing. Avoid hidden templates and wholesale renaming. | Opening/native inspection and adapter/worker/callback rendering have scoped checks; physical listening, runtime controls, save/fresh reopen and multiple compositions remain open. |
 | Authoritative state and modes | `meldritch-app/src/project.rs`: `ProjectSource.base/source`, `enable_project_source`; `lib.rs`: `AppController::dispatch`, `CockpitMode`; render host `SongLiveOverrides` | Accepted source is app-owned independently of an instrument panel; native editors mutate the same source and preserve import provenance. Mapping faders still write authored values. Separate interaction mode and instance overlays without duplicate state. | Mode switch keeps audio/transport; performance moves leave authored fingerprint/export unchanged; explicit promotion reconstructs edits; failed promotion is atomic. |
 | Patch scope / independent signals | DSL `SignalType`, `ModuleKind`, `resolve_port`, `CableDefinition`, `PatternVoiceDefinition`; render `compile_pattern_voice`, `CompiledNotePatch::render_with_filter_overrides` | Mono composition bindings execute independent pitch/gate; legacy track notes keep coupled articulation. Only four signal families and fixed voice topology execute; general graph execution remains missing. | Held pitch under an independent gate and split rendering are proved; non-amplitude envelope, broader graph execution and other families remain required. Unsupported execution must reject, never silently ignore cables. |
 | Patchable patterns / transforms | DSL `NotePatternDefinition`, `NoteEventDefinition`; `song/notes.rs`: `PatternMaterial`, compatibility `AuthoredPattern.track`; `song/voices.rs`: separate bindings; core `Pattern::events_between`, `EventOccurrence` | Native palette patterns have no track owner and independently bind mono inputs. No event-transform graph, rate adapters or polyphonic source contract. Legacy step/duration semantics differ; occurrence identity must survive transformations. | Independent gate source, initial/held pitch, adjacent retriggers and clock/overlap rejection are checked. Multi-composition reuse, transformed identities, probability/ratchet bounds and standalone reload remain open. |

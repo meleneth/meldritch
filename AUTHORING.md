@@ -25,8 +25,13 @@ with separate pitch/gate bindings, explicit clock/initial pitch/output level and
 visible unbound fallbacks. Native v/p/g author these relationships. Their audio
 uses ordinary voice lowering, rerender worker and immutable callback publication
 in headless tests. Pattern velocity does not implicitly travel through pitch or
-gate; this subset has an explicit instance output level. Native device playback,
-runtime overlays and standalone saves remain next. Everything stays in memory.
+gate; this subset has an explicit instance output level. Native Space playback
+uses a thin CLI adapter over SongAudioHost; opening stays device-free, and a
+device opens only after prepared audio and an explicit play request. Ctrl-Tab
+uses the existing mode state: the native cockpit starts in construction
+(AllParameters), while performance hides/blocks construction editing and keeps
+transport. The legacy song cockpit still defaults to Performance. Runtime
+overlays, capture and standalone saves remain next. Everything stays in memory.
 The full example retains `design` status.
 
 ## Recommended immediate implementation prompt

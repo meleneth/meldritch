@@ -136,6 +136,7 @@ impl super::AppController {
             256,
         );
         app.enable_project_source(project.authoring_source())?;
+        app.cockpit_mode = super::CockpitMode::AllParameters;
         Ok((app, engine))
     }
 

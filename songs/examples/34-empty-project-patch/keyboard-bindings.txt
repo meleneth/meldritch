@@ -5,4 +5,4 @@
 # g connects pattern-1.gate -> voice-1-instance/input.gate.
 # g again disconnects only gate (low fallback); p again disconnects only pitch (C3 fallback).
 # Controls inspect the selected instrument's native instance; Ctrl-N still edits its palette pattern.
-# Device playback, runtime controls, disk capture and save/reopen remain unfinished.
+# See keyboard-playback.txt for native playback; runtime controls, disk capture and save/reopen remain unfinished.

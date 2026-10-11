@@ -106,6 +106,16 @@ impl SongAudioHost {
         self.submit();
     }
 
+    /// Accept an app-owned project revision independently of editor projections.
+    /// Compilation failure retains the previous host source and publication.
+    pub fn replace_source(&mut self, song: ValidatedSong) -> Result<(), String> {
+        let patch = CompiledSongPatch::compile_initial(&song)?;
+        self.targets = live_song_control_targets(&song);
+        self.song = song;
+        self.replace_patch(patch);
+        Ok(())
+    }
+
     fn submit(&mut self) {
         self.worker
             .submit(self.generation, self.patch.clone(), self.overrides.clone());
