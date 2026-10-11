@@ -393,7 +393,8 @@ complete. Exact commands, results and known limitations are in
   acceptance tests, plus HSM runtime-state persistence
 - [ ] Wire page-aware soft takeover to real faders and script bindings
 - [ ] Add Stream Deck discovery/HID/image transport and real reconnect lifecycle
-- [ ] Add live MicroLab voice input and physical APC output/input integration
+- [ ] Add live MicroLab voice input and authoritative APC feedback integration
+  (example 19 now uses real APC input; example 20 sends static Lua LED frames)
 - [ ] Hardware-test the new transports; retain LaunchControl support
 - [ ] Add a Rust-owned hierarchical transport lifecycle when discovery,
   reconnect/backoff and device failures require it; test statig against those
@@ -411,6 +412,46 @@ new persistence or runtime capability becomes supported.
 Example 18's `accept` status covers only its explicit headless acceptance file.
 Hardware protocols and transport gaps, statig evaluation, API details and actual
 multicore bottlenecks are recorded in `CONTROL_PLANE.md`.
+
+### 19.10 Connected APC playground and Lua colors
+
+Progress checkpoint (2026-10-10): examples 19 and 20 are implemented. The APC
+playground uses the existing TOML/MIDI song host and typed commands, not a second
+application model. The Lua LED diagnostic shares the constrained VM and sends
+only a fully validated, bounded presentation plan outside audio.
+
+- [x] Four synth lanes, sixteen variations, nine audible fader targets,
+  script-authored grid mute/solo and transport buttons; readable control map
+- [x] Headless mapping, authoritative app-state/audio integration, render range
+  equality, levels/filters/resonance/mute/solo and invalid-reference tests
+- [x] Grow the independent compatibility corpus with example 19; retain old files
+- [x] Recognize the existing `performance_session` kind in the fixture format
+  check when running examples generates journals under `performances/`
+- [x] Observe real APC Control-port input (105 diagnostic events, including CC
+  and pad messages); open production audio/TUI, capture 226 accepted actions
+  (223 curated controls, three lane mutes), and exit with clean session marker
+- [x] Add Lua palette animation, fixed-color peripheral button behaviors,
+  hardware-free dry run, bounds/diagnostics and deterministic wire tests
+- [x] Send nine LED frames / 720 messages successfully to the connected APC
+  Control output; retain final static playground hints
+- [ ] Visually confirm all LED colors on hardware and exhaustively check every
+  mapped input, audible response, transport action and unplug behavior
+- [ ] Connect LED presentation to authoritative variation/mute/solo state;
+  implement soft takeover, reconnect restoration and quantized launches
+
+Verification: `cargo test --workspace` passed 320 test executions (the root and
+CLI binaries duplicate CLI tests), including historical compatibility. The new
+APC tests cover two CLI cases, one DSL validation/negative case, one render case
+and two LED-plan cases. `cargo clippy -p meldritch-control --all-targets
+--no-deps -- -D warnings`, `cargo fmt --all -- --check`, `git diff --check`,
+`cargo run -q -- validate-song songs/examples/19-apc-mini-mk2-playground` and the
+existing example 09 validation passed. The LED dry run and physical send passed.
+Strict CLI Clippy reports three pre-existing `too_many_arguments` findings in
+unchanged MIDI/TUI functions; the new control crate is lint-clean.
+No audio callback or render scheduler implementation changed. Hardware input,
+output submission and startup are observed; listening/visual acceptance remains
+explicitly unverified. Local captured sessions are ignored user data.
+
 
 ## Completed showcase milestones
 

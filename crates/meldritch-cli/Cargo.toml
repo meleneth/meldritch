@@ -10,6 +10,7 @@ clap.workspace = true
 meldritch-app = { path = "../meldritch-app" }
 meldritch-audio = { path = "../meldritch-audio" }
 meldritch-core = { path = "../meldritch-core" }
+meldritch-control = { path = "../meldritch-control" }
 meldritch-dsl = { path = "../meldritch-dsl" }
 meldritch-render = { path = "../meldritch-render" }
 meldritch-tui = { path = "../meldritch-tui" }

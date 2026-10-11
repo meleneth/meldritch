@@ -19,6 +19,16 @@ song-playback host. Production `tui-song` remains the existing TOML/MIDI path.
 
 ## Reuse and boundaries
 
+The separate [APC Lua color diagnostic](https://github.com/meleneth/meldritch/blob/main/songs/examples/20-apc-lua-colors/ACCEPTANCE.md)
+uses the same constrained VM to author bounded LED frames. Run
+`cargo run -- apc-lua-colors songs/examples/20-apc-lua-colors/colors.lua`, or add
+`--dry-run` for a hardware-free wire preview. Rust validates all pad/button
+addresses, palette values, brightness, frame counts and holds before opening
+the matching MIDI output. Lua never receives a raw MIDI or filesystem capability.
+This presentation-only diagnostic does not mutate app state or enter audio;
+it leaves static hints, not authoritative live feedback. Its API is documented
+in the example's acceptance file.
+
 `meldritch-dsl::load_song_directory` remains the semantic validator and reference
 resolver. `LuaProject::load(root, source)` is an explicit composition adapter:
 Lua chooses a song directory within the supplied root, then the current typed

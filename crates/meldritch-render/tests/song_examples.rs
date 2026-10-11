@@ -18,6 +18,94 @@ fn example(name: &str) -> PathBuf {
 }
 
 #[test]
+fn apc_playground_renders_coherent_variations_levels_mute_and_solo() {
+    let song = load_song_directory(example("19-apc-mini-mk2-playground")).unwrap();
+    let range = FrameRange::new(0, 48_000).unwrap();
+    let patch = compile_mixed_note_song(&song).unwrap();
+    assert_eq!(patch.track_count(), 4);
+    let whole = patch.render(range).unwrap();
+    assert!(whole.peak_abs() > 0.01);
+    assert!(whole.samples().iter().all(|s| s.is_finite()));
+    for lane in ["beat-drum", "rhythm-drum-a", "bass-a", "pad"] {
+        let filtered = patch
+            .render_with_live_overrides(
+                range,
+                &[CompiledSynthFilterOverride::new(
+                    lane,
+                    "filter",
+                    Some(80.0),
+                    None,
+                )],
+                &[],
+            )
+            .unwrap();
+        assert_ne!(
+            filtered.samples(),
+            whole.samples(),
+            "{lane} cutoff must change audio"
+        );
+    }
+    let resonant = patch
+        .render_with_live_overrides(
+            range,
+            &[CompiledSynthFilterOverride::new(
+                "pad",
+                "filter",
+                None,
+                Some(0.8),
+            )],
+            &[],
+        )
+        .unwrap();
+    assert_ne!(resonant.samples(), whole.samples());
+    let left = patch.render(FrameRange::new(0, 7331).unwrap()).unwrap();
+    let right = patch
+        .render(FrameRange::new(7331, 48_000).unwrap())
+        .unwrap();
+    assert_eq!(
+        left.samples()
+            .iter()
+            .chain(right.samples())
+            .copied()
+            .collect::<Vec<_>>(),
+        whole.samples()
+    );
+    let varied =
+        compile_mixed_note_song_with_lane_variation(&song, "beat-drum", "beat-drum-b").unwrap();
+    assert_ne!(varied.render(range).unwrap().samples(), whole.samples());
+    let lanes = ["beat-drum", "rhythm-drum-a", "bass-a", "pad"];
+    let silent = patch
+        .render_with_live_overrides(
+            range,
+            &[],
+            &lanes
+                .iter()
+                .map(|id| CompiledLaneLevelOverride::new(*id, 0.0))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+    assert_eq!(silent.peak_abs(), 0.0);
+    let muted = compile_mixed_note_song_with_lane_state(
+        &song,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+    )
+    .unwrap();
+    assert_eq!(muted.render(range).unwrap().peak_abs(), 0.0);
+    let solo = compile_mixed_note_song_with_lane_state(
+        &song,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeSet::from(["bass-a".to_owned()]),
+    )
+    .unwrap();
+    let solo_audio = solo.render(range).unwrap();
+    assert!(solo_audio.peak_abs() > 0.0);
+    assert_ne!(solo_audio.samples(), whole.samples());
+}
+
+#[test]
 fn minimal_modular_synth_compiles_and_renders_finite_audio() {
     let song = load_song_directory(example("00-minimal-synth")).expect("song should load");
     let patch = compile_drone_song(&song).expect("minimal patch should compile");

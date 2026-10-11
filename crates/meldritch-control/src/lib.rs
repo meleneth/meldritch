@@ -11,6 +11,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 pub type Result<T> = std::result::Result<T, String>;
+pub mod led_demo;
 const MAX_DEFINITIONS: usize = 64;
 pub const QUEUE_CAPACITY: usize = 64;
 pub const JOURNAL_CAPACITY: usize = 256;
@@ -217,48 +218,53 @@ fn insert<T>(map: &mut BTreeMap<String, T>, id: String, value: T) -> Result<()> 
     Ok(())
 }
 
+fn constrained_vm(source: &str) -> Result<(Lua, Rc<Cell<u32>>)> {
+    if source.len() > 256 * 1024 {
+        return Err("Lua source too large".into());
+    }
+    let lua = Lua::new_with(
+        StdLib::TABLE | StdLib::STRING | StdLib::UTF8,
+        LuaOptions::default(),
+    )
+    .map_err(error)?;
+    lua.set_memory_limit(4 * 1024 * 1024).map_err(error)?;
+    // Base-library functions can otherwise load files/bytecode or catch the
+    // instruction-limit error repeatedly. No coroutine library is loaded.
+    for name in [
+        "dofile",
+        "loadfile",
+        "load",
+        "require",
+        "print",
+        "collectgarbage",
+        "pcall",
+        "xpcall",
+        "rawset",
+    ] {
+        lua.globals().set(name, Value::Nil).map_err(error)?;
+    }
+    let budget = Rc::new(Cell::new(0u32));
+    let hook_budget = Rc::clone(&budget);
+    lua.set_hook(
+        HookTriggers::new().every_nth_instruction(1000),
+        move |_, _| {
+            let count = hook_budget.get() + 1;
+            hook_budget.set(count);
+            if count > 100 {
+                return Err(mlua::Error::RuntimeError(
+                    "Lua instruction budget exceeded".into(),
+                ));
+            }
+            Ok(VmState::Continue)
+        },
+    )
+    .map_err(error)?;
+    Ok((lua, budget))
+}
+
 impl LuaProject {
     pub fn load(root: impl AsRef<Path>, source: &str) -> Result<Self> {
-        if source.len() > 256 * 1024 {
-            return Err("Lua source too large".into());
-        }
-        let lua = Lua::new_with(
-            StdLib::TABLE | StdLib::STRING | StdLib::UTF8,
-            LuaOptions::default(),
-        )
-        .map_err(error)?;
-        lua.set_memory_limit(4 * 1024 * 1024).map_err(error)?;
-        // Base-library functions can otherwise load files/bytecode or catch the
-        // instruction-limit error repeatedly. No coroutine library is loaded.
-        for name in [
-            "dofile",
-            "loadfile",
-            "load",
-            "require",
-            "print",
-            "collectgarbage",
-            "pcall",
-            "xpcall",
-            "rawset",
-        ] {
-            lua.globals().set(name, Value::Nil).map_err(error)?;
-        }
-        let budget = Rc::new(Cell::new(0u32));
-        let hook_budget = Rc::clone(&budget);
-        lua.set_hook(
-            HookTriggers::new().every_nth_instruction(1000),
-            move |_, _| {
-                let count = hook_budget.get() + 1;
-                hook_budget.set(count);
-                if count > 100 {
-                    return Err(mlua::Error::RuntimeError(
-                        "Lua instruction budget exceeded".into(),
-                    ));
-                }
-                Ok(VmState::Continue)
-            },
-        )
-        .map_err(error)?;
+        let (lua, budget) = constrained_vm(source)?;
         let definition: Table = lua
             .load(source)
             .set_name("main.lua")

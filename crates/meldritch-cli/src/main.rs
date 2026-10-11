@@ -313,6 +313,20 @@ enum TransformKindArg {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run a bounded Lua-authored APC Mini MK2 LED animation (no audio).
+    ApcLuaColors {
+        #[arg(value_name = "LUA_FILE")]
+        source: PathBuf,
+        /// Validate and print MIDI messages without opening hardware.
+        #[arg(long)]
+        dry_run: bool,
+        /// Output-port name substring; the default selects the Session Control port.
+        #[arg(long, default_value = "APC mini mk2 Control")]
+        port: String,
+        /// Turn off pads/buttons after the animation instead of keeping its last frame.
+        #[arg(long)]
+        clear: bool,
+    },
     Validate {
         #[arg(value_name = "PROJECT")]
         project: PathBuf,
@@ -816,6 +830,12 @@ fn main() {
 
 fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
+        Command::ApcLuaColors {
+            source,
+            dry_run,
+            port,
+            clear,
+        } => apc_lua_colors(source, dry_run, port, clear),
         Command::Validate { project } => validate_project(project),
         Command::ValidateSong { song } => validate_song(song),
         Command::MidiControlsCheck { song, seconds } => midi_controls_check(song, seconds),
@@ -2566,6 +2586,82 @@ impl MappedMidiInput {
             None => format!("{:?}", self.input),
         }
     }
+}
+
+fn apc_lua_colors(
+    source: PathBuf,
+    dry_run: bool,
+    port_name: String,
+    clear: bool,
+) -> Result<(), String> {
+    use meldritch_control::led_demo::ApcLedDemo;
+    // Read a bounded source before allocating/evaluating a project VM.
+    let file = std::fs::File::open(&source).map_err(|e| format!("{}: {e}", source.display()))?;
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut std::io::Read::take(file, 256 * 1024 + 1), &mut text)
+        .map_err(|e| e.to_string())?;
+    let plan = ApcLedDemo::load(&text)?;
+    if dry_run {
+        for (index, frame) in plan.frames.iter().enumerate() {
+            println!(
+                "frame {index}, hold {}ms: {:?}",
+                frame.hold_ms,
+                frame.messages()
+            );
+        }
+        println!(
+            "validated {} frames, {}ms; clear={clear}",
+            plan.frames.len(),
+            plan.duration_ms()
+        );
+        return Ok(());
+    }
+    if port_name.trim().is_empty() {
+        return Err("MIDI output port match cannot be empty".into());
+    }
+    let midi = midir::MidiOutput::new("meldritch-apc-lua-colors").map_err(|e| e.to_string())?;
+    let matches = midi
+        .ports()
+        .into_iter()
+        .filter_map(|port| {
+            let name = midi.port_name(&port).ok()?;
+            midi_port_name_matches(&name, &port_name).then_some((port, name))
+        })
+        .collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return Err(format!(
+            "expected one MIDI output matching '{port_name}', found {}; use --port to choose the Control port",
+            matches.len()
+        ));
+    }
+    let (port, name) = matches.into_iter().next().expect("one match checked");
+    let mut connection = midi
+        .connect(&port, "meldritch-apc-leds")
+        .map_err(|e| e.to_string())?;
+    println!(
+        "APC LED output: {name}; {} validated frames",
+        plan.frames.len()
+    );
+    for frame in &plan.frames {
+        for message in frame.messages() {
+            connection.send(&message).map_err(|e| e.to_string())?;
+        }
+        thread::sleep(Duration::from_millis(frame.hold_ms));
+    }
+    if clear {
+        for message in ApcLedDemo::clear_messages() {
+            connection.send(&message).map_err(|e| e.to_string())?;
+        }
+    }
+    println!(
+        "sent LED plan; {}",
+        if clear {
+            "LEDs cleared"
+        } else {
+            "final presentation retained"
+        }
+    );
+    Ok(())
 }
 
 fn midi_controls_check(path: PathBuf, seconds: u64) -> Result<(), String> {
@@ -8235,6 +8331,171 @@ mod tests {
                 value: (4350.0 - 100.0) / (5000.0 - 100.0),
             })
         );
+    }
+
+    #[test]
+    fn apc_playground_commands_change_authoritative_lanes_and_audio() {
+        let song = meldritch_dsl::load_song_directory(example_song_path(
+            "songs/examples/19-apc-mini-mk2-playground",
+        ))
+        .unwrap();
+        let (playback, _engine) =
+            meldritch_audio::device_output::playback_session_parts(8).unwrap();
+        let state = meldritch_render::coordinator::SampleRenderState::new(
+            meldritch_core::Pattern::new(PatternId::new(1), 4, 4).unwrap(),
+            Tempo::new(118.0, 48000).unwrap(),
+            ProbabilitySeed::new(1),
+            meldritch_render::RenderSettings::new(1).unwrap(),
+            Arc::new(BTreeMap::new()),
+        );
+        let coordinator = RenderCoordinator::new_from_state(
+            RenderCoordinatorConfig::new(1, 48000, 6000, 1, Duration::from_millis(2)).unwrap(),
+            state.clone(),
+            playback.status_monitor(),
+        )
+        .unwrap();
+        let mut app = meldritch_app::AppController::new(
+            playback,
+            coordinator,
+            meldritch_render::live_edit::LivePatternEditor::new(state, 48000),
+            meldritch_app::Selection {
+                track: TrackId::new(1),
+                step: StepIndex::new(0),
+            },
+            256,
+        );
+        app.set_performance_pages(song_performance_pages_for_view(&song));
+        let actions = midi_action_bindings_for_song(&song);
+        let range = FrameRange::new(0, 48000).unwrap();
+        let before = CompiledSongPatch::compile_initial(&song)
+            .unwrap()
+            .render_default(range)
+            .unwrap();
+        let input = map_script_midi_note(&actions, "apc-mini", 1, 8, true)
+            .unwrap()
+            .input;
+        let result = app.handle_input(input.clone()).unwrap();
+        assert_eq!(
+            song_lane_selection(&result),
+            Some(("beat-drum".to_owned(), "beat-drum-b".to_owned()))
+        );
+        let view = app.view_model();
+        assert_eq!(active_lane_variations(&view)["beat-drum"], "beat-drum-b");
+        let after = compile_mixed_song_for_active_lanes(
+            &song,
+            &active_lane_variations(&view),
+            &BTreeMap::new(),
+            &included_lanes_from_view(&view),
+        )
+        .unwrap()
+        .render_default(range)
+        .unwrap();
+        assert_ne!(before.samples(), after.samples());
+        let mute = map_script_midi_note(&actions, "apc-mini", 1, 32, true)
+            .unwrap()
+            .input;
+        let muted = app.handle_input(mute.clone()).unwrap();
+        assert_session_kind(&mute, &muted, "lane_mute", Some("beat-drum"));
+        assert!(!included_lanes_from_view(&app.view_model()).contains("beat-drum"));
+        app.handle_input(
+            map_script_midi_note(&actions, "apc-mini", 1, 42, true)
+                .unwrap()
+                .input,
+        )
+        .unwrap();
+        assert_eq!(
+            included_lanes_from_view(&app.view_model()),
+            BTreeSet::from(["bass-a".to_owned()])
+        );
+    }
+
+    #[test]
+    fn apc_playground_maps_grid_buttons_and_all_nine_faders() {
+        use meldritch_app::AppInput;
+        let song = meldritch_dsl::load_song_directory(example_song_path(
+            "songs/examples/19-apc-mini-mk2-playground",
+        ))
+        .unwrap();
+        let controls = midi_control_bindings_for_song(&song);
+        let actions = midi_action_bindings_for_song(&song);
+        assert_eq!(controls.len(), 9);
+        assert_eq!(actions.len(), 32);
+        let lanes = ["beat-drum", "rhythm-drum-a", "bass-a", "pad"];
+        for (column, lane) in lanes.iter().enumerate() {
+            for (row, variation) in ['a', 'b', 'c', 'd'].iter().enumerate() {
+                let note = (row * 8 + column) as u8;
+                assert_eq!(
+                    map_script_midi_note(&actions, "apc-mini", 1, note, true)
+                        .unwrap()
+                        .input,
+                    AppInput::SelectLaneVariation {
+                        lane_id: (*lane).to_owned(),
+                        variation_id: format!("{lane}-{variation}"),
+                    }
+                );
+                assert!(map_script_midi_note(&actions, "apc-mini", 1, note, false).is_none());
+                assert!(map_script_midi_note(&actions, "apc-mini", 2, note, true).is_none());
+                assert!(map_script_midi_note(&actions, "other", 1, note, true).is_none());
+            }
+            for note in [32 + column as u8, 100 + column as u8] {
+                assert_eq!(
+                    map_script_midi_note(&actions, "apc-mini", 1, note, true)
+                        .unwrap()
+                        .input,
+                    AppInput::ToggleLaneMute((*lane).to_owned())
+                );
+            }
+            assert_eq!(
+                map_script_midi_note(&actions, "apc-mini", 1, 40 + column as u8, true)
+                    .unwrap()
+                    .input,
+                AppInput::ToggleLaneSolo((*lane).to_owned())
+            );
+        }
+        assert!(map_script_midi_note(&actions, "apc-mini", 1, 63, true).is_none());
+        for (note, input) in [
+            (112, AppInput::TogglePlayback),
+            (113, AppInput::Stop),
+            (114, AppInput::Rewind),
+            (115, AppInput::ToggleCockpitMode),
+        ] {
+            assert_eq!(
+                map_script_midi_note(&actions, "apc-mini", 1, note, true)
+                    .unwrap()
+                    .input,
+                input
+            );
+        }
+        let ids = [
+            "beat-drum-level",
+            "rhythm-drum-a-level",
+            "bass-a-level",
+            "pad-level",
+            "beat-drum-cutoff",
+            "rhythm-drum-a-cutoff",
+            "bass-a-cutoff",
+            "pad-cutoff",
+            "pad-resonance",
+        ];
+        for (index, id) in ids.iter().enumerate() {
+            for value in [0, 127] {
+                let input = meldritch_app::MidiControlInput {
+                    device: "apc-mini".to_owned(),
+                    channel: 1,
+                    cc: 48 + index as u8,
+                    value,
+                };
+                assert_eq!(
+                    map_script_midi_control_change(&controls, &actions, input, Some("main"))
+                        .unwrap()
+                        .input,
+                    AppInput::SetCuratedControlNormalized {
+                        id: (*id).to_owned(),
+                        value: f64::from(value) / 127.0
+                    }
+                );
+            }
+        }
     }
 
     #[test]

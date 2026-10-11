@@ -12,6 +12,56 @@ fn examples_root() -> PathBuf {
         .join("songs/examples")
 }
 
+#[test]
+fn apc_playground_validates_and_rejects_invalid_action_references() {
+    let root = examples_root().join("19-apc-mini-mk2-playground");
+    let song = load_song_directory(&root).unwrap();
+    assert_eq!(song.performance().tracks().len(), 4);
+    assert_eq!(song.performance().controls().len(), 9);
+    assert_eq!(
+        song.fingerprint(),
+        load_song_directory(&root).unwrap().fingerprint()
+    );
+    let temporary = std::env::temp_dir().join(format!(
+        "meldritch-apc-invalid-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&temporary).unwrap();
+    for directory in ["synths", "patterns"] {
+        fs::create_dir(temporary.join(directory)).unwrap();
+        for file in fs::read_dir(root.join(directory)).unwrap() {
+            let file = file.unwrap();
+            fs::copy(
+                file.path(),
+                temporary.join(directory).join(file.file_name()),
+            )
+            .unwrap();
+        }
+    }
+    let main = fs::read_to_string(root.join("main.mlperformance")).unwrap();
+    for (fixture, diagnostic) in [
+        ("unknown-lane", "unknown lane 'missing-lane'"),
+        (
+            "unknown-variation",
+            "unknown lane variation 'beat-drum:missing-variation'",
+        ),
+    ] {
+        let invalid = fs::read_to_string(root.join(format!("invalid/{fixture}.toml"))).unwrap();
+        fs::write(
+            temporary.join("main.mlperformance"),
+            format!("{main}\n{invalid}"),
+        )
+        .unwrap();
+        let error = load_song_directory(&temporary).unwrap_err().to_string();
+        assert!(error.contains(diagnostic), "{fixture}: {error}");
+    }
+    fs::remove_dir_all(temporary).unwrap();
+}
+
 fn collect_ml_files(directory: &Path, output: &mut Vec<PathBuf>) {
     let mut entries = fs::read_dir(directory)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", directory.display()))
@@ -66,6 +116,18 @@ fn every_example_file_is_versioned_toml_with_matching_kind() {
             Some("mlsynth") => "synth",
             Some("mldsp") => "dsp",
             Some("mlpattern") => "pattern",
+            // Running an example creates captured sessions beside its authored
+            // source. The CLI's existing session kind is distinct; never treat
+            // those journals as performance entrypoints or rewrite them.
+            Some("mlperformance")
+                if path
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|s| s.to_str())
+                    == Some("performances") =>
+            {
+                "performance_session"
+            }
             Some("mlperformance") => "performance",
             Some("mlsamples") => "samples",
             Some("mlsampler") => "sampler",

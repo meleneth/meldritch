@@ -27,6 +27,7 @@ clap.workspace = true
 meldritch-app = { path = "crates/meldritch-app" }
 meldritch-audio = { path = "crates/meldritch-audio" }
 meldritch-core = { path = "crates/meldritch-core" }
+meldritch-control = { path = "crates/meldritch-control" }
 meldritch-dsl = { path = "crates/meldritch-dsl" }
 meldritch-render = { path = "crates/meldritch-render" }
 meldritch-tui = { path = "crates/meldritch-tui" }

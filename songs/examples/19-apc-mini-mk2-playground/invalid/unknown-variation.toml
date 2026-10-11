@@ -1,0 +1,7 @@
+# Appended to main.mlperformance by the validation acceptance test.
+[[actions]]
+id = "invalid-variation"
+label = "Unknown variation"
+action = "select_lane_variation"
+lane = "beat-drum"
+variation_id = "missing-variation"

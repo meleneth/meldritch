@@ -21,6 +21,8 @@ Status values:
 | `16-launch-control-xl-playground` | Full LaunchControl XL MIDI surface with playable groove scenes | play |
 | `17-launch-control-xl-ensemble` | Banked multi-lane LaunchControl XL groovebox ensemble with lane/pattern-bank/sample metadata | parse |
 | `18-lua-control-plane` | Constrained Lua composition, hierarchical pages, reusable mode widget, coherent simulated surfaces, typed journal and historical compatibility (headless scope in ACCEPTANCE.md) | accept |
+| `19-apc-mini-mk2-playground` | Four synth lanes, sixteen variations, nine faders and script-authored APC Session input; Linux discovery/input observed, full hardware/audio smoke pending | play |
+| `20-apc-lua-colors` | Bounded Lua-authored palette animation, MIDI output and static playground hints; headless protocol tests, visual hardware confirmation pending | compile |
 
 An implementation may advance a row only when all earlier statuses for that row
 are satisfied. New schema or runtime behavior requires a new row or an explicit
