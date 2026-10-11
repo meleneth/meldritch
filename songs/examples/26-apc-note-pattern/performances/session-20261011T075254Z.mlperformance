@@ -1,0 +1,559 @@
+[meldritch]
+kind = "performance_session"
+version = 1
+
+[session]
+id = "session-20261011T075254Z"
+created_at_utc = "20261011T075254Z"
+source_performance = "piano-roll"
+source_title = "Lua Piano Roll"
+song_root = "/home/meleneth/code/meldritch/songs/examples/26-apc-note-pattern"
+source_fingerprint = "0972153104a6ee74"
+timeline_frames = 192000
+event_buffer_limit = 8
+clean_termination = true
+termination = "clean"
+
+[final_state]
+cockpit_mode = "Performance"
+transport_state = "Playing"
+transport_position = 105984
+selection_track = 1
+selection_step = 0
+history_len = 36
+
+[[events]]
+sequence = 1
+wall_offset_ms = 9220
+absolute_frame = 103936
+musical_beat = 4.330666667
+requested_quantization = "immediate"
+actual_frame = 103936
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"seed\", edit: Insert { start_tick: 0, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+command = "EditNote { pattern: \"seed\", edit: Insert { start_tick: 0, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"seed\", selected_note: Some(\"note-1\"), changed: true, dirty_ranges: [FrameRange { start: 0, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "seed"
+current = "note-1"
+
+[[events]]
+sequence = 2
+wall_offset_ms = 12482
+absolute_frame = 68608
+musical_beat = 2.858666667
+requested_quantization = "immediate"
+actual_frame = 68608
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"seed\", edit: Insert { start_tick: 960, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+command = "EditNote { pattern: \"seed\", edit: Insert { start_tick: 960, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"seed\", selected_note: Some(\"note-2\"), changed: true, dirty_ranges: [FrameRange { start: 24000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "seed"
+current = "note-2"
+
+[[events]]
+sequence = 3
+wall_offset_ms = 13314
+absolute_frame = 108544
+musical_beat = 4.522666667
+requested_quantization = "immediate"
+actual_frame = 108544
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"seed\", edit: Insert { start_tick: 1440, duration_ticks: 480, pitch: 50, velocity: 0.8 } }"
+command = "EditNote { pattern: \"seed\", edit: Insert { start_tick: 1440, duration_ticks: 480, pitch: 50, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"seed\", selected_note: Some(\"note-3\"), changed: true, dirty_ranges: [FrameRange { start: 36000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "seed"
+current = "note-3"
+
+[[events]]
+sequence = 4
+wall_offset_ms = 17087
+absolute_frame = 96768
+musical_beat = 4.032000000
+requested_quantization = "immediate"
+actual_frame = 96768
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"seed\", edit: Insert { start_tick: 1920, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+command = "EditNote { pattern: \"seed\", edit: Insert { start_tick: 1920, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"seed\", selected_note: Some(\"note-4\"), changed: true, dirty_ranges: [FrameRange { start: 48000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "seed"
+current = "note-4"
+
+[[events]]
+sequence = 5
+wall_offset_ms = 21700
+absolute_frame = 126976
+musical_beat = 5.290666667
+requested_quantization = "immediate"
+actual_frame = 126976
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"seed\", edit: Insert { start_tick: 2880, duration_ticks: 480, pitch: 50, velocity: 0.8 } }"
+command = "EditNote { pattern: \"seed\", edit: Insert { start_tick: 2880, duration_ticks: 480, pitch: 50, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"seed\", selected_note: Some(\"note-5\"), changed: true, dirty_ranges: [FrameRange { start: 72000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "seed"
+current = "note-5"
+
+[[events]]
+sequence = 6
+wall_offset_ms = 22041
+absolute_frame = 143360
+musical_beat = 5.973333333
+requested_quantization = "immediate"
+actual_frame = 143360
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"seed\", edit: Duration { id: \"note-5\", duration_ticks: 960 } }"
+command = "EditNote { pattern: \"seed\", edit: Duration { id: \"note-5\", duration_ticks: 960 } }"
+result = "PatternEdited { pattern: \"seed\", selected_note: Some(\"note-5\"), changed: true, dirty_ranges: [FrameRange { start: 72000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "seed"
+current = "note-5"
+
+[[events]]
+sequence = 7
+wall_offset_ms = 28919
+absolute_frame = 90112
+musical_beat = 3.754666667
+requested_quantization = "immediate"
+actual_frame = 90112
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"seed\", edit: Insert { start_tick: 1920, duration_ticks: 480, pitch: 52, velocity: 0.8 } }"
+command = "EditNote { pattern: \"seed\", edit: Insert { start_tick: 1920, duration_ticks: 480, pitch: 52, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"seed\", selected_note: Some(\"note-6\"), changed: true, dirty_ranges: [FrameRange { start: 48000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "seed"
+current = "note-6"
+
+[[events]]
+sequence = 8
+wall_offset_ms = 29095
+absolute_frame = 98304
+musical_beat = 4.096000000
+requested_quantization = "immediate"
+actual_frame = 98304
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"seed\", edit: Duration { id: \"note-6\", duration_ticks: 1440 } }"
+command = "EditNote { pattern: \"seed\", edit: Duration { id: \"note-6\", duration_ticks: 1440 } }"
+result = "PatternEdited { pattern: \"seed\", selected_note: Some(\"note-6\"), changed: true, dirty_ranges: [FrameRange { start: 48000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "seed"
+current = "note-6"
+
+[[events]]
+sequence = 9
+wall_offset_ms = 39623
+absolute_frame = 27136
+musical_beat = 1.130666667
+requested_quantization = "immediate"
+actual_frame = 27136
+provenance = "lua:apc-mini"
+input = "SelectNote { pattern: \"seed\", id: \"note-6\" }"
+command = "SelectNote { pattern: \"seed\", id: \"note-6\" }"
+result = "PatternSelectionChanged"
+changed = false
+kind = "note_selection"
+
+[[events]]
+sequence = 10
+wall_offset_ms = 40574
+absolute_frame = 73216
+musical_beat = 3.050666667
+requested_quantization = "immediate"
+actual_frame = 73216
+provenance = "lua:apc-mini"
+input = "SelectNote { pattern: \"seed\", id: \"note-6\" }"
+command = "SelectNote { pattern: \"seed\", id: \"note-6\" }"
+result = "PatternSelectionChanged"
+changed = false
+kind = "note_selection"
+
+[[events]]
+sequence = 11
+wall_offset_ms = 42409
+absolute_frame = 161280
+musical_beat = 6.720000000
+requested_quantization = "immediate"
+actual_frame = 161280
+provenance = "lua:apc-mini"
+input = "SelectNote { pattern: \"seed\", id: \"note-6\" }"
+command = "SelectNote { pattern: \"seed\", id: \"note-6\" }"
+result = "PatternSelectionChanged"
+changed = false
+kind = "note_selection"
+
+[[events]]
+sequence = 12
+wall_offset_ms = 42974
+absolute_frame = 187904
+musical_beat = 7.829333333
+requested_quantization = "immediate"
+actual_frame = 187904
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"seed\", edit: Duration { id: \"note-6\", duration_ticks: 1440 } }"
+command = "EditNote { pattern: \"seed\", edit: Duration { id: \"note-6\", duration_ticks: 1440 } }"
+result = "PatternEdited { pattern: \"seed\", selected_note: Some(\"note-6\"), changed: false, dirty_ranges: [] }"
+changed = false
+kind = "note_pattern"
+target_id = "seed"
+current = "note-6"
+
+[[events]]
+sequence = 13
+wall_offset_ms = 44103
+absolute_frame = 50176
+musical_beat = 2.090666667
+requested_quantization = "immediate"
+actual_frame = 50176
+provenance = "lua:apc-mini"
+input = "SelectNote { pattern: \"seed\", id: \"note-6\" }"
+command = "SelectNote { pattern: \"seed\", id: \"note-6\" }"
+result = "PatternSelectionChanged"
+changed = false
+kind = "note_selection"
+
+[[events]]
+sequence = 14
+wall_offset_ms = 46220
+absolute_frame = 152576
+musical_beat = 6.357333333
+requested_quantization = "immediate"
+actual_frame = 152576
+provenance = "lua:apc-mini"
+input = "CreateNotePattern { track: \"bass\", id: \"roll\", length_ticks: 7680, looped: true }"
+command = "CreateNotePattern { track: \"bass\", id: \"roll\", length_ticks: 7680, looped: true }"
+result = "PatternEdited { pattern: \"roll\", selected_note: None, changed: true, dirty_ranges: [FrameRange { start: 0, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+
+[[events]]
+sequence = 15
+wall_offset_ms = 47156
+absolute_frame = 4608
+musical_beat = 0.192000000
+requested_quantization = "immediate"
+actual_frame = 4608
+provenance = "lua:apc-mini"
+input = "SavePattern"
+command = "SavePattern"
+result = "PatternSaveRequested"
+changed = false
+kind = "authored_pattern_save"
+
+[[events]]
+sequence = 16
+wall_offset_ms = 50021
+absolute_frame = 142848
+musical_beat = 5.952000000
+requested_quantization = "immediate"
+actual_frame = 142848
+provenance = "lua:apc-mini"
+input = "SavePattern"
+command = "SavePattern"
+result = "PatternSaveRequested"
+changed = false
+kind = "authored_pattern_save"
+
+[[events]]
+sequence = 17
+wall_offset_ms = 56446
+absolute_frame = 66048
+musical_beat = 2.752000000
+requested_quantization = "immediate"
+actual_frame = 66048
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 0, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+command = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 0, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"roll\", selected_note: Some(\"note-1\"), changed: true, dirty_ranges: [FrameRange { start: 0, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+current = "note-1"
+
+[[events]]
+sequence = 18
+wall_offset_ms = 56838
+absolute_frame = 85504
+musical_beat = 3.562666667
+requested_quantization = "immediate"
+actual_frame = 85504
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 480, duration_ticks: 480, pitch: 50, velocity: 0.8 } }"
+command = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 480, duration_ticks: 480, pitch: 50, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"roll\", selected_note: Some(\"note-2\"), changed: true, dirty_ranges: [FrameRange { start: 12000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+current = "note-2"
+
+[[events]]
+sequence = 19
+wall_offset_ms = 57181
+absolute_frame = 101888
+musical_beat = 4.245333333
+requested_quantization = "immediate"
+actual_frame = 101888
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 480, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+command = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 480, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"roll\", selected_note: Some(\"note-3\"), changed: true, dirty_ranges: [FrameRange { start: 12000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+current = "note-3"
+
+[[events]]
+sequence = 20
+wall_offset_ms = 57527
+absolute_frame = 118272
+musical_beat = 4.928000000
+requested_quantization = "immediate"
+actual_frame = 118272
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 960, duration_ticks: 480, pitch: 50, velocity: 0.8 } }"
+command = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 960, duration_ticks: 480, pitch: 50, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"roll\", selected_note: Some(\"note-4\"), changed: true, dirty_ranges: [FrameRange { start: 24000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+current = "note-4"
+
+[[events]]
+sequence = 21
+wall_offset_ms = 62683
+absolute_frame = 174080
+musical_beat = 7.253333333
+requested_quantization = "immediate"
+actual_frame = 174080
+provenance = "lua:apc-mini"
+input = "SelectNote { pattern: \"roll\", id: \"note-2\" }"
+command = "SelectNote { pattern: \"roll\", id: \"note-2\" }"
+result = "PatternSelectionChanged"
+changed = false
+kind = "note_selection"
+
+[[events]]
+sequence = 22
+wall_offset_ms = 64124
+absolute_frame = 51712
+musical_beat = 2.154666667
+requested_quantization = "immediate"
+actual_frame = 51712
+provenance = "lua:apc-mini"
+input = "SelectNote { pattern: \"roll\", id: \"note-2\" }"
+command = "SelectNote { pattern: \"roll\", id: \"note-2\" }"
+result = "PatternSelectionChanged"
+changed = false
+kind = "note_selection"
+
+[[events]]
+sequence = 23
+wall_offset_ms = 65565
+absolute_frame = 120320
+musical_beat = 5.013333333
+requested_quantization = "immediate"
+actual_frame = 120320
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 1440, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+command = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 1440, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"roll\", selected_note: Some(\"note-5\"), changed: true, dirty_ranges: [FrameRange { start: 36000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+current = "note-5"
+
+[[events]]
+sequence = 24
+wall_offset_ms = 68237
+absolute_frame = 56320
+musical_beat = 2.346666667
+requested_quantization = "immediate"
+actual_frame = 56320
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 2400, duration_ticks: 480, pitch: 50, velocity: 0.8 } }"
+command = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 2400, duration_ticks: 480, pitch: 50, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"roll\", selected_note: Some(\"note-6\"), changed: true, dirty_ranges: [FrameRange { start: 60000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+current = "note-6"
+
+[[events]]
+sequence = 25
+wall_offset_ms = 69629
+absolute_frame = 123904
+musical_beat = 5.162666667
+requested_quantization = "immediate"
+actual_frame = 123904
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 52, velocity: 0.8 } }"
+command = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 52, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"roll\", selected_note: Some(\"note-7\"), changed: true, dirty_ranges: [FrameRange { start: 84000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+current = "note-7"
+
+[[events]]
+sequence = 26
+wall_offset_ms = 83012
+absolute_frame = 189952
+musical_beat = 7.914666667
+requested_quantization = "immediate"
+actual_frame = 189952
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 48, velocity: 0.8 } }"
+command = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 48, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"roll\", selected_note: Some(\"note-8\"), changed: true, dirty_ranges: [FrameRange { start: 84000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+current = "note-8"
+
+[[events]]
+sequence = 27
+wall_offset_ms = 87404
+absolute_frame = 16896
+musical_beat = 0.704000000
+requested_quantization = "immediate"
+actual_frame = 16896
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 54, velocity: 0.8 } }"
+command = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 54, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"roll\", selected_note: Some(\"note-9\"), changed: true, dirty_ranges: [FrameRange { start: 84000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+current = "note-9"
+
+[[events]]
+sequence = 28
+wall_offset_ms = 90943
+absolute_frame = 185856
+musical_beat = 7.744000000
+requested_quantization = "immediate"
+actual_frame = 185856
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 53, velocity: 0.8 } }"
+command = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 53, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"roll\", selected_note: Some(\"note-10\"), changed: true, dirty_ranges: [FrameRange { start: 84000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+current = "note-10"
+
+[[events]]
+sequence = 29
+wall_offset_ms = 91299
+absolute_frame = 12288
+musical_beat = 0.512000000
+requested_quantization = "immediate"
+actual_frame = 12288
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 51, velocity: 0.8 } }"
+command = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 51, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"roll\", selected_note: Some(\"note-11\"), changed: true, dirty_ranges: [FrameRange { start: 84000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+current = "note-11"
+
+[[events]]
+sequence = 30
+wall_offset_ms = 91606
+absolute_frame = 26624
+musical_beat = 1.109333333
+requested_quantization = "immediate"
+actual_frame = 26624
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 50, velocity: 0.8 } }"
+command = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 50, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"roll\", selected_note: Some(\"note-12\"), changed: true, dirty_ranges: [FrameRange { start: 84000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+current = "note-12"
+
+[[events]]
+sequence = 31
+wall_offset_ms = 91910
+absolute_frame = 40960
+musical_beat = 1.706666667
+requested_quantization = "immediate"
+actual_frame = 40960
+provenance = "lua:apc-mini"
+input = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+command = "EditNote { pattern: \"roll\", edit: Insert { start_tick: 3360, duration_ticks: 480, pitch: 49, velocity: 0.8 } }"
+result = "PatternEdited { pattern: \"roll\", selected_note: Some(\"note-13\"), changed: true, dirty_ranges: [FrameRange { start: 84000, end: 192000 }] }"
+changed = true
+kind = "note_pattern"
+target_id = "roll"
+current = "note-13"
+
+[[events]]
+sequence = 32
+wall_offset_ms = 94406
+absolute_frame = 160768
+musical_beat = 6.698666667
+requested_quantization = "immediate"
+actual_frame = 160768
+provenance = "lua:apc-mini"
+input = "SelectNote { pattern: \"roll\", id: \"note-9\" }"
+command = "SelectNote { pattern: \"roll\", id: \"note-9\" }"
+result = "PatternSelectionChanged"
+changed = false
+kind = "note_selection"
+
+[[events]]
+sequence = 33
+wall_offset_ms = 94653
+absolute_frame = 173056
+musical_beat = 7.210666667
+requested_quantization = "immediate"
+actual_frame = 173056
+provenance = "lua:apc-mini"
+input = "SelectNote { pattern: \"roll\", id: \"note-10\" }"
+command = "SelectNote { pattern: \"roll\", id: \"note-10\" }"
+result = "PatternSelectionChanged"
+changed = false
+kind = "note_selection"
+
+[[events]]
+sequence = 34
+wall_offset_ms = 94956
+absolute_frame = 187392
+musical_beat = 7.808000000
+requested_quantization = "immediate"
+actual_frame = 187392
+provenance = "lua:apc-mini"
+input = "SelectNote { pattern: \"roll\", id: \"note-7\" }"
+command = "SelectNote { pattern: \"roll\", id: \"note-7\" }"
+result = "PatternSelectionChanged"
+changed = false
+kind = "note_selection"
+
+[[events]]
+sequence = 35
+wall_offset_ms = 95317
+absolute_frame = 12800
+musical_beat = 0.533333333
+requested_quantization = "immediate"
+actual_frame = 12800
+provenance = "lua:apc-mini"
+input = "SelectNote { pattern: \"roll\", id: \"note-11\" }"
+command = "SelectNote { pattern: \"roll\", id: \"note-11\" }"
+result = "PatternSelectionChanged"
+changed = false
+kind = "note_selection"
+
