@@ -4,7 +4,7 @@ version = 1
 
 [synth]
 id = "edited-bass"
-polyphony = 1
+polyphony = 8
 
 [[inputs]]
 id = "pitch"

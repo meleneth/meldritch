@@ -26,7 +26,7 @@ Feature: Create and assign notes using APC or TUI input
   Scenario: Select an existing note without deleting it
     Given cell 0 already contains the authored C3 event
     When APC packets "90 00 7f" then "80 00 00" arrive on the declared Control port
-    Then C3 is selected and retained and the release makes no change
+    Then C3 is selected while held and deleted once on release
     When the authored DELETE modifier is held and C3 is pressed
     Then C3 is removed exactly once and either release order makes no change
 

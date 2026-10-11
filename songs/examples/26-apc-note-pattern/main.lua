@@ -31,9 +31,14 @@ local function interact(view, event)
   local key = event.source .. ":" .. event.cell
   if event.kind == "release" then
     down[key] = nil
-    if held and held.source == event.source and held.cell == event.cell then held = nil end
+    valid_hold(view.pattern)
+    if held and held.source == event.source and held.cell == event.cell then
+      local finished = held
+      held = nil
+      if finished.toggle then return edit(view.pattern, "delete", finished.id) end
+    end
     if blocked and blocked.source == event.source and blocked.cell == event.cell then blocked = nil end
-    return -- releases never make musical edits
+    return -- only a completed tap on an existing start deletes
   end
   if down[key] then return end -- repeated note-on is not another press
   down[key] = true
@@ -72,12 +77,13 @@ local function interact(view, event)
     return
   end
   if held then
+    held.toggle = false -- a second pad consumes the tap, including invalid endpoints
     -- Invalid endpoints are consumed, never interpreted as note creation.
     if held.source ~= event.source or pitch ~= held.pitch or tick < held.tick then return end
     return edit(pattern, "duration", held.id, "duration_ticks", tick + 480 - held.tick)
   end
   if start then
-    held = { id = start.id, pattern = pattern.id, source = event.source, cell = cell, pitch = pitch, tick = tick }
+    held = { id = start.id, pattern = pattern.id, source = event.source, cell = cell, pitch = pitch, tick = tick, toggle = true }
     return { name = "select_note", pattern = pattern.id, id = start.id }
   end
   if note then return { name = "select_note", pattern = pattern.id, id = note.id } end

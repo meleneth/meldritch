@@ -9,9 +9,10 @@ indexes scenarios bound by these Rust tests; there is no separate Gherkin runner
 The Lua policy maps eight eighth-note columns and chromatic C3..G3 rows. It
 starts with a blank two-bar seed; NEW creates/assigns `roll`. Two bars allow
 cross-page endpoints. Pad 0 creates C3 at step 0; pad 9 creates C#3 at step 1,
-both at velocity 0.8 with one-step duration. Existing starts select, never toggle.
+both at velocity 0.8 with one-step duration. Existing starts select on press;
+an unmodified tap deletes on release, while a second grid pad consumes deletion.
 Bodies select without starting a duration gesture. Explicit held controls delete
-and change velocity. Release creates no commands. These policies live in Lua;
+and change velocity. Endpoint releases create no commands. These policies live in Lua;
 Rust validates typed note/selection/create commands against the single song
 source. Actual MIDI packet decoding, wrong-channel/malformed rejection, logical
 terminal equivalence and native 80×24 inspection are verified headlessly.
@@ -34,3 +35,7 @@ sample/ownership/time translation and unrelated source edits refuse lossy export
 Full composed-song exports and native keyboard grid creation remain outside this
 slice. See [PIANO_ROLL.md](../../../PIANO_ROLL.md) for controls, duration policy,
 commands, persistence syntax, independent validation/render and physical limits.
+
+The synth declares eight voices. A three-note same-onset chord must render as
+the sum of its independently rendered voices; toggling one start leaves the
+other notes intact. Tests cover velocity-zero release deletion and held gestures.

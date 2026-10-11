@@ -29,6 +29,39 @@ fn new_pattern(host: &mut Harness) {
 }
 
 #[test]
+fn occupied_tap_toggles_off_but_endpoint_gestures_keep_polyphonic_notes() {
+    let mut host = Harness::new();
+    new_pattern(&mut host);
+    host.run_script(
+        "press 0\nrelease 0\npress 16\nrelease 16\npress 32\nrelease 32\nexpect_count 3",
+    );
+    let chord = host.app.view_model().pattern_editor.unwrap().source;
+    assert_eq!(chord.synths()["edited-bass"].polyphony(), 8);
+    let audio = render(&chord);
+    let mut sum = vec![0.0; audio.samples().len()];
+    for keep in ["note-1", "note-2", "note-3"] {
+        let mut solo = chord.as_ref().clone();
+        for delete in ["note-1", "note-2", "note-3"] {
+            if delete != keep {
+                solo = solo
+                    .edit_note("roll", &NoteEdit::Delete { id: delete.into() })
+                    .unwrap()
+                    .0;
+            }
+        }
+        for (out, sample) in sum.iter_mut().zip(render(&solo).samples()) {
+            *out += sample;
+        }
+    }
+    for (actual, expected) in audio.samples().iter().zip(sum) {
+        assert!((actual - expected).abs() < 1e-12);
+    }
+    host.run_script("press 0\npress 3\nrelease 0\nrelease 3\nexpect_count 3\nexpect_note note-1 C3 0 1920 0.8\npress 0\nrelease 0\nexpect_count 2\npress 0\nzero 0\nexpect_count 3\nexpect_note note-4 C3 0 480 0.8\nwait");
+    assert_eq!(host.reader.snapshot().generation(), host.host.generation());
+    assert!(render(&host.app.view_model().pattern_editor.unwrap().source).peak_abs() > 0.0);
+}
+
+#[test]
 fn later_insert_preserves_historical_simultaneous_note_order_and_audio_prefix() {
     let host = Harness::new();
     let path = host.root.join("patterns/seed.mlpattern");

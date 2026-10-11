@@ -29,6 +29,8 @@ foundation, with composed musical authoring still unfinished. The
   stable identities; two-bar fixture proves eight-step page crossing
 - [x] Example 27: held-pad explicit note duration, release/lost-release cleanup,
   rewind/loop-safe interaction ordering and persistence beyond one step
+- [x] Piano-roll usability: occupied taps toggle off, held endpoints retain notes,
+  and the example renders eight independent voices (three-note chord sum tested)
 - [ ] Example 28: author fader bindings to existing synth cutoff and lane level;
   shared inspection, pickup rearming and persistent mappings/mixer settings
 - [ ] Example 30: compose the supported oscillator/ADSR/VCA/low-pass patch;

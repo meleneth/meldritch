@@ -7065,7 +7065,7 @@ mod tests {
     fn piano_roll_loads_before_devices_and_preserves_legacy_toml_entrypoint() {
         let root = example_song_path("songs/examples/26-apc-note-pattern");
         let base = meldritch_dsl::load_song_directory(&root).unwrap();
-        assert_eq!(format!("{:016x}", base.fingerprint()), "0972153104a6ee74");
+        assert_eq!(format!("{:016x}", base.fingerprint()), "5295a12b3ad372d1");
         assert!(
             song_scene_bank(&base, tempo_from_song(&base).unwrap())
                 .unwrap()

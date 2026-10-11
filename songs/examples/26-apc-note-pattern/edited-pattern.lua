@@ -2,7 +2,7 @@
 return {
   kind = "pattern",
   version = 1,
-  base_fingerprint = "0972153104a6ee74",
+  base_fingerprint = "5295a12b3ad372d1",
   pattern = {
     id = "roll", track = "bass",
     length_ticks = 7680, looped = true, next_note_id = 4,

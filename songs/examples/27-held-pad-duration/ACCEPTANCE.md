@@ -11,9 +11,9 @@ cargo run -p meldritch-control --example piano_roll -- songs/examples/27-held-pa
 Hold an occupied onset pad; pressing another pad on the same pitch row chooses
 an inclusive endpoint. With an eighth-note grid, holding C3 step 0 and pressing
 step 3 sets a half-note duration (four steps). Commit on the endpoint press,
-once; release only clears the transient hold. This gesture changes one event,
-not four retriggers and not the legacy step gate. Plain short press selects and
-retains the note. Both release orders, note-on-zero releases and duplicate
+once; endpoint releases only clear the transient hold. This gesture changes one event,
+not four retriggers and not the legacy step gate. Plain short press selects;
+a tap with no second pad deletes the start on release. Both release orders, note-on-zero releases and duplicate
 note-ons are verified. Logical TUI pad events invoke the same Lua policy;
 native keyboard inspection reads the same source and exclusive end.
 

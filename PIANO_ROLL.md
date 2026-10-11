@@ -20,10 +20,14 @@ The Session grid has eight time columns and eight chromatic pitches, bottom to
 top. The initial bottom row is C3, the top row G3. Each column is an eighth note
 (480 ticks at the loader's 960 PPQ). These choices live in `main.lua`.
 
+The example synth uses eight independent voices, so overlapping pitches sound
+as chords. The earlier one-voice fixture was monophonic.
+
 - Press an empty pad to create a note with velocity 0.8 and one-step duration.
-- Press a note start to select it. It stays present when released.
+- Tap an existing note start to toggle it off on release. Its press selects it
+  while held; any second grid pad consumes the tap and starts a duration gesture.
 - Hold its start and press another pad on the same pitch row to set its end
-  through that endpoint step. Release either pad first; releases never edit.
+  through that endpoint step. Release either pad first; endpoint releases do not edit.
   A newly created start can also be held immediately for extension.
 - Press a sustained body to select its note without starting a duration gesture.
   Invalid earlier or cross-row endpoints are consumed without creating notes.
