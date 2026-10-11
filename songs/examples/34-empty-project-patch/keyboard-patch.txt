@@ -1,0 +1,11 @@
+# Native empty-project authoring; no Lua/controller script is required.
+# n creates voice-1, Ctrl-E opens its existing parameter editor.
+# Right changes sine to triangle. Ctrl-G opens the existing typed draft editor.
+disconnect amp.audio out.audio
+add tone low_pass
+connect amp.audio tone.audio
+connect tone.audio out.audio
+set tone cutoff_hz 1800
+commit
+# Esc returns to parameters; Esc returns to the project overview.
+# Ctrl-S must report unsupported new-project saving and retain unsaved edits.

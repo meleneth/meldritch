@@ -3,8 +3,9 @@
 Status: **design for the complete workflow**. The read-only opening checkpoint
 is implemented: DSL `project_directory`, CLI project-opening tests and native TUI
 tests cover empty/legacy roots, diagnostics and presentation. `opening.txt` and
-`invalid/malformed-entry.toml` specify that checkpoint. Native note authoring,
-bindings, composition playback and self-contained save/reopen remain unimplemented.
+`invalid/malformed-entry.toml` specify that checkpoint. Native patch and independent
+note authoring checkpoints are implemented; bindings, composition playback and
+self-contained save/reopen remain unimplemented.
 An additional
 ownership checkpoint moves accepted definitions/provenance into app-owned
 `ProjectSource`. Headless commands create/edit a pattern and edit a patch without
@@ -32,6 +33,11 @@ A no-subcommand PTY smoke also accepts two `n` presses and clean quit/restoratio
 without files. There is no disk capture/replay, persistence or physical-audio
 acceptance for this new cockpit yet.
 
+Native editor checks: `cargo test -p meldritch-tui native_` covers patch drafts
+and independent pattern gestures. The DSL project-directory suite also rejects
+unconnected sampler slots, missing note IDs and invalid values without inventing
+ownership. Historical authoring/persistence/pickup suites remain required.
+
 ## Scenario and observable behavior
 
 Construction checkpoint: `construction.toml` is a typed request fixture,
@@ -44,6 +50,29 @@ requests, duplicate identities and unsupported executable wiring leave source,
 history and publication unchanged. Existing patch edits act on the same source.
 Definitions remain in memory only; quitting loses unsaved construction and the
 screen must say so. This partial checkpoint does not accept playback/save/reopen.
+
+Native patch-editing checkpoint: after `n`, Ctrl-E opens the accepted instrument
+editor over the same project-owned source. Right changes its waveform; Ctrl-G
+stages `keyboard-patch.txt` using existing patch operations. Disconnecting a
+cable is draft-only. Incomplete commits and stale drafts leave accepted source
+and history unchanged; completing the filter chain commits atomically. Esc exits
+the draft panel, then parameters, without quitting. A `q` typed inside a draft is
+text, while q at the project overview quits. Repeats/releases never edit. Native
+save requests explicitly report unsupported new-project saving and retain edits.
+Imported provenance stays empty; no baseline fixture, files or device are added.
+
+Native pattern checkpoint: `keyboard-pattern.txt` creates a one-bar project-owned
+pattern using `c`, independently of whether any instrument exists. It adds no
+track, assignment or note. Its inspector shows separate pitch/gate source ports.
+Arrow keys move a tick/pitch cursor; Enter inserts/selects notes and the existing
+`NoteEdit` handles duration (`[`/`]`), velocity (`-`/`+`) and deletion. Stable note
+IDs are not reused. Esc/Ctrl-N close/reopen without source edits. Invalid note
+ranges/values and unknown IDs preserve accepted source/history. Native cursor
+movement/repeats cannot accidentally duplicate notes. The existing version-1
+track-owned pattern exports, Lua projections and tests retain their behavior;
+new unconnected material must reject those legacy exports instead of inventing
+an owner. All this material is still in-memory and silent, with bindings and
+persistence acceptance unfinished.
 
 1. In a temporary empty directory execute `meldritch` with no subcommand. Open
    a silent valid project in a usable TUI without writing files or initializing

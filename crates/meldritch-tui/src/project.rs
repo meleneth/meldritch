@@ -18,10 +18,203 @@ pub fn project_construction_command(key: KeyEvent, source: &ValidatedSong) -> Op
     Some(AppCommand::CreatePatch(PatchCreation::mono_voice(id)))
 }
 
+/// Native note gestures lower to the same NoteEdit commands as Lua/hardware.
+pub fn project_pattern_command(
+    key: KeyEvent,
+    view: &AppViewModel,
+    source: &ValidatedSong,
+) -> Option<AppCommand> {
+    use meldritch_app::NoteEdit;
+    if key.kind != KeyEventKind::Press {
+        return None;
+    }
+    let editor = view.palette_pattern_editor.as_ref();
+    if key.code == KeyCode::Char('n') && key.modifiers == KeyModifiers::CONTROL && editor.is_some()
+    {
+        return Some(AppCommand::TogglePatternEditor);
+    }
+    if let Some(editor) = editor
+        && editor.visible
+    {
+        if key.code == KeyCode::Char('e')
+            && key.modifiers == KeyModifiers::CONTROL
+            && view.instrument_editor.is_some()
+        {
+            return Some(AppCommand::ToggleInstrumentEditor);
+        }
+        if key.code == KeyCode::Char('s') && key.modifiers == KeyModifiers::CONTROL {
+            return Some(AppCommand::SavePattern);
+        }
+        if key.modifiers != KeyModifiers::NONE {
+            return None;
+        }
+        let selected = editor
+            .selected_note
+            .as_ref()
+            .and_then(|id| editor.pattern.notes.iter().find(|n| &n.id == id));
+        let edit = match key.code {
+            KeyCode::Esc => return Some(AppCommand::TogglePatternEditor),
+            KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
+                return Some(AppCommand::MovePatternCursor {
+                    tick_delta: match key.code {
+                        KeyCode::Left => -480,
+                        KeyCode::Right => 480,
+                        _ => 0,
+                    },
+                    pitch_delta: match key.code {
+                        KeyCode::Down => -1,
+                        KeyCode::Up => 1,
+                        _ => 0,
+                    },
+                });
+            }
+            KeyCode::Enter => {
+                if let Some(note) = editor.pattern.notes.iter().find(|n| {
+                    n.start_tick == editor.cursor_tick
+                        && n.note == meldritch_app::note_name(editor.cursor_pitch)
+                }) {
+                    return Some(AppCommand::SelectNote {
+                        pattern: editor.pattern.id.clone(),
+                        id: note.id.clone(),
+                    });
+                }
+                NoteEdit::Insert {
+                    start_tick: editor.cursor_tick,
+                    duration_ticks: 480,
+                    pitch: editor.cursor_pitch,
+                    velocity: 0.8,
+                }
+            }
+            KeyCode::Delete => NoteEdit::Delete {
+                id: selected?.id.clone(),
+            },
+            KeyCode::Char('[' | ']') => NoteEdit::Duration {
+                id: selected?.id.clone(),
+                duration_ticks: if key.code == KeyCode::Char('[') {
+                    selected?.duration_ticks.saturating_sub(240)
+                } else {
+                    selected?.duration_ticks.saturating_add(240)
+                },
+            },
+            KeyCode::Char('-' | '+' | '=') => NoteEdit::Velocity {
+                id: selected?.id.clone(),
+                velocity: selected?.velocity
+                    + if key.code == KeyCode::Char('-') {
+                        -0.1
+                    } else {
+                        0.1
+                    },
+            },
+            _ => return None,
+        };
+        return Some(AppCommand::EditNote {
+            pattern: editor.pattern.id.clone(),
+            edit,
+        });
+    }
+    if key.code == KeyCode::Char('c')
+        && key.modifiers == KeyModifiers::NONE
+        && !view.instrument_editor.as_ref().is_some_and(|e| e.visible)
+    {
+        let id = (1..=129).map(|i| format!("pattern-{i}")).find(|id| {
+            !source.note_patterns().contains_key(id)
+                && !source.parameter_patterns().contains_key(id)
+        })?;
+        return Some(AppCommand::CreatePalettePattern {
+            id,
+            length_ticks: 3840,
+            looped: true,
+        });
+    }
+    None
+}
+
+pub fn draw_project_pattern(
+    frame: &mut ratatui::Frame<'_>,
+    editor: &meldritch_app::PalettePatternEditorView,
+    status: &str,
+) {
+    let mut lines = vec![
+        Line::from(format!(
+            "Pattern {} · {} ticks · loop {}",
+            editor.pattern.id, editor.pattern.length_ticks, editor.pattern.looped
+        )),
+        Line::from("Outputs: pitch : Pitch    gate : Gate (unconnected)"),
+        Line::from(format!(
+            "Cursor: tick {} · {}   Selected: {}",
+            editor.cursor_tick,
+            meldritch_app::note_name(editor.cursor_pitch),
+            editor.selected_note.as_deref().unwrap_or("none")
+        )),
+        Line::from("Arrows cursor · Enter insert/select · [ ] duration · - + velocity"),
+        Line::from("Delete note · Esc/Ctrl-N close · Ctrl-E patch parameters"),
+        Line::from("Unsaved project; no composition bindings or playback yet"),
+        Line::from(status.to_owned()),
+    ];
+    for note in &editor.pattern.notes {
+        lines.push(Line::from(format!(
+            "{} {} {} @{} +{} ticks velocity {:.2}",
+            if editor.selected_note.as_ref() == Some(&note.id) {
+                ">"
+            } else {
+                " "
+            },
+            note.id,
+            note.note,
+            note.start_tick,
+            note.duration_ticks,
+            note.velocity
+        )));
+    }
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("MELDRITCH · Project pattern"),
+            )
+            .wrap(Wrap { trim: false }),
+        frame.area(),
+    );
+}
+
 pub fn empty_project_quit(key: KeyEvent) -> bool {
     key.kind == KeyEventKind::Press
         && (matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
             || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)))
+}
+
+/// Reuse accepted editor bindings while the project has no playable composition.
+/// Transport/backing showcase actions are not exposed by this silent cockpit.
+pub fn project_editor_action(key: KeyEvent, view: &AppViewModel) -> Option<TuiAction> {
+    if key.kind == KeyEventKind::Press
+        && key.code == KeyCode::Char('c')
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+    {
+        return Some(TuiAction::Quit);
+    }
+    let action = map_key_for_view(key, &Step::new(48), view)?;
+    match action {
+        TuiAction::Quit => Some(action),
+        TuiAction::Input(ref input)
+            if matches!(
+                input,
+                AppInput::ToggleInstrumentEditor
+                    | AppInput::NavigateInstrument { .. }
+                    | AppInput::AdjustInstrument(_)
+                    | AppInput::EditInstrument(_)
+                    | AppInput::TogglePatchEditor
+                    | AppInput::PatchCharacter(_)
+                    | AppInput::PatchBackspace
+                    | AppInput::PatchScroll(_)
+                    | AppInput::PatchSubmit
+                    | AppInput::SaveInstrument
+            ) =>
+        {
+            Some(action)
+        }
+        _ => None,
+    }
 }
 
 pub fn draw_empty_project(frame: &mut ratatui::Frame<'_>, view: &ProjectOverview) {
@@ -34,7 +227,7 @@ pub fn draw_empty_project(frame: &mut ratatui::Frame<'_>, view: &ProjectOverview
             view.instruments, view.patterns
         )),
         Line::from(""),
-        Line::from("q / Esc: quit    n: create mono voice"),
+        Line::from("q / Esc: quit    n: create voice    c: create pattern"),
     ];
     frame.render_widget(
         Paragraph::new(text)
@@ -55,7 +248,17 @@ pub fn draw_project_construction(
     source: &ValidatedSong,
     status: &str,
 ) {
-    if source.synths().is_empty() {
+    draw_project_construction_selected(frame, view, source, status, None);
+}
+
+fn draw_project_construction_selected(
+    frame: &mut ratatui::Frame<'_>,
+    view: &ProjectOverview,
+    source: &ValidatedSong,
+    status: &str,
+    selected: Option<&str>,
+) {
+    if source.synths().is_empty() && source.note_patterns().is_empty() {
         draw_empty_project(frame, view);
         return;
     }
@@ -66,20 +269,31 @@ pub fn draw_project_construction(
             source.synths().len(),
             source.note_patterns().len()
         )),
-        Line::from("n: create mono voice    q / Esc: quit"),
+        Line::from("n: voice · c: pattern · Ctrl-E/N: editors · q/Esc: quit"),
         Line::from("Unsaved construction: quitting discards it"),
         Line::from(status.to_owned()),
     ];
-    let graph = source
-        .synths()
-        .values()
-        .max_by_key(|g| {
+    let graph = selected.and_then(|id| source.synths().get(id)).or_else(|| {
+        source.synths().values().max_by_key(|g| {
             g.id()
                 .strip_prefix("voice-")
                 .and_then(|id| id.parse::<u32>().ok())
                 .unwrap_or(0)
         })
-        .unwrap();
+    });
+    let Some(graph) = graph else {
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("MELDRITCH · Project construction"),
+                )
+                .wrap(Wrap { trim: false }),
+            frame.area(),
+        );
+        return;
+    };
     lines.push(Line::from(format!("Patch {} (mono)", graph.id())));
     for input in graph.inputs() {
         lines.push(Line::from(format!(
@@ -124,25 +338,84 @@ pub fn run_empty_project(project: &ProjectDirectory) -> io::Result<()> {
     let mut terminal = TerminalGuard::enter()?;
     let result = (|| {
         loop {
+            let model = app.view_model();
             terminal.terminal.draw(|frame| {
-                draw_project_construction(frame, &view, &app.authored_source().unwrap(), &status)
+                if let Some(editor) = &model.instrument_editor
+                    && editor.visible
+                {
+                    draw_instrument_editor(
+                        frame,
+                        &model,
+                        editor,
+                        &StatusMessage::info(format!("{status} · Unsaved project")),
+                    );
+                } else if let Some(editor) = &model.palette_pattern_editor
+                    && editor.visible
+                {
+                    draw_project_pattern(frame, editor, &status);
+                } else {
+                    draw_project_construction_selected(
+                        frame,
+                        &view,
+                        &app.authored_source().unwrap(),
+                        &status,
+                        model.instrument_editor.as_ref().map(|e| e.synth.as_str()),
+                    );
+                }
             })?;
             if event::poll(Duration::from_millis(100))?
                 && let Event::Key(key) = event::read()?
             {
-                if empty_project_quit(key) {
+                let editing = model.instrument_editor.as_ref().is_some_and(|e| e.visible)
+                    || model
+                        .palette_pattern_editor
+                        .as_ref()
+                        .is_some_and(|e| e.visible);
+                if !editing && empty_project_quit(key) {
                     return Ok(());
                 }
                 if let Some(command) =
-                    project_construction_command(key, &app.authored_source().unwrap())
+                    project_pattern_command(key, &model, &app.authored_source().unwrap())
                 {
                     status = match app.dispatch(command) {
-                        Ok(_) => {
+                        Ok(AppCommandResult::PatternSaveRequested) => {
+                            "New-project saving is not implemented; edits retained in memory".into()
+                        }
+                        Ok(_) => "Accepted pattern action; no composition bindings yet".into(),
+                        Err(e) => format!("Note rejected; source retained: {e:?}"),
+                    };
+                } else if !editing
+                    && let Some(command) =
+                        project_construction_command(key, &app.authored_source().unwrap())
+                {
+                    status = match app.dispatch(command) {
+                        Ok(AppCommandResult::PatchEdited { synth, .. }) => {
+                            app.dispatch(AppCommand::SelectInstrument(synth))
+                                .map_err(|e| io::Error::other(format!("{e:?}")))?;
+                            app.observe_instrument_save(
+                                "Unsaved new project; quitting discards edits".into(),
+                            );
                             "Accepted silent palette definition; no pattern or routing created"
                                 .into()
                         }
+                        Ok(_) => unreachable!("creation returns a typed patch result"),
                         Err(e) => format!("Creation rejected: {e:?}"),
                     };
+                } else if let Some(action) = project_editor_action(key, &model) {
+                    match action {
+                        TuiAction::Quit => return Ok(()),
+                        TuiAction::Input(input) => {
+                            status = match app.handle_input(input) {
+                                Ok(AppCommandResult::InstrumentSaveRequested) => {
+                                    let message = "New-project saving is not implemented; edits retained in memory";
+                                    app.observe_instrument_save(message.into());
+                                    message.into()
+                                }
+                                Ok(_) => "Accepted editor action; project remains unsaved".into(),
+                                Err(e) => format!("Edit rejected; source retained: {e:?}"),
+                            };
+                        }
+                    }
                 }
             }
         }
@@ -155,6 +428,268 @@ pub fn run_empty_project(project: &ProjectDirectory) -> io::Result<()> {
 mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
+
+    #[test]
+    fn native_palette_pattern_notes_need_no_instrument_or_track_and_preserve_ids() {
+        let project = meldritch_dsl::load_project_directory(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../songs/examples/34-empty-project-patch"),
+        )
+        .unwrap();
+        let (mut app, _engine) = AppController::new_empty_project(&project).unwrap();
+        let press = |app: &mut AppController, code, modifiers| {
+            let command = project_pattern_command(
+                KeyEvent::new(code, modifiers),
+                &app.view_model(),
+                &app.authored_source().unwrap(),
+            )
+            .unwrap();
+            app.dispatch(command)
+        };
+        press(&mut app, KeyCode::Char('c'), KeyModifiers::NONE).unwrap();
+        let empty = app.authored_source().unwrap();
+        assert!(empty.synths().is_empty());
+        assert!(empty.performance().tracks().is_empty());
+        assert!(
+            empty
+                .pattern_material("pattern-1")
+                .unwrap()
+                .notes
+                .is_empty()
+        );
+        assert!(empty.authored_pattern("pattern-1").is_err());
+        assert!(app.view_model().pattern_editor.is_none());
+        press(&mut app, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        let first = app.authored_source().unwrap();
+        for _ in 0..2 {
+            press(&mut app, KeyCode::Right, KeyModifiers::NONE).unwrap();
+        }
+        for _ in 0..7 {
+            press(&mut app, KeyCode::Up, KeyModifiers::NONE).unwrap();
+        }
+        assert!(std::sync::Arc::ptr_eq(
+            &first,
+            &app.authored_source().unwrap()
+        ));
+        press(&mut app, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        press(&mut app, KeyCode::Char(']'), KeyModifiers::NONE).unwrap();
+        press(&mut app, KeyCode::Char('-'), KeyModifiers::NONE).unwrap();
+        let material = app
+            .authored_source()
+            .unwrap()
+            .pattern_material("pattern-1")
+            .unwrap();
+        assert_eq!(
+            (
+                &material.notes[0].id,
+                &material.notes[0].note,
+                material.notes[0].start_tick,
+                material.notes[0].duration_ticks
+            ),
+            (&"note-1".to_owned(), &"C3".to_owned(), 0, 480)
+        );
+        assert_eq!(
+            (
+                &material.notes[1].note,
+                material.notes[1].start_tick,
+                material.notes[1].duration_ticks
+            ),
+            (&"G3".to_owned(), 960, 720)
+        );
+        assert!((material.notes[1].velocity - 0.7).abs() < 1e-12);
+        press(&mut app, KeyCode::Delete, KeyModifiers::NONE).unwrap();
+        press(&mut app, KeyCode::Enter, KeyModifiers::NONE).unwrap();
+        press(&mut app, KeyCode::Enter, KeyModifiers::NONE).unwrap(); // select, never duplicate
+        let accepted = app.authored_source().unwrap();
+        let material = accepted.pattern_material("pattern-1").unwrap();
+        assert_eq!(material.notes.len(), 2);
+        assert_eq!(material.notes[1].id, "note-3");
+        assert_eq!(material.next_note_id, 4);
+        let history = app.history().len();
+        assert!(
+            app.dispatch(AppCommand::EditNote {
+                pattern: "pattern-1".into(),
+                edit: meldritch_app::NoteEdit::Duration {
+                    id: "note-3".into(),
+                    duration_ticks: 4000
+                }
+            })
+            .is_err()
+        );
+        assert_eq!(app.history().len(), history);
+        assert!(std::sync::Arc::ptr_eq(
+            &accepted,
+            &app.authored_source().unwrap()
+        ));
+        for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+            assert!(
+                project_pattern_command(
+                    KeyEvent {
+                        kind,
+                        ..KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+                    },
+                    &app.view_model(),
+                    &accepted
+                )
+                .is_none()
+            );
+        }
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_project_pattern(
+                    frame,
+                    &app.view_model().palette_pattern_editor.unwrap(),
+                    "Accepted",
+                )
+            })
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        for expected in [
+            "pitch : Pitch",
+            "gate : Gate",
+            "note-1 C3 @0 +480",
+            "note-3 G3 @960 +480",
+            "no composition bindings",
+        ] {
+            assert!(text.contains(expected), "missing {expected}");
+        }
+        press(&mut app, KeyCode::Esc, KeyModifiers::NONE).unwrap();
+        press(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL).unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &accepted,
+            &app.authored_source().unwrap()
+        ));
+        assert!(accepted.performance().tracks().is_empty());
+        let (mut replay, _replay_engine) = AppController::new_empty_project(&project).unwrap();
+        for record in app.history() {
+            replay.dispatch(record.command.clone()).unwrap();
+        }
+        assert_eq!(
+            replay.authored_source().unwrap().fingerprint(),
+            accepted.fingerprint()
+        );
+    }
+
+    #[test]
+    fn native_patch_editing_keeps_project_provenance_and_accepts_only_complete_drafts() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../songs/examples/34-empty-project-patch");
+        let project = meldritch_dsl::load_project_directory(&root).unwrap();
+        let (mut app, _engine) = AppController::new_empty_project(&project).unwrap();
+        let baseline = app.authored_source().unwrap();
+        app.dispatch(
+            project_construction_command(
+                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
+                &baseline,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let created = app.authored_source().unwrap();
+        app.dispatch(AppCommand::SelectInstrument("voice-1".into()))
+            .unwrap();
+        let press = |app: &mut AppController, code, modifiers| {
+            let action =
+                project_editor_action(KeyEvent::new(code, modifiers), &app.view_model()).unwrap();
+            let TuiAction::Input(input) = action else {
+                panic!("editor input")
+            };
+            app.handle_input(input)
+        };
+        press(&mut app, KeyCode::Char('e'), KeyModifiers::CONTROL).unwrap();
+        press(&mut app, KeyCode::Right, KeyModifiers::NONE).unwrap();
+        assert_ne!(
+            created.fingerprint(),
+            app.authored_source().unwrap().fingerprint()
+        );
+        assert_eq!(
+            app.view_model().instrument_editor.unwrap().base_fingerprint,
+            baseline.fingerprint()
+        );
+        press(&mut app, KeyCode::Char('g'), KeyModifiers::CONTROL).unwrap();
+        let line = |app: &mut AppController, text: &str| {
+            for c in text.chars() {
+                press(app, KeyCode::Char(c), KeyModifiers::NONE).unwrap();
+            }
+            press(app, KeyCode::Enter, KeyModifiers::NONE)
+        };
+        let script = std::fs::read_to_string(root.join("keyboard-patch.txt")).unwrap();
+        let lines: Vec<_> = script
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty())
+            .collect();
+        let accepted = app.authored_source().unwrap();
+        line(&mut app, lines[0]).unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &accepted,
+            &app.authored_source().unwrap()
+        ));
+        let history = app.history().len();
+        assert!(line(&mut app, "commit").is_err());
+        assert_eq!(app.history().len(), history + "commit".len());
+        assert!(std::sync::Arc::ptr_eq(
+            &accepted,
+            &app.authored_source().unwrap()
+        ));
+        for _ in 0.."commit".len() {
+            press(&mut app, KeyCode::Backspace, KeyModifiers::NONE).unwrap();
+        }
+        for text in &lines[1..] {
+            line(&mut app, text).unwrap();
+        }
+        let committed = app.authored_source().unwrap();
+        assert_eq!(committed.synths()["voice-1"].modules().len(), 5);
+        assert_eq!(committed.synths()["voice-1"].cables().len(), 6);
+        assert_eq!(
+            committed.synths()["voice-1"]
+                .modules()
+                .iter()
+                .find(|m| m.id() == "tone")
+                .unwrap()
+                .cutoff_hz(),
+            Some(1800.0)
+        );
+        press(&mut app, KeyCode::Char('q'), KeyModifiers::NONE).unwrap();
+        assert_eq!(app.view_model().instrument_editor.unwrap().patch_input, "q");
+        press(&mut app, KeyCode::Esc, KeyModifiers::NONE).unwrap();
+        press(&mut app, KeyCode::Esc, KeyModifiers::NONE).unwrap();
+        assert!(!app.view_model().instrument_editor.unwrap().visible);
+        for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+            assert!(
+                project_editor_action(
+                    KeyEvent {
+                        kind,
+                        ..KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)
+                    },
+                    &app.view_model()
+                )
+                .is_none()
+            );
+        }
+        assert!(std::sync::Arc::ptr_eq(
+            &committed,
+            &app.authored_source().unwrap()
+        ));
+        assert_eq!(
+            app.view_model().instrument_editor.unwrap().base_fingerprint,
+            baseline.fingerprint()
+        );
+        assert!(committed.performance().tracks().is_empty());
+        assert_eq!(
+            project_editor_action(
+                KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+                &app.view_model()
+            ),
+            Some(TuiAction::Quit)
+        );
+    }
 
     #[test]
     fn native_creation_presses_dispatch_typed_graphs_and_display_every_connection() {

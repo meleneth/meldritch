@@ -25,7 +25,7 @@ pub use song::{
     NoteEventDefinition, NotePatternDefinition, ParameterEdit, ParameterInterpolation,
     ParameterLaneDefinition, ParameterOwner, ParameterPatternDefinition, ParameterPointDefinition,
     ParameterTargetDefinition, PatchCreation, PatchEdit, PatchInput, PatchOperation,
-    PerformanceActionDefinition, PerformanceDefinition, PerformanceLaneDefinition,
+    PatternMaterial, PerformanceActionDefinition, PerformanceDefinition, PerformanceLaneDefinition,
     PerformanceModifierDefinition, PerformancePageDefinition, PerformancePageStripDefinition,
     PerformancePatternBankDefinition, PerformanceUiDefinition, PerformanceUiKeyHintDefinition,
     PerformanceUiSectionDefinition, PerformanceUiSectionKind, PlaitsModel, PlaitsSettings,

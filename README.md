@@ -14,8 +14,11 @@ root shows a project overview, while `main.mlperformance` roots use the
 existing song cockpit. `meldritch open-project PATH --check` validates opening
 without terminal/audio/MIDI. In an empty root, **n** creates a silent mono-voice
 palette definition with inspectable pitch/gate inputs, modules and cables.
-Construction is currently in memory only; quitting discards it. Native pattern
-creation, routing, playback/save from empty and stateful graph transitions remain
+**Ctrl-E** opens parameters and **Ctrl-G** opens typed patch drafts. **c** creates
+an independent one-bar pattern; arrows move its cursor, Enter inserts/selects
+notes, **[ ]** change duration, **- +** change velocity, and Delete removes notes.
+Esc closes an editor; **Ctrl-N** reopens the pattern. Construction is currently
+in memory only; quitting discards it. Routing, playback/save from empty and stateful graph transitions remain
 proposed. Existing commands remain valid.
 Git is allowed as a required installed dependency; opening needs no repository
 or initialization. Empty opening creates no files or audio/MIDI streams.

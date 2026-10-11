@@ -117,6 +117,71 @@ fn empty_palette_construction_reuses_typed_batches_without_creating_timed_materi
 }
 
 #[test]
+fn palette_patterns_are_independent_and_cannot_invent_sample_or_track_ownership() {
+    use meldritch_dsl::NoteEdit;
+    let directory = Directory::new();
+    let empty = load_project_directory(&directory.0)
+        .unwrap()
+        .authoring_source();
+    let source = empty.create_palette_pattern("melody", 3840, true).unwrap();
+    assert!(source.synths().is_empty());
+    assert!(source.performance().tracks().is_empty());
+    assert!(
+        source
+            .authored_pattern("melody")
+            .unwrap_err()
+            .contains("one track owner")
+    );
+    assert!(source.create_palette_pattern("melody", 3840, true).is_err());
+    assert!(source.create_palette_pattern("zero", 0, true).is_err());
+    assert!(
+        source
+            .edit_note(
+                "melody",
+                &NoteEdit::InsertSample {
+                    start_tick: 0,
+                    duration_ticks: 480,
+                    pitch: 48,
+                    velocity: 0.8,
+                    slot: "imaginary".into()
+                }
+            )
+            .is_err()
+    );
+    let (edited, selected, _) = source
+        .edit_note(
+            "melody",
+            &NoteEdit::Insert {
+                start_tick: 0,
+                duration_ticks: 480,
+                pitch: 48,
+                velocity: 0.8,
+            },
+        )
+        .unwrap();
+    let selected = selected.unwrap();
+    for edit in [
+        NoteEdit::Duration {
+            id: selected.clone(),
+            duration_ticks: 0,
+        },
+        NoteEdit::Velocity {
+            id: selected.clone(),
+            velocity: f64::NAN,
+        },
+        NoteEdit::Delete {
+            id: "missing".into(),
+        },
+    ] {
+        assert!(edited.edit_note("melody", &edit).is_err());
+    }
+    assert_eq!(source.pattern_material("melody").unwrap().next_note_id, 1);
+    assert_eq!(edited.pattern_material("melody").unwrap().next_note_id, 2);
+    assert!(edited.authored_pattern("melody").is_err());
+    assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
+}
+
+#[test]
 fn malformed_existing_entry_and_invalid_roots_never_become_empty_projects() {
     let directory = Directory::new();
     fs::copy(

@@ -15,8 +15,13 @@ checkpoint now moves accepted definitions/provenance to `AppController`;
 pattern, parameter and patch mutations no longer require an instrument panel.
 Empty editable definitions and typed mono-patch creation now work: native `n`
 shows the recipe's modules, cables and independent inputs without making a track
-or pattern. This remains silent, in-memory construction. Next: native patch/note
-editing, composition bindings/playback and standalone saves.
+or pattern. Ctrl-E/Ctrl-G now reuse accepted parameter and typed patch editors.
+Native `c` creates an independent pattern; cursor/insert/duration/velocity/delete
+gestures dispatch the existing NoteEdit. `PatternMaterial` is a detached view of
+the same NotePatternDefinition, not a new event engine or filesystem format.
+Legacy AuthoredPattern projections still require one track for existing exports.
+This remains silent, in-memory construction. Next: independent composition
+bindings/playback and standalone saves.
 The full example retains `design` status.
 
 ## Recommended immediate implementation prompt

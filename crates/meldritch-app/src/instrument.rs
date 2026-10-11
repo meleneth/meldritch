@@ -58,6 +58,35 @@ fn source_from_parameters(
 }
 
 impl AppController {
+    /// Attach a selection/draft panel without replacing project definitions or
+    /// immutable import provenance. Unlike a reload, this is a typed UI action.
+    pub(crate) fn select_instrument(
+        &mut self,
+        id: &str,
+    ) -> Result<AppCommandResult, AppCommandError> {
+        let owner = self
+            .project_source
+            .as_ref()
+            .ok_or_else(|| AppCommandError::Instrument("no authored project source".into()))?;
+        owner
+            .source
+            .instrument_parameters(id)
+            .map_err(AppCommandError::Instrument)?;
+        self.instrument_editor = Some(InstrumentEditor {
+            synth: id.into(),
+            parameter: 0,
+            visible: false,
+            save_status: None,
+            patch_visible: false,
+            patch_base_fingerprint: 0,
+            patch_scroll: 0,
+            patch_input: String::new(),
+            patch_status: "Committed graph; no staged edits".into(),
+            patch_operations: vec![],
+        });
+        Ok(AppCommandResult::InstrumentEditorChanged)
+    }
+
     pub fn enable_instrument_editor(&mut self, song: ValidatedSong) -> Result<(), String> {
         self.enable_instrument_editor_from(song.clone(), song)
     }

@@ -149,6 +149,8 @@ impl AppController {
             .map_err(AppCommandError::Instrument)?;
         let validation = owner.source.edit_patch(&edit).and_then(|next| {
             next.validate_executable_patch(&edit.synth)?;
+            meldritch_render::song_render::validate_palette_synth(&next, &edit.synth)
+                .map_err(|e| e.to_string())?;
             meldritch_render::song_host::CompiledSongPatch::compile_initial(&next).map(|_| ())
         });
         let status = match validation {

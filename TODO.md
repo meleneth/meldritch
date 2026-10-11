@@ -30,7 +30,11 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 1 palette checkpoint: file-free empty source, typed bounded mono
   patch creation reusing existing batch/importer/voice lowering, native `n`,
   visible independent inputs/modules/cables, silence without tracks/patterns
-- [ ] Slice 1 next: native patch/note editing and explicit composition bindings,
+- [x] Slice 1 native authoring checkpoint: source-preserving instrument selection,
+  Ctrl-E/G parameter/atomic patch editing over newly created definitions;
+  independent palette patterns and native cursor/insert/select/duration/velocity/
+  delete via existing NoteEdit, with unchanged legacy exports/projections
+- [ ] Slice 1 next: explicit independent pitch/gate composition bindings,
   host playback/runtime overlay, self-contained save/fresh reload
 - [ ] Slice 2: shared palette, two compositions and independent pattern sources
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
@@ -90,6 +94,15 @@ diff checks, affected-crate all-targets Clippy (existing allowances) and docs
 build pass. Legacy 09/29 fingerprints remain `41472b38b65b60ed` and
 `54745c74a42665cf`. This is silent in-memory palette creation only, with no
 physical device/listening, disk replay, saved project or performance claim.
+
+Native authoring checkpoint: the readable keyboard-patch/pattern specifications
+bind to headless native gesture tests. New material creates no track/instrument
+assignment. Imported provenance remains immutable; parameter edits preserve new
+definitions absent from that provenance, and incomplete/stale patch drafts
+retain the accepted revision. Unsupported new-project saving reports retained
+in-memory edits. Full workflow status remains design pending bindings, playback,
+runtime control and self-contained save/reopen. Remote pushes are batched at
+larger milestones; verified intermediate commits remain local.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

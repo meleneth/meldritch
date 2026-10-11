@@ -56,6 +56,18 @@ pub struct AuthoredPattern {
     pub notes: Vec<AuthoredNote>,
 }
 
+/// Readable timed material without a track/instrument ownership assertion.
+/// Both this projection and the legacy AuthoredPattern use NotePatternDefinition.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatternMaterial {
+    pub id: String,
+    pub length_ticks: u64,
+    pub looped: bool,
+    pub next_note_id: u64,
+    pub notes: Vec<AuthoredNote>,
+}
+
 impl ValidatedSong {
     fn validate_authoring_slot(&self, pattern: &str, slot: Option<&str>) -> Result<(), String> {
         let owners: Vec<_> = self
@@ -64,6 +76,13 @@ impl ValidatedSong {
             .iter()
             .filter(|t| t.pattern_ids.iter().any(|p| p == pattern))
             .collect();
+        if owners.is_empty() {
+            return if slot.is_none() {
+                Ok(())
+            } else {
+                Err("unconnected patterns cannot select sample slots".into())
+            };
+        }
         let [owner] = owners.as_slice() else {
             return Err("authoring requires one track owner for the pattern".into());
         };
@@ -110,20 +129,11 @@ impl ValidatedSong {
         }
         Ok(ticks)
     }
-    pub fn authored_pattern(&self, id: &str) -> Result<AuthoredPattern, String> {
+    pub fn pattern_material(&self, id: &str) -> Result<PatternMaterial, String> {
         let pattern = self
             .note_patterns
             .get(id)
             .ok_or_else(|| format!("unknown note pattern '{id}'"))?;
-        let tracks: Vec<_> = self
-            .performance
-            .tracks
-            .iter()
-            .filter(|t| t.pattern_ids.iter().any(|p| p == id))
-            .collect();
-        if tracks.len() != 1 {
-            return Err("authoring requires one track owner for the pattern".into());
-        }
         let mut notes = Vec::new();
         for event in &pattern.events {
             self.validate_authoring_slot(id, event.sample_slot.as_deref())?;
@@ -145,18 +155,38 @@ impl ValidatedSong {
                 slot: event.sample_slot.clone(),
             });
         }
-        Ok(AuthoredPattern {
+        Ok(PatternMaterial {
             id: id.into(),
-            track: tracks[0].id.clone(),
             length_ticks: self.authoring_tick(pattern.length_frames)?,
             looped: pattern.looped,
             next_note_id: pattern.next_note_id,
             notes,
         })
     }
-    pub fn create_note_pattern(
+    /// Compatibility projection for version-1 track-owned exports.
+    pub fn authored_pattern(&self, id: &str) -> Result<AuthoredPattern, String> {
+        let material = self.pattern_material(id)?;
+        let tracks: Vec<_> = self
+            .performance
+            .tracks
+            .iter()
+            .filter(|t| t.pattern_ids.iter().any(|p| p == id))
+            .collect();
+        if tracks.len() != 1 {
+            return Err("authoring requires one track owner for the pattern".into());
+        }
+        Ok(AuthoredPattern {
+            id: material.id,
+            track: tracks[0].id.clone(),
+            length_ticks: material.length_ticks,
+            looped: material.looped,
+            next_note_id: material.next_note_id,
+            notes: material.notes,
+        })
+    }
+    /// Create independent timed material; relationships are authored separately.
+    pub fn create_palette_pattern(
         &self,
-        track: &str,
         id: &str,
         length_ticks: u64,
         looped: bool,
@@ -167,18 +197,6 @@ impl ValidatedSong {
             || self.parameter_patterns.contains_key(id)
         {
             return Err(format!("invalid or duplicate pattern identity '{id}'"));
-        }
-        let _owner = self
-            .performance
-            .tracks
-            .iter()
-            .find(|t| t.id == track)
-            .ok_or_else(|| format!("unknown track '{track}'"))?;
-        if !self.performance.lanes.is_empty() {
-            return Err(
-                "new pattern assignment currently requires a track without performance lanes"
-                    .into(),
-            );
         }
         let length_frames = self.authoring_frame(length_ticks)?;
         if length_frames == 0 {
@@ -195,6 +213,29 @@ impl ValidatedSong {
                 events: Vec::new(),
             },
         );
+        next.refresh_authoring_fingerprint();
+        Ok(next)
+    }
+    pub fn create_note_pattern(
+        &self,
+        track: &str,
+        id: &str,
+        length_ticks: u64,
+        looped: bool,
+    ) -> Result<Self, String> {
+        let _owner = self
+            .performance
+            .tracks
+            .iter()
+            .find(|t| t.id == track)
+            .ok_or_else(|| format!("unknown track '{track}'"))?;
+        if !self.performance.lanes.is_empty() {
+            return Err(
+                "new pattern assignment currently requires a track without performance lanes"
+                    .into(),
+            );
+        }
+        let mut next = self.create_palette_pattern(id, length_ticks, looped)?;
         let owner = next
             .performance
             .tracks
@@ -211,7 +252,7 @@ impl ValidatedSong {
         pattern: &str,
         edit: &NoteEdit,
     ) -> Result<(Self, Option<String>, u64), String> {
-        self.authored_pattern(pattern)?; // rejects unsupported ownership/sample translations
+        self.pattern_material(pattern)?; // rejects unsupported sample/time translations
         let mut next = self.clone();
         let definition = next.note_patterns.get_mut(pattern).unwrap();
         let (selected, earliest) = match edit {
@@ -365,10 +406,12 @@ impl ValidatedSong {
         let mut canonical = base.clone();
         for id in self.synths.keys() {
             let graph = &self.synths[id];
-            let original = base
-                .synths
-                .get(id)
-                .ok_or_else(|| format!("unknown base synth '{id}'"))?;
+            let Some(original) = base.synths.get(id) else {
+                // A typed palette creation has no imported defaults to restore.
+                // Preserve the whole accepted definition and its explicit values.
+                canonical.synths.insert(id.clone(), graph.clone());
+                continue;
+            };
             let same_topology = graph.inputs == original.inputs
                 && graph.cables == original.cables
                 && graph

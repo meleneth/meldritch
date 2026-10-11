@@ -2271,6 +2271,7 @@ mod tests {
             missed_artifacts: 1,
         };
         AppViewModel {
+            palette_pattern_editor: None,
             assignments: None,
             instrument_editor: None,
             pattern_editor: None,

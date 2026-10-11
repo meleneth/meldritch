@@ -50,8 +50,15 @@ adds a mono palette definition through `preview_patch`/`replace_patch`; renderer
 `validate_palette_synth` reuses voice lowering without a pattern/track. Native
 `n` expands an inspectable oscillator/ADSR/VCA/output recipe. The empty cockpit
 uses the existing app/controller with empty, sample-free scheduling scaffolding;
-that legacy coordinator pattern is never project truth or persisted. Pattern
-creation/routing/playback in this cockpit and standalone saves remain proposed.
+that legacy coordinator pattern is never project truth or persisted.
+`SelectInstrument` attaches the accepted editors without replacing provenance;
+new definitions have no imported defaults to canonicalize. `create_palette_pattern`
+adds independent NotePatternDefinition material. `PatternMaterial` and the native
+palette inspector carry no track field; legacy AuthoredPattern/export adapters
+still require one track. NoteEdit and the existing frame/counter validation are
+shared, while unconnected patterns reject sampler slots. Dirty track ranges
+follow explicit current pattern references; unconnected patterns dirty no audio.
+Composition bindings/playback in this cockpit and standalone saves remain proposed.
 Compilers may receive a selected composition projection, but that view
 must not become another mutable palette.
 
@@ -223,8 +230,8 @@ the missing behavior is implemented. Required tests are acceptance obligations.
 
 | Desired capability | Existing implementation / reuse | Missing boundary and risk | Required acceptance |
 | --- | --- | --- | --- |
-| Empty project / palette / compositions | DSL `song/project_directory.rs`: `load_project_directory`, `authoring_source`; `song/patch.rs`: `PatchCreation`, `create_patch`; app `new_empty_project`; TUI `project_construction_command`; CLI no-subcommand and `open_project` | Empty/legacy opening and silent mono palette creation exist without files or a track. Native note/routing/playback construction, self-contained save and multiple compositions are missing. Avoid hidden templates and wholesale renaming. | Opening and bounded palette creation have headless/native checks; play/save/fresh reopen and multiple compositions still require acceptance. |
-| Authoritative state and modes | `meldritch-app/src/project.rs`: `ProjectSource.base/source`, `enable_project_source`; `lib.rs`: `AppController::dispatch`, `CockpitMode`; render host `SongLiveOverrides` | Accepted source is app-owned independently of an instrument panel; empty editable definitions are missing. Mapping faders still write authored values. Separate interaction mode and instance overlays without duplicate state. | Mode switch keeps audio/transport; performance moves leave authored fingerprint/export unchanged; explicit promotion reconstructs edits; failed promotion is atomic. |
+| Empty project / palette / compositions | DSL `song/project_directory.rs`: `load_project_directory`, `authoring_source`; `song/patch.rs`: `PatchCreation`, `create_patch`; `song/notes.rs`: `PatternMaterial`, `create_palette_pattern`; app `new_empty_project`; TUI native patch and pattern commands; CLI no-subcommand and `open_project` | Empty/legacy opening, mono palette creation and native patch/note editing exist without files or a track. Explicit composition bindings, playback, self-contained save and multiple compositions are missing. Avoid hidden templates and wholesale renaming. | Opening, palette creation and native patch/note editing have headless and terminal checks; play/save/fresh reopen and multiple compositions still require acceptance. |
+| Authoritative state and modes | `meldritch-app/src/project.rs`: `ProjectSource.base/source`, `enable_project_source`; `lib.rs`: `AppController::dispatch`, `CockpitMode`; render host `SongLiveOverrides` | Accepted source is app-owned independently of an instrument panel; native editors mutate the same source and preserve import provenance. Mapping faders still write authored values. Separate interaction mode and instance overlays without duplicate state. | Mode switch keeps audio/transport; performance moves leave authored fingerprint/export unchanged; explicit promotion reconstructs edits; failed promotion is atomic. |
 | Patch scope / independent signals | DSL `SignalType`, `ModuleKind`, `resolve_port`, `CableDefinition`; render `compile_note_track_for_pattern`, `CompiledNotePatch::render_with_filter_overrides` | Only four signal families, validated string endpoints, endpoint-pair cables; fixed topology and pitch/gate event coupling. Validation is broader than execution. | Distinct pitch/gate traces and routing; reject cross-family cables; non-amplitude envelope example; unsupported graphs reject, never silently ignore cables. |
 | Patchable patterns / transforms | DSL `NotePatternDefinition`, `NoteEventDefinition`; `song/notes.rs`: `AuthoredPattern.track`, `create_note_pattern`; core `Pattern::events_between`, `EventOccurrence` | Authoring requires one track owner; no output-port binding or transform graph. Legacy step and duration semantics differ; polyphonic occurrence identity must survive transformation. | One pattern reused by two instances; independent gate source; adjacent/overlapping notes, loop/rewind and deterministic probability/ratchet bounds; source reload equivalence. |
 | LFOs / rates / combination | `meldritch-render/src/modulation.rs`: `Lfo`, `LfoRate`, `ModulationMatrix`; DSP envelope/follower kernels | Fixed destinations and implicit route sum; no graph LFO/parameter ports, integrated variable-rate phase, scope or reset contract. | Shared fan-out equals one source; per-voice phases differ as authored; rate modulation/reset/tempo, split render and feedback-delay tests; reject units/rate/combination ambiguity. |

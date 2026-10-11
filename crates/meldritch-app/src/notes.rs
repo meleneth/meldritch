@@ -1,5 +1,15 @@
 use super::*;
-pub use meldritch_dsl::{AuthoredPattern, NoteEdit};
+pub use meldritch_dsl::{AuthoredPattern, NoteEdit, PatternMaterial, note_name};
+
+#[derive(Clone, Debug)]
+pub struct PalettePatternEditorView {
+    pub pattern: PatternMaterial,
+    pub selected_note: Option<String>,
+    pub source: Arc<ValidatedSong>,
+    pub visible: bool,
+    pub cursor_tick: u64,
+    pub cursor_pitch: u8,
+}
 
 #[derive(Clone, Debug)]
 pub struct PatternEditorView {
@@ -11,19 +21,44 @@ pub struct PatternEditorView {
     pub save_status: Option<String>,
 }
 pub(crate) struct PatternSelection {
+    pub cursor_tick: u64,
+    pub cursor_pitch: u8,
     pub pattern: String,
     pub note: Option<String>,
     pub visible: bool,
     pub save_status: Option<String>,
 }
 impl AppController {
+    pub(crate) fn pattern_dirty_tracks(
+        &self,
+        pattern: &str,
+        ranges: &[FrameRange],
+    ) -> Vec<DirtyRange> {
+        let owner = self.project_source.as_ref().unwrap();
+        owner
+            .source
+            .performance()
+            .tracks()
+            .iter()
+            .enumerate()
+            .filter(|(_, track)| track.pattern_ids().iter().any(|id| id == pattern))
+            .flat_map(|(index, _)| {
+                ranges.iter().map(move |range| {
+                    DirtyRange::new(EntityId::Track(TrackId::new(index as u64 + 1)), *range)
+                })
+            })
+            .collect()
+    }
+
     pub fn enable_pattern_editor(&mut self, pattern: &str) -> Result<(), String> {
         self.project_source
             .as_ref()
             .ok_or("no authored song source")?
             .source
-            .authored_pattern(pattern)?;
+            .pattern_material(pattern)?;
         self.pattern_selection = Some(PatternSelection {
+            cursor_tick: 0,
+            cursor_pitch: 48,
             pattern: pattern.into(),
             note: None,
             visible: false,
@@ -58,6 +93,78 @@ impl AppController {
             save_status: selection.save_status.clone(),
         })
     }
+
+    pub(crate) fn palette_pattern_view(&self) -> Option<PalettePatternEditorView> {
+        let selection = self.pattern_selection.as_ref()?;
+        let owner = self.project_source.as_ref()?;
+        if owner
+            .source
+            .performance()
+            .tracks()
+            .iter()
+            .any(|t| t.pattern_ids().contains(&selection.pattern))
+        {
+            return None;
+        }
+        Some(PalettePatternEditorView {
+            pattern: owner.source.pattern_material(&selection.pattern).ok()?,
+            selected_note: selection.note.clone(),
+            source: owner.source.clone(),
+            visible: selection.visible,
+            cursor_tick: selection.cursor_tick,
+            cursor_pitch: selection.cursor_pitch,
+        })
+    }
+
+    pub(crate) fn create_palette_pattern(
+        &mut self,
+        id: &str,
+        length_ticks: u64,
+        looped: bool,
+    ) -> Result<AppCommandResult, AppCommandError> {
+        let owner = self
+            .project_source
+            .as_ref()
+            .ok_or_else(|| AppCommandError::Instrument("no authored project source".into()))?;
+        let next = owner
+            .source
+            .create_palette_pattern(id, length_ticks, looped)
+            .map_err(AppCommandError::Instrument)?;
+        meldritch_render::song_host::CompiledSongPatch::compile_initial(&next)
+            .map_err(AppCommandError::Instrument)?;
+        self.project_source.as_mut().unwrap().source = Arc::new(next);
+        self.enable_pattern_editor(id)
+            .map_err(AppCommandError::Instrument)?;
+        self.pattern_selection.as_mut().unwrap().visible = true;
+        if let Some(editor) = self.instrument_editor.as_mut() {
+            editor.visible = false;
+        }
+        Ok(AppCommandResult::PatternEdited {
+            pattern: id.into(),
+            selected_note: None,
+            changed: true,
+            dirty_ranges: vec![],
+        })
+    }
+
+    pub(crate) fn move_pattern_cursor(
+        &mut self,
+        tick_delta: i64,
+        pitch_delta: i32,
+    ) -> Result<AppCommandResult, AppCommandError> {
+        let view = self
+            .palette_pattern_view()
+            .ok_or_else(|| AppCommandError::Instrument("no selected palette pattern".into()))?;
+        let selection = self.pattern_selection.as_mut().unwrap();
+        selection.cursor_tick = selection
+            .cursor_tick
+            .saturating_add_signed(tick_delta)
+            .min(view.pattern.length_ticks.saturating_sub(1));
+        selection.cursor_pitch =
+            (i64::from(selection.cursor_pitch) + i64::from(pitch_delta)).clamp(0, 127) as u8;
+        selection.note = None;
+        Ok(AppCommandResult::PatternSelectionChanged)
+    }
     pub fn observe_pattern_save(&mut self, message: String) {
         if let Some(selection) = self.pattern_selection.as_mut() {
             selection.save_status = Some(message);
@@ -85,6 +192,8 @@ impl AppController {
             editor.visible = false;
         }
         self.pattern_selection = Some(PatternSelection {
+            cursor_tick: 0,
+            cursor_pitch: 48,
             pattern: id.into(),
             note: None,
             visible: true,
@@ -126,6 +235,11 @@ impl AppController {
             editor.visible = false;
         }
         self.pattern_selection = Some(PatternSelection {
+            cursor_tick: self.pattern_selection.as_ref().map_or(0, |s| s.cursor_tick),
+            cursor_pitch: self
+                .pattern_selection
+                .as_ref()
+                .map_or(48, |s| s.cursor_pitch),
             pattern: pattern.into(),
             note: selected_note.clone(),
             visible: true,
@@ -149,7 +263,7 @@ impl AppController {
             .ok_or_else(|| AppCommandError::Instrument("no authored song source".into()))?;
         if !owner
             .source
-            .authored_pattern(pattern)
+            .pattern_material(pattern)
             .map_err(AppCommandError::Instrument)?
             .notes
             .iter()
@@ -163,6 +277,11 @@ impl AppController {
             editor.visible = false;
         }
         self.pattern_selection = Some(PatternSelection {
+            cursor_tick: self.pattern_selection.as_ref().map_or(0, |s| s.cursor_tick),
+            cursor_pitch: self
+                .pattern_selection
+                .as_ref()
+                .map_or(48, |s| s.cursor_pitch),
             pattern: pattern.into(),
             note: Some(id.into()),
             visible: true,

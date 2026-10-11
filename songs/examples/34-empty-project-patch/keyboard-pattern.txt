@@ -1,0 +1,8 @@
+# Native unconnected pattern authoring, separate from instrument creation.
+# c creates pattern-1, 3840 ticks, looping, with no notes or track.
+# Enter inserts C3 at cursor tick 0, duration 480 ticks, velocity 0.8.
+# Right Right moves cursor to tick 960; Up seven times selects G3.
+# Enter inserts G3; ] increases its duration to 720; - reduces velocity to 0.7.
+# Delete removes the selected note; Enter creates a fresh note identity.
+# Esc closes the editor; Ctrl-N reopens it without altering source.
+# Patterns remain silent until composition bindings are authored.
