@@ -93,6 +93,9 @@ editor and versioned instrument Lua exports are documented in
 status for Lua piano-roll gestures, typed note edits, publication and independent
 Lua pattern reload; read `PIANO_ROLL.md`. Physical APC gesture/LED/listening
 acceptance remains pending. Examples 28 and 30 remain `design`.
+Example 31 adds headless drum-editor acceptance using the existing one-shot
+sampler and explicit sample-slot note commands; read `DRUM_EDITOR.md`. Its kit
+is generated and 909-inspired, not a native TR-909 synthesis engine.
 Section 19's unfinished performance infrastructure is retained
 but no longer determines the next implementation slice.
 

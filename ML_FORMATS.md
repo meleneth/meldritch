@@ -20,6 +20,11 @@ ownership limits and independent reload/render commands are documented in
 implicit historical note identities derive from source event order. New identity
 allocation state is included in fingerprints without changing historical imports.
 
+Example 31 adds explicit one-shot sampler-slot notes to that same version-1 Lua
+definition using optional `slot` metadata and a typed `insert_sample` command.
+Synth exports are unchanged; unsupported slice/root/transpose edits reject.
+See [DRUM_EDITOR.md](DRUM_EDITOR.md) for its generated kit and persistence limits.
+
 ## Example-first rule
 
 For every capability:

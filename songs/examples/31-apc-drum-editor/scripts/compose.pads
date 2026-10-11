@@ -1,0 +1,41 @@
+# Eight rows, sixteenth-note columns. Simultaneous sounds are independent hits.
+press 116
+release 116
+press 0
+release 0
+press 8
+zero 8
+press 16
+release 16
+press 24
+release 24
+press 32
+release 32
+press 40
+release 40
+press 48
+release 48
+press 56
+release 56
+expect_count 8
+# Toggle only the clap off and back on; duplicates/release are harmless.
+press 16
+press 16
+release 16
+expect_count 7
+press 16
+release 16
+expect_count 8
+# Change snare velocity and compose on the second time page.
+press 114
+press 8
+release 114
+release 8
+press 107
+release 107
+press 0
+release 0
+expect_count 9
+press 115
+release 115
+wait

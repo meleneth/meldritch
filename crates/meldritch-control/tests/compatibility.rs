@@ -33,6 +33,7 @@ fn historical_song_directories_load_compile_and_retain_range_identical_audio() {
         ("24-audio-aware-widgets", "mix"),
         ("25-edit-existing-synth", "mix"),
         ("26-apc-note-pattern", "blank_mix"),
+        ("31-apc-drum-editor", "blank_mix"),
     ];
     for (fixture, compiler) in fixtures {
         let path = repository().join("songs/examples").join(fixture);

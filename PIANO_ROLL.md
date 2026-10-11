@@ -124,7 +124,9 @@ exports have identical text. Missing/changed bases, unknown versions/fields,
 duplicate IDs, bad counters, unsupported ownership/sample events, invalid note
 types/ranges or times not losslessly representable at 960 PPQ reject. Creation
 and assignment currently require synth tracks without performance lane banks.
-Existing patterns need a single synth-track owner. A selected-pattern export
+The piano example uses a single synth-track owner; the separate
+[drum editor](DRUM_EDITOR.md) supports explicit one-shot sampler slots.
+A selected-pattern export
 rejects unrelated authored source changes; composed instrument/pattern exports,
 multiple new patterns per export and lane-bank authoring remain future work.
 

@@ -33,6 +33,7 @@ Status values:
 | `28-author-fader-mappings` | Editable cutoff/lane-level physical mappings, pickup and Lua persistence contract; unimplemented, hardware pending | design |
 | `29-lua-authored-roundtrip` | Separate instrument and note-pattern v1 Lua export/reload, confined base validation and atomic saves accepted via examples 25/26; composed patterns/instruments/cables/mappings/mixer export unimplemented | compile |
 | `30-compose-typed-patch` | Existing oscillator/ADSR/VCA/low-pass graph composition, inspection and Lua persistence contract; unimplemented | design |
+| `31-apc-drum-editor` | Lua drum rows, one-shot slot note commands, tap toggles/velocity/pages, generated 909-inspired kit, TUI/publication and independent Lua reload/render accepted headlessly; native TR-909 engine and physical acceptance pending | accept |
 
 An implementation may advance a row only when all earlier statuses for that row
 are satisfied. New schema or runtime behavior requires a new row or an explicit

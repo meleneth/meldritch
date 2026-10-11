@@ -1,0 +1,69 @@
+[meldritch]
+kind = "samples"
+version = 1
+[samples]
+id = "909-inspired-kit"
+
+[[slots]]
+id = "kick"
+label = "kick"
+path = "audio/kick.wav"
+mode = "one_shot"
+level = 1.0
+pitch_semitones = 0.0
+
+[[slots]]
+id = "snare"
+label = "snare"
+path = "audio/snare.wav"
+mode = "one_shot"
+level = 1.0
+pitch_semitones = 0.0
+
+[[slots]]
+id = "clap"
+label = "clap"
+path = "audio/clap.wav"
+mode = "one_shot"
+level = 1.0
+pitch_semitones = 0.0
+
+[[slots]]
+id = "closed-hat"
+label = "closed-hat"
+path = "audio/closed-hat.wav"
+mode = "one_shot"
+level = 1.0
+pitch_semitones = 0.0
+
+[[slots]]
+id = "open-hat"
+label = "open-hat"
+path = "audio/open-hat.wav"
+mode = "one_shot"
+level = 1.0
+pitch_semitones = 0.0
+
+[[slots]]
+id = "low-tom"
+label = "low-tom"
+path = "audio/low-tom.wav"
+mode = "one_shot"
+level = 1.0
+pitch_semitones = 0.0
+
+[[slots]]
+id = "high-tom"
+label = "high-tom"
+path = "audio/high-tom.wav"
+mode = "one_shot"
+level = 1.0
+pitch_semitones = 0.0
+
+[[slots]]
+id = "ride"
+label = "ride"
+path = "audio/ride.wav"
+mode = "one_shot"
+level = 1.0
+pitch_semitones = 0.0

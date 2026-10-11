@@ -46,6 +46,9 @@ pub fn fixture() -> PathBuf {
 }
 impl Harness {
     pub fn new() -> Self {
+        Self::from_fixture(&fixture())
+    }
+    pub fn from_fixture(fixture: &std::path::Path) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "meldritch-piano-roll-{}-{}",
@@ -63,7 +66,7 @@ impl Harness {
                 }
             }
         }
-        copy(&fixture(), &root);
+        copy(fixture, &root);
         let base = meldritch_dsl::load_song_directory(&root).unwrap();
         let patch = CompiledSongPatch::compile_initial(&base).unwrap();
         let audio = patch

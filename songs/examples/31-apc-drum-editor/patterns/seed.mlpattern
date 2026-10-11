@@ -1,0 +1,9 @@
+[meldritch]
+kind = "pattern"
+version = 1
+[pattern]
+id = "seed"
+type = "notes"
+length = "1 bar"
+loop = true
+resolution = "1/16"

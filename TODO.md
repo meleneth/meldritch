@@ -31,6 +31,11 @@ foundation, with composed musical authoring still unfinished. The
   rewind/loop-safe interaction ordering and persistence beyond one step
 - [x] Piano-roll usability: occupied taps toggle off, held endpoints retain notes,
   and the example renders eight independent voices (three-note chord sum tested)
+- [x] Example 31: Lua drum rows/toggling/velocity/pages, explicit one-shot slot
+  commands, shared TUI/publication and lossless Lua pattern persistence
+- [x] Add an inspectable generated 909-inspired sample kit for the drum editor
+- [ ] Implement and evaluate a faithful modular TR-909 voice/kit model;
+  no native 909 engine, hat choke groups or live drum voice controls exist yet
 - [ ] Example 28: author fader bindings to existing synth cutoff and lane level;
   shared inspection, pickup rearming and persistent mappings/mixer settings
 - [ ] Example 30: compose the supported oscillator/ADSR/VCA/low-pass patch;
@@ -56,6 +61,14 @@ historical example 09 still validates. Formatting, diff checks, documentation
 build and changed-crate Clippy checks passed with the above existing allowances
 plus `chunks_exact_to_as_chunks` for pre-existing DSP tests on the host compiler.
 Physical APC gestures, orientation, LED states and listening remain untested.
+
+Drum-slice verification: `cargo test --workspace --offline` passed all 366
+tests, including four drum-editor and ten piano-roll tests. The checked-in
+sample-slot Lua definition validated and independently rendered with
+`render-pattern`. Changed-crate Clippy (the allowances above), formatting,
+diff checks and the documentation build passed. The original generated kit
+is a 909-inspired approximation; faithful 909 voices and physical acceptance
+remain open.
 
 Done when a musician can create/edit these example instruments, patterns,
 patches, mappings and lane levels, save readable Lua, and reload equivalent

@@ -16,6 +16,10 @@ script-bound button presses/releases, clears gestures on disconnect/overflow
 and keeps Lua/TOML input ownership exclusive. Physical piano-roll acceptance
 remains pending.
 
+The [drum editor](DRUM_EDITOR.md) shares those boundaries, adding typed
+`insert_sample` requests with explicit slot identity. Lua owns drum rows/toggles;
+the authoritative pattern carries the slot alongside note identity and time.
+
 This milestone implements the headless vertical slice in
 `songs/examples/18-lua-control-plane`. Run it with:
 

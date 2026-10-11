@@ -13,6 +13,13 @@ pub enum NoteEdit {
         pitch: u8,
         velocity: f64,
     },
+    InsertSample {
+        start_tick: u64,
+        duration_ticks: u64,
+        pitch: u8,
+        velocity: f64,
+        slot: String,
+    },
     Duration {
         id: String,
         duration_ticks: u64,
@@ -34,6 +41,8 @@ pub struct AuthoredNote {
     pub start_tick: u64,
     pub duration_ticks: u64,
     pub velocity: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -48,6 +57,39 @@ pub struct AuthoredPattern {
 }
 
 impl ValidatedSong {
+    fn validate_authoring_slot(&self, pattern: &str, slot: Option<&str>) -> Result<(), String> {
+        let owners: Vec<_> = self
+            .performance
+            .tracks
+            .iter()
+            .filter(|t| t.pattern_ids.iter().any(|p| p == pattern))
+            .collect();
+        let [owner] = owners.as_slice() else {
+            return Err("authoring requires one track owner for the pattern".into());
+        };
+        if owner.sampler_id.is_none() {
+            return if slot.is_some() {
+                Err("sample slot edit requires a sampler track".into())
+            } else {
+                Ok(())
+            };
+        }
+        let slot = slot.ok_or("sampler note authoring requires an explicit sample slot")?;
+        let bank = owner
+            .sample_bank_id
+            .as_ref()
+            .and_then(|id| self.sample_banks.get(id))
+            .ok_or("sampler track has no sample bank")?;
+        let definition = bank
+            .slots
+            .iter()
+            .find(|s| s.id == slot)
+            .ok_or_else(|| format!("unknown sample slot '{slot}'"))?;
+        if definition.mode != SamplePlaybackMode::OneShot {
+            return Err("sample authoring currently requires one-shot slots".into());
+        }
+        Ok(())
+    }
     pub fn authoring_frame(&self, ticks: u64) -> Result<u64, String> {
         if ticks > (1_u64 << 53) - 1 {
             return Err("musical ticks exceed exact numeric range".into());
@@ -79,17 +121,20 @@ impl ValidatedSong {
             .iter()
             .filter(|t| t.pattern_ids.iter().any(|p| p == id))
             .collect();
-        if tracks.len() != 1 || tracks[0].sampler_id.is_some() {
-            return Err("authoring requires one synth-track owner for the pattern".into());
+        if tracks.len() != 1 {
+            return Err("authoring requires one track owner for the pattern".into());
         }
         let mut notes = Vec::new();
         for event in &pattern.events {
-            if event.sample_slot.is_some()
-                || event.sample_slice.is_some()
+            self.validate_authoring_slot(id, event.sample_slot.as_deref())?;
+            if event.sample_slice.is_some()
                 || event.root_note.is_some()
                 || event.pitch_semitones != 0.0
             {
-                return Err("sample event authoring is unsupported; refusing lossy export".into());
+                return Err(
+                    "sample slice/root/transpose authoring is unsupported; refusing lossy export"
+                        .into(),
+                );
             }
             notes.push(AuthoredNote {
                 id: event.id.clone(),
@@ -97,6 +142,7 @@ impl ValidatedSong {
                 start_tick: self.authoring_tick(event.start_frame)?,
                 duration_ticks: self.authoring_tick(event.duration_frames)?,
                 velocity: event.velocity,
+                slot: event.sample_slot.clone(),
             });
         }
         Ok(AuthoredPattern {
@@ -122,15 +168,15 @@ impl ValidatedSong {
         {
             return Err(format!("invalid or duplicate pattern identity '{id}'"));
         }
-        let owner = self
+        let _owner = self
             .performance
             .tracks
             .iter()
             .find(|t| t.id == track)
             .ok_or_else(|| format!("unknown track '{track}'"))?;
-        if owner.sampler_id.is_some() || !self.performance.lanes.is_empty() {
+        if !self.performance.lanes.is_empty() {
             return Err(
-                "new pattern assignment currently requires a synth track without performance lanes"
+                "new pattern assignment currently requires a track without performance lanes"
                     .into(),
             );
         }
@@ -174,7 +220,19 @@ impl ValidatedSong {
                 duration_ticks,
                 pitch,
                 velocity,
+            }
+            | NoteEdit::InsertSample {
+                start_tick,
+                duration_ticks,
+                pitch,
+                velocity,
+                ..
             } => {
+                let slot = match edit {
+                    NoteEdit::InsertSample { slot, .. } => Some(slot.as_str()),
+                    _ => None,
+                };
+                self.validate_authoring_slot(pattern, slot)?;
                 if *pitch > 127 {
                     return Err("note pitch must be MIDI 0..127".into());
                 }
@@ -193,7 +251,7 @@ impl ValidatedSong {
                     duration_frames: duration,
                     note: *pitch,
                     velocity: *velocity,
-                    sample_slot: None,
+                    sample_slot: slot.map(str::to_owned),
                     sample_slice: None,
                     root_note: None,
                     pitch_semitones: 0.0,
@@ -258,6 +316,7 @@ impl ValidatedSong {
         let mut events = Vec::new();
         let mut seen = std::collections::BTreeSet::new();
         for note in &pattern.notes {
+            next.validate_authoring_slot(&pattern.id, note.slot.as_deref())?;
             let serial = note
                 .id
                 .strip_prefix("note-")
@@ -286,7 +345,7 @@ impl ValidatedSong {
                 note: parse_note(Path::new("authored note"), &note.note)
                     .map_err(|e| e.to_string())?,
                 velocity: note.velocity,
-                sample_slot: None,
+                sample_slot: note.slot.clone(),
                 sample_slice: None,
                 root_note: None,
                 pitch_semitones: 0.0,

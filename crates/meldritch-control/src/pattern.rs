@@ -28,7 +28,11 @@ pub fn encode_pattern(view: &PatternEditorView) -> Result<String> {
         p.next_note_id
     );
     for n in &p.notes {
-        text.push_str(&format!("      {{ id = {}, note = {}, start_tick = {}, duration_ticks = {}, velocity = {:?} }},\n", quote(&n.id), quote(&n.note), n.start_tick, n.duration_ticks, n.velocity));
+        let slot = n
+            .slot
+            .as_ref()
+            .map_or(String::new(), |slot| format!(", slot = {}", quote(slot)));
+        text.push_str(&format!("      {{ id = {}, note = {}, start_tick = {}, duration_ticks = {}, velocity = {:?}{} }},\n", quote(&n.id), quote(&n.note), n.start_tick, n.duration_ticks, n.velocity, slot));
     }
     text.push_str("    },\n  },\n}\n");
     let (restored, _) = load_pattern(view.source.root(), &text)?;

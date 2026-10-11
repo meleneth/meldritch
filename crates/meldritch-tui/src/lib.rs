@@ -589,7 +589,7 @@ pub fn draw_with_status(
                         "published"
                     })
             ),
-            "     Identity     Pitch  Start tick  End (exclusive)  Velocity".into(),
+            "     Identity     Pitch  Start tick  End (exclusive)  Velocity Slot".into(),
         ];
         let visible_notes = usize::from(frame.area().height.saturating_sub(9)).max(1);
         let selected_index = editor
@@ -601,7 +601,7 @@ pub fn draw_with_status(
         let first = selected_index.saturating_sub(visible_notes - 1);
         for note in editor.pattern.notes.iter().skip(first).take(visible_notes) {
             lines.push(format!(
-                "{} {:12} {:5} {:10} {:16} {:8.3}",
+                "{} {:12} {:5} {:10} {:16} {:8.3} {}",
                 if editor.selected_note.as_ref() == Some(&note.id) {
                     ">"
                 } else {
@@ -611,7 +611,8 @@ pub fn draw_with_status(
                 note.note,
                 note.start_tick,
                 note.start_tick + note.duration_ticks,
-                note.velocity
+                note.velocity,
+                note.slot.as_deref().unwrap_or("")
             ));
         }
         lines.push(

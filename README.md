@@ -13,6 +13,10 @@ Compose notes with the [Lua APC piano roll](PIANO_ROLL.md):
 `cargo run -- tui-song songs/examples/26-apc-note-pattern --lua main.lua`.
 Physical gesture/LED/listening acceptance is still pending.
 
+Compose drum hits with the [APC drum editor](DRUM_EDITOR.md):
+`cargo run -- tui-song songs/examples/31-apc-drum-editor --lua main.lua`.
+Its generated kit is 909-inspired; a native TR-909 engine is not implemented.
+
 For the connected APC Mini MK2, start the four-lane playground:
 
 ```sh

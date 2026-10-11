@@ -1,0 +1,11 @@
+[meldritch]
+kind = "sampler"
+version = 1
+[sampler]
+id = "909-inspired-kit"
+bank = "../samples/kit.mlsamples"
+polyphony = 16
+default_slot = "kick"
+pitch_tracking = false
+level = 0.65
+pitch_semitones = 0.0
