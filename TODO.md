@@ -75,8 +75,10 @@ an empty project requires no Git repository or initialization.
   shared LFO amplitude/pitch fan-out, typed drafts/capture, rejection and reopen
 - [x] Slice 3 filter checkpoint: typed Hertz adapter/cutoff port, explicit clamp
   and cable/default precedence, sample/tail/split references and playing publication
-- [ ] Slice 3 next: envelope-controlled modulation depth, then
-  variable-rate integration, event cadence and broader instantiation scopes
+- [x] Slice 3 depth checkpoint: bipolar ControlAttenuate × unit-interval amount,
+  envelope-shaped fan-out, independent amplitude wiring, capture and fresh reopen
+- [ ] Slice 3 next: modulatable LFO rate with deterministic phase integration,
+  then event cadence and broader instantiation scopes
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
 - [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
 - [ ] Slice 6: quantized graph activation and proved compatible DSP-state continuity
@@ -387,6 +389,24 @@ Verification: offline workspace tests, the graph suite (ten parent tests plus
 isolated reopen children), 24 render-example tests, affected all-targets Clippy
 with existing allowances, formatting/diff checks and VitePress pass. Historical
 09/29 fingerprints remain `41472b38b65b60ed` / `54745c74a42665cf`.
+
+Slice 3 depth checkpoint adds ControlAttenuate to example 36, reusing the product
+kernel with bipolar signal/unit-interval amount → bipolar output. The explicit
+depth-patch draft routes ADSR into amount and fans out the attenuated LFO to pitch
+and amplitude adapters; its phase is unchanged. Independent LFO/composition
+arithmetic with existing oscillator/ADSR kernels checks attack/decay/release and
+adjacent retrigger ordering, full/split rendering and isolated authored reopen.
+Removing the separate envelope/VCA product leaves audible oscillation after depth
+reaches zero. Typed capture reconstructs every draft/source fingerprint and PCM.
+Nine invalid contracts preserve source/history, and the worker/callback checks
+combined depth/filter/pitch publication and failed-unit continuity while playing.
+Full example 36 stays design: variable-rate phase, broader cadence/scopes, feedback,
+normalization and continuous DSP-state migration remain open. Physical listening
+and deadline benchmarks remain unverified.
+Verification: offline workspace tests, graph-LFO acceptance (twelve parent tests
+plus isolated reopen children), affected all-targets Clippy with existing
+allowances, formatting/diff and VitePress pass. Historical 09/29 fingerprints
+remain `41472b38b65b60ed` / `54745c74a42665cf`.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

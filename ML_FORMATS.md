@@ -127,6 +127,11 @@ input/Hertz output, and one cabled low_pass.cutoff port. ConfigureControlHertz
 uses the same typed patch/capture path. The cable replaces the configured cutoff
 default; uncabled cutoff overrides reject on this path. Old uncabled behavior and
 absent-settings fingerprints are preserved. Broader modulation remains proposed.
+`control_attenuate` needs no configuration fields: Control input/output is bipolar,
+amount input is unit interval. Its explicit product evaluates at audio rate per
+instance through the existing control graph. Instantiate/connect/remove operations,
+native graph snapshots, capture and fingerprints preserve the module and cables.
+It does not reinterpret the existing unit-interval `control_multiply` ports.
 
 Example 35 extends native command version 1 with `select_palette_pattern`, a
 typed selection fact with an explicit pattern ID. Selection changes neither

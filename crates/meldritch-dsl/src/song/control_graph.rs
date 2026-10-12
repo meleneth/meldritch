@@ -11,6 +11,10 @@ pub enum ControlUnit {
 impl ModuleDefinition {
     pub fn control_unit(&self, port: &str, direction: PortDirection) -> Option<ControlUnit> {
         match (self.kind, direction, port) {
+            (ModuleKind::ControlAttenuate, _, "control") => Some(ControlUnit::Bipolar),
+            (ModuleKind::ControlAttenuate, PortDirection::Input, "amount") => {
+                Some(ControlUnit::UnitInterval)
+            }
             (ModuleKind::ControlHertz, PortDirection::Input, "control") => {
                 Some(ControlUnit::UnitInterval)
             }
@@ -240,6 +244,7 @@ impl SynthDefinition {
                         | ModuleKind::ControlMultiply
                         | ModuleKind::PitchModulate
                         | ModuleKind::ControlHertz
+                        | ModuleKind::ControlAttenuate
                 )
             })
             .map(|m| m.id.as_str())
@@ -302,7 +307,10 @@ impl SynthDefinition {
             }
             if !matches!(
                 module.kind,
-                ModuleKind::Lfo | ModuleKind::ControlScale | ModuleKind::ControlMultiply
+                ModuleKind::Lfo
+                    | ModuleKind::ControlScale
+                    | ModuleKind::ControlMultiply
+                    | ModuleKind::ControlAttenuate
             ) {
                 return Err("unsupported control source".into());
             }
@@ -331,6 +339,10 @@ impl SynthDefinition {
                 ModuleKind::ControlMultiply => {
                     visit(graph, &format!("{id}.left"), false, active, order)?;
                     visit(graph, &format!("{id}.right"), false, active, order)?;
+                }
+                ModuleKind::ControlAttenuate => {
+                    visit(graph, &format!("{id}.control"), true, active, order)?;
+                    visit(graph, &format!("{id}.amount"), false, active, order)?;
                 }
                 _ => unreachable!(),
             }

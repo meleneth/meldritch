@@ -105,10 +105,38 @@ and rejects graph controls/cutoff cables rather than silently discarding them.
 legacy_filter_automation_rejects_new_graph_controls_instead_of_ignoring_them
 checks this compatibility boundary; it does not introduce a second graph engine.
 
+## Depth checkpoint: explicit bipolar attenuation
+
+Apply depth-patch.txt after vibrato-patch.txt, optionally with filter-patch.txt.
+control_attenuate multiplies bipolar Control at its control input by unit-interval
+Control at amount, producing bipolar Control. No implicit sum, offset or clamp;
+it reuses the existing product kernel with independently validated port units.
+It has no LFO or destination knowledge. Audio/per-instance evaluation is intrinsic
+to this bounded primitive. LFO → depth.control and ADSR → depth.amount make an
+envelope-controlled modulation source. depth.control fans out to the amplitude
+scale and pitch adapter; the filter can share the scale output. ADSR settings
+produce gradual attack, decay and release of depth. LFO phase/reset is unchanged.
+
+Required tests: explicit source/unit metadata, atomic keyboard draft, full/split
+sample references using the existing oscillator/ADSR kernels and independent LFO/
+composition arithmetic, attack/decay/release/retrigger boundaries, fan-out and
+fresh-process authored save/reopen. Removing the separate envelope → VCA product
+must leave audible oscillation while envelope depth reaches zero: ADSR does not
+inherently own amplitude. Missing/duplicate inputs, wrong units, unused modules
+and signal/amount feedback reject with unchanged source/history/publication.
+Typed capture reconstruction and playing worker publication must reuse existing
+boundaries. Historical unit-interval multiplication and fingerprints remain intact.
+Checkpoint evidence: envelope_depth_draft_fanout_capture_and_reopen_match_explicit_signal_reference
+checks both amplitude-wiring variants, draft atomicity, attack/decay/release,
+adjacent retrigger, units, isolated full/split reopen and full typed capture/source
+reconstruction. invalid_depth_connections_reject_without_source_or_history_changes
+executes every negative fixture. native_graph_lfo checks the combined depth/pitch/
+filter worker publication and failed-amount-unit continuity while playing.
+
 ## Remaining full Slice 3 contract
 
 Broader explicit addition/clamping, modulatable LFO rate,
-envelope-controlled depth, event/control-rate latching and global/per-voice scopes
+event/control-rate latching and global/per-voice scopes
 remain requirements. Reset/stop/rewind and composition clocks need their full scope
 contracts. General feedback requires an explicit executable delay. Native controls
 and capture must retain stable semantic identities. Complete status must wait for

@@ -1,0 +1,13 @@
+clear
+add depth control_attenuate
+set env attack 0.25
+set env decay 0.5
+set env sustain 0.4
+set env release 0.125
+disconnect slow.control unipolar.control
+disconnect slow.control vibrato.control
+connect slow.control depth.control
+connect env.control depth.amount
+connect depth.control unipolar.control
+connect depth.control vibrato.control
+commit

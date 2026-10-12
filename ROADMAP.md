@@ -124,8 +124,11 @@ vibrato/depth, shared amplitude/pitch fan-out and typed draft/capture/save/reope
 tests with independent sample references. One oscillator adapter is supported;
 Plaits and pitch chains reject. A third checkpoint adds a typed Hertz cutoff
 adapter, authored clamping, cable/default precedence, independent filter-tail
-references, fresh reopen and playing publication. Full example remains design:
-variable-rate integration, event cadence and broader scopes are still required.
+references, fresh reopen and playing publication.
+ControlAttenuate now also enables envelope-controlled shared depth with explicit
+units, independent amplitude wiring, capture reconstruction and signal references.
+Full example remains design: variable-rate integration, event cadence and broader
+scopes are still required.
 
 **Sound/control:** shared phase sweeps both destinations; depth/rate/reset are
 inspectable. Demonstrate explicit sum/scale/clamp, event versus audio/control

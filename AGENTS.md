@@ -117,7 +117,11 @@ sample/split references, rejection, worker publication and fresh reopen are chec
 ControlHertz now drives a typed low_pass.cutoff port through explicit scaling and
 clamps. Independent filter recurrence/tail references, drafts, capture vocabulary,
 worker publication and fresh reopen are checked; cabled cutoff overrides reject.
-Variable-rate phase and broader scope/cadence remain open.
+ControlAttenuate now multiplies bipolar Control by unit-interval amount, enabling
+envelope-shaped shared modulation depth without destination knowledge. Typed
+drafts, independent signal references, amplitude separation, capture reconstruction,
+playing publication and fresh reopen are checked. Variable-rate phase and broader
+scope/cadence remain open.
 Example 35's native pattern-selection checkpoint is implemented: PgUp/PgDn
 selects palette material without rebinding, source/runtime mutation or rerender;
 typed capture and independent-source persistence/render tests pass. Its full

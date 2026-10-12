@@ -704,6 +704,238 @@ fn graph_lfo_reopen_child() {
 }
 
 #[test]
+fn envelope_depth_draft_fanout_capture_and_reopen_match_explicit_signal_reference() {
+    use meldritch_control::native_capture::{
+        NativeCommandEnvelope, NativeProjectCapture, load_native_capture_baseline,
+    };
+    use meldritch_dsl::{DependentCables, PatchEdit, PatchOperation};
+    use meldritch_render::dsp::{AdsrEnvelope, AdsrSettings};
+    let directory = Directory::new();
+    let mut app = directory.app();
+    app.enable_native_project_source(load_native_project(&directory.0, FIXTURE).unwrap())
+        .unwrap();
+    let mut capture = NativeProjectCapture::new(app.authored_source().unwrap(), 192000);
+    app.dispatch(AppCommand::SelectInstrument("bass".into()))
+        .unwrap();
+    app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+    app.dispatch(AppCommand::TogglePatchEditor).unwrap();
+    for script in [
+        include_str!("../../../songs/examples/36-patch-lfo/vibrato-patch.txt"),
+        include_str!("../../../songs/examples/36-patch-lfo/depth-patch.txt"),
+    ] {
+        let before = app.authored_source().unwrap();
+        let lines: Vec<_> = script.lines().collect();
+        for (index, line) in lines.iter().enumerate() {
+            for c in line.chars() {
+                app.dispatch(AppCommand::PatchCharacter(c)).unwrap();
+            }
+            app.dispatch(AppCommand::PatchSubmit).unwrap();
+            capture.checkpoint(&app).unwrap();
+            if index + 1 < lines.len() {
+                assert!(Arc::ptr_eq(&before, &app.authored_source().unwrap()));
+            }
+        }
+        assert_ne!(
+            before.fingerprint(),
+            app.authored_source().unwrap().fingerprint()
+        );
+    }
+    for envelope_controls_amplitude in [true, false] {
+        if !envelope_controls_amplitude {
+            app.dispatch(AppCommand::EditPatch(PatchEdit {
+                synth: "bass".into(),
+                operations: vec![
+                    PatchOperation::Remove {
+                        id: "shape".into(),
+                        cables: DependentCables::Disconnect,
+                    },
+                    PatchOperation::Connect {
+                        from: "unipolar.control".into(),
+                        to: "amp.level".into(),
+                    },
+                ],
+            }))
+            .unwrap();
+            capture.checkpoint(&app).unwrap();
+        }
+        let source = app.authored_source().unwrap();
+        let patch = CompiledSongPatch::compile_initial(&source).unwrap();
+        let audio = patch
+            .render_default(FrameRange::new(0, 192000).unwrap())
+            .unwrap();
+        let mut oscillator = Oscillator::new(Waveform::Sine);
+        let mut env = AdsrEnvelope::new(
+            AdsrSettings {
+                attack_seconds: 0.25,
+                decay_seconds: 0.5,
+                sustain_level: 0.4,
+                release_seconds: 0.125,
+            },
+            48000,
+        );
+        let base = 440.0 * 2_f64.powf((48.0 - 69.0) / 12.0);
+        for (frame, actual) in audio.samples().iter().enumerate() {
+            match frame % 96000 {
+                0 | 36000 => {
+                    env.note_off();
+                    env.note_on();
+                }
+                84000 => env.note_off(),
+                _ => {}
+            }
+            let envelope = env.next_value();
+            let lfo = (std::f64::consts::TAU * (frame as f64 / 24000.0).fract()).sin();
+            let attenuated = lfo * envelope;
+            let wave = oscillator.next(base * 2_f64.powf(attenuated * 0.5 / 12.0), 48000);
+            let amp = attenuated.mul_add(0.5, 0.5)
+                * if envelope_controls_amplitude {
+                    envelope
+                } else {
+                    1.0
+                };
+            assert!(
+                (actual - wave * amp * 0.8).abs() < 1e-12,
+                "frame {frame}, amplitude {envelope_controls_amplitude}"
+            );
+        }
+        if !envelope_controls_amplitude {
+            assert!(audio.samples()[92000..96000].iter().any(|s| s.abs() > 0.1));
+        }
+        assert_fresh_process(&directory, &source);
+    }
+    let accepted = app.authored_source().unwrap();
+    let ports = accepted.synths()["bass"]
+        .modules()
+        .iter()
+        .flat_map(|m| m.ports())
+        .collect::<Vec<_>>();
+    for (endpoint, unit) in [
+        ("depth.control", meldritch_dsl::ControlUnit::Bipolar),
+        ("depth.amount", meldritch_dsl::ControlUnit::UnitInterval),
+    ] {
+        assert_eq!(
+            ports.iter().filter(|p| p.endpoint == endpoint).count(),
+            if endpoint == "depth.control" { 2 } else { 1 }
+        );
+        assert!(
+            ports
+                .iter()
+                .filter(|p| p.endpoint == endpoint)
+                .all(|p| p.unit == Some(unit)
+                    && p.evaluation == Some(meldritch_dsl::ControlEvaluation::Audio))
+        );
+    }
+    capture.finish(&app).unwrap();
+    let text = fs::read_to_string(capture.session.as_ref().unwrap().path()).unwrap();
+    let mut replay = directory.app();
+    replay
+        .enable_native_project_source(load_native_capture_baseline(&directory.0, &text).unwrap())
+        .unwrap();
+    let events: toml::Value = toml::from_str(&text).unwrap();
+    for event in events["events"].as_array().unwrap() {
+        let envelope =
+            NativeCommandEnvelope::decode(&toml::to_string(&event["native"]).unwrap()).unwrap();
+        replay.dispatch(envelope.command.into()).unwrap();
+        assert_eq!(
+            envelope.source_after,
+            format!("{:016x}", replay.authored_source().unwrap().fingerprint())
+        );
+    }
+    assert_eq!(
+        accepted.fingerprint(),
+        replay.authored_source().unwrap().fingerprint()
+    );
+    assert_eq!(
+        CompiledSongPatch::compile_initial(&accepted)
+            .unwrap()
+            .render_default(FrameRange::new(0, 192000).unwrap())
+            .unwrap()
+            .samples(),
+        CompiledSongPatch::compile_initial(&replay.authored_source().unwrap())
+            .unwrap()
+            .render_default(FrameRange::new(0, 192000).unwrap())
+            .unwrap()
+            .samples()
+    );
+}
+
+#[test]
+fn invalid_depth_connections_reject_without_source_or_history_changes() {
+    use meldritch_dsl::{ModuleKind, PatchEdit, PatchOperation};
+    let directory = Directory::new();
+    let mut app = directory.app();
+    app.enable_native_project_source(load_native_project(&directory.0, FIXTURE).unwrap())
+        .unwrap();
+    let connect = |from: &str, to: &str| PatchOperation::Connect {
+        from: from.into(),
+        to: to.into(),
+    };
+    let disconnect = |from: &str, to: &str| PatchOperation::Disconnect {
+        from: from.into(),
+        to: to.into(),
+    };
+    let base = vec![
+        PatchOperation::Instantiate {
+            id: "depth".into(),
+            kind: ModuleKind::ControlAttenuate,
+        },
+        disconnect("slow.control", "unipolar.control"),
+        connect("slow.control", "depth.control"),
+        connect("env.control", "depth.amount"),
+        connect("depth.control", "unipolar.control"),
+    ];
+    let before = app.authored_source().unwrap();
+    let cases: toml::Value = toml::from_str(include_str!(
+        "../../../songs/examples/36-patch-lfo/invalid/depth.toml"
+    ))
+    .unwrap();
+    for case in cases["cases"].as_array().unwrap() {
+        let kind = case["kind"].as_str().unwrap();
+        let mut operations = base.clone();
+        match kind {
+            "missing_signal" => operations.push(disconnect("slow.control", "depth.control")),
+            "missing_amount" => operations.push(disconnect("env.control", "depth.amount")),
+            "bipolar_amount" => {
+                operations.push(disconnect("env.control", "depth.amount"));
+                operations.push(connect("slow.control", "depth.amount"));
+            }
+            "unit_interval_signal" => {
+                operations.push(disconnect("slow.control", "depth.control"));
+                operations.push(connect("env.control", "depth.control"));
+            }
+            "bipolar_to_vca" => {
+                operations.push(disconnect("shape.control", "amp.level"));
+                operations.push(connect("depth.control", "amp.level"));
+            }
+            "duplicate_amount" => operations.push(connect("unipolar.control", "depth.amount")),
+            "signal_cycle" => {
+                operations.push(disconnect("slow.control", "depth.control"));
+                operations.push(connect("depth.control", "depth.control"));
+            }
+            "amount_cycle" => {
+                operations.push(disconnect("env.control", "depth.amount"));
+                operations.push(connect("unipolar.control", "depth.amount"));
+            }
+            "unused_attenuator" => operations.push(PatchOperation::Instantiate {
+                id: "unused".into(),
+                kind: ModuleKind::ControlAttenuate,
+            }),
+            _ => panic!("unexecuted depth negative {kind}"),
+        }
+        assert!(
+            app.dispatch(AppCommand::EditPatch(PatchEdit {
+                synth: "bass".into(),
+                operations
+            }))
+            .is_err(),
+            "accepted {kind}"
+        );
+        assert!(Arc::ptr_eq(&before, &app.authored_source().unwrap()));
+        assert!(app.history().is_empty());
+    }
+}
+
+#[test]
 fn filter_hertz_draft_matches_independent_recurrence_and_fresh_process() {
     use meldritch_dsl::{ControlHertzSettings, PatchEdit, PatchOperation};
     let directory = Directory::new();

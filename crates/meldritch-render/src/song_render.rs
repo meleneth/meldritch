@@ -1974,6 +1974,7 @@ pub fn compile_filtered_note_song(
                 | ModuleKind::ControlMultiply
                 | ModuleKind::PitchModulate
                 | ModuleKind::ControlHertz
+                | ModuleKind::ControlAttenuate
         )
     }) || synth.cables().iter().any(|c| c.to().ends_with(".cutoff"))
     {

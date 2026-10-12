@@ -1,0 +1,18 @@
+[[cases]]
+kind = "missing_signal"
+[[cases]]
+kind = "missing_amount"
+[[cases]]
+kind = "bipolar_amount"
+[[cases]]
+kind = "unit_interval_signal"
+[[cases]]
+kind = "bipolar_to_vca"
+[[cases]]
+kind = "duplicate_amount"
+[[cases]]
+kind = "signal_cycle"
+[[cases]]
+kind = "amount_cycle"
+[[cases]]
+kind = "unused_attenuator"

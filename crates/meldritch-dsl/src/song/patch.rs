@@ -129,7 +129,7 @@ impl ModuleDefinition {
         for direction in [PortDirection::Input, PortDirection::Output] {
             for name in [
                 "pitch", "gate", "control", "audio", "level", "aux", "reset", "left", "right",
-                "cutoff",
+                "cutoff", "amount",
             ] {
                 let endpoint = format!("{}.{}", self.id, name);
                 if let Ok(signal) = resolve_port(
@@ -170,6 +170,7 @@ impl ModuleKind {
             Self::ControlMultiply => "control_multiply",
             Self::PitchModulate => "pitch_modulate",
             Self::ControlHertz => "control_hertz",
+            Self::ControlAttenuate => "control_attenuate",
         }
     }
 }
@@ -298,6 +299,7 @@ impl ValidatedSong {
                 ModuleKind::ControlMultiply => 2,
                 ModuleKind::PitchModulate => 2,
                 ModuleKind::ControlHertz => 2,
+                ModuleKind::ControlAttenuate => 2,
                 _ => 0,
             })
             .sum();

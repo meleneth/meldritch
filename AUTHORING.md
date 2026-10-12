@@ -81,8 +81,8 @@ replay, physical listening and continuous DSP-state migration remain future work
 
 ## Recommended immediate implementation prompt
 
-Continue Slice 3's example 36 from its working tremolo/vibrato/filter checkpoints.
-Add the smallest explicit envelope-controlled modulation-depth path,
+Continue Slice 3's example 36 from its working tremolo/vibrato/filter/depth checkpoints.
+Add the smallest explicit modulator-rate input with deterministic phase integration,
 reusing control_order, ControlPlan, the Lfo kernel, independent pitch/gate voice,
 typed PatchEdit, worker/publication and native save/capture. Do not hard-code a
 destination in Lfo or reinterpret unit-interval level as pitch/Hz. Write the next
@@ -111,6 +111,13 @@ The filter checkpoint adds ControlHertz and low_pass.cutoff, with an explicit
 unit-interval → Hertz affine/clamp transform. Cabled cutoff replaces its configured
 default and rejects overrides on that path. Sample/tail references, typed atomic
 drafts/settings/capture, playing publication and fresh-process PCM are checked.
+
+The depth checkpoint adds ControlAttenuate, an explicit bipolar signal multiplied
+by unit-interval amount. ADSR → amount shapes a shared LFO's depth across pitch and
+amplitude adapters. Drafts, signal references, capture reconstruction and fresh
+reopen pass, including a disconnected-envelope/VCA variant that keeps oscillating
+after the envelope reaches zero. Next: modulatable rate with integrated phase;
+event cadence, broader scopes and continuous DSP migration remain open.
 
 Example 35 now specifies this contract. Its pattern-selection checkpoint is
 implemented: native PgUp/PgDn lowers to SelectPalettePattern, preserves source,

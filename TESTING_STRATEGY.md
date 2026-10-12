@@ -260,6 +260,12 @@ reject. The worker test combines tremolo/vibrato/filter while playing and verifi
 exact stereo publication and invalid-input source/history/publication continuity.
 The legacy automated-filter regression test rejects graph controls on its distinct
 historical lowering, while the unchanged example-02 automation render still passes.
+Depth tests execute the vibrato/depth keyboard drafts, attack/decay/release and
+retrigger references using existing oscillator/ADSR kernels plus independent
+LFO/composition arithmetic, isolated full/split reopen and full typed capture
+reconstruction. A disconnected envelope/VCA variant remains audible after depth
+is zero. All invalid/depth.toml cases preserve source/history. Playing worker tests
+cover combined depth/pitch/filter publication and wrong-amount-unit continuity.
 
 Add later:
 - offline render throughput

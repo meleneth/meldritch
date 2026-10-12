@@ -260,6 +260,12 @@ filter physical limits remain compatible. Authored normalization is still open.
 The historical automated-filter renderer keeps its distinct fixed audio order;
 it rejects graph controls/cutoff cables until those combinations have a supported
 lowering. It must not discard connections or run a parallel graph implementation.
+ControlAttenuate adds bipolar control × unit-interval amount → bipolar control.
+It lowers to the same product kernel as ControlMultiply with different validated
+units, without changing historical unit-interval multiplication. ADSR may shape
+shared modulation depth while the separate VCA connection determines articulation;
+neither the LFO nor attenuator knows a destination. Fan-out evaluates that source
+once per sample/instance. No new event engine or implicit combination is involved.
 Control ModulePort metadata exposes bipolar/unit-interval units and audio cadence;
 scope is explicitly per instance. This is a bounded amplitude/pitch-control extension,
 not general audio DAG execution. Low-pass cutoff/Plaits timbre remain editable

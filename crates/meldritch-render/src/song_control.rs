@@ -74,6 +74,10 @@ impl ControlPlan {
                     left: resolve(&format!("{id}.left"))?,
                     right: resolve(&format!("{id}.right"))?,
                 },
+                ModuleKind::ControlAttenuate => ControlNode::Multiply {
+                    left: resolve(&format!("{id}.control"))?,
+                    right: resolve(&format!("{id}.amount"))?,
+                },
                 ModuleKind::PitchModulate => ControlNode::PitchModulate {
                     input: resolve(&format!("{id}.control"))?,
                     depth_semitones: module.pitch_modulation().unwrap().depth_semitones,

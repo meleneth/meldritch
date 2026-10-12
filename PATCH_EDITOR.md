@@ -11,7 +11,7 @@ Press Ctrl-E, then Ctrl-G. Type a command and Enter to stage it:
 
 | Command | Behavior |
 | --- | --- |
-| `add ID TYPE` | Instantiate oscillator, plaits, adsr, vca, low_pass, audio_output, lfo, control_scale, control_multiply, pitch_modulate or control_hertz with inspectable defaults |
+| `add ID TYPE` | Instantiate oscillator, plaits, adsr, vca, low_pass, audio_output, lfo, control_scale, control_multiply, pitch_modulate, control_hertz or control_attenuate with inspectable defaults |
 | `remove ID reject` | Remove only when no dependent cable remains |
 | `remove ID disconnect` | Explicitly remove the module and all its dependent cables |
 | `connect MODULE.PORT MODULE.PORT` | Connect one compatible output to an unoccupied input |
@@ -55,6 +55,9 @@ That cable replaces the configured cutoff default; the inspector labels the defa
 inactive, and cutoff overrides reject rather than bypassing the cable. Filter
 resonance stays configured/overridable. The existing DSP's physical frequency bound
 still applies after the authored adapter clamp. Configurable normalization is open.
+ControlAttenuate takes bipolar Control at control and unit-interval Control at
+amount, emitting their bipolar product. Ordinary add/connect drafts construct
+envelope-controlled depth; no settings or hidden destination routing are required.
 
 The inspector lists module IDs/types, typed input/output endpoints, authored
 values/ranges, explicit cables and draft validation/compilation diagnostics.

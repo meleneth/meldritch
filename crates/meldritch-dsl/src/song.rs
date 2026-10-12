@@ -50,6 +50,7 @@ pub enum ModuleKind {
     ControlMultiply,
     PitchModulate,
     ControlHertz,
+    ControlAttenuate,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -3272,6 +3273,7 @@ fn parse_synth(path: &Path, raw: RawSynthFile) -> Result<SynthDefinition, SongLo
             "control_multiply" => ModuleKind::ControlMultiply,
             "pitch_modulate" => ModuleKind::PitchModulate,
             "control_hertz" => ModuleKind::ControlHertz,
+            "control_attenuate" => ModuleKind::ControlAttenuate,
             unknown => {
                 return Err(SongLoadError::one(
                     path,
@@ -3824,6 +3826,8 @@ fn resolve_port(
         )
     })?;
     let signal = match (*kind, direction, port) {
+        (ModuleKind::ControlAttenuate, _, "control")
+        | (ModuleKind::ControlAttenuate, PortDirection::Input, "amount") => SignalType::Control,
         (ModuleKind::ControlHertz, _, "control")
         | (ModuleKind::LowPass, PortDirection::Input, "cutoff") => SignalType::Control,
         (ModuleKind::PitchModulate, _, "pitch") => SignalType::Pitch,
