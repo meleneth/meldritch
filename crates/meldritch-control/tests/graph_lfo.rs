@@ -7,6 +7,336 @@ use meldritch_render::{
 };
 use std::{fs, path::PathBuf, sync::Arc};
 const FIXTURE: &str = include_str!("../../../songs/examples/36-patch-lfo/main.project.lua");
+
+#[test]
+fn live_mono_worker_blocks_preserve_existing_pcm_and_u64_event_timing() {
+    use meldritch_render::song_render::{LiveVoiceEvent, LiveVoiceInput, compile_pattern_voice};
+    let directory = Directory::new();
+    let trace: toml::Value = toml::from_str(include_str!(
+        "../../../songs/examples/36-patch-lfo/live-keyboard.toml"
+    ))
+    .unwrap();
+    let origin = trace["origin_frame"].as_integer().unwrap() as u64;
+    let length = trace["length_frames"].as_integer().unwrap() as u64;
+    let events: Vec<_> = trace["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| LiveVoiceEvent {
+            frame: event["frame"].as_integer().unwrap() as u64,
+            input: LiveVoiceInput::Gate(event["high"].as_bool().unwrap()),
+        })
+        .collect();
+    let reset = FIXTURE
+        .replace("reset = \"none\"", "reset = \"gate_rise\"")
+        .replace(
+            "cables = {",
+            "cables = { { from = \"input.gate\", to = \"slow.reset\", signal = \"gate\" },",
+        );
+    let release = FIXTURE.replace(
+        "attack = 0, decay = 0, sustain = 1, release = 0",
+        "attack = 0.01, decay = 0.03, sustain = 0.7, release = 0.03",
+    );
+    let plaits_fm = FIXTURE.replace("kind = \"oscillator\", waveform = \"sine\"",
+        "kind = \"plaits\", plaits = { model = \"fm\", harmonics = 0.5, timbre = 0.5, morph = 0.5 }");
+    let plaits_harmonic = plaits_fm
+        .replace("model = \"fm\"", "model = \"harmonic\"")
+        .replace(
+            "cables = {",
+            "cables = { { from = \"input.gate\", to = \"osc.gate\", signal = \"gate\" },",
+        )
+        .replace("from = \"osc.audio\"", "from = \"osc.aux\"");
+    for (fixture, dynamic_filter) in [
+        (FIXTURE, false),
+        (reset.as_str(), false),
+        (release.as_str(), true),
+        (plaits_fm.as_str(), false),
+        (plaits_harmonic.as_str(), false),
+    ] {
+        let mut app = directory.app();
+        app.enable_native_project_source(load_native_project(&directory.0, fixture).unwrap())
+            .unwrap();
+        if dynamic_filter {
+            app.dispatch(AppCommand::SelectInstrument("bass".into()))
+                .unwrap();
+            app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+            app.dispatch(AppCommand::TogglePatchEditor).unwrap();
+            for script in [
+                include_str!("../../../songs/examples/36-patch-lfo/filter-patch.txt"),
+                include_str!("../../../songs/examples/36-patch-lfo/rate-patch.txt"),
+            ] {
+                for line in script.lines() {
+                    for c in line.chars() {
+                        app.dispatch(AppCommand::PatchCharacter(c)).unwrap();
+                    }
+                    app.dispatch(AppCommand::PatchSubmit).unwrap();
+                }
+            }
+        }
+        let source = app.authored_source().unwrap();
+        let history = app.history().len();
+        let patch =
+            compile_pattern_voice(&source, &source.pattern_voices()["bass-instance"]).unwrap();
+        let expected = patch.render(FrameRange::new(0, length).unwrap()).unwrap();
+        if dynamic_filter {
+            assert!(
+                expected.samples()[84000..]
+                    .iter()
+                    .any(|sample| sample.abs() > 1e-6)
+            );
+        }
+        for partition in [vec![4096], vec![1, 7, 31, 509, 2048], vec![3601, 17, 256]] {
+            let mut live = patch.live_renderer(48, origin).unwrap();
+            let mut actual = Vec::new();
+            let mut index = 0;
+            while live.cursor() < origin + length {
+                let start = live.cursor();
+                let end = (start + partition[index % partition.len()]).min(origin + length);
+                let input: Vec<_> = events
+                    .iter()
+                    .copied()
+                    .filter(|e| e.frame >= start && e.frame < end)
+                    .collect();
+                actual.extend_from_slice(
+                    live.render(FrameRange::new(start, end).unwrap(), &input)
+                        .unwrap()
+                        .samples(),
+                );
+                index += 1;
+            }
+            assert_eq!(actual, expected.samples());
+            assert_eq!(live.cursor(), origin + length);
+        }
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        assert_eq!(history, app.history().len());
+        assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn live_pitch_gate_and_atomic_invalid_block_recovery_follow_explicit_cables() {
+    use meldritch_render::dsp::{AdsrEnvelope, AdsrSettings};
+    use meldritch_render::song_render::{
+        LiveMonoRenderer, LiveVoiceEvent, LiveVoiceInput, compile_pattern_voice,
+    };
+    let directory = Directory::new();
+    let source = load_native_project(
+        &directory.0,
+        &FIXTURE.replace(
+            "attack = 0, decay = 0, sustain = 1, release = 0",
+            "attack = 0.01, decay = 0.03, sustain = 0.7, release = 0.03",
+        ),
+    )
+    .unwrap();
+    let patch = compile_pattern_voice(&source, &source.pattern_voices()["bass-instance"]).unwrap();
+    let events = [
+        LiveVoiceEvent {
+            frame: 50,
+            input: LiveVoiceInput::Pitch(60),
+        },
+        LiveVoiceEvent {
+            frame: 100,
+            input: LiveVoiceInput::Gate(true),
+        },
+        LiveVoiceEvent {
+            frame: 700,
+            input: LiveVoiceInput::Pitch(67),
+        },
+        LiveVoiceEvent {
+            frame: 900,
+            input: LiveVoiceInput::Gate(true),
+        },
+        LiveVoiceEvent {
+            frame: 1500,
+            input: LiveVoiceInput::Gate(false),
+        },
+        LiveVoiceEvent {
+            frame: 1600,
+            input: LiveVoiceInput::Gate(false),
+        },
+    ];
+    let mut live = patch.live_renderer(48, 0).unwrap();
+    let audio = live
+        .render(FrameRange::new(0, 4096).unwrap(), &events)
+        .unwrap();
+    let mut oscillator = Oscillator::new(Waveform::Sine);
+    let mut env = AdsrEnvelope::new(
+        AdsrSettings {
+            attack_seconds: 0.01,
+            decay_seconds: 0.03,
+            sustain_level: 0.7,
+            release_seconds: 0.03,
+        },
+        48000,
+    );
+    let mut pitch = 48;
+    for (frame, actual) in audio.samples().iter().enumerate() {
+        if frame == 50 {
+            pitch = 60;
+        }
+        if frame == 100 || frame == 900 {
+            env.note_on();
+        }
+        if frame == 700 {
+            pitch = 67;
+        }
+        if frame == 1500 {
+            env.note_off();
+        } // Duplicate low must not restart release.
+        let scale = (std::f64::consts::TAU * frame as f64 / 24000.0)
+            .sin()
+            .mul_add(0.5, 0.5);
+        let expected = oscillator.next(440.0 * 2_f64.powf((f64::from(pitch) - 69.0) / 12.0), 48000)
+            * env.next_value()
+            * scale;
+        assert!((actual - expected).abs() < 1e-12, "frame {frame}");
+    }
+    assert!(audio.samples()[50..100].iter().all(|s| *s == 0.0));
+    assert!(audio.samples()[1500..2000].iter().any(|s| s.abs() > 1e-6));
+    assert!(audio.samples()[3000..].iter().all(|s| *s == 0.0));
+    // Held gate crosses authored retriggers/loop boundaries without consuming them.
+    let mut held = patch.live_renderer(48, 0).unwrap();
+    let mut oscillator = Oscillator::new(Waveform::Sine);
+    let mut env = AdsrEnvelope::new(
+        AdsrSettings {
+            attack_seconds: 0.01,
+            decay_seconds: 0.03,
+            sustain_level: 0.7,
+            release_seconds: 0.03,
+        },
+        48000,
+    );
+    env.note_on();
+    for block in 0..25 {
+        let start = block * 4096;
+        let events = if block == 0 {
+            vec![LiveVoiceEvent {
+                frame: 0,
+                input: LiveVoiceInput::Gate(true),
+            }]
+        } else {
+            vec![]
+        };
+        let audio = held
+            .render(FrameRange::new(start, start + 4096).unwrap(), &events)
+            .unwrap();
+        for (relative, actual) in audio.samples().iter().enumerate() {
+            let frame = start + relative as u64;
+            let scale = (std::f64::consts::TAU * frame as f64 / 24000.0)
+                .sin()
+                .mul_add(0.5, 0.5);
+            let expected = oscillator.next(440.0 * 2_f64.powf((48.0 - 69.0) / 12.0), 48000)
+                * env.next_value()
+                * scale;
+            assert!((actual - expected).abs() < 1e-12, "held frame {frame}");
+        }
+    }
+    let mut pristine = patch.live_renderer(48, 4096).unwrap();
+    let mut invalid = patch.live_renderer(48, 4096).unwrap();
+    let pitch = |frame, value| LiveVoiceEvent {
+        frame,
+        input: LiveVoiceInput::Pitch(value),
+    };
+    let cases: toml::Value = toml::from_str(include_str!(
+        "../../../songs/examples/36-patch-lfo/invalid/live-keyboard.toml"
+    ))
+    .unwrap();
+    for case in cases["cases"].as_array().unwrap() {
+        let normal = FrameRange::new(4096, 4200).unwrap();
+        let (range, input) = match case["kind"].as_str().unwrap() {
+            "stale_block" => (FrameRange::new(4095, 4100).unwrap(), vec![]),
+            "empty_block" => (FrameRange::new(4096, 4096).unwrap(), vec![]),
+            "too_long" => (
+                FrameRange::new(4096, 4096 + LiveMonoRenderer::MAX_FRAMES + 1).unwrap(),
+                vec![],
+            ),
+            "late_invalid_pitch" => (normal, vec![pitch(4096, 60), pitch(4097, 128)]),
+            "unordered" => (normal, vec![pitch(4100, 60), pitch(4099, 64)]),
+            "past_event" => (normal, vec![pitch(4095, 60)]),
+            "end_event" => (normal, vec![pitch(4200, 60)]),
+            "event_budget" => (
+                normal,
+                vec![pitch(4096, 60); LiveMonoRenderer::MAX_EVENTS + 1],
+            ),
+            kind => panic!("unexecuted live negative {kind}"),
+        };
+        assert!(invalid.render(range, &input).is_err());
+        assert_eq!(invalid.cursor(), 4096);
+    }
+    let valid = [LiveVoiceEvent {
+        frame: 4096,
+        input: LiveVoiceInput::Gate(true),
+    }];
+    let range = FrameRange::new(4096, 8192).unwrap();
+    assert_eq!(
+        invalid.render(range, &valid).unwrap().samples(),
+        pristine.render(range, &valid).unwrap().samples()
+    );
+    assert!(patch.live_renderer(128, 0).is_err());
+    let poly = load_native_project(
+        &directory.0,
+        &FIXTURE.replace("polyphony = 1", "polyphony = 2"),
+    )
+    .unwrap_err();
+    assert!(poly.contains("mono"));
+    let legacy = meldritch_dsl::load_song_directory(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../songs/examples/26-apc-note-pattern"),
+    )
+    .unwrap();
+    let poly = meldritch_render::song_render::compile_note_song(&legacy).unwrap();
+    assert!(poly.live_renderer(48, 0).is_err());
+
+    // Removing authored envelope/VCA wiring allows oscillation despite a low gate.
+    let mut app = directory.app();
+    app.enable_native_project_source(source).unwrap();
+    app.dispatch(AppCommand::EditPatch(meldritch_dsl::PatchEdit {
+        synth: "bass".into(),
+        operations: vec![
+            meldritch_dsl::PatchOperation::Remove {
+                id: "shape".into(),
+                cables: meldritch_dsl::DependentCables::Disconnect,
+            },
+            meldritch_dsl::PatchOperation::Connect {
+                from: "unipolar.control".into(),
+                to: "amp.level".into(),
+            },
+        ],
+    }))
+    .unwrap();
+    let source = app.authored_source().unwrap();
+    let free = compile_pattern_voice(&source, &source.pattern_voices()["bass-instance"]).unwrap();
+    let mut low = free.live_renderer(48, 0).unwrap();
+    let block = low
+        .render(
+            FrameRange::new(0, 4096).unwrap(),
+            &[
+                LiveVoiceEvent {
+                    frame: 100,
+                    input: LiveVoiceInput::Gate(true),
+                },
+                LiveVoiceEvent {
+                    frame: 200,
+                    input: LiveVoiceInput::Gate(false),
+                },
+            ],
+        )
+        .unwrap();
+    assert!(block.samples()[0..100].iter().any(|s| s.abs() > 0.1));
+    assert!(block.samples()[3000..].iter().any(|s| s.abs() > 0.1));
+    let mut high_origin = free.live_renderer(48, u64::MAX - 4096).unwrap();
+    let mut zero_origin = free.live_renderer(48, 0).unwrap();
+    assert_eq!(
+        high_origin
+            .render(FrameRange::new(u64::MAX - 4096, u64::MAX).unwrap(), &[])
+            .unwrap()
+            .samples(),
+        zero_origin
+            .render(FrameRange::new(0, 4096).unwrap(), &[])
+            .unwrap()
+            .samples()
+    );
+    assert_eq!(high_origin.cursor(), u64::MAX);
+}
 struct Directory(PathBuf);
 impl Directory {
     fn new() -> Self {

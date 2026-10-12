@@ -130,6 +130,12 @@ worker publication and save/reopen are checked headlessly. Host MicroLab discove
 and connection were observed. Live key-held input, sustain/bend routing, timed
 recording and physical gestures/listening remain open; prioritize the runtime
 pitch/gate keyboard slice alongside the modulation queue.
+The live renderer foundation now extracts shared MonoState from the existing
+offline mono kernel. LiveMonoRenderer accepts bounded sequential u64 Pitch/Gate
+blocks and carries oscillator/envelope/filter/control state between blocks.
+Partition/offline equality, independent signals, invalid-block recovery and
+FM/harmonic Plaits are checked headlessly. Streaming publication, app-owned
+keyboard lifecycle and device audition remain open; reuse this renderer next.
 Example 35's native pattern-selection checkpoint is implemented: PgUp/PgDn
 selects palette material without rebinding, source/runtime mutation or rerender;
 typed capture and independent-source persistence/render tests pass. Its full

@@ -84,7 +84,9 @@ replay, physical listening and continuous DSP-state migration remain future work
 User-prioritized keyboard work: MicroLab mk3 now has native construction pattern
 step entry, explicit device selection and a decoded-input diagnostic. Next author
 the smallest explicit live keyboard Pitch/Gate binding and a runtime mono-note
-audition contract. Reuse the existing voice compiler, scheduler and safe worker/
+audition contract. LiveMonoRenderer now provides the shared incremental mono
+kernel with independent u64 Pitch/Gate events and proved block-state continuity.
+Reuse it with the existing voice compiler, scheduler and safe worker/
 publication boundary. Key-held performance must not rewrite saved patterns or
 patch defaults. Prove retrigger/release, zero-velocity release, overflow/disconnect/
 target cleanup, source/runtime separation and deterministic capture; report

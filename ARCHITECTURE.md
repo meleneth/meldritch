@@ -272,6 +272,15 @@ cycles. A 32-phase worker stack integrates cabled rate: reset authored phase fir
 evaluate current phase, then advance by this sample's Hertz/sample-rate. Static
 rate retains the absolute-frame kernel. Multiple Hertz adapters may feed distinct
 consumers; cutoff lowering resolves its actual cable rather than the first adapter.
+`song_render::mono::MonoState` now holds the shared mono DSP execution kernel.
+Offline rendering retains its pre-roll/scheduling behavior; LiveMonoRenderer
+advances that same state through 1..4096-frame worker blocks with at most 128
+prevalidated independent Pitch/Gate events. Absolute event frames/cursor are u64;
+each fresh instance's modulation age begins at zero at its explicit origin.
+State survives block boundaries, but this does not migrate state across graph
+revisions. Invalid blocks cannot partially change oscillator/envelope/filter/control
+history. Runtime input ownership, scheduling, streaming publication and device
+audition remain open; the current native device host still loops finite PCM.
 Control ModulePort metadata exposes bipolar/unit-interval units and audio cadence;
 scope is explicitly per instance. This is a bounded amplitude/pitch-control extension,
 not general audio DAG execution. Low-pass cutoff is now a typed signal input;

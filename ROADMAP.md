@@ -163,6 +163,11 @@ separation, bounded worker/callback scheduling and deterministic capture. Show
 measured latency and listening evidence separately. Sustain/bend must have authored
 routing; do not emulate live audition by rewriting patterns or looping a held-note
 PCM buffer. Reuse the existing voice compiler and scheduler, not a second engine.
+The renderer prerequisite now exists: LiveMonoRenderer shares MonoState with the
+offline mono renderer and preserves DSP across bounded, prevalidated u64 blocks.
+Varied partitions exactly match offline tremolo/reset/rate/filter/release and
+FM/harmonic Plaits; independent pitch/gate and atomic rejection are checked.
+Device-facing streaming publication and runtime input lifecycle remain next.
 
 ### 4. Normalled patch and an atomic dynamic interface recipe
 

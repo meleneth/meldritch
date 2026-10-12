@@ -1,0 +1,25 @@
+# Worker-renderer checkpoint: native patterns remain authored and untouched.
+# Independent pitch and gate events; same-frame entries keep their listed order.
+initial_pitch = 48
+origin_frame = 5000000000
+length_frames = 96000
+[[events]]
+frame = 5000000000
+kind = "gate"
+high = true
+[[events]]
+frame = 5000036000
+kind = "gate"
+high = false
+[[events]]
+frame = 5000036000
+kind = "gate"
+high = true
+[[events]]
+frame = 5000084000
+kind = "gate"
+high = false
+
+# This matches the base fixture's independent rhythm for one bar. Further tests
+# change pitch under a held gate, retrigger, release/tail and render many block sizes.
+# No MIDI callback/audio-device integration is claimed by this renderer checkpoint.

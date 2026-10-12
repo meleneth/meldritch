@@ -1,0 +1,17 @@
+# Rejections preserve cursor and oscillator/envelope/filter/control state.
+[[cases]]
+kind = "stale_block"
+[[cases]]
+kind = "empty_block"
+[[cases]]
+kind = "too_long"
+[[cases]]
+kind = "late_invalid_pitch"
+[[cases]]
+kind = "unordered"
+[[cases]]
+kind = "past_event"
+[[cases]]
+kind = "end_event"
+[[cases]]
+kind = "event_budget"

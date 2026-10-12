@@ -194,6 +194,42 @@ Keyboard transport tests cover unique matching and bounded overflow/epochs.
 MicroLab mk3 port discovery and a real input connection were observed; physical
 gestures/listening and reconnect interactions remain unverified.
 
+## Live keyboard renderer checkpoint
+
+live-keyboard.toml specifies independent timed Gate events at a u64 origin beyond
+u32, matching the existing fixture's rhythm without consuming or changing its
+patterns. Extract one shared mono DSP state/kernel from CompiledNotePatch; the
+offline renderer and incremental worker renderer must execute that same kernel.
+The live renderer starts a fresh instance at its declared origin, holding initial
+Pitch and low Gate. Modulator age starts at zero there. Pitch changes do not
+articulate; repeated high Gate explicitly retriggers; duplicate low Gate is
+idempotent. Neither Gate nor keyboard release implicitly owns VCA amplitude:
+the compiled cables determine it. This checkpoint has no velocity adapter yet.
+
+Live blocks are sequential, at most 4096 frames, with at most 128 prevalidated
+events. Events stay inside the block and in nondecreasing absolute frame order;
+same-frame order is stable. Validate the complete block before state mutation.
+Invalid range/order/pitch/budget must preserve the next cursor and all DSP state.
+No re-preroll, looped held-note PCM or DSP in device callbacks is acceptable.
+Retain oscillator/ADSR/filter/control phase and history across blocks. Mono only;
+reject polyphonic live lowering. Existing worker-side Plaits resources/kernels
+are reused, but physical listening and continuous graph-state migration stay open.
+
+Required evidence: exact existing offline PCM, varied block partitions, pitch
+under held Gate, explicit retrigger/reset, envelope release/filter tail and variable
+LFO phase continuity, invalid-block recovery, u64 timeline and unchanged source.
+Device-facing live MIDI routing, key lifecycle/cleanup, streaming publication,
+audition, sustain/bend and timed capture remain unimplemented in this checkpoint.
+
+Evidence: live_mono_worker_blocks_preserve_existing_pcm_and_u64_event_timing checks
+varied partitions against existing offline PCM for tremolo, cabled reset,
+modulated rate/filter/release and FM/harmonic Plaits. Source/history/files remain
+unchanged. live_pitch_gate_and_atomic_invalid_block_recovery_follow_explicit_cables
+checks independent pitch/gate references, release/retrigger, free amplitude wiring,
+all invalid/live-keyboard.toml cases, polyphonic rejection and origins near u64::MAX.
+DSP state/cursor are ephemeral worker state; authored saves retain their existing
+meaning. There is no serialized live-state/replay or graph revision continuity yet.
+
 ## Remaining full Slice 3 contract
 
 Broader explicit addition/clamping,

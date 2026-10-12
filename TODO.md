@@ -86,6 +86,9 @@ an empty project requires no Git repository or initialization.
 - [ ] Next keyboard slice: explicit live Pitch/Gate source bindings and runtime
   key-held audition, note lifecycle/overflow/disconnect cleanup and capture;
   then authored sustain/bend/control routing and timed recording
+- [x] Keyboard renderer foundation: one shared mono kernel for offline/incremental
+  worker execution, independent bounded u64 Pitch/Gate blocks, preserved DSP state,
+  exact partition/offline references and atomic invalid-block recovery
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
 - [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
 - [ ] Slice 6: quantized graph activation and proved compatible DSP-state continuity
@@ -451,6 +454,23 @@ Keyboard verification: focused native/transport tests, offline workspace suite,
 affected all-targets Clippy with existing allowances, formatting/diff and VitePress.
 Headless tests preserve independent gate binding, note identities/velocity, source
 and published audio on rejection, and reconstruct every captured fingerprint.
+
+Live keyboard renderer foundation extracts MonoState from CompiledNotePatch's
+existing mono sample path. LiveMonoRenderer owns the same oscillator, ADSR, filter
+and control arrays across sequential blocks; it does not rerender held-note loops.
+Fresh instances start at an explicit u64 origin with local modulation age zero.
+Pitch and Gate events stay independent; duplicate low is idempotent, high retriggers,
+and authored cables determine amplitude. Blocks prevalidate 1..4096 frames and
+at most 128 ordered/in-range events before any state change. Tests compare varied
+partitions to existing offline PCM, including cabled reset, rate/filter/release,
+FM/harmonic Plaits, and check independent references, all invalid contracts,
+polyphonic rejection, free amplitude wiring and origins near u64::MAX.
+No app/source/capture/device code changes in this checkpoint; streaming publication,
+explicit keyboard runtime bindings/lifecycle, live audition and timed capture
+remain next. Worker DSP state is ephemeral; authored persistence is unchanged.
+Verification: offline workspace suite and focused live renderer tests, affected
+all-targets Clippy with existing allowances, formatting/diff checks and VitePress
+pass. Historical 09/29 fingerprints remain `41472b38b65b60ed` / `54745c74a42665cf`.
 
 Investigation and ownership decisions: [AUTHORING.md](AUTHORING.md). The first
 implemented slice is [the instrument editor](INSTRUMENT_EDITOR.md): example 25

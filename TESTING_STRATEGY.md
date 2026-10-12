@@ -280,6 +280,14 @@ publication, native capture reconstruction and save/reopen. Pure transport tests
 check unique matching and bounded queue overflow. CLI parsing rejects keyboard
 input with --check and invalid CC ranges. Physical MicroLab discovery/connection
 was observed separately; these tests do not accept key-held audition or gestures.
+`cargo test -p meldritch-control --test graph_lfo live_` proves the incremental
+mono renderer prerequisite: varied bounded partitions equal existing offline PCM
+for tremolo/reset, rate/filter/release and FM/harmonic Plaits. Independent sample
+references cover pitch under held gate, retrigger and idempotent low/release.
+All invalid/live-keyboard.toml cases preserve state through subsequent valid
+rendering. Polyphonic live construction rejects, free amplitude wiring remains
+audible under low gate, and absolute origins beyond u32/near u64::MAX work.
+Source/history/files remain unchanged; no MIDI/device live audition is implied.
 
 Add later:
 - offline render throughput

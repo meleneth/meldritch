@@ -13,6 +13,8 @@ use meldritch_dsl::{
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+mod mono;
+pub use mono::{LiveMonoRenderer, LiveVoiceEvent, LiveVoiceInput};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompiledDronePatch {
@@ -781,29 +783,12 @@ impl CompiledNotePatch {
             frames: frame_count,
         })?;
         let mut block = AudioBlock::silent(self.channels, frames);
-        let mut oscillator = NoteOscillator::new(self.waveform, self.plaits);
-        let mut envelope = AdsrEnvelope::new(self.envelope, self.sample_rate);
-        let mut filter = StateVariableFilter::new();
-        let mut frequency = self
-            .independent_signals
-            .as_ref()
-            .map_or(440.0, |signals| midi_frequency(signals.initial_pitch));
-        let mut velocity = if self.independent_signals.is_some() {
-            1.0
-        } else {
-            0.0
-        };
+        let mut state = mono::MonoState::new(self)?;
         let mut active_end = None;
-        let mut control_values = [0.0; 33];
-        let mut control_origins = [0; 32];
-        let mut control_phases = [0.0; 32];
-        let control_tempo = meldritch_core::Tempo::new(self.bpm, self.sample_rate)
-            .map_err(|e| SongRenderError::InvalidPatternVoice(e.to_string()))?;
         for absolute_frame in 0..range.end() {
             let mut gate_rise = false;
             if active_end == Some(absolute_frame) {
-                envelope.note_off();
-                oscillator.note_off();
+                state.gate_off();
                 active_end = None;
             }
             let pattern_frame = if self.looped {
@@ -812,8 +797,7 @@ impl CompiledNotePatch {
                 absolute_frame
             };
             if self.looped && absolute_frame > 0 && pattern_frame == 0 {
-                envelope.note_off();
-                oscillator.note_off();
+                state.gate_off();
                 active_end = None;
             }
             if let Some(signals) = &self.independent_signals {
@@ -824,15 +808,14 @@ impl CompiledNotePatch {
                     .iter()
                     .filter(|event| event.start == pattern_frame)
                 {
-                    frequency = midi_frequency(event.note);
+                    state.frequency = midi_frequency(event.note);
                 }
                 for event in signals
                     .gate
                     .iter()
                     .filter(|event| event.start == pattern_frame)
                 {
-                    envelope.note_on();
-                    oscillator.note_on(1.0);
+                    state.gate_on(1.0);
                     gate_rise = true;
                     active_end = Some(absolute_frame + (event.end - event.start));
                 }
@@ -842,50 +825,19 @@ impl CompiledNotePatch {
                     .iter()
                     .filter(|event| event.start == pattern_frame)
                 {
-                    frequency = midi_frequency(event.note);
-                    velocity = event.velocity;
-                    envelope.note_on();
-                    oscillator.note_on(velocity);
+                    state.frequency = midi_frequency(event.note);
+                    state.gate_on(event.velocity);
                     gate_rise = true;
                     active_end = Some(absolute_frame + (event.end - event.start));
                 }
             }
-            // The compiled cables route VCA into the optional filter.
-            let envelope_value = envelope.next_value();
-            let level = self.control.as_ref().map_or(envelope_value, |plan| {
-                plan.value_at(
-                    absolute_frame,
-                    gate_rise,
-                    envelope_value,
-                    control_tempo,
-                    &mut control_values,
-                    &mut control_origins,
-                    &mut control_phases,
-                )
-            });
-            // The pitch adapter explicitly adds its semitone offset to the bound
-            // absolute pitch. It never changes the independent gate lifecycle.
-            let modulated_frequency = self
-                .control
-                .as_ref()
-                .and_then(|plan| plan.pitch_offset)
-                .map_or(frequency, |index| {
-                    frequency * 2_f64.powf(control_values[index] / 12.0)
-                });
-            let mut sample =
-                oscillator.next(modulated_frequency, self.sample_rate) * level * velocity;
-            if let Some(filter_settings) = &self.filter {
-                sample = filter.process(
-                    sample,
-                    self.control.as_ref().and_then(|plan| plan.cutoff).map_or(
-                        cutoff_override.unwrap_or(filter_settings.cutoff_hz),
-                        |index| control_values[index],
-                    ),
-                    resonance_override.unwrap_or(filter_settings.resonance),
-                    FilterMode::LowPass,
-                    self.sample_rate,
-                );
-            }
+            let sample = state.next_sample(
+                self,
+                absolute_frame,
+                gate_rise,
+                cutoff_override,
+                resonance_override,
+            );
             if absolute_frame < range.start() {
                 continue;
             }
