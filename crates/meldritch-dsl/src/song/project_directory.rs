@@ -60,6 +60,8 @@ pub(super) fn empty_project_source(root: &Path) -> ValidatedSong {
         parameter_patterns: BTreeMap::new(),
         dsps: BTreeMap::new(),
         pattern_voices: BTreeMap::new(),
+        compositions: BTreeMap::new(),
+        selected_composition: None,
         fingerprint: 0,
     };
     source.refresh_authoring_fingerprint();

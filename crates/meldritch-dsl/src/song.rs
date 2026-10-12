@@ -21,6 +21,8 @@ mod native_project;
 pub use native_project::*;
 mod voices;
 pub use voices::*;
+mod compositions;
+pub use compositions::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1264,6 +1266,8 @@ pub struct ValidatedSong {
     parameter_patterns: BTreeMap<String, ParameterPatternDefinition>,
     dsps: BTreeMap<String, DspDefinition>,
     pattern_voices: BTreeMap<String, PatternVoiceDefinition>,
+    compositions: BTreeMap<String, CompositionDefinition>,
+    selected_composition: Option<String>,
     fingerprint: u64,
 }
 
@@ -3178,6 +3182,8 @@ pub fn load_song_directory(path: impl AsRef<Path>) -> Result<ValidatedSong, Song
         parameter_patterns,
         dsps,
         pattern_voices: BTreeMap::new(),
+        compositions: BTreeMap::new(),
+        selected_composition: None,
         fingerprint,
     })
 }

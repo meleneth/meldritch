@@ -618,6 +618,9 @@ pub fn session_result_fields(
             None,
             None,
         ),
+        meldritch_app::AppCommandResult::CompositionEdited { composition, .. } => {
+            ("composition".into(), Some(composition.clone()), None, None)
+        }
         meldritch_app::AppCommandResult::ParameterEdited { target, .. } => (
             "authored_parameter".into(),
             Some(target.identity()),

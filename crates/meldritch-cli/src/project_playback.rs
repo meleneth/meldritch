@@ -24,6 +24,14 @@ pub(crate) struct NativeProjectAudio {
 }
 
 impl NativeProjectAudio {
+    fn require_prepared_audio(&self, source: &meldritch_app::ValidatedSong) -> Result<(), String> {
+        if source.fingerprint() != self.submitted_fingerprint
+            || self.ready_generation != Some(self.host.generation())
+        {
+            return Err("latest audio is still preparing; press Space again when ready".into());
+        }
+        Ok(())
+    }
     #[cfg(test)]
     pub(crate) fn new(app: &AppController, engine: PlaybackEngine) -> Result<Self, String> {
         let source = app.authored_source().ok_or("no authored project source")?;
@@ -45,7 +53,7 @@ impl NativeProjectAudio {
         let (publisher, reader) = audio_publication(initial);
         let patch = CompiledSongPatch::compile_initial(&source)?;
         let mut host = SongAudioHost::new(source.as_ref().clone(), patch, publisher, frames, 6000);
-        if !source.pattern_voices().is_empty() {
+        if !source.pattern_voices().is_empty() || !source.compositions().is_empty() {
             for voice in source.pattern_voices().values() {
                 if !voice.looped || source.authoring_frame(voice.length_ticks)? != u64::from(frames)
                 {
@@ -131,6 +139,7 @@ impl ProjectPlaybackHost for NativeProjectAudio {
                 source
                     .validate_output_level_control(voice, control)
                     .ok()
+                    .filter(|voice| source.is_pattern_voice_active(&voice.id))
                     .map(|_| (voice.clone(), *value))
             })
             .collect();
@@ -151,12 +160,10 @@ impl ProjectPlaybackHost for NativeProjectAudio {
         }
         self.poll(app)?;
         let source = app.authored_source().ok_or("no authored project source")?;
-        if source.pattern_voices().is_empty() {
+        if source.pattern_voices().is_empty() && source.selected_composition().is_none() {
             return Err("create an explicit patch instance with v before playback".into());
         }
-        if self.ready_generation != Some(self.host.generation()) {
-            return Err("latest audio is still preparing; press Space again when ready".into());
-        }
+        self.require_prepared_audio(&source)?;
         if self.stream.is_none() {
             let engine = self.engine.take().ok_or("device initialization failed; playback is unavailable in this cockpit; authored edits are retained")?;
             self.stream = Some(RealtimePlaybackSession::open_default(
@@ -211,6 +218,121 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
         let project = meldritch_dsl::load_project_directory(&path).unwrap();
         ProjectFixture { path, project }
+    }
+
+    #[test]
+    fn native_composition_transition_requires_stopped_transport_and_prepared_audio() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let project = project();
+        let source = meldritch_control::native_project::load_native_project(
+            project.root(),
+            include_str!(
+                "../../../songs/examples/35-project-palette-routing/compositions.project.lua"
+            ),
+        )
+        .unwrap();
+        let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
+        app.enable_native_project_source(source).unwrap();
+        let mut host = NativeProjectAudio::new(&app, engine).unwrap();
+        let ready = |app: &mut AppController, host: &mut NativeProjectAudio| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                host.poll(app).unwrap();
+                if host
+                    .require_prepared_audio(&app.authored_source().unwrap())
+                    .is_ok()
+                {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "composition render timeout");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        app.dispatch(AppCommand::SetOutputLevel {
+            voice: "bass-copy".into(),
+            control: "level".into(),
+            value: Some(0.2),
+        })
+        .unwrap();
+        ready(&mut app, &mut host);
+        let mut callback = PublishedAudioRenderer::from_engine(
+            host.reader.clone(),
+            2,
+            u32::MAX,
+            host.engine.take().unwrap(),
+        )
+        .unwrap();
+        let source = app.authored_source().unwrap();
+        let published = host.reader.snapshot();
+        let generation = host.host.generation();
+        let next = |app: &AppController, code| {
+            meldritch_tui::project_composition_command(
+                KeyEvent::new(code, KeyModifiers::NONE),
+                &app.view_model(),
+                &app.authored_source().unwrap(),
+            )
+            .unwrap()
+        };
+        app.dispatch(AppCommand::Play).unwrap();
+        let mut samples = vec![0.0; 512];
+        callback.render_f64(&mut samples);
+        let history = app.history().len();
+        assert!(app.dispatch(next(&app, KeyCode::F(8))).is_err());
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        assert!(Arc::ptr_eq(&published, &host.reader.snapshot()));
+        assert_eq!(host.host.generation(), generation);
+        assert_eq!(app.history().len(), history);
+        app.dispatch(AppCommand::Stop).unwrap();
+        // Stop must be observed by the callback, not merely queued.
+        assert!(app.dispatch(next(&app, KeyCode::F(8))).is_err());
+        callback.render_f64(&mut samples);
+        app.dispatch(next(&app, KeyCode::F(8))).unwrap();
+        let selected = app.authored_source().unwrap();
+        assert_eq!(selected.selected_composition(), Some("pulse"));
+        assert_eq!(selected.synths(), source.synths());
+        assert!(Arc::ptr_eq(&published, &host.reader.snapshot()));
+        assert!(
+            host.require_prepared_audio(&selected)
+                .unwrap_err()
+                .contains("still preparing")
+        );
+        ready(&mut app, &mut host);
+        assert!(!Arc::ptr_eq(&published, &host.reader.snapshot()));
+        assert_eq!(app.view_model().transport.state, TransportState::Stopped);
+        assert_eq!(
+            app.output_levels()
+                .get(&("bass-copy".into(), "level".into())),
+            Some(&0.2)
+        );
+        // Inactive held-composition gain is retained but cannot contaminate pulse.
+        let expected = CompiledSongPatch::compile_initial(&selected)
+            .unwrap()
+            .render_default(meldritch_core::FrameRange::new(0, u64::from(host.frames)).unwrap())
+            .unwrap();
+        for (frame, sample) in expected.samples().iter().enumerate() {
+            assert_eq!(
+                host.reader.snapshot().frame(frame as u32).unwrap(),
+                &[*sample, *sample]
+            );
+        }
+        host.save_project(&mut app).unwrap();
+        app.dispatch(AppCommand::Play).unwrap();
+        callback.render_f64(&mut samples);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.01));
+        app.dispatch(AppCommand::Stop).unwrap();
+        callback.render_f64(&mut samples);
+        app.dispatch(next(&app, KeyCode::F(7))).unwrap();
+        ready(&mut app, &mut host);
+        assert_eq!(
+            app.authored_source().unwrap().selected_composition(),
+            Some("held")
+        );
+        assert_eq!(
+            app.output_levels()
+                .get(&("bass-copy".into(), "level".into())),
+            Some(&0.2)
+        );
+        host.finish(&app).unwrap();
     }
 
     #[test]

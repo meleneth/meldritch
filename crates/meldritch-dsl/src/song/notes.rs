@@ -473,6 +473,7 @@ impl ValidatedSong {
             &self.sample_banks,
         );
         self.fingerprint_pattern_voices();
+        self.fingerprint_compositions();
     }
 }
 

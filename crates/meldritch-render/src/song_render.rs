@@ -1663,6 +1663,10 @@ fn compile_mixed_note_song_with_track_patterns_transposes_and_included_lanes(
     }
     for voice in song.pattern_voices().values() {
         let patch = compile_pattern_voice(song, voice)?;
+        // Validate inactive definitions too; membership only controls inclusion.
+        if !song.is_pattern_voice_active(&voice.id) {
+            continue;
+        }
         if channels.is_some_and(|channels| {
             patch.channels != channels && !(patch.channels <= 2 && channels <= 2)
         }) {

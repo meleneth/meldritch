@@ -19,6 +19,10 @@ pub struct NativeProjectDefinition {
     pub patches: Vec<SynthDefinition>,
     pub patterns: Vec<PatternMaterial>,
     pub voices: Vec<PatternVoiceDefinition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compositions: Vec<CompositionDefinition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_composition: Option<String>,
 }
 
 impl ValidatedSong {
@@ -27,8 +31,21 @@ impl ValidatedSong {
         root: impl AsRef<Path>,
         definition: &NativeProjectDefinition,
     ) -> Result<Self, String> {
-        if definition.kind != "project" || definition.version != 2 {
+        if definition.kind != "project" || !matches!(definition.version, 2 | 3) {
             return Err("unsupported self-contained project kind/version".into());
+        }
+        if definition.version == 2
+            && (!definition.compositions.is_empty() || definition.selected_composition.is_some())
+        {
+            return Err("named compositions require project version 3".into());
+        }
+        if definition.version == 3
+            && (definition.compositions.is_empty() || definition.selected_composition.is_none())
+        {
+            return Err("project version 3 requires compositions and explicit selection".into());
+        }
+        if definition.compositions.len() > 32 {
+            return Err("composition limit is 32".into());
         }
         let metadata = &definition.project;
         if metadata.id.is_empty()
@@ -68,6 +85,12 @@ impl ValidatedSong {
         for voice in &definition.voices {
             source = source.create_pattern_voice(voice.clone())?;
         }
+        for composition in &definition.compositions {
+            source = source.create_composition(composition.clone())?;
+        }
+        if let Some(id) = &definition.selected_composition {
+            source = source.select_composition(id)?;
+        }
         source.refresh_authoring_fingerprint();
         Ok(source)
     }
@@ -76,7 +99,7 @@ impl ValidatedSong {
     pub fn native_project_definition(&self) -> Result<NativeProjectDefinition, String> {
         let definition = NativeProjectDefinition {
             kind: "project".into(),
-            version: 2,
+            version: if self.compositions.is_empty() { 2 } else { 3 },
             project: NativeProjectMetadata {
                 id: self.performance.id.clone(),
                 title: self.performance.title.clone(),
@@ -90,6 +113,8 @@ impl ValidatedSong {
                 .map(|id| self.pattern_material(id))
                 .collect::<Result<_, _>>()?,
             voices: self.pattern_voices.values().cloned().collect(),
+            compositions: self.compositions.values().cloned().collect(),
+            selected_composition: self.selected_composition.clone(),
         };
         // Equality covers metadata and source maps that this bounded format omits.
         // It also protects against unsupported sample transforms and tick rounding.

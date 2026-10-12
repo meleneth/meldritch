@@ -30,8 +30,7 @@ pub fn project_level_command(
         return None;
     }
     let controls: Vec<_> = source
-        .pattern_voices()
-        .values()
+        .active_pattern_voices()
         .filter(|voice| {
             source.synths()[&voice.synth]
                 .output_level_control()
@@ -72,6 +71,51 @@ pub fn project_level_command(
         control,
         value,
     })
+}
+
+pub fn project_composition_command(
+    key: KeyEvent,
+    view: &AppViewModel,
+    source: &ValidatedSong,
+) -> Option<AppCommand> {
+    if key.kind != KeyEventKind::Press
+        || key.modifiers != KeyModifiers::NONE
+        || view.cockpit_mode == meldritch_app::CockpitMode::Performance
+        || view
+            .instrument_editor
+            .as_ref()
+            .is_some_and(|editor| editor.visible)
+        || view
+            .palette_pattern_editor
+            .as_ref()
+            .is_some_and(|editor| editor.visible)
+    {
+        return None;
+    }
+    if key.code == KeyCode::Char('b') {
+        let id = (1..=33)
+            .map(|index| format!("composition-{index}"))
+            .find(|id| !source.compositions().contains_key(id))?;
+        return Some(AppCommand::CreateComposition(
+            meldritch_app::CompositionDefinition {
+                id,
+                voices: source.pattern_voices().keys().cloned().collect(),
+            },
+        ));
+    }
+    if !matches!(key.code, KeyCode::F(7) | KeyCode::F(8)) {
+        return None;
+    }
+    let ids: Vec<_> = source.compositions().keys().collect();
+    let current = ids
+        .iter()
+        .position(|id| Some(id.as_str()) == source.selected_composition())?;
+    let next = if key.code == KeyCode::F(8) {
+        (current + 1) % ids.len()
+    } else {
+        (current + ids.len() - 1) % ids.len()
+    };
+    Some(AppCommand::SelectComposition(ids[next].clone()))
 }
 
 /// Composition relationships are deliberate typed actions, separate from creation.
@@ -434,7 +478,10 @@ fn draw_project_construction_selected(
     selected: Option<&str>,
     selected_pattern: Option<&str>,
 ) {
-    if source.synths().is_empty() && source.note_patterns().is_empty() {
+    if source.synths().is_empty()
+        && source.note_patterns().is_empty()
+        && source.compositions().is_empty()
+    {
         draw_empty_project(frame, view);
         let area = frame.area();
         if !status.is_empty() && area.height > 2 {
@@ -461,13 +508,22 @@ fn draw_project_construction_selected(
         Line::from(
             "n/c: patch/pattern · Ctrl-E/N: editors · Space: play · Ctrl-Tab mode · q: quit",
         ),
-        Line::from("Ctrl-S/F6: save project · capture does not replace saving"),
+        Line::from("Ctrl-S/F6: save · b: name composition · capture does not replace saving"),
         Line::from(format!(
             "Pattern: {} · PgUp/PgDn select (bindings unchanged)",
             selected_pattern.unwrap_or("none")
         )),
         Line::from(status.to_owned()),
     ];
+    if let Some(selected) = source.selected_composition() {
+        lines.push(Line::from(format!(
+            "Composition: {selected} · members: {}",
+            source.compositions()[selected].voices.join(", ")
+        )));
+        lines.push(Line::from(
+            "b: snapshot all instances · F7/F8: composition (stop first)",
+        ));
+    }
     if !source.pattern_voices().is_empty() {
         lines.push(Line::from(
             "v: instance · p/g: pitch/gate binding · x: expose level",
@@ -602,15 +658,21 @@ fn draw_project_performance(
         )),
         Line::from(format!(
             "{} active patch instances · Authored definitions retained",
-            source.pattern_voices().len()
+            source.active_pattern_voices().count()
         )),
         Line::from("Space: play/stop · Ctrl-Tab: construction · q/Esc: quit"),
         Line::from("Up/Down: select · Left/Right: level · Home: mute · End: default"),
         Line::from("Ctrl-S/F6: save project · capture does not replace saving"),
         Line::from(status.to_owned()),
     ];
+    lines.push(Line::from(format!(
+        "Composition: {}",
+        source
+            .selected_composition()
+            .unwrap_or("implicit (all instances)")
+    )));
     let mut count = 0;
-    for voice in source.pattern_voices().values() {
+    for voice in source.active_pattern_voices() {
         if let Some(control) = source.synths()[&voice.synth].output_level_control() {
             count += 1;
             let value = model
@@ -770,6 +832,13 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                     continue;
                 }
                 if let Some(command) =
+                    project_composition_command(key, &model, &app.authored_source().unwrap())
+                {
+                    status = match app.dispatch(command) {
+                        Ok(result) => command_result_text(&result),
+                        Err(error) => format!("Composition rejected; source retained: {error:?}"),
+                    };
+                } else if let Some(command) =
                     project_binding_command(key, &model, &app.authored_source().unwrap())
                 {
                     status = match app.dispatch(command) {
@@ -840,6 +909,94 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
 mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
+
+    #[test]
+    fn native_named_compositions_are_visible_and_keys_respect_editor_modes() {
+        let project = meldritch_dsl::load_project_directory(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../songs/examples/35-project-palette-routing"),
+        )
+        .unwrap();
+        let (mut app, _) = AppController::new_empty_project(&project).unwrap();
+        let press = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let command = project_composition_command(
+            press(KeyCode::Char('b')),
+            &app.view_model(),
+            &app.authored_source().unwrap(),
+        )
+        .unwrap();
+        app.dispatch(command).unwrap();
+        let source = app.authored_source().unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_project_construction(
+                    frame,
+                    &ProjectOverview::from_project(&project),
+                    &source,
+                    "",
+                )
+            })
+            .unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("Composition: composition-1"));
+        assert!(screen.contains("F7/F8: composition (stop first)"));
+        for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+            let mut key = press(KeyCode::F(8));
+            key.kind = kind;
+            assert!(project_composition_command(key, &app.view_model(), &source).is_none());
+        }
+        assert!(
+            project_composition_command(
+                KeyEvent::new(KeyCode::F(8), KeyModifiers::CONTROL),
+                &app.view_model(),
+                &source
+            )
+            .is_none()
+        );
+        app.dispatch(AppCommand::SetCockpitMode(
+            meldritch_app::CockpitMode::Performance,
+        ))
+        .unwrap();
+        terminal
+            .draw(|frame| draw_project_performance(frame, &project, &source, &app.view_model(), ""))
+            .unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("Composition: composition-1"));
+        assert!(
+            project_composition_command(press(KeyCode::F(8)), &app.view_model(), &source).is_none()
+        );
+        app.dispatch(AppCommand::SetCockpitMode(
+            meldritch_app::CockpitMode::AllParameters,
+        ))
+        .unwrap();
+        app.dispatch(AppCommand::CreatePalettePattern {
+            id: "notes".into(),
+            length_ticks: 3840,
+            looped: true,
+        })
+        .unwrap();
+        assert!(
+            project_composition_command(
+                press(KeyCode::F(8)),
+                &app.view_model(),
+                &app.authored_source().unwrap()
+            )
+            .is_none()
+        );
+    }
 
     #[test]
     fn native_pattern_selection_is_visible_without_rebinding() {

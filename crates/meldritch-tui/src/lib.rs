@@ -2109,6 +2109,12 @@ fn draw_status_with_title(
 
 fn command_result_text(result: &AppCommandResult) -> String {
     match result {
+        AppCommandResult::CompositionEdited {
+            composition,
+            changed,
+        } => {
+            format!("Composition {composition} (changed: {changed}); prepare audio before restart")
+        }
         AppCommandResult::OutputLevelExposed { synth, changed } => {
             format!("{synth} output level exposed (changed: {changed})")
         }

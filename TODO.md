@@ -60,9 +60,11 @@ an empty project requires no Git repository or initialization.
   PageUp/PageDown without rebinding, visible selection, separate melody/rhythm
   source key workflow, shared patch/two-instance render and independent gains;
   source/runtime/publication continuity, persistence and typed capture checks
-- [ ] Slice 2 next: named composition source ownership, scoped instance identity,
-  explicit selection with prepared stop/start policy and lossless save/reopen;
-  native selection of multiple instances sharing the same patch
+- [x] Slice 2 named composition checkpoint: project-v3 explicit membership over
+  project-unique instances, native b/F7/F8, stopped selection and prepared PCM
+  restart; inactive definition/gain scope, capture and fresh-process save/reopen
+- [ ] Slice 2 next: native selection of multiple instances sharing the same patch,
+  arbitrary composition membership authoring and composed acceptance audit
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
 - [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
@@ -247,7 +249,7 @@ patterns, draft panels, performance mode and repeats/releases. Control tests pro
 native two-pattern routing, scoped shared-patch gains, raw oscillator sound,
 save/reopen and capture reconstruction. The CLI host test proves selection retains
 runtime gains and active source/publication/generation while callback transport
-advances. Named compositions and native multi-instance selection remain missing;
+advances. At this checkpoint named compositions and native multi-instance selection were missing;
 example 35 is not accepted in full.
 Validation: workspace offline tests, four palette-routing integration tests,
 native selection screen/host checks, affected-crate all-targets Clippy with existing
@@ -255,6 +257,31 @@ allowances, formatting/diff and VitePress reference/build checks pass. Read-only
 CLI `open-project --check` validates the new fixture (`ea41a978f40edec0`);
 examples 09/29 retain their historical fingerprints. No devices or physical
 listening evidence are claimed. Keep this checkpoint local rather than pushing.
+
+Slice 2 named composition checkpoint: `compositions.txt` and the additive
+`compositions.project.lua` variant retain the original v2 example unchanged.
+CompositionDefinition owns canonical membership IDs over the one global instance
+registry; source fingerprints include every composition plus authored default
+selection. Native v3 requires explicit selected membership and preserves unused
+palette/instances; v2 rejects named fields and retains its implicit full mix.
+Typed b creates an all-instance snapshot; F7/F8 selects only at the construction
+overview after transport stop. App guards pending Play and callback-observed Stop,
+compiles before source acceptance and captures exact typed facts. The host retains
+prior PCM until prepared, gates restart by source/generation and applies only active
+instance overlays; inactive values survive returning to a composition. Tests check
+both selections through isolated fresh-process store loading/full-split oscillator
+PCM, inactive-invalid binding rejection, v2 compatibility, bounds/references,
+typed capture and worker/callback transition without a physical device. Native
+arbitrary membership editing and multi-instance selection remain the next checkpoint;
+example 35 stays design. Timed/metapattern actions and continuous DSP migration
+remain deferred.
+
+Named checkpoint validation: workspace offline tests, affected-crate all-targets
+Clippy with existing allowances, formatting/diff and VitePress reference/build
+checks pass. Read-only CLI opening validates the v3 variant (`4b1628b55a48a382`)
+before devices. Examples 09/29 retain `41472b38b65b60ed` / `54745c74a42665cf`.
+Composition tests include both fresh-process children; native key/UI and real
+worker/production-callback checks stay headless. Commit locally without a push.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

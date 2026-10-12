@@ -66,6 +66,8 @@ impl CockpitMode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommand {
+    CreateComposition(CompositionDefinition),
+    SelectComposition(String),
     ExposeOutputLevel {
         synth: String,
         control: String,
@@ -195,6 +197,10 @@ pub struct CommandRecord {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommandResult {
+    CompositionEdited {
+        composition: String,
+        changed: bool,
+    },
     OutputLevelExposed {
         synth: String,
         changed: bool,
@@ -1031,6 +1037,8 @@ impl Drop for PerformanceFxWorker {
 }
 
 pub struct AppController {
+    transport_commands_submitted: u64,
+    transport_requested_playing: bool,
     output_levels: BTreeMap<(String, String), f64>,
     project_source: Option<project::ProjectSource>,
     assignment_editor: Option<AssignmentEditor>,
@@ -1082,8 +1090,10 @@ impl AppController {
         history_capacity: usize,
     ) -> Self {
         Self {
+            transport_commands_submitted: playback.command_diagnostics().applied,
             project_source: None,
             output_levels: BTreeMap::new(),
+            transport_requested_playing: false,
             pattern_selection: None,
             assignment_editor: None,
             instrument_editor: None,
@@ -1509,6 +1519,9 @@ impl AppController {
         let source_before = self.authored_source().map(|source| source.fingerprint());
         let observed_frame = u64::from(self.playback.status_monitor().snapshot().position);
         let result = match &command {
+            AppCommand::CreateComposition(_) | AppCommand::SelectComposition(_) => {
+                self.composition_command(&command)?
+            }
             AppCommand::ExposeOutputLevel { .. } | AppCommand::SetOutputLevel { .. } => {
                 self.output_level_command(&command)?
             }
@@ -1653,14 +1666,22 @@ impl AppController {
             }
             AppCommand::Play => {
                 self.playback.play().map_err(AppCommandError::QueueFull)?;
+                self.transport_commands_submitted =
+                    self.transport_commands_submitted.saturating_add(1);
+                self.transport_requested_playing = true;
                 AppCommandResult::TransportQueued
             }
             AppCommand::Stop => {
                 self.playback.stop().map_err(AppCommandError::QueueFull)?;
+                self.transport_commands_submitted =
+                    self.transport_commands_submitted.saturating_add(1);
+                self.transport_requested_playing = false;
                 AppCommandResult::TransportQueued
             }
             AppCommand::Rewind => {
                 self.playback.rewind().map_err(AppCommandError::QueueFull)?;
+                self.transport_commands_submitted =
+                    self.transport_commands_submitted.saturating_add(1);
                 AppCommandResult::TransportQueued
             }
             AppCommand::Select(selection) => {
@@ -1960,6 +1981,27 @@ impl AppController {
             ),
             AppCommandResult::AssignmentsChanged { changed } => (*changed, vec![]),
             AppCommandResult::OutputLevelExposed { changed, .. } => (*changed, vec![]),
+            AppCommandResult::CompositionEdited { changed, .. } => (
+                *changed,
+                if *changed {
+                    (0..self
+                        .project_source
+                        .as_ref()
+                        .unwrap()
+                        .source
+                        .pattern_voices()
+                        .len())
+                        .map(|index| {
+                            DirtyRange::new(
+                                EntityId::Track(TrackId::new(index as u64 + 1)),
+                                FrameRange::new(0, self.editor.timeline_frames()).unwrap(),
+                            )
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                },
+            ),
             AppCommandResult::OutputLevelAdjusted { voice, changed, .. } => {
                 let source = &self.project_source.as_ref().unwrap().source;
                 let index = source

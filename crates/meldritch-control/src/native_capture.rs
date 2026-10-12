@@ -3,8 +3,8 @@
 use crate::session::{CapturedSessionEvent, PerformanceSessionCapture, session_result_fields};
 use meldritch_app::{AppCommand, AppController, CockpitMode};
 use meldritch_dsl::{
-    InstrumentEdit, NoteEdit, PatchCreation, PatchEdit, PatternSignal, PatternVoiceDefinition,
-    ValidatedSong,
+    CompositionDefinition, InstrumentEdit, NoteEdit, PatchCreation, PatchEdit, PatternSignal,
+    PatternVoiceDefinition, ValidatedSong,
 };
 use serde::{Deserialize, Serialize};
 use std::{path::Path, sync::Arc, time::Instant};
@@ -102,7 +102,7 @@ macro_rules! native_commands {
 }
 native_commands! {
     units { Play, Stop, Rewind, TogglePatternEditor, ToggleInstrumentEditor, TogglePatchEditor, PatchBackspace, PatchSubmit, SavePattern, SaveInstrument, SaveProject }
-    tuples { CreatePatch(creation: PatchCreation), EditPatch(edit: PatchEdit), CreatePatternVoice(voice: PatternVoiceDefinition), EditInstrument(edit: InstrumentEdit), SelectInstrument(id: String), SelectPalettePattern(id: String), PatchCharacter(character: char), PatchScroll(delta: i32), SetCockpitMode(mode: CockpitMode) }
+    tuples { CreateComposition(definition: CompositionDefinition), SelectComposition(id: String), CreatePatch(creation: PatchCreation), EditPatch(edit: PatchEdit), CreatePatternVoice(voice: PatternVoiceDefinition), EditInstrument(edit: InstrumentEdit), SelectInstrument(id: String), SelectPalettePattern(id: String), PatchCharacter(character: char), PatchScroll(delta: i32), SetCockpitMode(mode: CockpitMode) }
     structs {
         ExposeOutputLevel { synth: String, control: String },
         SetOutputLevel { voice: String, control: String, value: Option<f64> },

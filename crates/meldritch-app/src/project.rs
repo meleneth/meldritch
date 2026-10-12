@@ -1,7 +1,7 @@
 //! Detached project-root presentation, derived from the existing source model.
 pub use meldritch_dsl::ProjectDirectory;
 use meldritch_dsl::ValidatedSong;
-pub use meldritch_dsl::{PatternSignal, PatternVoiceDefinition};
+pub use meldritch_dsl::{CompositionDefinition, PatternSignal, PatternVoiceDefinition};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -13,6 +13,49 @@ pub(crate) struct ProjectSource {
 }
 
 impl super::AppController {
+    pub(crate) fn composition_command(
+        &mut self,
+        command: &super::AppCommand,
+    ) -> Result<super::AppCommandResult, super::AppCommandError> {
+        use super::{AppCommand, AppCommandError, AppCommandResult};
+        if self.transport_requested_playing
+            || self.playback.command_diagnostics().applied < self.transport_commands_submitted
+            || self.playback.status_monitor().snapshot().state
+                != meldritch_audio::transport::TransportState::Stopped
+        {
+            return Err(AppCommandError::Instrument(
+                "stop transport before changing composition".into(),
+            ));
+        }
+        let owner = self
+            .project_source
+            .as_ref()
+            .ok_or_else(|| AppCommandError::Instrument("no authored project source".into()))?;
+        owner
+            .source
+            .native_project_definition()
+            .map_err(AppCommandError::Instrument)?;
+        let (id, next) = match command {
+            AppCommand::CreateComposition(definition) => (
+                definition.id.clone(),
+                owner.source.create_composition(definition.clone()),
+            ),
+            AppCommand::SelectComposition(id) => (id.clone(), owner.source.select_composition(id)),
+            _ => unreachable!(),
+        };
+        let next = next.map_err(AppCommandError::Instrument)?;
+        meldritch_render::song_host::CompiledSongPatch::compile_initial(&next)
+            .map_err(AppCommandError::Instrument)?;
+        let changed = next.fingerprint() != owner.source.fingerprint();
+        if changed {
+            self.project_source.as_mut().unwrap().source = Arc::new(next);
+        }
+        Ok(AppCommandResult::CompositionEdited {
+            composition: id,
+            changed,
+        })
+    }
+
     /// Fresh native load selects inspectors without recording synthetic gestures.
     pub fn enable_native_project_source(&mut self, source: ValidatedSong) -> Result<(), String> {
         source.native_project_definition()?;

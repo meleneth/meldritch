@@ -10,7 +10,7 @@ Status values:
 
 | Example | Capability | Status |
 | --- | --- | --- |
-| `35-project-palette-routing` | Native palette-pattern selection with stable ID ordering, separate pitch/gate key workflow, shared-patch fan-out/independent instance gains, save/reopen and typed capture reconstruction checked; selection preserves playing publication/generation/runtime. Named compositions and native multi-instance selection remain unimplemented | design |
+| `35-project-palette-routing` | Native pattern selection/separate pitch-gate routing, shared-patch fan-out/gains, named project-v3 compositions, stopped F7/F8 selection, worker/callback publication, typed capture and isolated fresh-process persistence checked. Inactive gains/definitions retain explicit scope. Arbitrary membership editing and native multi-instance selection remain unfinished | design |
 | `34-empty-project-patch` | Bounded headless empty-root keyboard construction/pattern/independent pitch-gate/play/modify/save/fresh-process reopen; worker and production callback changes, exact mono-to-stereo publication, runtime/default separation, failures/retry and full/split oscillator PCM/identity equality checked. Embedded capture baselines survive later saves/root removal. Timed replay, physical listening and continuous DSP-state migration remain deferred | accept |
 | `00-minimal-synth` | Explicit oscillator-to-output patch | accept |
 | `01-synth-note-pattern` | Note pattern drives pitch and gate | accept |

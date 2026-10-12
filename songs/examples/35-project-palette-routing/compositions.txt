@@ -1,0 +1,45 @@
+Named composition checkpoint (project-v3):
+
+compositions.project.lua keeps the same project palette and independent sources,
+but declares held and pulse compositions. Each contains an explicit list of
+project-unique instance IDs from voices. held includes two independently controlled
+instances of the same patch; pulse includes one instance with a shorter rhythm.
+Composition membership is explicit; creating an instance does not silently add it
+to an existing composition. Project-v2 still plays its implicit full voice list.
+
+selected_composition is the authored default, mandatory for v3. All compositions,
+voices, palette definitions, bindings and selection save together. Versions 1/2
+retain their existing meanings. Instance IDs cannot collide anywhere in a project;
+composition references may share an instance deliberately. Membership order is
+canonical by ID; existing mixer normalization counts only included instances.
+
+Native b creates composition-N containing all currently declared instances. The
+first explicitly created composition becomes selected; subsequent creation does
+not switch it. F7/F8 selects previous/next composition in stable ID order and
+wraps. Construction only, overview only, stopped transport only. Inspect selected
+composition/membership in construction and performance. Typed selection compiles
+before acceptance; unknown or malformed references leave source/history intact.
+
+Stop playback explicitly, select a composition, wait for the existing worker to
+publish its new finite PCM, then restart. While preparing, prior PCM stays published
+and Space rejects premature restart. Running selection is rejected, leaving source,
+runtime, history, publication and transport unchanged. Pending typed transport
+commands must be consumed and the monitored state must be stopped before selection,
+including Play followed by Stop before the first callback. There is no seamless DSP
+state migration or quantized activation claim. Runtime overlays are project-instance
+owned, retained across selection but applied only to active members; save excludes
+them and reopen restores authored defaults/stopped transport.
+
+Reject duplicate/invalid composition IDs, repeated/missing member IDs, missing or
+unknown selection, more than 32 compositions and named fields on project-v2.
+Validate inactive instances too: an inactive malformed graph/binding must not be
+accepted just because it is silent. Full/split oscillator audio for either selection
+must equal its directly compiled membership, and fresh-process reload must retain
+both compositions and all shared palette IDs without seed files or capture replay.
+
+Native arbitrary membership editing, native selection between two instances of
+the same patch, timed/metapattern actions and continuous transitions remain deferred.
+Native playback still requires fixed stereo one-bar looping instances, including
+inactive definitions. Broader clocks remain a documented implementation restriction.
+Transport-bearing capture reconstruction must supply callback command consumption;
+baseline import and source-only authoring reconstruction do not implement timed replay.

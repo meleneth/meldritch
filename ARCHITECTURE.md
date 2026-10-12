@@ -116,7 +116,7 @@ rejects. App native loading restores inspector selections without recording fake
 gestures; the native host submits loaded voices to the existing worker immediately.
 TUI Ctrl-S/F6 invokes the host save boundary in both modes and inspectors, while
 saved/unsaved status compares accepted source to the last successful save.
-Capture remains separate. Native session headers embed the opening project-v2
+Capture remains separate. Native session headers embed the opening project-v2/v3
 source before filesystem creation; bounded `load_native_capture_baseline` restores
 it through the same importer/compiler and checks its fingerprint. Later saves and
 root removal cannot replace that baseline. A composed native-key/worker/callback
@@ -127,7 +127,28 @@ over independent palette material. It changes only inspector selection and is
 captured with explicit identity; p/g still authors each binding separately.
 Worker generation/publication and runtime gains stay unchanged. The shared-patch
 fixture reuses the existing independent-signal compiler and per-voice overlays.
-Named compositions and native selection of multiple instances remain missing.
+Named compositions now live in the same `ValidatedSong` as a map of
+`CompositionDefinition { id, voices }` and an explicit authored selected ID.
+`voices` references the one project-global instance registry; patch/pattern
+definitions are never copied. `active_pattern_voices` projects membership and the
+existing mixed compiler validates inactive instances before excluding them.
+Project-v3 saves all definitions and membership/default selection; v2 retains its
+implicit full list and rejects named fields. Canonical IDs/membership and selection
+participate in semantic fingerprints.
+
+App `CreateComposition` / `SelectComposition` are construction actions: validate
+and compile before acceptance, reject pending Play or unacknowledged Stop, and
+retain instance runtime overlays. Native b/F7/F8 lowers to those commands. The
+existing worker prepares finite PCM while stopped; NativeProjectAudio checks
+source fingerprint and ready generation before restart. Publication stays on the
+prior revision until preparation succeeds. Inactive runtime gains are retained in
+the app and filtered from the current worker submission. Neither DSP-state
+transfer nor seamless graph/interface activation is claimed. Native arbitrary
+membership editing and selection among instances sharing a patch remain missing.
+Current SelectComposition explicitly changes the authored default. Future live
+composition activation must use a separate runtime/scheduled action and cannot
+silently reuse that persistence effect. This static membership checkpoint is not
+the complete metapattern scheduling model.
 It does not provide general dynamic surfaces or
 stateful DSP migration.
 Compilers may receive a selected composition projection, but that view
@@ -301,7 +322,7 @@ the missing behavior is implemented. Required tests are acceptance obligations.
 
 | Desired capability | Existing implementation / reuse | Missing boundary and risk | Required acceptance |
 | --- | --- | --- | --- |
-| Empty project / palette / compositions | DSL project/palette/voice definitions and NativeProjectDefinition; app `new_empty_project`, native source loading; TUI authoring/binding/save and `ProjectPlaybackHost`; CLI `open_project`, `NativeProjectAudio`; control `SongAudioHost::replace_source`, `NativeProjectStore`, `load_native_capture_baseline` | Native authoring/binding/playback/modes, runtime level, typed capture and self-contained v2 save/reopen reuse the existing source/host. Multiple compositions are missing. Avoid hidden templates and wholesale renaming. | Composed real-key/worker/callback/fresh-process tests accept example 34 headlessly; embedded capture baselines survive later saves/root removal. Physical listening, timed replay and multiple compositions remain open. |
+| Empty project / palette / compositions | DSL project/palette/voice/CompositionDefinition and NativeProjectDefinition; app `new_empty_project`, native source loading, composition commands; TUI authoring/binding/save and `ProjectPlaybackHost`; CLI `open_project`, `NativeProjectAudio`; control `SongAudioHost::replace_source`, `NativeProjectStore`, `load_native_capture_baseline` | Self-contained v2/v3 saves and named membership/default selection reuse the existing source/host. Native instance selection/membership authoring remains incomplete. Avoid hidden templates and wholesale renaming. | Example 34 is headless accepted. Example 35 checks independent sources, named stopped selection, inactive scope and two fresh-process composition reloads; full native workflow, physical listening, timed replay and seamless activation remain open. |
 | Authoritative state and modes | `meldritch-app/src/project.rs`: `ProjectSource.base/source`, `enable_project_source`; `lib.rs`: `AppController::dispatch`, `CockpitMode`; render host `SongLiveOverrides` | Accepted source is app-owned independently of an instrument panel; native editors mutate the same source and preserve import provenance. Mapping faders still write authored values. Separate interaction mode and instance overlays without duplicate state. | Mode switch keeps audio/transport; performance moves leave authored fingerprint/export unchanged; explicit promotion reconstructs edits; failed promotion is atomic. |
 | Patch scope / independent signals | DSL `SignalType`, `ModuleKind`, `resolve_port`, `CableDefinition`, `PatternVoiceDefinition`; render `compile_pattern_voice`, `CompiledNotePatch::render_with_filter_overrides` | Mono composition bindings execute independent pitch/gate; legacy track notes keep coupled articulation. Only four signal families and fixed voice topology execute; general graph execution remains missing. | Held pitch under an independent gate and split rendering are proved; non-amplitude envelope, broader graph execution and other families remain required. Unsupported execution must reject, never silently ignore cables. |
 | Patchable patterns / transforms | DSL `NotePatternDefinition`, `NoteEventDefinition`; `song/notes.rs`: `PatternMaterial`, compatibility `AuthoredPattern.track`; `song/voices.rs`: separate bindings; core `Pattern::events_between`, `EventOccurrence` | Native palette patterns have no track owner and independently bind mono inputs. No event-transform graph, rate adapters or polyphonic source contract. Legacy step/duration semantics differ; occurrence identity must survive transformations. | Independent gate source, initial/held pitch, adjacent retriggers and clock/overlap rejection are checked. Multi-composition reuse, transformed identities, probability/ratchet bounds and standalone reload remain open. |

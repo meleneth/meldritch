@@ -1,13 +1,17 @@
 # Shared palette, independent sources and named compositions
 
-Status: **design for the full Slice 2 contract**. The first checkpoint is native
-palette-pattern selection and independent source routing is now implemented;
+Status: **design for the full Slice 2 contract**. Native palette-pattern selection
+and independent source routing are implemented;
 `cargo test -p meldritch-control --test palette_routing` proves real native keys,
 shared-patch source fan-out/independent gains, save/reopen and typed capture
 reconstruction. TUI screen checks show selected IDs; the CLI host test proves
 selection preserves source, runtime gains, worker generation and playing callback
-audio. Named composition
-ownership/selection and native multi-instance selection remain proposed.
+audio. Named composition ownership, stopped selection and project-v3 persistence
+now implement `compositions.txt` and `compositions.project.lua`. Control tests
+restore both selections in isolated fresh processes and reconstruct typed capture;
+CLI worker/callback tests prove stop acknowledgement, prepared publication and
+inactive runtime-gain exclusion. Native arbitrary membership editing and selection
+between multiple instances of the same patch remain unfinished.
 
 ## Pattern-selection checkpoint
 
@@ -39,11 +43,11 @@ selection and incompatible bound clocks to reject without source/runtime/history
 or selection changes. Failed bindings leave publication unchanged. Preserve
 example 34's keys, source hashes and capture/importer contracts.
 
-## Remaining Slice 2 contract
+## Named-composition checkpoint and remaining Slice 2 contract
 
-Add two explicitly named compositions using different subsets of the same palette,
-persist both plus explicit selection, and reopen each independently. Selection
-must prepare the new composition before an explicit stop/start boundary; retain
+Two explicitly named compositions now use different subsets of the same palette,
+persist both plus explicit selection, and reopen independently. Selection
+prepares the new composition after acknowledged stop and before restart; retain
 the prior active material on failure. Composition instances require stable scoped
 identities and inspectable pitch/gate traces; one source may fan out to both.
 Shared definition edits affect every referencing instance; instance runtime gains
@@ -55,6 +59,7 @@ deletion of referenced palette material and incompatible clocks.
 Use the existing authoritative Rust source, independent voice compiler,
 SongAudioHost/worker/publication, typed capture and constrained Lua serializer.
 Do not build another event engine or silently reinterpret project-v2 files.
-Full acceptance needs fresh-process composition persistence plus composed native
-selection/playback and compatibility tests. Physical listening, quantized
+Fresh-process composition persistence and composed native selection/publication
+tests now pass. Full acceptance still needs the remaining native instance and
+membership authoring workflow and compatibility audit. Physical listening, quantized
 activation and continuous DSP migration require separate evidence.

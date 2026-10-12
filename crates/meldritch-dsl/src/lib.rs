@@ -16,11 +16,11 @@ mod song;
 
 pub use song::{
     AUTHORING_PPQ, ActionControlDefinition, AuthoredNote, AuthoredPattern, CableDefinition,
-    ControlBindingAction, ControlBindingDefinition, CuratedControlDefinition, DelayParameter,
-    DependentCables, DspDefinition, EditableParameter, EditableTarget, InstrumentEdit,
-    InstrumentParameter, InstrumentParameterDefinition, InstrumentParameterId,
-    InstrumentParameterOwner, InstrumentRange, InstrumentValue, InstrumentWaveform,
-    MidiDeviceDefinition, MixerParameter, ModifierControlActionDefinition,
+    CompositionDefinition, ControlBindingAction, ControlBindingDefinition,
+    CuratedControlDefinition, DelayParameter, DependentCables, DspDefinition, EditableParameter,
+    EditableTarget, InstrumentEdit, InstrumentParameter, InstrumentParameterDefinition,
+    InstrumentParameterId, InstrumentParameterOwner, InstrumentRange, InstrumentValue,
+    InstrumentWaveform, MidiDeviceDefinition, MixerParameter, ModifierControlActionDefinition,
     ModifierControlDefinition, ModuleDefinition, ModuleKind, ModulePort, NativeProjectDefinition,
     NativeProjectMetadata, NoteEdit, NoteEventDefinition, NotePatternDefinition, ParameterEdit,
     ParameterInterpolation, ParameterLaneDefinition, ParameterOwner, ParameterPatternDefinition,

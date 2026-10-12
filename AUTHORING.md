@@ -79,23 +79,31 @@ replay, physical listening and continuous DSP-state migration remain future work
 
 ## Recommended immediate implementation prompt
 
-Start Slice 2 in [ROADMAP.md](ROADMAP.md) with the smallest readable example:
-one palette patch instantiated twice, melody pattern supplying pitch and a separate
-rhythm pattern supplying gate. Define two named compositions referencing that same
-palette, explicit selection and prepared stop/start transition semantics. Add
-invalid missing/ambiguous references and incompatible clocks before schema/code.
-Extend the existing accepted source, voice relationships, compiler and native
-serializer; do not introduce another event engine or mutable palette. Prove that
-rhythm edits change articulation without transposition, melody edits change pitch
-without moving gates, and save/fresh reopen preserves selection and shared IDs.
-Preserve example 34 and historical formats. Do not claim continuous DSP migration.
+Continue Slice 2's example 35 with native instance selection and membership
+authoring. Select an instance by stable ID independently of its shared patch;
+route p/g and exposed runtime level to that identity. Reuse CreatePatternVoice,
+BindPatternVoice and SetOutputLevel rather than cloning palette definitions.
+Provide explicit typed add/remove membership actions, validated atomically while
+stopped, so held and pulse can be authored from the keyboard. Do not silently
+retarget an unrelated control when membership or composition changes.
+Add key/negative fixtures first; test two independently controlled instances of
+one patch, failed membership edits, typed capture, worker publication and
+fresh-process persistence. Preserve example 34, project-v2/v3 and historical
+formats. Then audit composed example-35 acceptance. Do not add another event
+engine or claim continuous DSP migration.
 
 Example 35 now specifies this contract. Its pattern-selection checkpoint is
 implemented: native PgUp/PgDn lowers to SelectPalettePattern, preserves source,
 bindings/runtime/publication and captures selection as a typed fact. The independent
 source/shared-patch fixture, native two-pattern routing, save/reopen and capture
-tests pass. Continue with named composition ownership/selection and native
-multi-instance selection; do not invent another palette or event engine.
+tests pass. Named composition ownership/selection now uses project-v3 with an
+explicit selected composition and lists of project-unique instance IDs. Native
+b snapshots all instances; F7/F8 requires stopped transport, compiles before
+acceptance and prepares finite audio through the existing worker before restart.
+Fresh-process persistence and typed capture tests pass; inactive overlays remain
+instance-owned and do not contaminate another composition. Continue with native
+instance selection and membership authoring, then audit full example-35 acceptance.
+Do not invent another palette or event engine.
 
 The completed Slice 1 implementation prompt is retained below as historical scope.
 It established empty directory → construct patch → create pattern → independent

@@ -1,4 +1,4 @@
-//! Self-contained authored project v2; Lua only describes Rust-validated source.
+//! Self-contained authored projects v2/v3; Lua describes Rust-validated source.
 use crate::{Result, error};
 use meldritch_dsl::{NativeProjectDefinition, ValidatedSong};
 use mlua::LuaSerdeExt;

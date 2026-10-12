@@ -98,7 +98,7 @@ See that example's `capture.txt` and `capture-command.toml`; this is captured
 accepted state, not an authored project save or a claim of timed DSP activation.
 Legacy hosts retain their historical event representation. Native checkpoint
 storage is bounded and failure/retry behavior is tested. Native writers also embed
-`session.native_source`, a quoted self-contained project-v2 Lua opening baseline,
+`session.native_source`, a quoted self-contained project-v2/v3 Lua opening baseline,
 before events. `load_native_capture_baseline` bounds canonical header scanning and
 parsing, restores through the existing importer/compiler and checks the opening
 fingerprint. The original root is provenance; callers supply a destination root.
@@ -110,7 +110,27 @@ Example 35 extends native command version 1 with `select_palette_pattern`, a
 typed selection fact with an explicit pattern ID. Selection changes neither
 authored source nor bindings; project-v2 saves exclude cursor/editor selection.
 Its project-v2 fixture reuses existing independent voice bindings and one palette
-definition across two instances; named composition schema remains unimplemented.
+definition across two instances. Its named variant adds native command version-1
+`create_composition` / `select_composition` authored actions; running or pending-Play
+composition changes reject. Selection is an authored default, not a runtime override.
+
+Example 35's `compositions.project.lua` adds self-contained project **version 3**:
+`compositions` contains `{ id, voices = { instance_id, ... } }` declarations and
+`selected_composition` is mandatory and must resolve. `voices` remains one
+project-owned, globally unique instance registry; compositions reference it rather
+than copying the palette. Membership IDs are canonicalized; repeats/missing members
+and more than 32 compositions reject. All definitions, including inactive ones,
+validate/compile. The selected list alone controls mix inclusion/normalization.
+Runtime gain keys remain instance-owned and are applied only when active.
+Native b snapshots all declared instances into a new named composition; the first
+is explicitly selected by that construction action. F7/F8 selects while stopped
+in construction. Selection saves as the authored default; reopening starts stopped
+with authored gains. Arbitrary native membership editing remains deferred.
+Version 2 rejects named composition fields and preserves its implicit full voice
+list. Version 3 requires at least one composition plus explicit selection. Native
+export chooses v2 for unnamed projects and v3 for named ones, checks full restored
+source equality and preserves all inactive definitions. The file/store boundaries
+and historical base-bound project-v1/instrument formats remain unchanged.
 
 Example 34 additionally defines self-contained `kind="project", version=2` Lua
 in `authored-project.lua`. It stores project identity/clock, complete supported

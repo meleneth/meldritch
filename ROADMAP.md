@@ -78,7 +78,12 @@ through typed app commands without rebinding or rerendering. Native keys can now
 author melody and rhythm separately and bind their pitch/gate independently.
 The executable v2 fixture/tests prove one shared patch, two independent runtime
 gains, save/reopen and capture reconstruction. Full example status remains design:
-named composition ownership/selection and native multi-instance selection are next.
+named composition ownership/selection now has its own checked checkpoint.
+Project-v3 stores named membership/default selection; b snapshots all instances
+and F7/F8 selects after stop acknowledgement. Worker preparation gates restart;
+inactive definitions validate and runtime overlays apply only to active members.
+Both selections reopen in fresh processes. Native multi-instance selection and
+arbitrary membership authoring remain next; full example status stays design.
 
 **Sound/control:** changing rhythm changes articulation without transposing;
 changing melody changes pitch without moving gate boundaries. Composition

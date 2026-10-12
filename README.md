@@ -43,7 +43,13 @@ opening source so subsequent saves cannot erase the reconstruction baseline.
 In construction, **PageUp/PageDown** selects palette patterns at the overview or
 pattern editor. Selection keeps bindings unchanged; **p/g** explicitly binds the
 selected pattern's pitch/gate. This lets melody and rhythm come from different
-patterns. Named composition selection remains planned.
+patterns. In the construction overview, **b** names a composition containing all
+declared instances; **F7/F8** selects named compositions after stopping transport.
+Wait for prepared audio before restarting. Named projects save as project-v3 Lua;
+unnamed version-2 projects keep their current meaning. Composition selection saves
+the authored default and preserves instance runtime gains without saving them.
+Arbitrary membership editing and native selection between shared-patch instances
+remain unfinished.
 Timed replay and stateful graph transitions remain proposed. Existing commands
 remain valid.
 Git is allowed as a required installed dependency; opening needs no repository

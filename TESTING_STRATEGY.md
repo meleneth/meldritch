@@ -213,7 +213,18 @@ lossless native save/reopen and typed capture reconstruction. `cargo test -p
 meldritch-cli native_palette_selection` proves actual host generation/publication,
 runtime gain and advancing callback continuity. `cargo test -p meldritch-tui
 native_pattern_selection` checks visible selection/hints in an 80×24 backend.
-These do not accept named composition selection or the whole example.
+These pattern checks alone do not accept the whole example.
+
+`cargo test -p meldritch-control --test compositions` checks project-v3 membership,
+v2 compatibility, explicit selection/bounds/negative references, inactive binding
+validation, typed composition capture reconstruction and two isolated fresh-process
+reloads with full/split exact oscillator PCM. A direct v2 member-only compilation
+must match each named mix. `cargo test -p meldritch-cli native_composition_transition`
+checks pending Play, acknowledged Stop, prior-publication preservation, prepared
+restart, inactive gain exclusion/retention and callback audio without a device.
+`cargo test -p meldritch-tui native_named_compositions` checks visible composition
+IDs and guarded native keys. Native instance/membership authoring and composed full
+example-35 acceptance remain unfinished; continuous DSP migration is not proved.
 
 Add later:
 - offline render throughput
