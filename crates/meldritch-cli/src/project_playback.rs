@@ -12,6 +12,7 @@ use meldritch_render::song_host::CompiledSongPatch;
 use meldritch_tui::ProjectPlaybackHost;
 
 pub(crate) struct NativeProjectAudio {
+    capture: meldritch_control::native_capture::NativeProjectCapture,
     host: SongAudioHost,
     reader: AudioSnapshotReader,
     engine: Option<PlaybackEngine>,
@@ -32,6 +33,10 @@ impl NativeProjectAudio {
         let patch = CompiledSongPatch::compile_initial(&source)?;
         let host = SongAudioHost::new(source.as_ref().clone(), patch, publisher, frames, 6000);
         Ok(Self {
+            capture: meldritch_control::native_capture::NativeProjectCapture::new(
+                source.clone(),
+                frames,
+            ),
             host,
             reader,
             engine: Some(engine),
@@ -44,7 +49,16 @@ impl NativeProjectAudio {
 }
 
 impl ProjectPlaybackHost for NativeProjectAudio {
+    fn prepare_action(&mut self, app: &AppController) -> Result<(), String> {
+        self.capture.checkpoint(app)
+    }
+    fn finish(&mut self, app: &AppController) -> Result<(), String> {
+        self.capture.finish(app)
+    }
     fn poll(&mut self, app: &mut AppController) -> Result<(), String> {
+        self.capture
+            .checkpoint(app)
+            .map_err(|error| format!("capture checkpoint: {error}"))?;
         let source = app.authored_source().ok_or("no authored project source")?;
         if source.fingerprint() != self.submitted_fingerprint {
             // This first native playback slice has one fixed one-bar PCM layout.
@@ -116,20 +130,38 @@ mod tests {
     use meldritch_app::{AppInput, NoteEdit, PatchCreation, PatternSignal, PatternVoiceDefinition};
     use meldritch_audio::device_output::PublishedAudioRenderer;
     use std::{
-        path::Path,
+        path::PathBuf,
         sync::Arc,
         time::{Duration, Instant},
     };
 
-    fn project() -> meldritch_dsl::ProjectDirectory {
-        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let relative = "songs/examples/34-empty-project-patch";
-        let path = if manifest.join(relative).exists() {
-            manifest.join(relative)
-        } else {
-            manifest.join("../..").join(relative)
-        };
-        meldritch_dsl::load_project_directory(path).unwrap()
+    struct ProjectFixture {
+        path: PathBuf,
+        project: meldritch_dsl::ProjectDirectory,
+    }
+    impl std::ops::Deref for ProjectFixture {
+        type Target = meldritch_dsl::ProjectDirectory;
+        fn deref(&self) -> &Self::Target {
+            &self.project
+        }
+    }
+    impl Drop for ProjectFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+    fn project() -> ProjectFixture {
+        let path = std::env::temp_dir().join(format!(
+            "meldritch-native-host-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        let project = meldritch_dsl::load_project_directory(&path).unwrap();
+        ProjectFixture { path, project }
     }
 
     #[test]
@@ -138,6 +170,8 @@ mod tests {
         let project = project();
         let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
         let mut host = NativeProjectAudio::new(&app, engine).unwrap();
+        host.poll(&mut app).unwrap();
+        assert_eq!(std::fs::read_dir(project.root()).unwrap().count(), 0);
         assert!(host.stream.is_none());
         assert!(
             host.toggle_playback(&mut app)
@@ -265,6 +299,27 @@ mod tests {
             1024
         );
         assert!(host.stream.is_none());
+        host.finish(&app).unwrap();
+        let captured: toml::Table = toml::from_str(
+            &std::fs::read_to_string(host.capture.session.as_ref().unwrap().path()).unwrap(),
+        )
+        .unwrap();
+        assert!(captured["session"]["clean_termination"].as_bool().unwrap());
+        assert_eq!(
+            captured["events"].as_array().unwrap().len(),
+            app.history().len()
+        );
+        for (event, record) in captured["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(app.history())
+        {
+            assert_eq!(
+                event["absolute_frame"].as_integer(),
+                Some(record.observed_frame as i64)
+            );
+        }
     }
 
     #[test]

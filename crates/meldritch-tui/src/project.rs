@@ -421,7 +421,7 @@ fn draw_project_construction_selected(
         Line::from(
             "n/c: patch/pattern · Ctrl-E/N: editors · Space: play · Ctrl-Tab mode · q: quit",
         ),
-        Line::from("Unsaved construction: quitting discards it"),
+        Line::from("Unsaved authored project; capture does not replace saving"),
         Line::from(status.to_owned()),
     ];
     if !source.pattern_voices().is_empty() {
@@ -526,6 +526,13 @@ pub fn run_empty_project(project: &ProjectDirectory) -> io::Result<()> {
 
 /// Host adapters own devices and the existing song renderer; the TUI owns neither.
 pub trait ProjectPlaybackHost {
+    /// Flush accepted facts before another gesture, preserving bounded capture.
+    fn prepare_action(&mut self, _app: &AppController) -> Result<(), String> {
+        Ok(())
+    }
+    fn finish(&mut self, _app: &AppController) -> Result<(), String> {
+        Ok(())
+    }
     fn poll(&mut self, app: &mut AppController) -> Result<(), String>;
     fn toggle_playback(&mut self, app: &mut AppController) -> Result<(), String>;
 }
@@ -549,7 +556,7 @@ fn draw_project_performance(
         )),
         Line::from("Space: play/stop · Ctrl-Tab: construction · q/Esc: quit"),
         Line::from("Up/Down: select · Left/Right: level · Home: mute · End: default"),
-        Line::from("Unsaved project; quitting discards authored edits"),
+        Line::from("Unsaved authored project; capture does not replace saving"),
         Line::from(status.to_owned()),
     ];
     let mut count = 0;
@@ -603,7 +610,7 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
     let result = (|| {
         loop {
             if let Err(error) = host.poll(app) {
-                status = format!("Audio unchanged: {error}");
+                status = format!("Project update pending: {error}");
             }
             let model = app.view_model();
             terminal.terminal.draw(|frame| {
@@ -647,7 +654,17 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                         .as_ref()
                         .is_some_and(|e| e.visible);
                 if !editing && empty_project_quit(key) {
-                    return Ok(());
+                    match host.finish(app) {
+                        Ok(()) => return Ok(()),
+                        Err(error) => {
+                            status = format!("Capture not saved; quit deferred: {error}");
+                            continue;
+                        }
+                    }
+                }
+                if let Err(error) = host.prepare_action(app) {
+                    status = format!("Capture checkpoint failed; gesture deferred: {error}");
+                    continue;
                 }
                 if !editing
                     && key.kind == KeyEventKind::Press
@@ -718,7 +735,7 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                             app.dispatch(AppCommand::SelectInstrument(synth))
                                 .map_err(|e| io::Error::other(format!("{e:?}")))?;
                             app.observe_instrument_save(
-                                "Unsaved new project; quitting discards edits".into(),
+                                "Unsaved authored project; capture does not replace saving".into(),
                             );
                             "Accepted silent palette definition; no pattern or routing created"
                                 .into()
@@ -728,7 +745,12 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                     };
                 } else if let Some(action) = project_editor_action(key, &model) {
                     match action {
-                        TuiAction::Quit => return Ok(()),
+                        TuiAction::Quit => match host.finish(app) {
+                            Ok(()) => return Ok(()),
+                            Err(error) => {
+                                status = format!("Capture not saved; quit deferred: {error}");
+                            }
+                        },
                         TuiAction::Input(input) => {
                             status = match app.handle_input(input) {
                                 Ok(AppCommandResult::InstrumentSaveRequested) => {
@@ -745,6 +767,9 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
             }
         }
     })();
+    if result.is_err() {
+        let _ = host.prepare_action(app);
+    }
     terminal.restore()?;
     result
 }
@@ -1306,7 +1331,7 @@ mod tests {
             "osc.audio -> amp.audio : Audio",
             "env.control -> amp.level : Control",
             "amp.audio -> out.audio : Audio",
-            "quitting discards it",
+            "capture does not replace saving",
         ] {
             assert!(text.contains(expected), "missing {expected}");
         }

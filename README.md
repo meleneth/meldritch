@@ -28,8 +28,10 @@ performance hides internal editing and blocks construction gestures. In construc
 Up/Down select an exposed patch, Left/Right change runtime gain, Home silences and
 End restores the authored instance default. These gestures leave source unchanged.
 This path is checked headlessly through the production callback; physical
-listening remains unverified. Construction is in memory only; quitting discards
-it. Disk capture, save/reopen and stateful
+listening remains unverified. Accepted gestures now create a timestamped typed
+capture under `performances/`; opening alone creates no files. Capture preserves
+construction/runtime commands but does not replace authored saving or automatically
+reopen the project. Save/reopen, timed replay and stateful
 graph transitions remain proposed. Existing commands remain valid.
 Git is allowed as a required installed dependency; opening needs no repository
 or initialization. Empty opening creates no files or audio/MIDI streams.

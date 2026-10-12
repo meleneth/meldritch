@@ -10,7 +10,7 @@ Status values:
 
 | Example | Capability | Status |
 | --- | --- | --- |
-| `34-empty-project-patch` | Empty/legacy opening, native patch/pattern/binding authoring, lazy playback/modes and explicit patch output-level instance overlays checked through existing host/worker/publication/callback; physical listening unverified; disk capture and self-contained save/reopen unfinished | design |
+| `34-empty-project-patch` | Empty/legacy opening, native patch/pattern/binding authoring, playback/modes, runtime level and lazy typed disk capture checked through shared host/worker/callback/session writer; bounded checkpoint retry and fresh-app reconstruction pass; physical listening unverified; timed replay and self-contained save/reopen unfinished | design |
 | `00-minimal-synth` | Explicit oscillator-to-output patch | accept |
 | `01-synth-note-pattern` | Note pattern drives pitch and gate | accept |
 | `02-synth-parameter-pattern` | Pattern drives a synth parameter port | accept |

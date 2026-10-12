@@ -14,6 +14,7 @@ pub type Result<T> = std::result::Result<T, String>;
 pub mod assignments;
 pub mod instrument;
 pub mod led_demo;
+pub mod native_capture;
 pub mod pattern;
 pub mod performance;
 pub mod pickup;

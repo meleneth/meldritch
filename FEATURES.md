@@ -26,8 +26,8 @@ vertical slices are planned in [ROADMAP.md](ROADMAP.md).
   bindings are also implemented. Native Space playback and mode transitions reuse
   the existing host/worker/publication; callback behavior is checked headlessly,
   physical listening remains unverified. Explicit patch output-level declarations
-  and instance runtime overlays are implemented; disk capture and standalone
-  persistence remain unfinished.
+  and instance runtime overlays are implemented. Native typed disk capture is
+  implemented; standalone persistence and timed replay remain unfinished.
   Standalone save/reopen remain unimplemented. Git is allowed as an external
   dependency and may be required installed; a repository, commit or network
   operation is unnecessary merely to open/play local music.

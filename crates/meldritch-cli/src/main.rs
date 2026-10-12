@@ -8868,6 +8868,7 @@ mod tests {
 
     fn test_session_event(sequence: u64) -> CapturedSessionEvent {
         CapturedSessionEvent {
+            native_payload: None,
             sequence,
             wall_offset_ms: 42,
             absolute_frame: 12_000,

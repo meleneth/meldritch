@@ -1,0 +1,10 @@
+# Native typed-event payload shape; placeholder fingerprints are not an actual session.
+version = 1
+source_before = "0000000000000000"
+source_after = "0000000000000000"
+[command]
+kind = "set_output_level"
+[command.value]
+voice = "voice-1-instance"
+control = "level"
+value = 0.4

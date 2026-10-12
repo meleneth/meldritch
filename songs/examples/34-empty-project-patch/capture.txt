@@ -1,0 +1,21 @@
+# Native capture checkpoint, not authored project persistence or timed replay.
+# Opening/polling/quitting without accepted commands creates no files/devices.
+# The first accepted native command lazily creates performances/session-UTC[-NNN].mlperformance.
+# Rejected commands have no event. Accepted no-ops/navigation/drafts do have events.
+# Each native event includes the exact typed command (native command version 1),
+# sequence, observed control-thread frame, source fingerprints before/after,
+# accepted result/changed and runtime level previous/current where applicable.
+# Observed frames are acceptance observations, never claimed DSP activation times.
+# The legacy performance_session v1 envelope is retained with an explicit native
+# command version. Old writers retain their old event representation.
+# Native checkpoints retain at most eight pending events, copy existing events
+# through a fixed-size buffer, then atomically publish a complete TOML file.
+# A failed write retains the previous checkpoint and pending events. The native
+# cockpit blocks further gestures/clean quit until checkpointing can succeed.
+# A bounded-history gap is diagnosed, never silently dropped. Capture files are
+# limited to 64 MiB; rotation and long-running u64/epoch replay remain future work.
+# Clean quit flushes events and writes final source fingerprint/runtime levels.
+# Abnormal termination leaves the last durable file marked unclean.
+# A fresh empty app can reconstruct authored/runtime state by dispatching recorded
+# typed commands in sequence, validating before/after fingerprints. This does not
+# schedule sample-timed playback, drive devices, or turn capture into authored save.

@@ -64,7 +64,7 @@ Schema fields without an example are unsupported proposals, not features.
 - `.mlpattern` describes note events or typed parameter changes over musical
   time.
 - `.mlperformance` assembles a song and defines its curated playable surface.
-  Generated session journals use the same extension with `kind = "session"`.
+  Generated session journals use the same extension with `kind = "performance_session"`.
 
 All formats are TOML and begin with a versioned `[meldritch]` table.
 
@@ -91,6 +91,14 @@ may be empty or contain multiple compositions; their layout requires an example.
 Captured sessions are written
 under `performances/` and are never considered entry-point candidates.
 
+Example 34's native capture keeps the `performance_session` version-1 envelope
+and explicitly declares `session.native_command_version = 1`. Its events add
+an `events.native` table with a typed command and source fingerprints before/after.
+See that example's `capture.txt` and `capture-command.toml`; this is captured
+accepted state, not an authored project save or a claim of timed DSP activation.
+Legacy hosts retain their historical event representation. Native checkpoint
+storage is bounded and failure/retry behavior is tested.
+
 Lua API v1 adds an explicit composition adapter, without changing the authored
 TOML entrypoint or migrating historical songs. `main.lua` chooses a confined
 existing song and defines headless control behavior. Saved Lua envelopes retain
@@ -112,8 +120,10 @@ Authored patterns use musical time. Initial examples use:
   the current parser uses 960 ticks per beat, so one sixteenth note is 240 ticks
 - explicit looping and launch quantization
 
-Generated sessions additionally record absolute `u64` frames and wall-clock
-offsets so exact replay does not depend on reparsing musical notation.
+Typed Lua journals record `u64` frames. The legacy performance-session envelope
+and native control-frame observations currently use `u32` positions plus wall-clock
+offsets. Long-running `u64`/epoch sessions and sample-timed native replay remain
+requirements; control observations must not be reported as DSP activation times.
 
 ## Current support target
 

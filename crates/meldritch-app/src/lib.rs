@@ -48,7 +48,7 @@ pub struct Selection {
     pub step: StepIndex,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum CockpitMode {
     Performance,
     AllParameters,
@@ -182,6 +182,10 @@ pub enum AppCommand {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommandRecord {
+    pub result: AppCommandResult,
+    pub observed_frame: u64,
+    pub source_before: Option<u64>,
+    pub source_after: Option<u64>,
     pub sequence: u64,
     pub command: AppCommand,
     pub changed: bool,
@@ -1501,6 +1505,8 @@ impl AppController {
         if let Some(edit) = self.catalog_control_command(&command)? {
             return self.dispatch(edit);
         }
+        let source_before = self.authored_source().map(|source| source.fingerprint());
+        let observed_frame = u64::from(self.playback.status_monitor().snapshot().position);
         let result = match &command {
             AppCommand::ExposeOutputLevel { .. } | AppCommand::SetOutputLevel { .. } => {
                 self.output_level_command(&command)?
@@ -2069,7 +2075,16 @@ impl AppController {
                 previous, current, ..
             } => (previous != current, Vec::new()),
         };
-        self.record(command, changed, dirty_ranges);
+        self.record(CommandRecord {
+            sequence: self.next_sequence,
+            result: result.clone(),
+            observed_frame,
+            source_before,
+            source_after: self.authored_source().map(|source| source.fingerprint()),
+            command,
+            changed,
+            dirty_ranges,
+        });
         Ok(result)
     }
 
@@ -2838,19 +2853,14 @@ impl AppController {
         }))
     }
 
-    fn record(&mut self, command: AppCommand, changed: bool, dirty_ranges: Vec<DirtyRange>) {
+    fn record(&mut self, record: CommandRecord) {
         if self.history_capacity == 0 {
             return;
         }
         if self.history.len() == self.history_capacity {
             self.history.pop_front();
         }
-        self.history.push_back(CommandRecord {
-            sequence: self.next_sequence,
-            command,
-            changed,
-            dirty_ranges,
-        });
+        self.history.push_back(record);
         self.next_sequence = self.next_sequence.wrapping_add(1);
     }
 }

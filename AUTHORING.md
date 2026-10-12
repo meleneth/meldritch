@@ -41,7 +41,18 @@ identical setting does not submit another audio generation. Keyboard selection
 reuses the selected patch; the native workflow creates one instance per patch.
 General multi-instance surface selection, hardware mappings/pickup for these controls,
 graph recipes and revisioned dynamic interfaces remain future work.
-Disk capture and standalone saves remain next. Everything stays in memory.
+Native disk capture now observes typed accepted history through the shared
+PerformanceSessionCapture writer. `capture.txt` and its typed-payload fixtures in
+example 34 specify the checkpoint. Opening stays file-free; the first accepted
+command lazily reserves a timestamped session. Native events carry versioned typed
+commands, per-command source fingerprints and observed control frames; they do not
+claim DSP activation timing. Pending event storage is bounded at eight; checkpoint
+copying uses 64 KiB buffers and an explicit 64 MiB file limit. Failed writes retain
+the old checkpoint/pending facts, and the cockpit defers further gestures/clean
+quit until retry succeeds. Tests reconstruct source, UI/runtime state and raw PCM
+in a fresh app after original history eviction. This is not a timed replay API or
+standalone authored save. Source/runtime stay in memory; command facts persist.
+Self-contained save/reopen and timed replay remain next.
 The full example retains `design` status.
 
 ## Recommended immediate implementation prompt

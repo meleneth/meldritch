@@ -12,8 +12,16 @@ overlays are implemented as specified by `keyboard-level.txt`; app/TUI/native-ho
 tests prove rejected identity/value commands preserve source/history, independent
 instance values, mode/patch preservation, load reset, callback mute/restore with
 advancing transport, and no generation for repeated identical settings. Accepted
-runtime facts exist in bounded in-memory command history and session classification;
-disk capture, timed replay and self-contained save/reopen remain unimplemented.
+runtime facts now persist through native typed disk capture as specified by
+`capture.txt` and its valid/invalid payload fixtures. `cargo test -p
+meldritch-control --test native_capture` checks lazy file creation, bounded pending
+buffers, failure recovery without duplication, history/source-continuity diagnostics,
+confined paths and reconstruction of source/runtime/PCM after history eviction.
+Timed replay and self-contained save/reopen remain unimplemented.
+Native 80×24 PTY checks also prove file-free empty open/quit, twelve typed
+construction/runtime events and a clean final gain, and capture-path failure
+deferring another gesture/quit until successful retry without duplicates. These
+smoke checks open no audio device; they do not establish physical listening.
 Physical listening remains unverified. Run `cargo test -p meldritch-app --test
 pattern_voice`, `cargo test -p meldritch-tui native_level` and `cargo test -p
 meldritch-cli project_playback` for this checkpoint.
@@ -40,9 +48,10 @@ Palette checks: the same DSL suite plus `cargo test -p meldritch-app empty_proje
 and `cargo test -p meldritch-tui native_creation`. They cover typed recipe equality,
 invalid inputs/IDs, incomplete and unsupported wiring, deterministic in-memory
 command replay, the construction bound, silence and full 80×24 inspection.
-A no-subcommand PTY smoke also accepts two `n` presses and clean quit/restoration
-without files. There is no disk capture/replay, persistence or physical-audio
-acceptance for this new cockpit yet.
+A no-subcommand PTY smoke at the palette checkpoint accepted two `n` presses and
+clean quit/restoration without files. Native capture now deliberately writes
+accepted gestures to sessions; opening/quit without gestures still creates no files.
+Authored persistence, timed replay and physical-audio acceptance remain unfinished.
 
 Native editor checks: `cargo test -p meldritch-tui native_` covers patch drafts
 and independent pattern gestures. The DSL project-directory suite also rejects
@@ -56,11 +65,13 @@ not a save format. From a file-free empty root, native `n` dispatches creation o
 `voice-1` with the fixture's pitch/gate inputs, four modules and five cables.
 Subsequent `n` creates a distinct definition; no track, pattern or composition
 binding is created. The palette stays silent. The screen shows independent typed
-inputs and every module/cable. No files or devices are opened. Invalid/incomplete
+inputs and every module/cable. No authored files or devices are opened; accepted
+native gestures now create capture metadata lazily. Invalid/incomplete
 requests, duplicate identities and unsupported executable wiring leave source,
 history and publication unchanged. Existing patch edits act on the same source.
-Definitions remain in memory only; quitting loses unsaved construction and the
-screen must say so. This partial checkpoint does not accept playback/save/reopen.
+Definitions remain unsaved authored state; capture preserves typed facts but does
+not automatically reopen them. The screen must distinguish capture from saving.
+This partial checkpoint does not accept the complete save/reopen workflow.
 
 Native patch-editing checkpoint: after `n`, Ctrl-E opens the accepted instrument
 editor over the same project-owned source. Right changes its waveform; Ctrl-G
@@ -70,7 +81,8 @@ and history unchanged; completing the filter chain commits atomically. Esc exits
 the draft panel, then parameters, without quitting. A `q` typed inside a draft is
 text, while q at the project overview quits. Repeats/releases never edit. Native
 save requests explicitly report unsupported new-project saving and retain edits.
-Imported provenance stays empty; no baseline fixture, files or device are added.
+Imported provenance stays empty; no baseline fixture, authored files or device are
+added. Native accepted gesture captures remain separate from provenance/source.
 
 Native pattern checkpoint: `keyboard-pattern.txt` creates a one-bar project-owned
 pattern using `c`, independently of whether any instrument exists. It adds no

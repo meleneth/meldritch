@@ -90,8 +90,19 @@ the existing worker's live overrides; the mixed renderer replaces only that inst
 output gain, with independent identities from legacy lane gains. Construction patch
 edits preserve the declaration/overlay. Loading resets overlays; mode changes do not.
 This additive graph-snapshot field leaves historical .mlsynth files, hashes and empty
-declarations unchanged. In-memory facts/classification exist; disk capture and
-standalone saves remain proposed. It does not provide general dynamic surfaces or
+declarations unchanged. Native disk capture now reuses PerformanceSessionCapture
+and its timestamp/reservation/TOML/session categories. App CommandRecord retains
+accepted results, observed control frames and source fingerprints before/after.
+`native_capture.rs` is a bounded serialization/observation adapter, not a second
+source model or scheduler: decoded commands dispatch through AppController.
+The first accepted command starts capture; native append checkpoints copy existing
+events with fixed buffers, retain at most eight pending events and atomically rename
+complete files. A failure preserves pending events/last good file; native TUI hooks
+defer subsequent gestures/clean quit until checkpoint retry succeeds. Legacy writer
+mode/encoding remain unchanged; native payload/version metadata is additive.
+Headless reconstruction includes authored and runtime state after history eviction;
+timed replay, u64/epoch sessions, rotation and standalone saves remain proposed.
+It does not provide general dynamic surfaces or
 stateful DSP migration.
 Compilers may receive a selected composition projection, but that view
 must not become another mutable palette.

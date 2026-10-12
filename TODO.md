@@ -43,7 +43,10 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 1 runtime level checkpoint: explicit patch-owned output-level declaration,
   typed instance overlay, native x/arrows/Home/End; source/defaults unchanged,
   existing worker/callback mute/restore and in-memory accepted facts checked
-- [ ] Slice 1 next: disk capture, self-contained save/fresh reload
+- [x] Slice 1 capture checkpoint: lazy typed accepted sessions over shared writer,
+  per-command source/control observations, bounded pending buffers, atomic
+  checkpoints/failure retry, clean quit and fresh-app source/runtime/PCM reconstruction
+- [ ] Slice 1 next: self-contained save/fresh reload
 - [ ] Slice 2: shared palette, two compositions and independent pattern sources
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
@@ -145,6 +148,26 @@ Workspace tests, focused final DSL/render/both-CLI checks, formatting/diff check
 affected-crate Clippy (existing allowances) and the docs/reference build pass.
 Linear half-gain full/split raw f64 renders agree, and the legacy example 09
 fingerprint remains `41472b38b65b60ed`. This checkpoint is committed locally.
+
+Native capture checkpoint: `capture.txt` plus valid/invalid typed payload fixtures
+specify the additive native command version in the existing session envelope.
+Commands/results/source fingerprints/control observations are captured from typed
+app history; navigation/no-ops/drafts are retained and rejections omitted. Capture
+starts lazily and never becomes an entry point. Native checkpoints retain at most
+eight pending events, copy durable history through 64 KiB buffers, and bound a file
+at 64 MiB. Write failures preserve prior TOML/pending events; further gestures and
+clean quit wait for successful retry. Tests prove reconstruction beyond history
+eviction, no duplicate/lost events on retry, source-continuity/history-gap diagnostics,
+unknown payload/version rejection and confined directory/temp-symlink handling.
+The native callback test also checks capture observations and clean termination.
+Workspace tests, final native capture/CLI checks, affected-crate Clippy (existing
+allowances), formatting/diff checks and docs build pass. Real 80×24 PTY checks
+confirm file-free empty open/quit, twelve typed construction/runtime events and
+clean final gain, plus capture-path failure blocking another gesture/quit and
+recovering without duplication. Sparse file-limit and finished-session tests pass.
+No audio device is opened by these native capture smoke tests. Commit stays local.
+Standalone saves, CLI capture reconstruction, timed replay/epochs, capture rotation,
+performance harvesting and physical audio/hardware acceptance remain deferred.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

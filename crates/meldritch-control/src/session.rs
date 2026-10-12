@@ -3,12 +3,14 @@
 use meldritch_core::Tempo;
 use std::{
     fs::OpenOptions,
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CapturedSessionEvent {
+    pub native_payload: Option<String>,
     pub sequence: u64,
     pub wall_offset_ms: u128,
     pub absolute_frame: u32,
@@ -46,6 +48,9 @@ pub struct FinalSessionControl {
 
 #[derive(Debug)]
 pub struct PerformanceSessionCapture {
+    native_append: bool,
+    native_header_bytes: u64,
+    pub native_final_fingerprint: Option<u64>,
     pub path: PathBuf,
     pub temp_path: PathBuf,
     pub session_id: String,
@@ -67,6 +72,27 @@ pub struct PerformanceSessionCapture {
 const SESSION_EVENT_BUFFER_LIMIT: usize = 8;
 
 impl PerformanceSessionCapture {
+    pub fn create_native(
+        song: &meldritch_dsl::ValidatedSong,
+        timeline_frames: u32,
+    ) -> Result<Self, String> {
+        Self::create_native_at(song, timeline_frames, &utc_session_timestamp()?)
+    }
+
+    pub fn create_native_at(
+        song: &meldritch_dsl::ValidatedSong,
+        timeline_frames: u32,
+        timestamp: &str,
+    ) -> Result<Self, String> {
+        Self::create_with_mode(
+            song.root(),
+            song,
+            timeline_frames,
+            timestamp,
+            SESSION_EVENT_BUFFER_LIMIT,
+            true,
+        )
+    }
     pub fn create(
         song: &meldritch_dsl::ValidatedSong,
         timeline_frames: u32,
@@ -97,15 +123,46 @@ impl PerformanceSessionCapture {
         timestamp: &str,
         event_buffer_limit: usize,
     ) -> Result<Self, String> {
+        Self::create_with_mode(
+            session_root,
+            song,
+            timeline_frames,
+            timestamp,
+            event_buffer_limit,
+            false,
+        )
+    }
+
+    fn create_with_mode(
+        session_root: &Path,
+        song: &meldritch_dsl::ValidatedSong,
+        timeline_frames: u32,
+        timestamp: &str,
+        event_buffer_limit: usize,
+        native_append: bool,
+    ) -> Result<Self, String> {
         if event_buffer_limit == 0 {
             return Err("session event buffer limit must be greater than zero".to_owned());
         }
         let directory = session_root.join("performances");
         std::fs::create_dir_all(&directory)
             .map_err(|error| format!("failed to create {}: {error}", directory.display()))?;
+        let root = session_root
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        if !directory
+            .canonicalize()
+            .map_err(|error| error.to_string())?
+            .starts_with(&root)
+        {
+            return Err("performance capture directory escapes project root".into());
+        }
         let (path, session_id) = reserve_session_path(&directory, timestamp)?;
         let temp_path = path.with_extension("mlperformance.tmp");
         let mut capture = Self {
+            native_append,
+            native_header_bytes: 0,
+            native_final_fingerprint: None,
             path,
             temp_path,
             session_id,
@@ -123,7 +180,12 @@ impl PerformanceSessionCapture {
             clean_termination: false,
             termination: "running".to_owned(),
         };
-        capture.checkpoint()?;
+        if let Err(error) = capture.checkpoint() {
+            if native_append {
+                let _ = std::fs::remove_file(&capture.path);
+            }
+            return Err(error);
+        }
         Ok(capture)
     }
 
@@ -221,6 +283,7 @@ impl PerformanceSessionCapture {
         let musical_beat = f64::from(absolute_frame) / tempo.frames_per_beat().max(f64::EPSILON);
         let (kind, target_id, previous, current) = session_result_fields(input, result);
         self.push_event(CapturedSessionEvent {
+            native_payload: None,
             sequence,
             wall_offset_ms: self.started.elapsed().as_millis(),
             absolute_frame,
@@ -243,6 +306,20 @@ impl PerformanceSessionCapture {
     }
 
     pub fn push_event(&mut self, event: CapturedSessionEvent) -> Result<(), String> {
+        if self.native_append {
+            if self.clean_termination {
+                return Err("cannot append to a cleanly finished native capture".into());
+            }
+            crate::native_capture::NativeCommandEnvelope::decode(
+                event
+                    .native_payload
+                    .as_deref()
+                    .ok_or("native capture requires a typed command payload")?,
+            )?;
+        }
+        if self.native_append && self.events.len() >= self.event_buffer_limit {
+            self.checkpoint()?;
+        }
         self.events.push(event);
         self.uncheckpointed_events += 1;
         if self.uncheckpointed_events >= self.event_buffer_limit {
@@ -266,11 +343,21 @@ impl PerformanceSessionCapture {
     pub fn finish_clean_without_controller(&mut self) -> Result<(), String> {
         self.clean_termination = true;
         self.termination = "clean".to_owned();
-        self.checkpoint()
+        let result = self.checkpoint();
+        if result.is_err() && self.native_append {
+            self.clean_termination = false;
+            self.termination = "running".into();
+            self.final_state = None;
+            self.native_final_fingerprint = None;
+        }
+        result
     }
 
     pub fn checkpoint(&mut self) -> Result<(), String> {
         let encoded = self.to_toml();
+        if self.native_append {
+            return self.checkpoint_native(&encoded);
+        }
         std::fs::write(&self.temp_path, encoded)
             .map_err(|error| format!("failed to write {}: {error}", self.temp_path.display()))?;
         std::fs::rename(&self.temp_path, &self.path).map_err(|error| {
@@ -280,12 +367,87 @@ impl PerformanceSessionCapture {
         Ok(())
     }
 
+    fn checkpoint_native(&mut self, encoded: &str) -> Result<(), String> {
+        const MAX_BYTES: u64 = 64 * 1024 * 1024;
+        let header_end = encoded
+            .find("\n[[events]]\n")
+            .map_or(encoded.len(), |index| index + 1);
+        let (header, pending) = encoded.split_at(header_end);
+        let mut previous = std::fs::File::open(&self.path).map_err(|error| error.to_string())?;
+        let previous_bytes = previous
+            .metadata()
+            .map_err(|error| error.to_string())?
+            .len();
+        if previous_bytes < self.native_header_bytes {
+            return Err("capture checkpoint was truncated externally".into());
+        }
+        let event_bytes = previous_bytes - self.native_header_bytes;
+        if event_bytes + encoded.len() as u64 > MAX_BYTES {
+            return Err("native capture reached 64 MiB; pending events retained".into());
+        }
+        previous
+            .seek(SeekFrom::Start(self.native_header_bytes))
+            .map_err(|error| error.to_string())?;
+        // create_new rejects preexisting files/symlinks. Cleanup only a file
+        // created by this attempt; never follow or erase a foreign temp path.
+        let mut temporary = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&self.temp_path)
+            .map_err(|error| {
+                format!(
+                    "failed to create capture checkpoint {}: {error}",
+                    self.temp_path.display()
+                )
+            })?;
+        let write = (|| -> std::io::Result<()> {
+            temporary.write_all(header.as_bytes())?;
+            let mut buffer = [0_u8; 64 * 1024];
+            let mut remaining = event_bytes;
+            while remaining != 0 {
+                let limit = usize::try_from(remaining.min(buffer.len() as u64)).unwrap();
+                let count = previous.read(&mut buffer[..limit])?;
+                if count == 0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "capture changed while checkpointing",
+                    ));
+                }
+                temporary.write_all(&buffer[..count])?;
+                remaining -= count as u64;
+            }
+            temporary.write_all(pending.as_bytes())?;
+            temporary.sync_all()?;
+            std::fs::rename(&self.temp_path, &self.path)
+        })();
+        if let Err(error) = write {
+            let _ = std::fs::remove_file(&self.temp_path);
+            return Err(format!("failed to publish native capture: {error}"));
+        }
+        self.native_header_bytes = header.len() as u64;
+        self.events.clear();
+        self.uncheckpointed_events = 0;
+        Ok(())
+    }
+
+    /// Native append mode returns the header and pending buffer only. Its complete
+    /// history is the checkpoint file; legacy mode still returns the whole session.
     pub fn to_toml(&self) -> String {
         let mut out = String::new();
         out.push_str("[meldritch]\n");
         out.push_str("kind = \"performance_session\"\n");
         out.push_str("version = 1\n\n");
         out.push_str("[session]\n");
+        if self.native_append {
+            out.push_str("native_command_version = 1\n");
+            if let Some(fingerprint) = self.native_final_fingerprint {
+                push_string(
+                    &mut out,
+                    "final_source_fingerprint",
+                    &format!("{fingerprint:016x}"),
+                );
+            }
+        }
         push_string(&mut out, "id", &self.session_id);
         push_string(&mut out, "created_at_utc", &self.created_at_utc);
         push_string(&mut out, "source_performance", &self.source_performance);
@@ -326,7 +488,11 @@ impl PerformanceSessionCapture {
                 push_string(&mut out, "id", &control.id);
                 push_string(&mut out, "target", &control.target);
                 if let Some(value) = control.value {
-                    out.push_str(&format!("value = {:.12}\n", value));
+                    if self.native_append {
+                        out.push_str(&format!("value = {value}\n"));
+                    } else {
+                        out.push_str(&format!("value = {:.12}\n", value));
+                    }
                 }
                 out.push('\n');
             }
@@ -358,6 +524,25 @@ impl PerformanceSessionCapture {
             if let Some(current) = &event.current {
                 push_string(&mut out, "current", current);
             }
+            if let Some(payload) = &event.native_payload {
+                out.push_str("[events.native]\n");
+                for line in payload.lines() {
+                    if let Some(table) = line
+                        .strip_prefix("[[")
+                        .and_then(|line| line.strip_suffix("]]"))
+                    {
+                        out.push_str(&format!("[[events.native.{table}]]\n"));
+                    } else if let Some(table) = line
+                        .strip_prefix('[')
+                        .and_then(|line| line.strip_suffix(']'))
+                    {
+                        out.push_str(&format!("[events.native.{table}]\n"));
+                    } else {
+                        out.push_str(line);
+                        out.push('\n');
+                    }
+                }
+            }
             out.push('\n');
         }
         out
@@ -381,6 +566,13 @@ impl FinalSessionState {
                     target: control.target.clone(),
                     value: control.value,
                 })
+                .chain(view.output_levels.iter().map(|((voice, control), value)| {
+                    FinalSessionControl {
+                        id: format!("{voice}/{control}"),
+                        target: "instance_output_level".into(),
+                        value: Some(*value),
+                    }
+                }))
                 .collect(),
         }
     }

@@ -8,6 +8,11 @@ Follow [ROADMAP.md](ROADMAP.md) and example 34. Untested requirements remain
 proposed. Assert Rust state, compiler behavior, worker publication and callback
 consumption separately from presentation, then fresh-process persistence.
 
+Native capture's current checkpoint proves typed-command reconstruction in a fresh
+app, source/runtime separation, bounded pending storage, failure/retry without lost
+or duplicated events, clean/unclean markers, history/source-continuity diagnostics
+and path confinement. It does not prove timed replay, u64 epochs or authored reopen.
+
 - Empty opening creates no musical files or Git repository; saved music reopens
   without a seed, hardware or replay.
 - Construction/performance mutations have distinct owners; runtime gestures do
