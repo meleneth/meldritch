@@ -86,6 +86,7 @@ pub enum AppCommand {
         length_ticks: u64,
         looped: bool,
     },
+    SelectPalettePattern(String),
     MovePatternCursor {
         tick_delta: i64,
         pitch_delta: i32,
@@ -1519,6 +1520,7 @@ impl AppController {
                 length_ticks,
                 looped,
             } => self.create_palette_pattern(id, *length_ticks, *looped)?,
+            AppCommand::SelectPalettePattern(id) => self.select_palette_pattern(id)?,
             AppCommand::MovePatternCursor {
                 tick_delta,
                 pitch_delta,

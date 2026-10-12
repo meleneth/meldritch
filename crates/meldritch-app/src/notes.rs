@@ -161,6 +161,46 @@ impl AppController {
         })
     }
 
+    pub(crate) fn select_palette_pattern(
+        &mut self,
+        id: &str,
+    ) -> Result<AppCommandResult, AppCommandError> {
+        let source = self
+            .project_source
+            .as_ref()
+            .ok_or_else(|| AppCommandError::Instrument("no authored project source".into()))?;
+        source
+            .source
+            .pattern_material(id)
+            .map_err(AppCommandError::Instrument)?;
+        if source
+            .source
+            .performance()
+            .tracks()
+            .iter()
+            .any(|track| track.pattern_ids().iter().any(|pattern| pattern == id))
+        {
+            return Err(AppCommandError::Instrument(
+                "palette pattern required".into(),
+            ));
+        }
+        if self
+            .pattern_selection
+            .as_ref()
+            .is_some_and(|selection| selection.pattern == id)
+        {
+            return Ok(AppCommandResult::PatternSelectionChanged);
+        }
+        let visible = self
+            .pattern_selection
+            .as_ref()
+            .is_some_and(|selection| selection.visible);
+        self.enable_pattern_editor(id)
+            .map_err(AppCommandError::Instrument)?;
+        self.pattern_selection.as_mut().unwrap().visible = visible;
+        Ok(AppCommandResult::PatternSelectionChanged)
+    }
+
     pub(crate) fn move_pattern_cursor(
         &mut self,
         tick_delta: i64,

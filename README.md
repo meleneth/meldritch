@@ -40,6 +40,10 @@ legacy/native entries, symlinks and external entry edits diagnose explicitly.
 The composed native-key workflow is accepted headlessly, including fresh-process
 reopen and exact deterministic oscillator rendering. Native captures embed their
 opening source so subsequent saves cannot erase the reconstruction baseline.
+In construction, **PageUp/PageDown** selects palette patterns at the overview or
+pattern editor. Selection keeps bindings unchanged; **p/g** explicitly binds the
+selected pattern's pitch/gate. This lets melody and rhythm come from different
+patterns. Named composition selection remains planned.
 Timed replay and stateful graph transitions remain proposed. Existing commands
 remain valid.
 Git is allowed as a required installed dependency; opening needs no repository

@@ -90,6 +90,13 @@ rhythm edits change articulation without transposition, melody edits change pitc
 without moving gates, and save/fresh reopen preserves selection and shared IDs.
 Preserve example 34 and historical formats. Do not claim continuous DSP migration.
 
+Example 35 now specifies this contract. Its pattern-selection checkpoint is
+implemented: native PgUp/PgDn lowers to SelectPalettePattern, preserves source,
+bindings/runtime/publication and captures selection as a typed fact. The independent
+source/shared-patch fixture, native two-pattern routing, save/reopen and capture
+tests pass. Continue with named composition ownership/selection and native
+multi-instance selection; do not invent another palette or event engine.
+
 The completed Slice 1 implementation prompt is retained below as historical scope.
 It established empty directory → construct patch → create pattern → independent
 pitch/gate → play → modify → save → fresh-process reopen using native keys.

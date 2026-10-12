@@ -106,6 +106,11 @@ Later saves cannot change the captured baseline. Older captures without this fie
 require their original source explicitly; the loader never infers an empty baseline.
 This additive field changes neither legacy writers nor the event vocabulary and
 does not implement timed replay or execute events during project opening.
+Example 35 extends native command version 1 with `select_palette_pattern`, a
+typed selection fact with an explicit pattern ID. Selection changes neither
+authored source nor bindings; project-v2 saves exclude cursor/editor selection.
+Its project-v2 fixture reuses existing independent voice bindings and one palette
+definition across two instances; named composition schema remains unimplemented.
 
 Example 34 additionally defines self-contained `kind="project", version=2` Lua
 in `authored-project.lua`. It stores project identity/clock, complete supported

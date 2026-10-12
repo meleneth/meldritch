@@ -206,6 +206,15 @@ and removal of the original root; missing/forged/oversized baselines reject.
 These establish bounded headless example-34 acceptance. They do not prove physical
 listening, timed replay, Plaits RNG reproducibility or continuous DSP migration.
 
+Example 35's scoped pattern checkpoint uses `cargo test -p meldritch-control
+--test palette_routing`: native two-pattern key routing, cursor/note selection
+semantics, failed selection/clock diagnostics, shared-patch signal/gain independence,
+lossless native save/reopen and typed capture reconstruction. `cargo test -p
+meldritch-cli native_palette_selection` proves actual host generation/publication,
+runtime gain and advancing callback continuity. `cargo test -p meldritch-tui
+native_pattern_selection` checks visible selection/hints in an 80×24 backend.
+These do not accept named composition selection or the whole example.
+
 Add later:
 - offline render throughput
 - worker saturation

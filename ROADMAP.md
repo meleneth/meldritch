@@ -14,7 +14,9 @@ in [TODO.md](TODO.md). Each slice starts with a readable scenario and invalid
 neighbors, then binds acceptance to actual app/compiler/host boundaries.
 
 Example 34 has opening/creation/binding requests, invalid neighbors and scoped tests.
-Its composed construction/persistence contract is accepted headlessly. Names 35–41 below are
+Its composed construction/persistence contract is accepted headlessly. Example 35
+now specifies the next contract and implements its pattern-selection checkpoint.
+Names 36–41 below are
 reserved planning names, not existing files, schema or capability claims.
 No slice requires rewriting working examples or introducing another engine.
 
@@ -67,9 +69,16 @@ PCM revision publication is reported honestly; no continuous DSP-state claim.
 
 ### 2. One palette, two compositions, two independent pattern sources
 
-**Scenario/example:** proposed `35-project-palette-routing`: reuse one bass
+**Scenario/example:** [35-project-palette-routing](songs/examples/35-project-palette-routing/ACCEPTANCE.md): reuse one bass
 definition in two compositions; melody supplies pitch, rhythm supplies gate.
 One pattern also feeds two separately identified instances.
+
+**Current checkpoint:** PageUp/PageDown selects independent palette patterns
+through typed app commands without rebinding or rerendering. Native keys can now
+author melody and rhythm separately and bind their pitch/gate independently.
+The executable v2 fixture/tests prove one shared patch, two independent runtime
+gains, save/reopen and capture reconstruction. Full example status remains design:
+named composition ownership/selection and native multi-instance selection are next.
 
 **Sound/control:** changing rhythm changes articulation without transposing;
 changing melody changes pitch without moving gate boundaries. Composition

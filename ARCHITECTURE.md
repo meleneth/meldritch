@@ -122,6 +122,12 @@ it through the same importer/compiler and checks its fingerprint. Later saves an
 root removal cannot replace that baseline. A composed native-key/worker/callback
 test and isolated fresh-process reload establish headless workflow acceptance.
 Reconstruction uses existing typed dispatch; timed replay is unimplemented.
+Example 35 adds app `SelectPalettePattern` and native PageUp/PageDown navigation
+over independent palette material. It changes only inspector selection and is
+captured with explicit identity; p/g still authors each binding separately.
+Worker generation/publication and runtime gains stay unchanged. The shared-patch
+fixture reuses the existing independent-signal compiler and per-voice overlays.
+Named compositions and native selection of multiple instances remain missing.
 It does not provide general dynamic surfaces or
 stateful DSP migration.
 Compilers may receive a selected composition projection, but that view

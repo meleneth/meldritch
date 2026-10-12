@@ -214,6 +214,77 @@ mod tests {
     }
 
     #[test]
+    fn native_palette_selection_preserves_playing_audio_and_runtime_gain() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let project = project();
+        let source = meldritch_control::native_project::load_native_project(
+            project.root(),
+            include_str!("../../../songs/examples/35-project-palette-routing/main.project.lua"),
+        )
+        .unwrap();
+        let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
+        app.enable_native_project_source(source).unwrap();
+        let mut host = NativeProjectAudio::new(&app, engine).unwrap();
+        app.dispatch(AppCommand::SetOutputLevel {
+            voice: "bass-copy".into(),
+            control: "level".into(),
+            value: Some(0.2),
+        })
+        .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            host.poll(&mut app).unwrap();
+            if host.ready_generation == Some(host.host.generation()) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "worker publication timeout"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let source = app.authored_source().unwrap();
+        let published = host.reader.snapshot();
+        let generation = host.host.generation();
+        let mut callback = PublishedAudioRenderer::from_engine(
+            host.reader.clone(),
+            2,
+            u32::MAX,
+            host.engine.take().unwrap(),
+        )
+        .unwrap();
+        app.dispatch(AppCommand::Play).unwrap();
+        let mut samples = vec![0.0; 512];
+        callback.render_f64(&mut samples);
+        let position = app.view_model().transport.position;
+        let command = meldritch_tui::project_pattern_command(
+            KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+            &app.view_model(),
+            &source,
+        )
+        .unwrap();
+        app.dispatch(command).unwrap();
+        host.poll(&mut app).unwrap();
+        assert_eq!(
+            app.view_model().palette_pattern_editor.unwrap().pattern.id,
+            "rhythm"
+        );
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        assert!(Arc::ptr_eq(&published, &host.reader.snapshot()));
+        assert_eq!(host.host.generation(), generation);
+        assert_eq!(
+            app.output_levels()
+                .get(&("bass-copy".into(), "level".into())),
+            Some(&0.2)
+        );
+        assert_eq!(app.view_model().transport.state, TransportState::Playing);
+        callback.render_f64(&mut samples);
+        assert!(samples.iter().any(|value| value.abs() > 0.01));
+        assert!(app.view_model().transport.position > position);
+        host.finish(&app).unwrap();
+    }
+
+    #[test]
     fn native_keyboard_workflow_saves_and_reopens_in_a_fresh_process() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         use meldritch_tui::{

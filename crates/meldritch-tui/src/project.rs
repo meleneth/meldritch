@@ -153,6 +153,36 @@ pub fn project_pattern_command(
         return None;
     }
     let editor = view.palette_pattern_editor.as_ref();
+    if matches!(key.code, KeyCode::PageUp | KeyCode::PageDown)
+        && key.modifiers == KeyModifiers::NONE
+        && !view
+            .instrument_editor
+            .as_ref()
+            .is_some_and(|editor| editor.visible)
+    {
+        let patterns: Vec<_> = source
+            .note_patterns()
+            .keys()
+            .filter(|id| {
+                !source
+                    .performance()
+                    .tracks()
+                    .iter()
+                    .any(|track| track.pattern_ids().contains(id))
+            })
+            .collect();
+        if patterns.is_empty() {
+            return None;
+        }
+        let current =
+            editor.and_then(|editor| patterns.iter().position(|id| **id == editor.pattern.id));
+        let next = match current {
+            None => 0,
+            Some(index) if key.code == KeyCode::PageDown => (index + 1) % patterns.len(),
+            Some(index) => (index + patterns.len() - 1) % patterns.len(),
+        };
+        return Some(AppCommand::SelectPalettePattern(patterns[next].clone()));
+    }
     if key.code == KeyCode::Char('n') && key.modifiers == KeyModifiers::CONTROL && editor.is_some()
     {
         return Some(AppCommand::TogglePatternEditor);
@@ -271,7 +301,7 @@ pub fn draw_project_pattern(
             editor.selected_note.as_deref().unwrap_or("none")
         )),
         Line::from("Arrows cursor · Enter insert/select · [ ] duration · - + velocity"),
-        Line::from("Delete note · Esc/Ctrl-N close · Ctrl-E patch parameters"),
+        Line::from("PgUp/PgDn pattern · Delete note · Esc/Ctrl-N close · Ctrl-E patch"),
         Line::from(
             if editor.source.pattern_voices().values().any(|voice| {
                 voice.pitch_pattern.as_deref() == Some(&editor.pattern.id)
@@ -393,7 +423,7 @@ pub fn draw_project_construction(
     source: &ValidatedSong,
     status: &str,
 ) {
-    draw_project_construction_selected(frame, view, source, status, None);
+    draw_project_construction_selected(frame, view, source, status, None, None);
 }
 
 fn draw_project_construction_selected(
@@ -402,6 +432,7 @@ fn draw_project_construction_selected(
     source: &ValidatedSong,
     status: &str,
     selected: Option<&str>,
+    selected_pattern: Option<&str>,
 ) {
     if source.synths().is_empty() && source.note_patterns().is_empty() {
         draw_empty_project(frame, view);
@@ -431,6 +462,10 @@ fn draw_project_construction_selected(
             "n/c: patch/pattern · Ctrl-E/N: editors · Space: play · Ctrl-Tab mode · q: quit",
         ),
         Line::from("Ctrl-S/F6: save project · capture does not replace saving"),
+        Line::from(format!(
+            "Pattern: {} · PgUp/PgDn select (bindings unchanged)",
+            selected_pattern.unwrap_or("none")
+        )),
         Line::from(status.to_owned()),
     ];
     if !source.pattern_voices().is_empty() {
@@ -658,6 +693,10 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                         &app.authored_source().unwrap(),
                         &display_status,
                         model.instrument_editor.as_ref().map(|e| e.synth.as_str()),
+                        model
+                            .palette_pattern_editor
+                            .as_ref()
+                            .map(|e| e.pattern.id.as_str()),
                     );
                 }
             })?;
@@ -801,6 +840,74 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
 mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
+
+    #[test]
+    fn native_pattern_selection_is_visible_without_rebinding() {
+        let project = meldritch_dsl::load_project_directory(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../songs/examples/35-project-palette-routing"),
+        )
+        .unwrap();
+        let (mut app, _) = AppController::new_empty_project(&project).unwrap();
+        for id in ["melody", "rhythm"] {
+            app.dispatch(AppCommand::CreatePalettePattern {
+                id: id.into(),
+                length_ticks: 3840,
+                looped: true,
+            })
+            .unwrap();
+        }
+        app.dispatch(AppCommand::TogglePatternEditor).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let source = app.authored_source().unwrap();
+        let selection = app.view_model().palette_pattern_editor.unwrap();
+        terminal
+            .draw(|frame| {
+                draw_project_construction_selected(
+                    frame,
+                    &ProjectOverview::from_project(&project),
+                    &source,
+                    "",
+                    None,
+                    Some(&selection.pattern.id),
+                )
+            })
+            .unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("Pattern: rhythm"));
+        assert!(screen.contains("PgUp/PgDn select (bindings unchanged)"));
+        app.dispatch(AppCommand::TogglePatternEditor).unwrap();
+        let command = project_pattern_command(
+            KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+            &app.view_model(),
+            &source,
+        )
+        .unwrap();
+        app.dispatch(command).unwrap();
+        let selection = app.view_model().palette_pattern_editor.unwrap();
+        terminal
+            .draw(|frame| draw_project_pattern(frame, &selection, ""))
+            .unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(screen.contains("Pattern melody"));
+        assert!(screen.contains("PgUp/PgDn pattern"));
+        assert!(std::sync::Arc::ptr_eq(
+            &source,
+            &app.authored_source().unwrap()
+        ));
+    }
 
     #[test]
     fn native_save_is_global_but_repeats_and_releases_do_not_save() {

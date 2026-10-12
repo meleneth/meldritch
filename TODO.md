@@ -1,8 +1,8 @@
 # Active TODO
 
-Immediate priority: the project-to-playable-patch workflow in section 21 and
-[ROADMAP.md](ROADMAP.md). This is a requirements/planning update, not new runtime
-support. Sections 20/19 retain accepted work, unfinished work and historical
+Immediate priority: shared palette and named compositions in section 21 and
+[ROADMAP.md](ROADMAP.md). The bounded empty-project workflow is accepted headlessly.
+Sections 20/19 retain accepted work, unfinished work and historical
 verification; their older next-step recommendations are superseded.
 The completed showcase milestones remain completion history.
 
@@ -56,6 +56,13 @@ an empty project requires no Git repository or initialization.
   save/failure/retry and isolated fresh-process reopen; embedded capture baselines
   survive later saves and root removal. No timed replay or physical listening claim
 - [ ] Slice 2: shared palette, two compositions and independent pattern sources
+- [x] Slice 2 pattern-selection checkpoint: typed SelectPalettePattern, native
+  PageUp/PageDown without rebinding, visible selection, separate melody/rhythm
+  source key workflow, shared patch/two-instance render and independent gains;
+  source/runtime/publication continuity, persistence and typed capture checks
+- [ ] Slice 2 next: named composition source ownership, scoped instance identity,
+  explicit selection with prepared stop/start policy and lossless save/reopen;
+  native selection of multiple instances sharing the same patch
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
 - [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
@@ -228,6 +235,26 @@ VitePress reference/build checks pass. Examples 09/29 retain fingerprints
 `41472b38b65b60ed` / `54745c74a42665cf`. Physical listening, device deadlines,
 sample-timed replay/epochs and harvesting remain deferred. This is a local checkpoint;
 no push is required.
+
+Slice 2 pattern checkpoint: [example 35](songs/examples/35-project-palette-routing/ACCEPTANCE.md)
+defines the full contract as design, with an executable project-v2 routing fixture
+and negative selection/clock requests. Native PgUp/PgDn now selects palette
+patterns at the overview or pattern editor in stable ID order. Bindings remain
+explicit p/g actions; selection resets cursor/note only when its identity changes.
+The app command validates before changing selection and does not replace source;
+typed native capture records it. UI navigation excludes track-owned/parameter
+patterns, draft panels, performance mode and repeats/releases. Control tests prove
+native two-pattern routing, scoped shared-patch gains, raw oscillator sound,
+save/reopen and capture reconstruction. The CLI host test proves selection retains
+runtime gains and active source/publication/generation while callback transport
+advances. Named compositions and native multi-instance selection remain missing;
+example 35 is not accepted in full.
+Validation: workspace offline tests, four palette-routing integration tests,
+native selection screen/host checks, affected-crate all-targets Clippy with existing
+allowances, formatting/diff and VitePress reference/build checks pass. Read-only
+CLI `open-project --check` validates the new fixture (`ea41a978f40edec0`);
+examples 09/29 retain their historical fingerprints. No devices or physical
+listening evidence are claimed. Keep this checkpoint local rather than pushing.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

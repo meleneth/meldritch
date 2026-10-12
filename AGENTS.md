@@ -107,6 +107,10 @@ Preserve `INVARIANTS.md`. In particular:
 
 The immediate priority is section 21 of `TODO.md`, Slice 2's example-first shared
 palette, composition selection and independent pattern-source routing.
+Example 35's native pattern-selection checkpoint is implemented: PgUp/PgDn
+selects palette material without rebinding, source/runtime mutation or rerender;
+typed capture and independent-source persistence/render tests pass. Its full
+named-composition contract remains design, including native multi-instance selection.
 Example 34's bounded empty-project workflow is accepted headlessly; physical
 listening, timed replay and continuous DSP-state migration remain unverified.
 Read the architecture, roadmap, AUTHORING.md and accepted

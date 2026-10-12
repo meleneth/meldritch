@@ -102,7 +102,7 @@ macro_rules! native_commands {
 }
 native_commands! {
     units { Play, Stop, Rewind, TogglePatternEditor, ToggleInstrumentEditor, TogglePatchEditor, PatchBackspace, PatchSubmit, SavePattern, SaveInstrument, SaveProject }
-    tuples { CreatePatch(creation: PatchCreation), EditPatch(edit: PatchEdit), CreatePatternVoice(voice: PatternVoiceDefinition), EditInstrument(edit: InstrumentEdit), SelectInstrument(id: String), PatchCharacter(character: char), PatchScroll(delta: i32), SetCockpitMode(mode: CockpitMode) }
+    tuples { CreatePatch(creation: PatchCreation), EditPatch(edit: PatchEdit), CreatePatternVoice(voice: PatternVoiceDefinition), EditInstrument(edit: InstrumentEdit), SelectInstrument(id: String), SelectPalettePattern(id: String), PatchCharacter(character: char), PatchScroll(delta: i32), SetCockpitMode(mode: CockpitMode) }
     structs {
         ExposeOutputLevel { synth: String, control: String },
         SetOutputLevel { voice: String, control: String, value: Option<f64> },

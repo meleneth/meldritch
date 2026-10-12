@@ -1,0 +1,20 @@
+# Typed request fixtures, not an authored project format.
+[[cases]]
+kind = "select_palette_pattern"
+id = "missing"
+expect = "unknown note pattern"
+
+[[cases]]
+kind = "select_palette_pattern"
+id = ""
+expect = "unknown note pattern"
+
+[[cases]]
+kind = "select_palette_pattern"
+id = "track-owned"
+expect = "palette pattern required"
+
+[[cases]]
+kind = "bind_gate"
+length_ticks = 1920
+expect = "bound pattern must share the voice length and loop policy"
