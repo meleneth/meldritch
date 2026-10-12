@@ -266,6 +266,13 @@ LFO/composition arithmetic, isolated full/split reopen and full typed capture
 reconstruction. A disconnected envelope/VCA variant remains audible after depth
 is zero. All invalid/depth.toml cases preserve source/history. Playing worker tests
 cover combined depth/pitch/filter publication and wrong-amount-unit continuity.
+Rate tests independently integrate phase for sine/triangle/saw/square at each
+sample, with tempo/Hertz source clocks and explicit gate reset before evaluation.
+Typed keyboard drafts, full/split isolated reopen and capture reconstruction must
+produce identical source and PCM. Every invalid/rate.toml case preserves source
+and history, including out-of-range declared clamps and typed rate feedback.
+The playing host combines two Hertz adapters for rate and cutoff, plus depth and
+pitch fan-out, and checks that feedback rejection preserves published PCM.
 
 Add later:
 - offline render throughput

@@ -80,7 +80,8 @@ Apply filter-patch.txt to the tremolo or vibrato patch. Insert the existing
 low_pass in the explicit audio chain. control_hertz takes unit-interval Control
 and emits Hertz Control via input × gain_hz + offset_hz, clamped to authored
 clamp_min_hz/clamp_max_hz. Gain/offset are finite in -20000..20000;
-clamps are ordered within 20..20000 Hz. The typed low_pass.cutoff input accepts
+clamps are ordered within 0.001..20000 Hz (defaults remain 20..20000).
+The typed low_pass.cutoff input accepts
 Hertz only. A cable replaces the filter's configured cutoff default; cutoff
 overrides must reject on this cabled path. Uncabled historical defaults/overrides
 retain their behavior. Existing filter DSP applies its documented physical
@@ -133,9 +134,36 @@ reconstruction. invalid_depth_connections_reject_without_source_or_history_chang
 executes every negative fixture. native_graph_lfo checks the combined depth/pitch/
 filter worker publication and failed-amount-unit continuity while playing.
 
+## Rate checkpoint: one modulator changes another's speed
+
+Apply rate-patch.txt to the base patch or its pitch/filter/depth extensions.
+clock LFO → unit-interval scale → explicit Hertz adapter → slow.rate. Hertz
+adapters now permit authored clamps within 0.001..20000 Hz; defaults remain
+20..20000. An LFO rate cable must originate at an adapter whose declared clamps
+are within 0.001..100 Hz. Bipolar/unit-interval sources never become Hz implicitly.
+The cable replaces the configured Hertz/Beats rate, which remains an inactive
+default. The clock may be beat-synchronized or free-running; the cabled target
+integrates instantaneous Hertz. Uncabled LFO evaluation stays exactly compatible.
+
+At frame zero, or an explicitly cabled gate rise, target phase equals authored
+phase. Evaluate the waveform at the current phase, then advance by that frame's
+Hertz/sample_rate and wrap into [0,1). Thus rate at frame N affects phase N+1;
+changing rate does not retroactively multiply elapsed frames or reset phase.
+Reset precedes evaluation and increment; resetting the target never resets its
+rate source. Pattern loops do not reset free-running phase. Dependency order
+includes rate cables; sources and state remain per instance, evaluated once per
+sample in bounded worker arrays. Finite published PCM still loops; this does not
+promise uninterrupted phase across realtime graph revisions/publication loops.
+
+Required evidence: independent discrete phase-integration/sample references,
+tempo versus Hz rate-source timing, all four waveforms, cabled gate reset and
+fan-out, full/split/fresh-process render equality, typed drafts/capture and playing
+publication. Wrong units/ranges, missing/duplicate/unused inputs and rate feedback
+reject with source/history/audio unchanged. Broader cadence/scopes remain open.
+
 ## Remaining full Slice 3 contract
 
-Broader explicit addition/clamping, modulatable LFO rate,
+Broader explicit addition/clamping,
 event/control-rate latching and global/per-voice scopes
 remain requirements. Reset/stop/rewind and composition clocks need their full scope
 contracts. General feedback requires an explicit executable delay. Native controls

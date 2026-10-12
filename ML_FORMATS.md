@@ -125,13 +125,19 @@ native save/reopen. The filter checkpoint adds `control_hertz` with required
 `hertz` gain_hz/offset_hz/clamp_min_hz/clamp_max_hz settings, typed unit-interval
 input/Hertz output, and one cabled low_pass.cutoff port. ConfigureControlHertz
 uses the same typed patch/capture path. The cable replaces the configured cutoff
-default; uncabled cutoff overrides reject on this path. Old uncabled behavior and
+default; cabled cutoff overrides reject on this path. Old uncabled behavior and
 absent-settings fingerprints are preserved. Broader modulation remains proposed.
 `control_attenuate` needs no configuration fields: Control input/output is bipolar,
 amount input is unit interval. Its explicit product evaluates at audio rate per
 instance through the existing control graph. Instantiate/connect/remove operations,
 native graph snapshots, capture and fingerprints preserve the module and cables.
 It does not reinterpret the existing unit-interval `control_multiply` ports.
+Lfo also exposes an optional Hertz `rate` input. No new settings field is needed:
+the cable replaces configured rate, using deterministic samplewise phase integration.
+The source must be an explicit ControlHertz adapter declaring clamps in 0.001..100 Hz.
+General adapter clamps now permit 0.001..20000 Hz; defaults remain 20..20000 Hz.
+Existing settings/fingerprints remain compatible. Rate cables persist and capture
+through the existing typed patch and native snapshot formats.
 
 Example 35 extends native command version 1 with `select_palette_pattern`, a
 typed selection fact with an explicit pattern ID. Selection changes neither

@@ -43,7 +43,8 @@ optional filter → output are the executable topology. Plaits can use audio or
 aux. There are no implicit adapters, hidden routes or alternate graph compiler.
 Example 36 extends the amplitude control path with a bounded control DAG:
 LFO → scale and ADSR → multiplier → VCA, plus explicit PitchModulate vibrato.
-Every control node must reach VCA level or the oscillator pitch adapter;
+Every control node must reach VCA level, oscillator pitch or filter cutoff,
+including dependencies through an LFO rate input;
 units/rate validate and multiple cables still require an explicit combiner.
 Inspect settings and typed ports in the scrolling graph pane. A gate-rise-reset
 LFO requires input.gate → ID.reset; reset-none rejects that cable. Unsupported
@@ -58,6 +59,12 @@ still applies after the authored adapter clamp. Configurable normalization is op
 ControlAttenuate takes bipolar Control at control and unit-interval Control at
 amount, emitting their bipolar product. Ordinary add/connect drafts construct
 envelope-controlled depth; no settings or hidden destination routing are required.
+Lfo.rate is an optional Hertz input. Connect an explicit ControlHertz adapter with
+declared clamps within 0.001..100 Hz; rate-patch.txt in example 36 demonstrates a
+second LFO controlling the first one's speed. General Hertz clamps allow
+0.001..20000 Hz, with unchanged 20..20000 defaults. The inspector labels cabled
+rate as integrated phase and configured rate as inactive. Rate dependencies take
+part in cycle validation; no implicit feedback delay or reset is introduced.
 
 The inspector lists module IDs/types, typed input/output endpoints, authored
 values/ranges, explicit cables and draft validation/compilation diagnostics.

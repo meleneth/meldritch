@@ -3826,6 +3826,7 @@ fn resolve_port(
         )
     })?;
     let signal = match (*kind, direction, port) {
+        (ModuleKind::Lfo, PortDirection::Input, "rate") => SignalType::Control,
         (ModuleKind::ControlAttenuate, _, "control")
         | (ModuleKind::ControlAttenuate, PortDirection::Input, "amount") => SignalType::Control,
         (ModuleKind::ControlHertz, _, "control")

@@ -129,7 +129,7 @@ impl ModuleDefinition {
         for direction in [PortDirection::Input, PortDirection::Output] {
             for name in [
                 "pitch", "gate", "control", "audio", "level", "aux", "reset", "left", "right",
-                "cutoff", "amount",
+                "cutoff", "amount", "rate",
             ] {
                 let endpoint = format!("{}.{}", self.id, name);
                 if let Ok(signal) = resolve_port(
@@ -294,17 +294,27 @@ impl ValidatedSong {
             .modules
             .iter()
             .map(|m| match m.kind {
-                ModuleKind::Lfo => usize::from(m.lfo.unwrap().reset == LfoReset::GateRise),
+                ModuleKind::Lfo => {
+                    usize::from(m.lfo.unwrap().reset == LfoReset::GateRise)
+                        + usize::from(
+                            graph
+                                .cables
+                                .iter()
+                                .any(|c| c.to == format!("{}.rate", m.id)),
+                        )
+                }
                 ModuleKind::ControlScale => 1,
                 ModuleKind::ControlMultiply => 2,
                 ModuleKind::PitchModulate => 2,
-                ModuleKind::ControlHertz => 2,
+                ModuleKind::ControlHertz => 1,
                 ModuleKind::ControlAttenuate => 2,
                 _ => 0,
             })
             .sum();
-        let expected_cables =
-            if with_filter { 6 } else { 5 } + usize::from(patched_plaits_gate) + control_cables;
+        let expected_cables = if with_filter { 6 } else { 5 }
+            + usize::from(patched_plaits_gate)
+            + control_cables
+            + usize::from(graph.cables.iter().any(|c| c.to.ends_with(".cutoff")));
         if graph.modules.len() != expected_modules || graph.cables.len() != expected_cables {
             return Err("unsupported note topology: one source, ADSR, VCA, output, optional low-pass and bounded control/pitch adapters with exactly the executable cables required".into());
         }

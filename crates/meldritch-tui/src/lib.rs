@@ -600,6 +600,13 @@ fn draw_instrument_editor(
                             settings.reset
                         ));
                     }
+                    if graph
+                        .cables()
+                        .iter()
+                        .any(|c| c.to() == format!("{}.rate", m.id()))
+                    {
+                        lines.push("Rate: cabled Hertz with integrated phase; configured rate is the inactive default".into());
+                    }
                     if let Some(settings) = m.scale() {
                         lines.push(format!(
                             "Scale gain {} offset {} clamp {}..{}",

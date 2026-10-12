@@ -1,0 +1,10 @@
+clear
+add clock lfo
+lfo clock sine beats 4 phase 0 reset none
+add clock-scale control_scale
+add speed control_hertz
+hertz speed 3 1 1 4
+connect clock.control clock-scale.control
+connect clock-scale.control speed.control
+connect speed.control slow.rate
+commit

@@ -11,6 +11,7 @@ pub enum ControlUnit {
 impl ModuleDefinition {
     pub fn control_unit(&self, port: &str, direction: PortDirection) -> Option<ControlUnit> {
         match (self.kind, direction, port) {
+            (ModuleKind::Lfo, PortDirection::Input, "rate") => Some(ControlUnit::Hertz),
             (ModuleKind::ControlAttenuate, _, "control") => Some(ControlUnit::Bipolar),
             (ModuleKind::ControlAttenuate, PortDirection::Input, "amount") => {
                 Some(ControlUnit::UnitInterval)
@@ -70,11 +71,11 @@ pub(super) fn validate_hertz_settings(
             .all(|v| v.is_finite())
             || !(-20000.0..=20000.0).contains(&s.gain_hz)
             || !(-20000.0..=20000.0).contains(&s.offset_hz)
-            || s.clamp_min_hz < 20.0
+            || s.clamp_min_hz < 0.001
             || s.clamp_max_hz > 20000.0
             || s.clamp_min_hz > s.clamp_max_hz
         {
-            return Err("Hertz adapter requires finite gain/offset in -20000..20000 and ordered clamps in 20..20000 Hz".into());
+            return Err("Hertz adapter requires finite gain/offset in -20000..20000 and ordered clamps in 0.001..20000 Hz".into());
         }
     }
     Ok(())
@@ -269,7 +270,7 @@ impl SynthDefinition {
         fn visit<'a>(
             graph: &'a SynthDefinition,
             endpoint: &str,
-            bipolar: bool,
+            expected: ControlUnit,
             active: &mut BTreeSet<&'a str>,
             order: &mut Vec<String>,
         ) -> Result<(), String> {
@@ -293,14 +294,11 @@ impl SynthDefinition {
             if port != "control" || cable.signal != SignalType::Control {
                 return Err("control source requires Control output".into());
             }
-            if module.control_unit(port, PortDirection::Output)
-                != Some(if bipolar {
-                    ControlUnit::Bipolar
-                } else {
-                    ControlUnit::UnitInterval
-                })
-            {
-                return Err("control unit mismatch: bipolar requires scale; VCA/multiply require unit interval".into());
+            let actual = module.control_unit(port, PortDirection::Output);
+            if actual != Some(expected) {
+                return Err(format!(
+                    "control unit mismatch at '{endpoint}': expected {expected:?}, found {actual:?}; use an explicit adapter"
+                ));
             }
             if module.kind == ModuleKind::Adsr {
                 return Ok(());
@@ -311,6 +309,7 @@ impl SynthDefinition {
                     | ModuleKind::ControlScale
                     | ModuleKind::ControlMultiply
                     | ModuleKind::ControlAttenuate
+                    | ModuleKind::ControlHertz
             ) {
                 return Err("unsupported control source".into());
             }
@@ -332,18 +331,70 @@ impl SynthDefinition {
                         (LfoReset::GateRise, [c]) if c.from == "input.gate" && c.signal == SignalType::Gate => {},
                         _ => return Err("LFO reset policy requires exactly its explicit input.gate cable or none".into()),
                     }
+                    let endpoint = format!("{id}.rate");
+                    if let Some(cable) = graph.cables.iter().find(|c| c.to == endpoint) {
+                        visit(graph, &endpoint, ControlUnit::Hertz, active, order)?;
+                        let (source, _) =
+                            cable.from.split_once('.').ok_or("invalid rate source")?;
+                        let settings = graph
+                            .modules
+                            .iter()
+                            .find(|m| m.id == source)
+                            .and_then(|m| m.hertz)
+                            .ok_or("LFO rate requires an explicit Hertz adapter")?;
+                        if settings.clamp_min_hz < 0.001 || settings.clamp_max_hz > 100.0 {
+                            return Err(
+                                "LFO rate adapter must declare clamps within 0.001..100 Hz".into(),
+                            );
+                        }
+                    }
                 }
-                ModuleKind::ControlScale => {
-                    visit(graph, &format!("{id}.control"), true, active, order)?
-                }
+                ModuleKind::ControlScale => visit(
+                    graph,
+                    &format!("{id}.control"),
+                    ControlUnit::Bipolar,
+                    active,
+                    order,
+                )?,
                 ModuleKind::ControlMultiply => {
-                    visit(graph, &format!("{id}.left"), false, active, order)?;
-                    visit(graph, &format!("{id}.right"), false, active, order)?;
+                    visit(
+                        graph,
+                        &format!("{id}.left"),
+                        ControlUnit::UnitInterval,
+                        active,
+                        order,
+                    )?;
+                    visit(
+                        graph,
+                        &format!("{id}.right"),
+                        ControlUnit::UnitInterval,
+                        active,
+                        order,
+                    )?;
                 }
                 ModuleKind::ControlAttenuate => {
-                    visit(graph, &format!("{id}.control"), true, active, order)?;
-                    visit(graph, &format!("{id}.amount"), false, active, order)?;
+                    visit(
+                        graph,
+                        &format!("{id}.control"),
+                        ControlUnit::Bipolar,
+                        active,
+                        order,
+                    )?;
+                    visit(
+                        graph,
+                        &format!("{id}.amount"),
+                        ControlUnit::UnitInterval,
+                        active,
+                        order,
+                    )?;
                 }
+                ModuleKind::ControlHertz => visit(
+                    graph,
+                    &format!("{id}.control"),
+                    ControlUnit::UnitInterval,
+                    active,
+                    order,
+                )?,
                 _ => unreachable!(),
             }
             active.remove(module.id.as_str());
@@ -354,7 +405,7 @@ impl SynthDefinition {
         visit(
             self,
             &format!("{}.level", amp.id),
-            false,
+            ControlUnit::UnitInterval,
             &mut BTreeSet::new(),
             &mut order,
         )?;
@@ -390,50 +441,40 @@ impl SynthDefinition {
             visit(
                 self,
                 &format!("{}.control", adapter.id),
-                true,
+                ControlUnit::Bipolar,
                 &mut BTreeSet::new(),
                 &mut order,
             )?;
             order.push(adapter.id.clone());
         }
-        let hertz = self
-            .modules
-            .iter()
-            .filter(|m| m.kind == ModuleKind::ControlHertz)
-            .collect::<Vec<_>>();
         let cutoff_cables = self
             .cables
             .iter()
             .filter(|c| c.to.ends_with(".cutoff"))
             .collect::<Vec<_>>();
-        match (hertz.as_slice(), cutoff_cables.as_slice()) {
-            ([], []) => {}
-            ([adapter], [cable]) => {
+        match cutoff_cables.as_slice() {
+            [] => {}
+            [cable] => {
                 let filter = self
                     .modules
                     .iter()
                     .find(|m| m.kind == ModuleKind::LowPass)
                     .ok_or("Hertz adapter requires a low-pass filter")?;
-                if cable.from != format!("{}.control", adapter.id)
-                    || cable.to != format!("{}.cutoff", filter.id)
+                if cable.to != format!("{}.cutoff", filter.id)
                     || cable.signal != SignalType::Control
                 {
                     return Err("filter cutoff requires explicit Hertz adapter output".into());
                 }
                 visit(
                     self,
-                    &format!("{}.control", adapter.id),
-                    false,
+                    &format!("{}.cutoff", filter.id),
+                    ControlUnit::Hertz,
                     &mut BTreeSet::new(),
                     &mut order,
                 )?;
-                order.push(adapter.id.clone());
             }
             _ => {
-                return Err(
-                    "filter lowering requires one Hertz adapter and one cutoff cable or neither"
-                        .into(),
-                );
+                return Err("filter lowering requires at most one explicit cutoff cable".into());
             }
         }
         if controls.len() != order.len() {

@@ -704,6 +704,266 @@ fn graph_lfo_reopen_child() {
 }
 
 #[test]
+fn cabled_lfo_rate_integrates_phase_with_tempo_hz_reset_and_all_waveforms() {
+    use meldritch_control::native_capture::{
+        NativeCommandEnvelope, NativeProjectCapture, load_native_capture_baseline,
+    };
+    use meldritch_dsl::{
+        GraphLfoRate, GraphLfoSettings, GraphLfoShape, LfoReset, PatchEdit, PatchOperation,
+    };
+    let directory = Directory::new();
+    for (bpm, clock_hz, shape, reset) in [
+        (120, false, GraphLfoShape::Sine, false),
+        (60, false, GraphLfoShape::Sine, false),
+        (60, true, GraphLfoShape::Sine, false),
+        (120, false, GraphLfoShape::Triangle, false),
+        (120, false, GraphLfoShape::Saw, false),
+        (120, false, GraphLfoShape::Square, false),
+        (120, false, GraphLfoShape::Sine, true),
+    ] {
+        let mut app = directory.app();
+        app.enable_native_project_source(
+            load_native_project(
+                &directory.0,
+                &FIXTURE.replace("bpm = 120", &format!("bpm = {bpm}")),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mut capture = (bpm == 120 && !clock_hz && shape == GraphLfoShape::Sine && !reset)
+            .then(|| NativeProjectCapture::new(app.authored_source().unwrap(), 192000));
+        app.dispatch(AppCommand::SelectInstrument("bass".into()))
+            .unwrap();
+        app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+        app.dispatch(AppCommand::TogglePatchEditor).unwrap();
+        let before = app.authored_source().unwrap();
+        let lines: Vec<_> = include_str!("../../../songs/examples/36-patch-lfo/rate-patch.txt")
+            .lines()
+            .collect();
+        for (index, line) in lines.iter().enumerate() {
+            for c in line.chars() {
+                app.dispatch(AppCommand::PatchCharacter(c)).unwrap();
+            }
+            app.dispatch(AppCommand::PatchSubmit).unwrap();
+            if let Some(capture) = &mut capture {
+                capture.checkpoint(&app).unwrap();
+            }
+            if index + 1 < lines.len() {
+                assert!(Arc::ptr_eq(&before, &app.authored_source().unwrap()));
+            }
+        }
+        let mut operations = vec![PatchOperation::ConfigureLfo {
+            module: "slow".into(),
+            settings: GraphLfoSettings {
+                shape,
+                phase: 0.25,
+                reset: if reset {
+                    LfoReset::GateRise
+                } else {
+                    LfoReset::None
+                },
+                ..GraphLfoSettings::default()
+            },
+        }];
+        if reset {
+            operations.push(PatchOperation::Connect {
+                from: "input.gate".into(),
+                to: "slow.reset".into(),
+            });
+        }
+        if clock_hz {
+            operations.push(PatchOperation::ConfigureLfo {
+                module: "clock".into(),
+                settings: GraphLfoSettings {
+                    rate: GraphLfoRate::Hertz(0.5),
+                    ..GraphLfoSettings::default()
+                },
+            });
+        }
+        app.dispatch(AppCommand::EditPatch(PatchEdit {
+            synth: "bass".into(),
+            operations,
+        }))
+        .unwrap();
+        if let Some(capture) = &mut capture {
+            capture.checkpoint(&app).unwrap();
+        }
+        let source = app.authored_source().unwrap();
+        let patch = CompiledSongPatch::compile_initial(&source).unwrap();
+        let audio = patch
+            .render_default(FrameRange::new(0, 192000).unwrap())
+            .unwrap();
+        let mut oscillator = Oscillator::new(Waveform::Sine);
+        let beat = 48000 * 60 / bpm;
+        let source_period = if clock_hz { 96000.0 } else { (4 * beat) as f64 };
+        let mut phase = 0.25;
+        for (frame, actual) in audio.samples().iter().enumerate() {
+            let position = frame % (4 * beat);
+            if reset && (position == 0 || position == beat * 3 / 2) {
+                phase = 0.25;
+            }
+            let value = match shape {
+                GraphLfoShape::Sine => (std::f64::consts::TAU * phase).sin(),
+                GraphLfoShape::Triangle => 1.0 - 4.0 * (phase - 0.5).abs(),
+                GraphLfoShape::Saw => phase.mul_add(2.0, -1.0),
+                GraphLfoShape::Square => {
+                    if phase < 0.5 {
+                        1.0
+                    } else {
+                        -1.0
+                    }
+                }
+            };
+            let wave = oscillator.next(440.0 * 2_f64.powf((48.0 - 69.0) / 12.0), 48000);
+            let expected =
+                wave * if position < beat * 7 / 2 {
+                    value.mul_add(0.5, 0.5)
+                } else {
+                    0.0
+                } * 0.8;
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "{shape:?}, reset {reset}, frame {frame}"
+            );
+            let clock = (std::f64::consts::TAU * (frame as f64 / source_period).fract()).sin();
+            let hz = clock.mul_add(0.5, 0.5).mul_add(3.0, 1.0);
+            phase = (phase + hz / 48000.0).fract();
+        }
+        assert_fresh_process(&directory, &source);
+        if let Some(mut capture) = capture {
+            capture.finish(&app).unwrap();
+            let text = fs::read_to_string(capture.session.as_ref().unwrap().path()).unwrap();
+            let mut replay = directory.app();
+            replay
+                .enable_native_project_source(
+                    load_native_capture_baseline(&directory.0, &text).unwrap(),
+                )
+                .unwrap();
+            let events: toml::Value = toml::from_str(&text).unwrap();
+            for event in events["events"].as_array().unwrap() {
+                let envelope =
+                    NativeCommandEnvelope::decode(&toml::to_string(&event["native"]).unwrap())
+                        .unwrap();
+                replay.dispatch(envelope.command.into()).unwrap();
+                assert_eq!(
+                    envelope.source_after,
+                    format!("{:016x}", replay.authored_source().unwrap().fingerprint())
+                );
+            }
+            assert_eq!(
+                CompiledSongPatch::compile_initial(&replay.authored_source().unwrap())
+                    .unwrap()
+                    .render_default(FrameRange::new(0, 192000).unwrap())
+                    .unwrap()
+                    .samples(),
+                audio.samples()
+            );
+        }
+    }
+}
+
+#[test]
+fn invalid_rate_connections_reject_without_source_or_history_changes() {
+    use meldritch_dsl::{ControlHertzSettings, ModuleKind, PatchEdit, PatchOperation};
+    let directory = Directory::new();
+    let mut app = directory.app();
+    app.enable_native_project_source(load_native_project(&directory.0, FIXTURE).unwrap())
+        .unwrap();
+    let connect = |from: &str, to: &str| PatchOperation::Connect {
+        from: from.into(),
+        to: to.into(),
+    };
+    let disconnect = |from: &str, to: &str| PatchOperation::Disconnect {
+        from: from.into(),
+        to: to.into(),
+    };
+    let base = vec![
+        PatchOperation::Instantiate {
+            id: "clock".into(),
+            kind: ModuleKind::Lfo,
+        },
+        PatchOperation::Instantiate {
+            id: "clock-scale".into(),
+            kind: ModuleKind::ControlScale,
+        },
+        PatchOperation::Instantiate {
+            id: "speed".into(),
+            kind: ModuleKind::ControlHertz,
+        },
+        PatchOperation::ConfigureControlHertz {
+            module: "speed".into(),
+            settings: ControlHertzSettings {
+                gain_hz: 3.0,
+                offset_hz: 1.0,
+                clamp_min_hz: 1.0,
+                clamp_max_hz: 4.0,
+            },
+        },
+        connect("clock.control", "clock-scale.control"),
+        connect("clock-scale.control", "speed.control"),
+        connect("speed.control", "slow.rate"),
+    ];
+    let before = app.authored_source().unwrap();
+    let cases: toml::Value = toml::from_str(include_str!(
+        "../../../songs/examples/36-patch-lfo/invalid/rate.toml"
+    ))
+    .unwrap();
+    for case in cases["cases"].as_array().unwrap() {
+        let kind = case["kind"].as_str().unwrap();
+        let mut operations = base.clone();
+        match kind {
+            "rate_range" | "zero_clamp" | "nonfinite_mapper" => {
+                operations.push(PatchOperation::ConfigureControlHertz {
+                    module: "speed".into(),
+                    settings: match kind {
+                        "rate_range" => ControlHertzSettings {
+                            gain_hz: 3.0,
+                            offset_hz: 1.0,
+                            clamp_min_hz: 1.0,
+                            clamp_max_hz: 101.0,
+                        },
+                        "zero_clamp" => ControlHertzSettings {
+                            clamp_min_hz: 0.0,
+                            ..ControlHertzSettings::default()
+                        },
+                        _ => ControlHertzSettings {
+                            gain_hz: f64::INFINITY,
+                            ..ControlHertzSettings::default()
+                        },
+                    },
+                })
+            }
+            "bipolar_rate" => {
+                operations.push(disconnect("speed.control", "slow.rate"));
+                operations.push(connect("clock.control", "slow.rate"));
+            }
+            "unit_interval_rate" => {
+                operations.push(disconnect("speed.control", "slow.rate"));
+                operations.push(connect("clock-scale.control", "slow.rate"));
+            }
+            "missing_input" => operations.push(disconnect("clock-scale.control", "speed.control")),
+            "missing_rate_cable" => operations.push(disconnect("speed.control", "slow.rate")),
+            "duplicate_rate" => operations.push(connect("speed.control", "slow.rate")),
+            "feedback" => {
+                operations.push(disconnect("clock.control", "clock-scale.control"));
+                operations.push(connect("slow.control", "clock-scale.control"));
+            }
+            _ => panic!("unexecuted rate negative {kind}"),
+        }
+        assert!(
+            app.dispatch(AppCommand::EditPatch(PatchEdit {
+                synth: "bass".into(),
+                operations
+            }))
+            .is_err(),
+            "accepted {kind}"
+        );
+        assert!(Arc::ptr_eq(&before, &app.authored_source().unwrap()));
+        assert!(app.history().is_empty());
+    }
+}
+
+#[test]
 fn envelope_depth_draft_fanout_capture_and_reopen_match_explicit_signal_reference() {
     use meldritch_control::native_capture::{
         NativeCommandEnvelope, NativeProjectCapture, load_native_capture_baseline,

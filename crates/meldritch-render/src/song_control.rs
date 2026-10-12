@@ -8,7 +8,10 @@ use meldritch_dsl::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ControlNode {
-    Lfo(GraphLfoSettings),
+    Lfo {
+        settings: GraphLfoSettings,
+        rate: Option<usize>,
+    },
     Scale {
         input: usize,
         settings: ControlScaleSettings,
@@ -65,7 +68,18 @@ impl ControlPlan {
         for id in &order {
             let module = graph.modules().iter().find(|m| m.id() == id).unwrap();
             nodes.push(match module.kind() {
-                ModuleKind::Lfo => ControlNode::Lfo(module.lfo().unwrap()),
+                ModuleKind::Lfo => ControlNode::Lfo {
+                    settings: module.lfo().unwrap(),
+                    rate: if graph
+                        .cables()
+                        .iter()
+                        .any(|c| c.to() == format!("{id}.rate"))
+                    {
+                        Some(resolve(&format!("{id}.rate"))?)
+                    } else {
+                        None
+                    },
+                },
                 ModuleKind::ControlScale => ControlNode::Scale {
                     input: resolve(&format!("{id}.control"))?,
                     settings: module.scale().unwrap(),
@@ -94,16 +108,16 @@ impl ControlPlan {
             .iter()
             .find(|m| m.kind() == ModuleKind::Vca)
             .ok_or("missing VCA")?;
+        let cutoff = graph
+            .modules()
+            .iter()
+            .find(|m| m.kind() == ModuleKind::LowPass)
+            .map(|m| format!("{}.cutoff", m.id()))
+            .filter(|endpoint| graph.cables().iter().any(|c| c.to() == endpoint))
+            .map(|endpoint| resolve(&endpoint))
+            .transpose()?;
         Ok(Some(Self {
-            cutoff: order
-                .iter()
-                .position(|id| {
-                    graph
-                        .modules()
-                        .iter()
-                        .any(|m| m.id() == id && m.kind() == ModuleKind::ControlHertz)
-                })
-                .map(|index| index + 1),
+            cutoff,
             pitch_offset: order
                 .iter()
                 .position(|id| {
@@ -125,15 +139,16 @@ impl ControlPlan {
         tempo: Tempo,
         values: &mut [f64; 33],
         origins: &mut [u64; 32],
+        phases: &mut [f64; 32],
     ) -> f64 {
         values[0] = envelope;
         for (index, node) in self.nodes.iter().enumerate() {
             values[index + 1] = match node {
-                ControlNode::Lfo(settings) => {
+                ControlNode::Lfo { settings, rate } => {
                     if gate_rise && settings.reset == LfoReset::GateRise {
                         origins[index] = frame;
                     }
-                    Lfo {
+                    let mut source = Lfo {
                         shape: match settings.shape {
                             GraphLfoShape::Sine => LfoShape::Sine,
                             GraphLfoShape::Triangle => LfoShape::Triangle,
@@ -146,8 +161,20 @@ impl ControlPlan {
                         },
                         phase: settings.phase,
                         seed: 0,
+                    };
+                    if let Some(rate) = rate {
+                        if frame == 0 || (gate_rise && settings.reset == LfoReset::GateRise) {
+                            phases[index] = settings.phase;
+                        }
+                        source.phase = phases[index];
+                        let value = source.value_at(0, tempo);
+                        phases[index] = (phases[index]
+                            + values[*rate] / f64::from(tempo.sample_rate()))
+                        .fract();
+                        value
+                    } else {
+                        source.value_at(frame - origins[index], tempo)
                     }
-                    .value_at(frame - origins[index], tempo)
                 }
                 ControlNode::Scale { input, settings } => values[*input]
                     .mul_add(settings.gain, settings.offset)

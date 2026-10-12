@@ -81,17 +81,15 @@ replay, physical listening and continuous DSP-state migration remain future work
 
 ## Recommended immediate implementation prompt
 
-Continue Slice 3's example 36 from its working tremolo/vibrato/filter/depth checkpoints.
-Add the smallest explicit modulator-rate input with deterministic phase integration,
-reusing control_order, ControlPlan, the Lfo kernel, independent pitch/gate voice,
-typed PatchEdit, worker/publication and native save/capture. Do not hard-code a
-destination in Lfo or reinterpret unit-interval level as pitch/Hz. Write the next
-musical/negative fixture before schema; preserve the tremolo and examples 25–35.
-Keep variable-rate integration, event cadence and broader scopes explicitly open
-until their own contracts are executable. Prove deterministic full/split audio,
-inspectable ports/settings, typed edits, negative unit/rate/cycle/combination,
-worker/callback publication and fresh-process reopen. Do not claim continuous
-DSP-state migration from finite PCM replacement.
+Continue Slice 3's example 36 from its working tremolo/vibrato/filter/depth/rate
+checkpoints. Define the smallest explicit control-cadence/latching example and
+its consumer timing contract before adding schema. Reuse control_order, ControlPlan,
+the Lfo kernel, typed PatchEdit, worker/publication and native save/capture; later
+event consumers must use the existing scheduler. Preserve audio-rate behavior and
+examples 25–35. Keep event cadence and broader scopes open until their own contracts
+are executable. Prove deterministic full/split audio, inspectable ports/settings,
+typed edits, rejected incompatible cadence, publication and fresh-process reopen.
+Do not claim continuous DSP-state migration from finite PCM replacement.
 
 Example 36's first checkpoint is implemented: audio-rate/per-instance Lfo,
 ControlScale and ControlMultiply form an explicit amplitude-control DAG, with
@@ -104,8 +102,8 @@ are still explicitly declared; internal LFO settings are not auto-exposed.
 The vibrato checkpoint adds an explicit PitchModulate adapter and pitch-depth
 draft command. One bipolar LFO fans out to amplitude and semitone pitch offset;
 independent references, zero/negative depth, failure continuity, worker publication
-and isolated full/split save/reopen are checked. Continue with filter adapters;
-variable-rate LFO integration and broader scope/cadence remain open.
+and isolated full/split save/reopen are checked. Filter and variable-rate adapters
+are covered by the subsequent checkpoints; broader scope/cadence remain open.
 
 The filter checkpoint adds ControlHertz and low_pass.cutoff, with an explicit
 unit-interval → Hertz affine/clamp transform. Cabled cutoff replaces its configured
@@ -116,8 +114,14 @@ The depth checkpoint adds ControlAttenuate, an explicit bipolar signal multiplie
 by unit-interval amount. ADSR → amount shapes a shared LFO's depth across pitch and
 amplitude adapters. Drafts, signal references, capture reconstruction and fresh
 reopen pass, including a disconnected-envelope/VCA variant that keeps oscillating
-after the envelope reaches zero. Next: modulatable rate with integrated phase;
-event cadence, broader scopes and continuous DSP migration remain open.
+after the envelope reaches zero.
+
+The rate checkpoint adds an optional Hertz input to Lfo, using the same explicit
+ControlHertz adapter with declared clamps within 0.001..100 Hz. Cabled rate replaces
+the configured default. Phase evaluates before each sample's Hertz increment;
+explicit gate reset precedes both. All four waveforms, tempo/Hertz, typed capture,
+fresh-process full/split PCM and playing feedback rejection are checked. Event
+cadence, broader scopes and continuous DSP migration remain open.
 
 Example 35 now specifies this contract. Its pattern-selection checkpoint is
 implemented: native PgUp/PgDn lowers to SelectPalettePattern, preserves source,

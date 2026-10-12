@@ -77,8 +77,9 @@ an empty project requires no Git repository or initialization.
   and cable/default precedence, sample/tail/split references and playing publication
 - [x] Slice 3 depth checkpoint: bipolar ControlAttenuate × unit-interval amount,
   envelope-shaped fan-out, independent amplitude wiring, capture and fresh reopen
-- [ ] Slice 3 next: modulatable LFO rate with deterministic phase integration,
-  then event cadence and broader instantiation scopes
+- [x] Slice 3 rate checkpoint: explicit Hertz input, deterministic phase integration,
+  reset ordering, independent waveform references, capture and playing publication
+- [ ] Slice 3 next: explicit control/event cadence and broader instantiation scopes
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
 - [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
 - [ ] Slice 6: quantized graph activation and proved compatible DSP-state continuity
@@ -407,6 +408,24 @@ Verification: offline workspace tests, graph-LFO acceptance (twelve parent tests
 plus isolated reopen children), affected all-targets Clippy with existing
 allowances, formatting/diff and VitePress pass. Historical 09/29 fingerprints
 remain `41472b38b65b60ed` / `54745c74a42665cf`.
+
+Slice 3 rate checkpoint connects a second LFO through scale and ControlHertz to
+the first LFO's typed rate input. The cable replaces its configured rate; declared
+adapter clamps must stay within 0.001..100 Hz. Each sample reads the current phase
+before advancing by Hertz/sample-rate, with explicit gate reset before evaluation.
+The static-rate path and historical fingerprints remain unchanged. Independent
+references cover all four waveforms, tempo/Hertz, reset, full/split and fresh-process
+rendering; typed capture reconstructs the source and PCM. Nine negative contracts
+preserve source/history. Playing tests combine rate, pitch, depth and filter cables,
+and reject rate feedback without changing publication. Full example 36 stays
+design: broader cadence/scopes, explicit delayed feedback, normalization and
+continuous DSP-state migration remain open. Physical listening and deadlines
+remain unverified.
+
+Rate checkpoint verification: offline workspace tests, fourteen graph-LFO parent
+tests plus isolated reopen children, affected all-targets Clippy with existing
+allowances, formatting/diff checks and VitePress pass. Historical 09/29
+fingerprints remain `41472b38b65b60ed` / `54745c74a42665cf`.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

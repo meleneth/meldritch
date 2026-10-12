@@ -127,8 +127,9 @@ adapter, authored clamping, cable/default precedence, independent filter-tail
 references, fresh reopen and playing publication.
 ControlAttenuate now also enables envelope-controlled shared depth with explicit
 units, independent amplitude wiring, capture reconstruction and signal references.
-Full example remains design: variable-rate integration, event cadence and broader
-scopes are still required.
+An explicit Hertz rate input now integrates phase samplewise, with all-waveform,
+reset, tempo, capture, isolated reopen and playing feedback-rejection checks.
+Full example remains design: event/control cadence and broader scopes are required.
 
 **Sound/control:** shared phase sweeps both destinations; depth/rate/reset are
 inspectable. Demonstrate explicit sum/scale/clamp, event versus audio/control

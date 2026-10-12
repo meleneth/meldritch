@@ -796,6 +796,7 @@ impl CompiledNotePatch {
         let mut active_end = None;
         let mut control_values = [0.0; 33];
         let mut control_origins = [0; 32];
+        let mut control_phases = [0.0; 32];
         let control_tempo = meldritch_core::Tempo::new(self.bpm, self.sample_rate)
             .map_err(|e| SongRenderError::InvalidPatternVoice(e.to_string()))?;
         for absolute_frame in 0..range.end() {
@@ -859,6 +860,7 @@ impl CompiledNotePatch {
                     control_tempo,
                     &mut control_values,
                     &mut control_origins,
+                    &mut control_phases,
                 )
             });
             // The pitch adapter explicitly adds its semitone offset to the bound
