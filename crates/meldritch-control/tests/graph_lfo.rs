@@ -465,11 +465,15 @@ fn native_atomic_patch_draft_and_fresh_process_persistence_reuse_existing_bounda
     assert_ne!(source.fingerprint(), before.fingerprint());
     // Snapshot fixture supplies timed independent source material; no second importer.
     let source = load_native_project(&directory.0, FIXTURE).unwrap();
+    assert_fresh_process(&directory, &source);
+}
+
+fn assert_fresh_process(directory: &Directory, source: &meldritch_dsl::ValidatedSong) {
     let mut store =
         NativeProjectStore::open(&meldritch_dsl::load_project_directory(&directory.0).unwrap())
             .unwrap();
-    store.save(&source).unwrap();
-    let patch = CompiledSongPatch::compile_initial(&source).unwrap();
+    store.save(source).unwrap();
+    let patch = CompiledSongPatch::compile_initial(source).unwrap();
     let pcm: Vec<_> = patch
         .render_default(FrameRange::new(0, 192_000).unwrap())
         .unwrap()
@@ -499,6 +503,174 @@ fn native_atomic_patch_draft_and_fresh_process_persistence_reuse_existing_bounda
         String::from_utf8_lossy(&child.stdout),
         String::from_utf8_lossy(&child.stderr)
     );
+}
+
+#[test]
+fn explicit_vibrato_draft_fanout_depth_and_fresh_process_match_sample_reference() {
+    use meldritch_dsl::{PatchEdit, PatchOperation, PitchModulationSettings};
+    let directory = Directory::new();
+    let mut app = directory.app();
+    let fixture = FIXTURE.replace(
+        "notes = { { id = \"note-1\", note = \"C3\", start_tick = 0, duration_ticks = 3840, velocity = 0.8 } }",
+        "notes = { { id = \"note-1\", note = \"C3\", start_tick = 0, duration_ticks = 1920, velocity = 0.8 }, { id = \"note-2\", note = \"C4\", start_tick = 1920, duration_ticks = 1920, velocity = 0.8 } }",
+    ).replace("id = \"melody\", length_ticks = 3840, looped = true, next_note_id = 2", "id = \"melody\", length_ticks = 3840, looped = true, next_note_id = 3");
+    assert_ne!(fixture, FIXTURE);
+    app.enable_native_project_source(load_native_project(&directory.0, &fixture).unwrap())
+        .unwrap();
+    app.dispatch(AppCommand::SelectInstrument("bass".into()))
+        .unwrap();
+    app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+    app.dispatch(AppCommand::TogglePatchEditor).unwrap();
+    let before = app.authored_source().unwrap();
+    let lines: Vec<_> = include_str!("../../../songs/examples/36-patch-lfo/vibrato-patch.txt")
+        .lines()
+        .collect();
+    for (index, line) in lines.iter().enumerate() {
+        for c in line.chars() {
+            app.dispatch(AppCommand::PatchCharacter(c)).unwrap();
+        }
+        app.dispatch(AppCommand::PatchSubmit).unwrap();
+        if index + 1 < lines.len() {
+            assert!(Arc::ptr_eq(&before, &app.authored_source().unwrap()));
+        }
+    }
+    let accepted = app.authored_source().unwrap();
+    assert_ne!(accepted.fingerprint(), before.fingerprint());
+    assert_eq!(
+        accepted.synths()["bass"]
+            .modules()
+            .iter()
+            .filter(|m| m.kind() == meldritch_dsl::ModuleKind::Lfo)
+            .count(),
+        1
+    );
+    for depth in [0.5, 0.0, -2.0] {
+        let edit = PatchEdit {
+            synth: "bass".into(),
+            operations: vec![PatchOperation::ConfigurePitchModulation {
+                module: "vibrato".into(),
+                settings: PitchModulationSettings {
+                    depth_semitones: depth,
+                },
+            }],
+        };
+        let envelope = meldritch_control::native_capture::NativeProjectCommand::try_from(
+            &AppCommand::EditPatch(edit.clone()),
+        )
+        .unwrap();
+        let text = toml::to_string(&envelope).unwrap();
+        let restored: meldritch_control::native_capture::NativeProjectCommand =
+            toml::from_str(&text).unwrap();
+        app.dispatch(restored.into()).unwrap();
+        let source = app.authored_source().unwrap();
+        let patch = CompiledSongPatch::compile_initial(&source).unwrap();
+        let audio = patch
+            .render_default(FrameRange::new(0, 192_000).unwrap())
+            .unwrap();
+        let mut oscillator = Oscillator::new(Waveform::Sine);
+        for (frame, actual) in audio.samples().iter().enumerate() {
+            let pitch = if frame % 96_000 < 48_000 { 48.0 } else { 60.0 };
+            let base = 440.0 * 2_f64.powf((pitch - 69.0) / 12.0);
+            let lfo = (std::f64::consts::TAU * (frame as f64 / 24_000.0).fract()).sin();
+            let wave = oscillator.next(base * 2_f64.powf(lfo * depth / 12.0), 48_000);
+            let expected =
+                wave * if frame % 96_000 < 84_000 {
+                    lfo.mul_add(0.5, 0.5)
+                } else {
+                    0.0
+                } * 0.8;
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "depth {depth}, frame {frame}"
+            );
+        }
+        assert_fresh_process(&directory, &source);
+    }
+}
+
+#[test]
+fn invalid_pitch_adapters_leave_source_and_history_unchanged() {
+    use meldritch_dsl::{ModuleKind, PatchEdit, PatchOperation, PitchModulationSettings};
+    let directory = Directory::new();
+    let mut app = directory.app();
+    app.enable_native_project_source(load_native_project(&directory.0, FIXTURE).unwrap())
+        .unwrap();
+    let connect = |from: &str, to: &str| PatchOperation::Connect {
+        from: from.into(),
+        to: to.into(),
+    };
+    let disconnect = |from: &str, to: &str| PatchOperation::Disconnect {
+        from: from.into(),
+        to: to.into(),
+    };
+    let base = vec![
+        disconnect("input.pitch", "osc.pitch"),
+        PatchOperation::Instantiate {
+            id: "vibrato".into(),
+            kind: ModuleKind::PitchModulate,
+        },
+        connect("input.pitch", "vibrato.pitch"),
+        connect("slow.control", "vibrato.control"),
+        connect("vibrato.pitch", "osc.pitch"),
+    ];
+    let before = app.authored_source().unwrap();
+    let cases: toml::Value = toml::from_str(include_str!(
+        "../../../songs/examples/36-patch-lfo/invalid/pitch.toml"
+    ))
+    .unwrap();
+    for case in cases["cases"].as_array().unwrap() {
+        let kind = case["kind"].as_str().unwrap();
+        let mut operations = base.clone();
+        match kind {
+            "nonfinite_depth" | "depth_range" => {
+                operations.push(PatchOperation::ConfigurePitchModulation {
+                    module: "vibrato".into(),
+                    settings: PitchModulationSettings {
+                        depth_semitones: if kind == "depth_range" {
+                            25.0
+                        } else {
+                            f64::INFINITY
+                        },
+                    },
+                })
+            }
+            "missing_pitch" => operations.push(disconnect("input.pitch", "vibrato.pitch")),
+            "missing_control" => operations.push(disconnect("slow.control", "vibrato.control")),
+            "duplicate_pitch" => operations.push(connect("input.pitch", "osc.pitch")),
+            "unit_interval_control" => {
+                operations.push(disconnect("slow.control", "vibrato.control"));
+                operations.push(connect("unipolar.control", "vibrato.control"));
+            }
+            "direct_control_to_pitch" => operations.push(connect("slow.control", "osc.pitch")),
+            "second_adapter" => operations.push(PatchOperation::Instantiate {
+                id: "extra".into(),
+                kind: ModuleKind::PitchModulate,
+            }),
+            "plaits" => {
+                operations.push(PatchOperation::Remove {
+                    id: "osc".into(),
+                    cables: meldritch_dsl::DependentCables::Disconnect,
+                });
+                operations.push(PatchOperation::Instantiate {
+                    id: "osc".into(),
+                    kind: ModuleKind::Plaits,
+                });
+                operations.push(connect("vibrato.pitch", "osc.pitch"));
+                operations.push(connect("osc.audio", "amp.audio"));
+            }
+            _ => panic!("unexecuted pitch negative {kind}"),
+        }
+        assert!(
+            app.dispatch(AppCommand::EditPatch(PatchEdit {
+                synth: "bass".into(),
+                operations
+            }))
+            .is_err(),
+            "accepted {kind}"
+        );
+        assert!(Arc::ptr_eq(&before, &app.authored_source().unwrap()));
+        assert!(app.history().is_empty());
+    }
 }
 
 #[test]

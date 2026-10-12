@@ -81,8 +81,8 @@ replay, physical listening and continuous DSP-state migration remain future work
 
 ## Recommended immediate implementation prompt
 
-Continue Slice 3's example 36 from its working tremolo checkpoint. Add the smallest
-explicit pitch/filter modulation path with unit adapters and declared combination,
+Continue Slice 3's example 36 from its working tremolo/vibrato checkpoints. Add the smallest
+explicit filter modulation path with unit adapters and declared combination,
 reusing control_order, ControlPlan, the Lfo kernel, independent pitch/gate voice,
 typed PatchEdit, worker/publication and native save/capture. Do not hard-code a
 destination in Lfo or reinterpret unit-interval level as pitch/Hz. Write the next
@@ -100,6 +100,12 @@ Native patch commands configure all settings; the scrolling inspector exposes
 units/audio cadence and graph settings. Independent sample references, exact split
 renders, typed capture and fresh-process persistence pass. Performance controls
 are still explicitly declared; internal LFO settings are not auto-exposed.
+
+The vibrato checkpoint adds an explicit PitchModulate adapter and pitch-depth
+draft command. One bipolar LFO fans out to amplitude and semitone pitch offset;
+independent references, zero/negative depth, failure continuity, worker publication
+and isolated full/split save/reopen are checked. Continue with filter adapters;
+variable-rate LFO integration and broader scope/cadence remain open.
 
 Example 35 now specifies this contract. Its pattern-selection checkpoint is
 implemented: native PgUp/PgDn lowers to SelectPalettePattern, preserves source,

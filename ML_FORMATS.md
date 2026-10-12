@@ -115,7 +115,13 @@ LFO/scale input is bipolar and scale/multiplier/ADSR output is unit interval.
 Native v2/v3 saves retain these settings and reject invalid/unused/cyclic graphs.
 Typed ConfigureLfo/ConfigureControlScale operations reuse EditPatch and capture;
 historical graphs with absent settings retain their fingerprints. The first
-executable control DAG ends at VCA level; broader modulation remains proposed.
+executable control DAG ends at VCA level. The vibrato checkpoint adds
+`pitch_modulate` with required `pitch_modulation = { depth_semitones = ... }`
+settings (finite -24..24). Its independent Pitch input/output and bipolar Control
+input explicitly add a semitone offset. ConfigurePitchModulation reuses EditPatch.
+One adapter between input.pitch and oscillator.pitch is lowered at audio rate;
+Plaits and chained pitch adapters reject. These settings fingerprint and survive
+native save/reopen. Broader modulation remains proposed.
 
 Example 35 extends native command version 1 with `select_palette_pattern`, a
 typed selection fact with an explicit pattern ID. Selection changes neither

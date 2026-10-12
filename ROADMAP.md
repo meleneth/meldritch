@@ -119,7 +119,10 @@ scale/clamp and envelope multiplier → VCA, inside the existing note compiler.
 Static audio-rate/per-instance settings, Hertz/beats phase, cabled gate reset,
 shared fan-out, typed graph drafts, capture and fresh-process persistence now have
 headless tests. Worker/callback tests prove playing rate edits and invalid-unit
-publication continuity. Full example remains design: pitch/filter adapters,
+publication continuity. A second checkpoint now adds explicit PitchModulate
+vibrato/depth, shared amplitude/pitch fan-out and typed draft/capture/save/reopen
+tests with independent sample references. One oscillator adapter is supported;
+Plaits and pitch chains reject. Full example remains design: filter adapters,
 variable-rate integration, event cadence and broader scopes are still required.
 
 **Sound/control:** shared phase sweeps both destinations; depth/rate/reset are

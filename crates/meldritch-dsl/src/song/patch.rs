@@ -10,6 +10,10 @@ pub enum DependentCables {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PatchOperation {
+    ConfigurePitchModulation {
+        module: String,
+        settings: PitchModulationSettings,
+    },
     ConfigureLfo {
         module: String,
         settings: GraphLfoSettings,
@@ -159,6 +163,7 @@ impl ModuleKind {
             Self::Lfo => "lfo",
             Self::ControlScale => "control_scale",
             Self::ControlMultiply => "control_multiply",
+            Self::PitchModulate => "pitch_modulate",
         }
     }
 }
@@ -180,6 +185,8 @@ fn instantiate(id: &str, kind: ModuleKind) -> Result<ModuleDefinition, String> {
         return Err("tempo_delay belongs to DSP graphs; unsupported in this synth editor".into());
     }
     Ok(ModuleDefinition {
+        pitch_modulation: (kind == ModuleKind::PitchModulate)
+            .then(PitchModulationSettings::default),
         lfo: (kind == ModuleKind::Lfo).then(GraphLfoSettings::default),
         scale: (kind == ModuleKind::ControlScale).then(ControlScaleSettings::default),
         id: id.into(),
@@ -282,13 +289,14 @@ impl ValidatedSong {
                 ModuleKind::Lfo => usize::from(m.lfo.unwrap().reset == LfoReset::GateRise),
                 ModuleKind::ControlScale => 1,
                 ModuleKind::ControlMultiply => 2,
+                ModuleKind::PitchModulate => 2,
                 _ => 0,
             })
             .sum();
         let expected_cables =
             if with_filter { 6 } else { 5 } + usize::from(patched_plaits_gate) + control_cables;
         if graph.modules.len() != expected_modules || graph.cables.len() != expected_cables {
-            return Err("unsupported note topology: one source, ADSR, VCA, output and optional low-pass with exactly the executable cables required".into());
+            return Err("unsupported note topology: one source, ADSR, VCA, output, optional low-pass and bounded control/pitch adapters with exactly the executable cables required".into());
         }
         Ok(())
     }
@@ -321,6 +329,18 @@ impl ValidatedSong {
             }
             let graph = next.synths.get_mut(&edit.synth).unwrap();
             match operation {
+                PatchOperation::ConfigurePitchModulation { module, settings } => {
+                    control_graph::validate_pitch_settings(
+                        ModuleKind::PitchModulate,
+                        Some(*settings),
+                    )?;
+                    let target = graph
+                        .modules
+                        .iter_mut()
+                        .find(|m| &m.id == module && m.kind == ModuleKind::PitchModulate)
+                        .ok_or("unknown pitch modulation module")?;
+                    target.pitch_modulation = Some(*settings);
+                }
                 PatchOperation::ConfigureLfo { module, settings } => {
                     control_graph::validate_control_settings(
                         ModuleKind::Lfo,
@@ -491,6 +511,7 @@ impl ValidatedSong {
                 .modules
                 .iter()
                 .map(|m| RawModule {
+                    pitch_modulation: m.pitch_modulation,
                     lfo: m.lfo,
                     scale: m.scale,
                     id: m.id.clone(),
@@ -539,6 +560,7 @@ impl ValidatedSong {
             // Reject irrelevant settings rather than preserve a misleading configuration.
             let mut allowed = instantiate(&m.id, m.kind)?;
             match m.kind {
+                ModuleKind::PitchModulate => allowed.pitch_modulation = m.pitch_modulation,
                 ModuleKind::Lfo => allowed.lfo = m.lfo,
                 ModuleKind::ControlScale => allowed.scale = m.scale,
                 ModuleKind::Oscillator => {

@@ -569,6 +569,52 @@ mod tests {
         callback.render_f64(&mut samples);
         assert!(samples.iter().any(|sample| sample.abs() > 0.01));
         assert_eq!(app.view_model().transport.state, TransportState::Playing);
+        let published = host.reader.snapshot();
+        app.dispatch(AppCommand::EditPatch(PatchEdit {
+            synth: "bass".into(),
+            operations: vec![
+                PatchOperation::Disconnect {
+                    from: "input.pitch".into(),
+                    to: "osc.pitch".into(),
+                },
+                PatchOperation::Instantiate {
+                    id: "vibrato".into(),
+                    kind: meldritch_dsl::ModuleKind::PitchModulate,
+                },
+                PatchOperation::Connect {
+                    from: "input.pitch".into(),
+                    to: "vibrato.pitch".into(),
+                },
+                PatchOperation::Connect {
+                    from: "slow.control".into(),
+                    to: "vibrato.control".into(),
+                },
+                PatchOperation::Connect {
+                    from: "vibrato.pitch".into(),
+                    to: "osc.pitch".into(),
+                },
+            ],
+        }))
+        .unwrap();
+        assert!(Arc::ptr_eq(&published, &host.reader.snapshot()));
+        ready(&mut app, &mut host);
+        let expected = CompiledSongPatch::compile_initial(&app.authored_source().unwrap())
+            .unwrap()
+            .render_default(meldritch_core::FrameRange::new(0, u64::from(host.frames)).unwrap())
+            .unwrap();
+        assert!(
+            (0..host.frames)
+                .any(|frame| published.frame(frame) != host.reader.snapshot().frame(frame))
+        );
+        for (frame, sample) in expected.samples().iter().enumerate() {
+            assert_eq!(
+                host.reader.snapshot().frame(frame as u32).unwrap(),
+                &[*sample, *sample]
+            );
+        }
+        callback.render_f64(&mut samples);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.01));
+        assert_eq!(app.view_model().transport.state, TransportState::Playing);
         host.save_project(&mut app).unwrap();
         host.finish(&app).unwrap();
         assert!(host.stream.is_none());

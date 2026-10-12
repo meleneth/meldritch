@@ -48,6 +48,7 @@ pub enum ModuleKind {
     Lfo,
     ControlScale,
     ControlMultiply,
+    PitchModulate,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -73,6 +74,8 @@ impl PatchInput {
 #[serde(deny_unknown_fields)]
 pub struct ModuleDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pitch_modulation: Option<PitchModulationSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     lfo: Option<GraphLfoSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     scale: Option<ControlScaleSettings>,
@@ -94,6 +97,9 @@ pub struct ModuleDefinition {
 }
 
 impl ModuleDefinition {
+    pub const fn pitch_modulation(&self) -> Option<PitchModulationSettings> {
+        self.pitch_modulation
+    }
     pub const fn lfo(&self) -> Option<GraphLfoSettings> {
         self.lfo
     }
@@ -1684,6 +1690,7 @@ struct RawSynth {
 
 #[derive(Debug, Deserialize)]
 struct RawModule {
+    pitch_modulation: Option<PitchModulationSettings>,
     lfo: Option<GraphLfoSettings>,
     scale: Option<ControlScaleSettings>,
     id: String,
@@ -3256,6 +3263,7 @@ fn parse_synth(path: &Path, raw: RawSynthFile) -> Result<SynthDefinition, SongLo
             "lfo" => ModuleKind::Lfo,
             "control_scale" => ModuleKind::ControlScale,
             "control_multiply" => ModuleKind::ControlMultiply,
+            "pitch_modulate" => ModuleKind::PitchModulate,
             unknown => {
                 return Err(SongLoadError::one(
                     path,
@@ -3333,7 +3341,10 @@ fn parse_synth(path: &Path, raw: RawSynthFile) -> Result<SynthDefinition, SongLo
         }
         control_graph::validate_control_settings(kind, module.lfo, module.scale)
             .map_err(|e| SongLoadError::one(path, e))?;
+        control_graph::validate_pitch_settings(kind, module.pitch_modulation)
+            .map_err(|e| SongLoadError::one(path, e))?;
         modules.push(ModuleDefinition {
+            pitch_modulation: module.pitch_modulation,
             lfo: module.lfo,
             scale: module.scale,
             plaits: validate_plaits(path, kind, &module)?,
@@ -3473,7 +3484,10 @@ fn load_dsp(path: &Path) -> Result<DspDefinition, SongLoadError> {
         }
         control_graph::validate_control_settings(kind, module.lfo, module.scale)
             .map_err(|e| SongLoadError::one(path, e))?;
+        control_graph::validate_pitch_settings(kind, module.pitch_modulation)
+            .map_err(|e| SongLoadError::one(path, e))?;
         modules.push(ModuleDefinition {
+            pitch_modulation: module.pitch_modulation,
             lfo: module.lfo,
             scale: module.scale,
             plaits: validate_plaits(path, kind, &module)?,
@@ -3796,6 +3810,8 @@ fn resolve_port(
         )
     })?;
     let signal = match (*kind, direction, port) {
+        (ModuleKind::PitchModulate, _, "pitch") => SignalType::Pitch,
+        (ModuleKind::PitchModulate, PortDirection::Input, "control") => SignalType::Control,
         (ModuleKind::Lfo, PortDirection::Input, "reset") => SignalType::Gate,
         (
             ModuleKind::Lfo | ModuleKind::ControlScale | ModuleKind::ControlMultiply,
@@ -4774,6 +4790,10 @@ fn fingerprint_song(
                 }
                 fingerprint.u64(settings.phase.to_bits());
                 fingerprint.u64(settings.reset as u64);
+            }
+            if let Some(settings) = module.pitch_modulation {
+                fingerprint.string("pitch-modulate-v1-semitones-audio-per-instance");
+                fingerprint.u64(settings.depth_semitones.to_bits());
             }
             if let Some(settings) = module.scale {
                 fingerprint.string("control-scale-v1-bipolar-to-unit-interval");

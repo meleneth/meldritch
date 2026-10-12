@@ -606,6 +606,12 @@ fn draw_instrument_editor(
                             settings.gain, settings.offset, settings.clamp_min, settings.clamp_max
                         ));
                     }
+                    if let Some(settings) = m.pitch_modulation() {
+                        lines.push(format!(
+                            "Pitch = input + bipolar control × {} semitones (Audio/PerInstance)",
+                            settings.depth_semitones
+                        ));
+                    }
                     for p in source
                         .instrument_parameters(&editor.synth)
                         .unwrap_or_default()

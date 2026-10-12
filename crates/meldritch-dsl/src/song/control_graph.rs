@@ -1,4 +1,4 @@
-//! Dimensionless control modules over the ordinary typed synth graph.
+//! Explicit control modules and pitch adapters over the ordinary typed synth graph.
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -11,6 +11,7 @@ impl ModuleDefinition {
     pub fn control_unit(&self, port: &str, direction: PortDirection) -> Option<ControlUnit> {
         match (self.kind, direction, port) {
             (ModuleKind::Lfo, PortDirection::Output, "control")
+            | (ModuleKind::PitchModulate, PortDirection::Input, "control")
             | (ModuleKind::ControlScale, PortDirection::Input, "control") => {
                 Some(ControlUnit::Bipolar)
             }
@@ -26,6 +27,35 @@ impl ModuleDefinition {
             _ => None,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PitchModulationSettings {
+    pub depth_semitones: f64,
+}
+impl Default for PitchModulationSettings {
+    fn default() -> Self {
+        Self {
+            depth_semitones: 0.5,
+        }
+    }
+}
+pub(super) fn validate_pitch_settings(
+    kind: ModuleKind,
+    settings: Option<PitchModulationSettings>,
+) -> Result<(), String> {
+    if (kind == ModuleKind::PitchModulate) != settings.is_some() {
+        return Err("pitch modulation settings must match module kind".into());
+    }
+    if let Some(settings) = settings {
+        if !settings.depth_semitones.is_finite()
+            || !(-24.0..=24.0).contains(&settings.depth_semitones)
+        {
+            return Err("pitch modulation requires finite depth in -24..24 semitones".into());
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
@@ -149,7 +179,8 @@ pub(super) fn validate_control_settings(
 }
 impl SynthDefinition {
     /// Validate the complete bounded control DAG and return dependency order.
-    /// Every new control node must reach the VCA; no hidden/ignored branches.
+    /// Every new control node must reach VCA level or oscillator pitch;
+    /// no hidden/ignored branches.
     pub fn control_order(&self) -> Result<Vec<String>, String> {
         let controls: BTreeSet<_> = self
             .modules
@@ -157,7 +188,10 @@ impl SynthDefinition {
             .filter(|m| {
                 matches!(
                     m.kind,
-                    ModuleKind::Lfo | ModuleKind::ControlScale | ModuleKind::ControlMultiply
+                    ModuleKind::Lfo
+                        | ModuleKind::ControlScale
+                        | ModuleKind::ControlMultiply
+                        | ModuleKind::PitchModulate
                 )
             })
             .map(|m| m.id.as_str())
@@ -261,8 +295,46 @@ impl SynthDefinition {
             &mut BTreeSet::new(),
             &mut order,
         )?;
+        let adapters = self
+            .modules
+            .iter()
+            .filter(|m| m.kind == ModuleKind::PitchModulate)
+            .collect::<Vec<_>>();
+        if !adapters.is_empty() {
+            if adapters.len() != 1 {
+                return Err("pitch lowering requires exactly one pitch adapter".into());
+            }
+            let adapter = adapters[0];
+            let oscillator = self.modules.iter().find(|m| m.kind == ModuleKind::Oscillator)
+                .ok_or("pitch adapter currently requires an oscillator; Plaits lowering is unsupported")?;
+            for (from, to) in [
+                ("input.pitch".to_owned(), format!("{}.pitch", adapter.id)),
+                (
+                    format!("{}.pitch", adapter.id),
+                    format!("{}.pitch", oscillator.id),
+                ),
+            ] {
+                let cables = self
+                    .cables
+                    .iter()
+                    .filter(|c| c.to == to)
+                    .collect::<Vec<_>>();
+                if !matches!(cables.as_slice(), [c] if c.from == from && c.signal == SignalType::Pitch)
+                {
+                    return Err("pitch adapter requires one explicit input.pitch → adapter.pitch → oscillator.pitch route".into());
+                }
+            }
+            visit(
+                self,
+                &format!("{}.control", adapter.id),
+                true,
+                &mut BTreeSet::new(),
+                &mut order,
+            )?;
+            order.push(adapter.id.clone());
+        }
         if controls.len() != order.len() {
-            return Err("unused control module outside executable VCA graph".into());
+            return Err("unused control module outside executable VCA/pitch graph".into());
         }
         Ok(order)
     }

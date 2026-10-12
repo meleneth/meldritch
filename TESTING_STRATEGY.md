@@ -246,7 +246,11 @@ without publication/history changes and authored saving. Callback code is unchan
 the control plan allocates during worker compilation and evaluates bounded stack
 arrays during worker rendering. Neither these checks nor finite PCM looping prove
 continuous modulation state across publications or physical deadline/listening
-acceptance. Full example-36 status stays design until the remaining contract passes.
+acceptance. Vibrato tests also execute pitch-depth drafts, shared amplitude/pitch
+fan-out, positive/zero/negative semitone references, capture command roundtrips,
+isolated full/split reopen, and every invalid/pitch.toml case with source/history
+continuity. The worker test adds the pitch adapter while playing and checks PCM.
+Full example-36 status stays design until the remaining contract passes.
 
 Add later:
 - offline render throughput

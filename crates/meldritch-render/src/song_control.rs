@@ -1,4 +1,4 @@
-//! Bounded worker-side lowering of the source graph's dimensionless controls.
+//! Bounded worker-side lowering of explicit controls and pitch adapters.
 use crate::modulation::{Lfo, LfoRate, LfoShape};
 use meldritch_core::Tempo;
 use meldritch_dsl::{
@@ -17,11 +17,16 @@ pub(crate) enum ControlNode {
         left: usize,
         right: usize,
     },
+    PitchModulate {
+        input: usize,
+        depth_semitones: f64,
+    },
 }
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ControlPlan {
     pub nodes: Vec<ControlNode>,
     pub output: usize,
+    pub pitch_offset: Option<usize>,
 }
 impl ControlPlan {
     pub fn compile(graph: &SynthDefinition) -> Result<Option<Self>, String> {
@@ -64,6 +69,10 @@ impl ControlPlan {
                     left: resolve(&format!("{id}.left"))?,
                     right: resolve(&format!("{id}.right"))?,
                 },
+                ModuleKind::PitchModulate => ControlNode::PitchModulate {
+                    input: resolve(&format!("{id}.control"))?,
+                    depth_semitones: module.pitch_modulation().unwrap().depth_semitones,
+                },
                 _ => return Err("unsupported lowered control node".into()),
             });
         }
@@ -73,6 +82,15 @@ impl ControlPlan {
             .find(|m| m.kind() == ModuleKind::Vca)
             .ok_or("missing VCA")?;
         Ok(Some(Self {
+            pitch_offset: order
+                .iter()
+                .position(|id| {
+                    graph
+                        .modules()
+                        .iter()
+                        .any(|m| m.id() == id && m.kind() == ModuleKind::PitchModulate)
+                })
+                .map(|index| index + 1),
             nodes,
             output: resolve(&format!("{}.level", amp.id()))?,
         }))
@@ -113,6 +131,10 @@ impl ControlPlan {
                     .mul_add(settings.gain, settings.offset)
                     .clamp(settings.clamp_min, settings.clamp_max),
                 ControlNode::Multiply { left, right } => values[*left] * values[*right],
+                ControlNode::PitchModulate {
+                    input,
+                    depth_semitones,
+                } => values[*input] * depth_semitones,
             };
         }
         values[self.output]

@@ -71,7 +71,9 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 3 tremolo checkpoint: explicit LFO/scale/clamp/multiply control DAG,
   audio/per-instance rate/phase/cabled reset, fan-out, typed native drafts/capture,
   worker publication, independent sample/split tests and fresh-process save/reopen
-- [ ] Slice 3 next: pitch/filter unit adapters and declared combination, then
+- [x] Slice 3 vibrato checkpoint: explicit PitchModulate combination/depth,
+  shared LFO amplitude/pitch fan-out, typed drafts/capture, rejection and reopen
+- [ ] Slice 3 next: filter unit adapters and declared combination, then
   variable-rate integration, event cadence and broader instantiation scopes
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
 - [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
@@ -349,6 +351,22 @@ pass. Formatting/diff checks and the VitePress build pass. Read-only project che
 reports example 36 fingerprint `47ef98d84d4c31b3`; historical examples 09 and 29
 retain `41472b38b65b60ed` and `54745c74a42665cf`. Physical listening, deadline
 benchmarks and continuous stateful DSP migration remain unverified.
+
+Slice 3 vibrato checkpoint adds an explicit audio/per-instance PitchModulate
+adapter to example 36. Pitch = input.pitch + bipolar Control × depth_semitones;
+no implicit sum, clamp or articulation. One adapter between input.pitch and
+oscillator.pitch is supported; Plaits and chained pitch adapters reject.
+The existing graph order/stack/LFO/voice worker handles amplitude/pitch fan-out.
+Typed depth edits and keyboard drafts persist through the native serializer and
+capture vocabulary. Sample references prove positive/zero/negative depth, exact
+split rendering and isolated fresh-process reopen. Nine negative contracts reject
+without source/history mutation. Playing worker/callback publication checks cover
+adding the pitch graph. Full example 36 remains design; filter ports, variable-rate
+phase, event cadence and broader scope remain open. Offline workspace tests,
+the graph suite (eight parent tests plus isolated child runs), affected all-targets
+Clippy with existing allowances, formatting/diff and VitePress checks pass.
+Historical 09/29 fingerprints remain unchanged. Physical listening/deadlines and
+continuous stateful DSP migration remain unverified.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

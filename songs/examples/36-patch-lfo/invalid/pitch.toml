@@ -1,0 +1,18 @@
+[[cases]]
+kind = "nonfinite_depth"
+[[cases]]
+kind = "depth_range"
+[[cases]]
+kind = "missing_pitch"
+[[cases]]
+kind = "missing_control"
+[[cases]]
+kind = "duplicate_pitch"
+[[cases]]
+kind = "unit_interval_control"
+[[cases]]
+kind = "direct_control_to_pitch"
+[[cases]]
+kind = "second_adapter"
+[[cases]]
+kind = "plaits"

@@ -11,7 +11,7 @@ Press Ctrl-E, then Ctrl-G. Type a command and Enter to stage it:
 
 | Command | Behavior |
 | --- | --- |
-| `add ID TYPE` | Instantiate oscillator, plaits, adsr, vca, low_pass, audio_output, lfo, control_scale or control_multiply with inspectable defaults |
+| `add ID TYPE` | Instantiate oscillator, plaits, adsr, vca, low_pass, audio_output, lfo, control_scale, control_multiply or pitch_modulate with inspectable defaults |
 | `remove ID reject` | Remove only when no dependent cable remains |
 | `remove ID disconnect` | Explicitly remove the module and all its dependent cables |
 | `connect MODULE.PORT MODULE.PORT` | Connect one compatible output to an unoccupied input |
@@ -19,6 +19,7 @@ Press Ctrl-E, then Ctrl-G. Type a command and Enter to stage it:
 | `set MODULE PARAM VALUE` | Use the ordinary typed instrument parameter validator |
 | `lfo ID SHAPE beats/hertz VALUE phase PHASE reset none/gate_rise` | Configure sine/triangle/saw/square, cycle beats or Hertz, phase and explicit reset; audio/per-instance scope |
 | `scale ID GAIN OFFSET MIN MAX` | Configure explicit bipolar → unit-interval affine scaling and clamping |
+| `pitch-depth ID SEMITONES` | Configure pitch_modulate depth in -24..24; output Pitch = input Pitch + bipolar Control × depth, audio/per-instance |
 | `commit` | Validate complete graph and compile before replacing source/publishing |
 | `clear` | Discard staged commands |
 | `save` / Ctrl-S | Save the committed selected instrument, never an incomplete draft |
@@ -40,11 +41,12 @@ Pitch → oscillator/Plaits, gate → ADSR, source → VCA, ADSR → VCA level, 
 optional filter → output are the executable topology. Plaits can use audio or
 aux. There are no implicit adapters, hidden routes or alternate graph compiler.
 Example 36 extends the amplitude control path with a bounded control DAG:
-LFO → scale and ADSR → multiplier → VCA. Every control node must reach that
-VCA; units/rate validate and multiple cables still require an explicit combiner.
+LFO → scale and ADSR → multiplier → VCA, plus explicit PitchModulate vibrato.
+Every control node must reach VCA level or the oscillator pitch adapter;
+units/rate validate and multiple cables still require an explicit combiner.
 Inspect settings and typed ports in the scrolling graph pane. A gate-rise-reset
 LFO requires input.gate → ID.reset; reset-none rejects that cable. Unsupported
-pitch/filter modulation, polyphonic control lowering, event cadence and globals
+filter modulation, Plaits/chain pitch lowering, polyphonic control lowering, event cadence and globals
 remain future work; the fixed audio chain remains the current executable subset.
 
 The inspector lists module IDs/types, typed input/output endpoints, authored

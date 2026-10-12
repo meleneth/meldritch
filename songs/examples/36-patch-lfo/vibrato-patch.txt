@@ -1,0 +1,8 @@
+clear
+disconnect input.pitch osc.pitch
+add vibrato pitch_modulate
+pitch-depth vibrato 0.5
+connect input.pitch vibrato.pitch
+connect slow.control vibrato.control
+connect vibrato.pitch osc.pitch
+commit

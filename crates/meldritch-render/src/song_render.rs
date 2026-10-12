@@ -851,7 +851,17 @@ impl CompiledNotePatch {
                     &mut control_origins,
                 )
             });
-            let mut sample = oscillator.next(frequency, self.sample_rate) * level * velocity;
+            // The pitch adapter explicitly adds its semitone offset to the bound
+            // absolute pitch. It never changes the independent gate lifecycle.
+            let modulated_frequency = self
+                .control
+                .as_ref()
+                .and_then(|plan| plan.pitch_offset)
+                .map_or(frequency, |index| {
+                    frequency * 2_f64.powf(control_values[index] / 12.0)
+                });
+            let mut sample =
+                oscillator.next(modulated_frequency, self.sample_rate) * level * velocity;
             if let Some(filter_settings) = &self.filter {
                 sample = filter.process(
                     sample,
@@ -1345,6 +1355,13 @@ fn compile_note_definition(
         ),
     ] {
         if control.is_some() && to == format!("{}.level", amplifier.id()) {
+            continue;
+        }
+        if control
+            .as_ref()
+            .is_some_and(|plan| plan.pitch_offset.is_some())
+            && to == format!("{}.pitch", oscillator.id())
+        {
             continue;
         }
         if !synth

@@ -52,9 +52,31 @@ scrollable inspector handles these added modules. LFO shape/rate/phase/reset and
 scale/clamp edit through the ordinary typed draft commands in keyboard-patch.txt.
 New controls are not automatically exposed as performance parameters.
 
+## Next checkpoint: explicit vibrato
+
+Apply vibrato-patch.txt to the tremolo patch. One shared LFO drives amplitude and
+an explicit pitch_modulate adapter. Its pitch input is absolute semitone Pitch;
+its control input is bipolar dimensionless Control. Output is Pitch:
+input pitch + control × authored depth_semitones. Depth is finite in -24..24;
+there is no implicit summing, gate coupling or pitch clamp. The adapter evaluates
+at audio rate per instance and shares the existing dependency order and LFO phase.
+The first lowering supports one adapter between input.pitch and oscillator.pitch;
+other pitch chains and Plaits pitch modulation must reject until implemented.
+
+Required tests: independent sample reference, zero/negative depth, fan-out,
+exact split rendering, typed draft edits, rejection of missing/duplicate inputs,
+wrong units/families/nonfinite depth/unsupported chains, unchanged source/history
+on failure, and authored save/reopen with unchanged fingerprint and PCM.
+
+Checkpoint evidence: explicit_vibrato_draft_fanout_depth_and_fresh_process_match_sample_reference
+and invalid_pitch_adapters_leave_source_and_history_unchanged execute the draft,
+sample references, typed capture vocabulary and isolated full/split reopen.
+The native_graph_lfo worker test adds the adapter while playing and verifies
+publication against authored PCM through the production callback without devices.
+
 ## Remaining full Slice 3 contract
 
-Pitch and filter unit adapters, explicit addition/clamping, modulatable LFO rate,
+Filter unit adapters, broader explicit addition/clamping, modulatable LFO rate,
 envelope-controlled depth, event/control-rate latching and global/per-voice scopes
 remain requirements. Reset/stop/rewind and composition clocks need their full scope
 contracts. General feedback requires an explicit executable delay. Native controls
