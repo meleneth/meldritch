@@ -1,0 +1,25 @@
+Native instance and membership authoring contract:
+
+At the construction overview, Up/Down selects a project instance by stable ID,
+including inactive instances. Patch and pattern inspector selection stay separate.
+v creates another instance of the selected patch with the selected pattern clock:
+the first ID remains PATCH-instance; subsequent IDs are PATCH-instance-2, etc.
+Creation explicitly selects the new instance, without adding composition membership.
+p/g binds or unbinds only the selected instance's independent pitch/gate signal.
+a/d adds/removes that instance in the selected named composition, while stopped.
+These operations are idempotent, compile the complete candidate before acceptance,
+and preserve all palette definitions, other compositions and instance identities.
+
+Performance Up/Down selects active instances with exposed level controls. Left/Right,
+Home and End address only that instance's semantic control. An inactive selection
+remains selected across membership/composition changes; it cannot control another
+instance implicitly. Explicit Up/Down chooses an available active control again.
+Fresh open selects the first active instance by stable ID, without synthetic capture.
+Selection is runtime/editor state, excluded from authored saves and fingerprints.
+
+Reject unknown instance/composition references and membership edits while playing
+or while transport commands remain unconsumed. Reject repeats, releases, modifiers
+and inspector gestures as overview edits. Failed edits preserve source, selection,
+history and publication. Accepted selection/membership gestures are typed captured
+facts, reconstructable from the opening baseline. Save/reopen preserves both
+compositions and independent bindings; runtime gains reopen at authored defaults.

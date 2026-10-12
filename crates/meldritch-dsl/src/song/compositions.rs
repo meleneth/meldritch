@@ -77,6 +77,30 @@ impl ValidatedSong {
         next.refresh_authoring_fingerprint();
         Ok(next)
     }
+    pub fn set_composition_member(
+        &self,
+        composition: &str,
+        voice: &str,
+        included: bool,
+    ) -> Result<Self, String> {
+        let definition = self
+            .compositions
+            .get(composition)
+            .ok_or("unknown composition")?;
+        if !self.pattern_voices.contains_key(voice) {
+            return Err("unknown composition member".into());
+        }
+        let mut next = self.clone();
+        let mut members = definition.voices.clone();
+        members.retain(|id| id != voice);
+        if included {
+            members.push(voice.into());
+        }
+        members.sort();
+        next.compositions.get_mut(composition).unwrap().voices = members;
+        next.refresh_authoring_fingerprint();
+        Ok(next)
+    }
     pub(super) fn fingerprint_compositions(&mut self) {
         if self.compositions.is_empty() {
             return;

@@ -48,8 +48,11 @@ declared instances; **F7/F8** selects named compositions after stopping transpor
 Wait for prepared audio before restarting. Named projects save as project-v3 Lua;
 unnamed version-2 projects keep their current meaning. Composition selection saves
 the authored default and preserves instance runtime gains without saving them.
-Arbitrary membership editing and native selection between shared-patch instances
-remain unfinished.
+At the overview, **v** creates and selects another instance of the chosen patch;
+**Up/Down** selects instance IDs independently of patch/pattern selection.
+**a/d** adds/removes the selected instance in a named composition while stopped.
+Performance arrows address the selected active instance's level, so shared-patch
+instances remain independently controllable. Inactive selection never retargets.
 Timed replay and stateful graph transitions remain proposed. Existing commands
 remain valid.
 Git is allowed as a required installed dependency; opening needs no repository

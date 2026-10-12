@@ -37,9 +37,11 @@ against (instance ID, control ID). Normalized linear gain replaces the instance
 output gain, not envelope/VCA wiring. No internal parameter is automatically exposed.
 App-owned runtime values and accepted command facts stay outside source/provenance;
 mode changes preserve them and explicit source loading resets them. A repeated
-identical setting does not submit another audio generation. Keyboard selection
-reuses the selected patch; the native workflow creates one instance per patch.
-General multi-instance surface selection, hardware mappings/pickup for these controls,
+identical setting does not submit another audio generation. Native v creates and
+selects additional instances of the chosen patch; Up/Down selects instance IDs
+independently of patch/pattern inspectors. p/g and performance level gestures
+address that identity. Inactive selection remains explicit and cannot retarget.
+Hardware mappings/pickup for these controls,
 graph recipes and revisioned dynamic interfaces remain future work.
 Native disk capture now observes typed accepted history through the shared
 PerformanceSessionCapture writer. `capture.txt` and its typed-payload fixtures in
@@ -79,18 +81,14 @@ replay, physical listening and continuous DSP-state migration remain future work
 
 ## Recommended immediate implementation prompt
 
-Continue Slice 2's example 35 with native instance selection and membership
-authoring. Select an instance by stable ID independently of its shared patch;
-route p/g and exposed runtime level to that identity. Reuse CreatePatternVoice,
-BindPatternVoice and SetOutputLevel rather than cloning palette definitions.
-Provide explicit typed add/remove membership actions, validated atomically while
-stopped, so held and pulse can be authored from the keyboard. Do not silently
-retarget an unrelated control when membership or composition changes.
-Add key/negative fixtures first; test two independently controlled instances of
-one patch, failed membership edits, typed capture, worker publication and
-fresh-process persistence. Preserve example 34, project-v2/v3 and historical
-formats. Then audit composed example-35 acceptance. Do not add another event
-engine or claim continuous DSP migration.
+Audit Slice 2's composed example-35 acceptance against its required negatives:
+ambiguous/missing composition selection, duplicate instance IDs, unsupported
+chords/combination, referenced-material deletion and incompatible clocks. Map each
+contract to an executable test and document unavailable operations honestly.
+Exercise the complete native multi-instance/membership workflow through existing
+worker publication and fresh-process persistence. Preserve example 34, project-v2/v3
+and historical formats. Advance status only when every stated observable behavior
+is proved; do not add another event engine or claim continuous DSP migration.
 
 Example 35 now specifies this contract. Its pattern-selection checkpoint is
 implemented: native PgUp/PgDn lowers to SelectPalettePattern, preserves source,
@@ -101,8 +99,11 @@ explicit selected composition and lists of project-unique instance IDs. Native
 b snapshots all instances; F7/F8 requires stopped transport, compiles before
 acceptance and prepares finite audio through the existing worker before restart.
 Fresh-process persistence and typed capture tests pass; inactive overlays remain
-instance-owned and do not contaminate another composition. Continue with native
-instance selection and membership authoring, then audit full example-35 acceptance.
+instance-owned and do not contaminate another composition. Native instance
+selection/membership now follows `instance-keys.txt`: stable-ID v/Up/Down/p/g,
+stopped a/d, independent performance levels and explicit inactive selection.
+Capture reconstruction, edited membership publication and fresh-process tests pass.
+Continue with the full example-35 acceptance audit.
 Do not invent another palette or event engine.
 
 The completed Slice 1 implementation prompt is retained below as historical scope.

@@ -621,6 +621,9 @@ pub fn session_result_fields(
         meldritch_app::AppCommandResult::CompositionEdited { composition, .. } => {
             ("composition".into(), Some(composition.clone()), None, None)
         }
+        meldritch_app::AppCommandResult::PatternVoiceSelected { voice, .. } => {
+            ("instance_selection".into(), Some(voice.clone()), None, None)
+        }
         meldritch_app::AppCommandResult::ParameterEdited { target, .. } => (
             "authored_parameter".into(),
             Some(target.identity()),

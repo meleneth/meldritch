@@ -13,7 +13,6 @@ pub fn project_level_command(
     if key.kind != KeyEventKind::Press || key.modifiers != KeyModifiers::NONE {
         return None;
     }
-    let synth = &view.instrument_editor.as_ref()?.synth;
     if view.cockpit_mode != meldritch_app::CockpitMode::Performance {
         if key.code == KeyCode::Char('x')
             && !view.instrument_editor.as_ref()?.visible
@@ -23,7 +22,7 @@ pub fn project_level_command(
                 .is_some_and(|editor| editor.visible)
         {
             return Some(AppCommand::ExposeOutputLevel {
-                synth: synth.clone(),
+                synth: view.instrument_editor.as_ref()?.synth.clone(),
                 control: "level".into(),
             });
         }
@@ -43,17 +42,20 @@ pub fn project_level_command(
         }
         let index = controls
             .iter()
-            .position(|voice| &voice.synth == synth)
-            .unwrap_or(0);
-        let next = if key.code == KeyCode::Down {
-            (index + 1) % controls.len()
-        } else {
-            (index + controls.len() - 1) % controls.len()
+            .position(|voice| Some(voice.id.as_str()) == view.selected_pattern_voice.as_deref());
+        let next = match index {
+            None => 0,
+            Some(index) if key.code == KeyCode::Down => (index + 1) % controls.len(),
+            Some(index) => (index + controls.len() - 1) % controls.len(),
         };
-        return Some(AppCommand::SelectInstrument(controls[next].synth.clone()));
+        return Some(AppCommand::SelectPatternVoice(controls[next].id.clone()));
     }
-    let voice = controls.into_iter().find(|voice| &voice.synth == synth)?;
-    let control = source.synths()[synth].output_level_control()?.to_owned();
+    let voice = controls
+        .into_iter()
+        .find(|voice| Some(voice.id.as_str()) == view.selected_pattern_voice.as_deref())?;
+    let control = source.synths()[&voice.synth]
+        .output_level_control()?
+        .to_owned();
     let current = view
         .output_levels
         .get(&(voice.id.clone(), control.clone()))
@@ -103,6 +105,13 @@ pub fn project_composition_command(
             },
         ));
     }
+    if matches!(key.code, KeyCode::Char('a' | 'd')) {
+        return Some(AppCommand::SetCompositionMember {
+            composition: source.selected_composition()?.into(),
+            voice: view.selected_pattern_voice.clone()?,
+            included: key.code == KeyCode::Char('a'),
+        });
+    }
     if !matches!(key.code, KeyCode::F(7) | KeyCode::F(8)) {
         return None;
     }
@@ -138,10 +147,33 @@ pub fn project_binding_command(
     {
         return None;
     }
-    let synth = &view.instrument_editor.as_ref()?.synth;
-    let pattern = &view.palette_pattern_editor.as_ref()?.pattern;
-    let id = format!("{synth}-instance");
+    if matches!(key.code, KeyCode::Up | KeyCode::Down) {
+        let ids: Vec<_> = source.pattern_voices().keys().collect();
+        if ids.is_empty() {
+            return None;
+        }
+        let current = ids
+            .iter()
+            .position(|id| Some(id.as_str()) == view.selected_pattern_voice.as_deref());
+        let next = match current {
+            None => 0,
+            Some(index) if key.code == KeyCode::Down => (index + 1) % ids.len(),
+            Some(index) => (index + ids.len() - 1) % ids.len(),
+        };
+        return Some(AppCommand::SelectPatternVoice(ids[next].clone()));
+    }
     if key.code == KeyCode::Char('v') {
+        let synth = &view.instrument_editor.as_ref()?.synth;
+        let pattern = &view.palette_pattern_editor.as_ref()?.pattern;
+        let id = (1..=33)
+            .map(|index| {
+                if index == 1 {
+                    format!("{synth}-instance")
+                } else {
+                    format!("{synth}-instance-{index}")
+                }
+            })
+            .find(|id| !source.pattern_voices().contains_key(id))?;
         return Some(AppCommand::CreatePatternVoice(PatternVoiceDefinition {
             id,
             synth: synth.clone(),
@@ -153,6 +185,8 @@ pub fn project_binding_command(
             gate_pattern: None,
         }));
     }
+    let pattern = &view.palette_pattern_editor.as_ref()?.pattern;
+    let id = view.selected_pattern_voice.clone()?;
     let voice = source.pattern_voices().get(&id)?;
     let (signal, binding) = match key.code {
         KeyCode::Char('p') => (PatternSignal::Pitch, &voice.pitch_pattern),
@@ -467,7 +501,7 @@ pub fn draw_project_construction(
     source: &ValidatedSong,
     status: &str,
 ) {
-    draw_project_construction_selected(frame, view, source, status, None, None);
+    draw_project_construction_selected(frame, view, source, status, None, None, None);
 }
 
 fn draw_project_construction_selected(
@@ -477,6 +511,7 @@ fn draw_project_construction_selected(
     status: &str,
     selected: Option<&str>,
     selected_pattern: Option<&str>,
+    selected_voice: Option<&str>,
 ) {
     if source.synths().is_empty()
         && source.note_patterns().is_empty()
@@ -521,17 +556,24 @@ fn draw_project_construction_selected(
             source.compositions()[selected].voices.join(", ")
         )));
         lines.push(Line::from(
-            "b: snapshot all instances · F7/F8: composition (stop first)",
+            "b: snapshot · F7/F8: composition (stop first) · a/d: member",
         ));
     }
     if !source.pattern_voices().is_empty() {
         lines.push(Line::from(
-            "v: instance · p/g: pitch/gate binding · x: expose level",
+            "v: new · Up/Down: instance · p/g: bind · x: expose level",
         ));
         for voice in source.pattern_voices().values() {
             lines.push(Line::from(format!(
-                "{} ({}) · level {:.2}",
-                voice.id, voice.synth, voice.level
+                "{}{} ({}) · level {:.2}",
+                if selected_voice == Some(voice.id.as_str()) {
+                    "> "
+                } else {
+                    ""
+                },
+                voice.id,
+                voice.synth,
+                voice.level
             )));
             lines.push(Line::from(format!(
                 "  pitch: {}.pitch -> input.pitch (fallback {})",
@@ -666,10 +708,20 @@ fn draw_project_performance(
         Line::from(status.to_owned()),
     ];
     lines.push(Line::from(format!(
-        "Composition: {}",
+        "Composition: {} · instance: {}{}",
         source
             .selected_composition()
-            .unwrap_or("implicit (all instances)")
+            .unwrap_or("implicit (all instances)"),
+        model.selected_pattern_voice.as_deref().unwrap_or("none"),
+        if model
+            .selected_pattern_voice
+            .as_deref()
+            .is_some_and(|id| !source.is_pattern_voice_active(id))
+        {
+            " (inactive)"
+        } else {
+            ""
+        },
     )));
     let mut count = 0;
     for voice in source.active_pattern_voices() {
@@ -680,10 +732,7 @@ fn draw_project_performance(
                 .get(&(voice.id.clone(), control.to_owned()))
                 .copied()
                 .unwrap_or(voice.level);
-            let selected = model
-                .instrument_editor
-                .as_ref()
-                .is_some_and(|editor| editor.synth == voice.synth);
+            let selected = model.selected_pattern_voice.as_deref() == Some(voice.id.as_str());
             lines.push(Line::from(format!(
                 "{} {}/{} = {:.2} (authored {:.2})",
                 if selected { ">" } else { " " },
@@ -759,6 +808,7 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                             .palette_pattern_editor
                             .as_ref()
                             .map(|e| e.pattern.id.as_str()),
+                        model.selected_pattern_voice.as_deref(),
                     );
                 }
             })?;
@@ -911,6 +961,146 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     #[test]
+    fn shared_instance_surface_highlights_one_id_and_guards_overview_gestures() {
+        let project = meldritch_dsl::load_project_directory(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../songs/examples/34-empty-project-patch"),
+        )
+        .unwrap();
+        let (mut app, _) = AppController::new_empty_project(&project).unwrap();
+        app.dispatch(AppCommand::CreatePatch(PatchCreation::mono_voice(
+            "voice-1",
+        )))
+        .unwrap();
+        app.dispatch(AppCommand::SelectInstrument("voice-1".into()))
+            .unwrap();
+        app.dispatch(AppCommand::CreatePalettePattern {
+            id: "notes".into(),
+            length_ticks: 3840,
+            looped: true,
+        })
+        .unwrap();
+        app.dispatch(AppCommand::TogglePatternEditor).unwrap();
+        for _ in 0..2 {
+            let command = project_binding_command(
+                KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+                &app.view_model(),
+                &app.authored_source().unwrap(),
+            )
+            .unwrap();
+            app.dispatch(command).unwrap();
+        }
+        app.dispatch(AppCommand::ExposeOutputLevel {
+            synth: "voice-1".into(),
+            control: "level".into(),
+        })
+        .unwrap();
+        app.dispatch(AppCommand::CreateComposition(
+            meldritch_app::CompositionDefinition {
+                id: "held".into(),
+                voices: app
+                    .authored_source()
+                    .unwrap()
+                    .pattern_voices()
+                    .keys()
+                    .cloned()
+                    .collect(),
+            },
+        ))
+        .unwrap();
+        let source = app.authored_source().unwrap();
+        let check_blocked = |view: &AppViewModel, kind, modifiers| {
+            for code in [
+                KeyCode::Char('v'),
+                KeyCode::Char('p'),
+                KeyCode::Char('g'),
+                KeyCode::Up,
+                KeyCode::Down,
+            ] {
+                assert!(
+                    project_binding_command(
+                        KeyEvent::new_with_kind(code, modifiers, kind),
+                        view,
+                        &source
+                    )
+                    .is_none()
+                );
+            }
+            for code in [KeyCode::Char('a'), KeyCode::Char('d')] {
+                assert!(
+                    project_composition_command(
+                        KeyEvent::new_with_kind(code, modifiers, kind),
+                        view,
+                        &source
+                    )
+                    .is_none()
+                );
+            }
+        };
+        for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+            check_blocked(&app.view_model(), kind, KeyModifiers::NONE);
+        }
+        check_blocked(
+            &app.view_model(),
+            KeyEventKind::Press,
+            KeyModifiers::CONTROL,
+        );
+        app.dispatch(AppCommand::TogglePatternEditor).unwrap();
+        check_blocked(&app.view_model(), KeyEventKind::Press, KeyModifiers::NONE);
+        app.dispatch(AppCommand::TogglePatternEditor).unwrap();
+        app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+        check_blocked(&app.view_model(), KeyEventKind::Press, KeyModifiers::NONE);
+        app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+        app.dispatch(AppCommand::SetCockpitMode(
+            meldritch_app::CockpitMode::Performance,
+        ))
+        .unwrap();
+        check_blocked(&app.view_model(), KeyEventKind::Press, KeyModifiers::NONE);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| draw_project_performance(frame, &project, &source, &app.view_model(), ""))
+            .unwrap();
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(screen.contains("> voice-1-instance-2/level"));
+        assert!(!screen.contains("> voice-1-instance/level"));
+        app.dispatch(AppCommand::SetCompositionMember {
+            composition: "held".into(),
+            voice: "voice-1-instance-2".into(),
+            included: false,
+        })
+        .unwrap();
+        let inactive = app.authored_source().unwrap();
+        assert!(
+            project_level_command(
+                KeyEvent::new(KeyCode::Home, KeyModifiers::NONE),
+                &app.view_model(),
+                &inactive
+            )
+            .is_none()
+        );
+        terminal
+            .draw(|frame| {
+                draw_project_performance(frame, &project, &inactive, &app.view_model(), "")
+            })
+            .unwrap();
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(screen.contains("voice-1-instance-2 (inactive)"));
+        assert!(!screen.contains("> voice-1-instance/level"));
+    }
+
+    #[test]
     fn native_named_compositions_are_visible_and_keys_respect_editor_modes() {
         let project = meldritch_dsl::load_project_directory(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1027,6 +1217,7 @@ mod tests {
                     "",
                     None,
                     Some(&selection.pattern.id),
+                    None,
                 )
             })
             .unwrap();

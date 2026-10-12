@@ -37,8 +37,8 @@ accepted just because it is silent. Full/split oscillator audio for either selec
 must equal its directly compiled membership, and fresh-process reload must retain
 both compositions and all shared palette IDs without seed files or capture replay.
 
-Native arbitrary membership editing, native selection between two instances of
-the same patch, timed/metapattern actions and continuous transitions remain deferred.
+Native membership editing and instance selection now follow instance-keys.txt.
+Timed/metapattern actions and continuous transitions remain deferred.
 Native playback still requires fixed stereo one-bar looping instances, including
 inactive definitions. Broader clocks remain a documented implementation restriction.
 Transport-bearing capture reconstruction must supply callback command consumption;

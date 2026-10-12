@@ -10,6 +10,189 @@ use std::{fs, path::PathBuf, sync::Arc};
 
 const FIXTURE: &str =
     include_str!("../../../songs/examples/35-project-palette-routing/compositions.project.lua");
+
+fn key(app: &mut AppController, code: KeyCode) {
+    let event = KeyEvent::new(code, KeyModifiers::NONE);
+    let source = app.authored_source().unwrap();
+    let view = app.view_model();
+    let command = meldritch_tui::project_level_command(event, &view, &source)
+        .or_else(|| meldritch_tui::project_composition_command(event, &view, &source))
+        .or_else(|| meldritch_tui::project_binding_command(event, &view, &source))
+        .or_else(|| meldritch_tui::project_pattern_command(event, &view, &source))
+        .expect("native key lowers to typed command");
+    app.dispatch(command).unwrap();
+}
+
+#[test]
+fn native_shared_instance_keys_membership_and_controls_reconstruct_without_retargeting() {
+    let directory = Directory::new();
+    let source = load_native_project(&directory.0, FIXTURE).unwrap();
+    let mut app = directory.app();
+    app.enable_native_project_source(source.clone()).unwrap();
+    assert_eq!(
+        app.view_model().selected_pattern_voice.as_deref(),
+        Some("bass-copy")
+    );
+    let mut capture = NativeProjectCapture::new(app.authored_source().unwrap(), 96_000);
+    // Same palette patch, independently routed instance, no implicit membership.
+    for code in [
+        KeyCode::Char('v'),
+        KeyCode::Char('p'),
+        KeyCode::PageDown,
+        KeyCode::Char('g'),
+    ] {
+        key(&mut app, code);
+        capture.checkpoint(&app).unwrap();
+    }
+    let created = app.authored_source().unwrap();
+    let id = "voice-1-instance-2";
+    assert_eq!(app.view_model().selected_pattern_voice.as_deref(), Some(id));
+    assert!(!created.is_pattern_voice_active(id));
+    assert_eq!(created.synths(), source.synths());
+    assert_eq!(created.note_patterns(), source.note_patterns());
+    assert_eq!(
+        created.pattern_voices()[id].pitch_pattern.as_deref(),
+        Some("melody")
+    );
+    assert_eq!(
+        created.pattern_voices()[id].gate_pattern.as_deref(),
+        Some("rhythm")
+    );
+    key(&mut app, KeyCode::Char('a'));
+    capture.checkpoint(&app).unwrap();
+    let included = app.authored_source().unwrap();
+    key(&mut app, KeyCode::Char('a'));
+    capture.checkpoint(&app).unwrap();
+    assert!(Arc::ptr_eq(&included, &app.authored_source().unwrap()));
+    // Selection changes neither the patch inspector nor authored revision.
+    key(&mut app, KeyCode::Down);
+    capture.checkpoint(&app).unwrap();
+    assert_eq!(
+        app.view_model().selected_pattern_voice.as_deref(),
+        Some("bass-copy")
+    );
+    assert_eq!(app.view_model().instrument_editor.unwrap().synth, "voice-1");
+    assert!(app.history().back().unwrap().dirty_ranges.is_empty());
+    key(&mut app, KeyCode::Char('d'));
+    capture.checkpoint(&app).unwrap();
+    let removed = app.authored_source().unwrap();
+    assert!(!removed.is_pattern_voice_active("bass-copy"));
+    assert_eq!(
+        removed.compositions()["pulse"],
+        source.compositions()["pulse"]
+    );
+    app.dispatch(AppCommand::SetCockpitMode(
+        meldritch_app::CockpitMode::Performance,
+    ))
+    .unwrap();
+    capture.checkpoint(&app).unwrap();
+    assert!(
+        meldritch_tui::project_level_command(
+            KeyEvent::new(KeyCode::Home, KeyModifiers::NONE),
+            &app.view_model(),
+            &removed
+        )
+        .is_none(),
+        "inactive selection must not silently retarget"
+    );
+    key(&mut app, KeyCode::Down);
+    capture.checkpoint(&app).unwrap();
+    assert_eq!(
+        app.view_model().selected_pattern_voice.as_deref(),
+        Some("voice-1-instance")
+    );
+    key(&mut app, KeyCode::Home);
+    capture.checkpoint(&app).unwrap();
+    key(&mut app, KeyCode::Down);
+    capture.checkpoint(&app).unwrap();
+    key(&mut app, KeyCode::Left);
+    capture.checkpoint(&app).unwrap();
+    assert_eq!(
+        app.output_levels()[&("voice-1-instance".into(), "level".into())],
+        0.0
+    );
+    assert!((app.output_levels()[&(id.into(), "level".into())] - 0.7).abs() < 1e-12);
+    assert!(Arc::ptr_eq(&removed, &app.authored_source().unwrap()));
+    capture.finish(&app).unwrap();
+    let text = fs::read_to_string(capture.session.as_ref().unwrap().path()).unwrap();
+    let mut replay = directory.app();
+    replay
+        .enable_native_project_source(load_native_capture_baseline(&directory.0, &text).unwrap())
+        .unwrap();
+    let document: toml::Value = toml::from_str(&text).unwrap();
+    for event in document["events"].as_array().unwrap() {
+        let envelope =
+            NativeCommandEnvelope::decode(&toml::to_string(&event["native"]).unwrap()).unwrap();
+        replay.dispatch(envelope.command.into()).unwrap();
+        assert_eq!(
+            envelope.source_after,
+            format!("{:016x}", replay.authored_source().unwrap().fingerprint())
+        );
+    }
+    assert_eq!(
+        replay.view_model().selected_pattern_voice,
+        app.view_model().selected_pattern_voice
+    );
+    assert_eq!(replay.output_levels(), app.output_levels());
+    let mut store = NativeProjectStore::open(&directory.project()).unwrap();
+    store.save(&removed).unwrap();
+    let reopened = NativeProjectStore::open(&directory.project()).unwrap();
+    let mut fresh = directory.app();
+    fresh
+        .enable_native_project_source(reopened.source().unwrap().clone())
+        .unwrap();
+    assert_eq!(
+        fresh.authored_source().unwrap().fingerprint(),
+        removed.fingerprint()
+    );
+    assert_eq!(
+        fresh.view_model().selected_pattern_voice.as_deref(),
+        Some("voice-1-instance")
+    );
+    assert!(fresh.output_levels().is_empty());
+}
+
+#[test]
+fn invalid_instance_selection_and_membership_preserve_accepted_state() {
+    let directory = Directory::new();
+    let mut app = directory.app();
+    app.enable_native_project_source(load_native_project(&directory.0, FIXTURE).unwrap())
+        .unwrap();
+    let source = app.authored_source().unwrap();
+    let selected = app.view_model().selected_pattern_voice;
+    for command in [
+        AppCommand::SelectPatternVoice("missing".into()),
+        AppCommand::SetCompositionMember {
+            composition: "missing".into(),
+            voice: "bass-copy".into(),
+            included: true,
+        },
+        AppCommand::SetCompositionMember {
+            composition: "held".into(),
+            voice: "missing".into(),
+            included: false,
+        },
+    ] {
+        assert!(app.dispatch(command).is_err());
+        assert!(app.history().is_empty());
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        assert_eq!(app.view_model().selected_pattern_voice, selected);
+    }
+    app.dispatch(AppCommand::Play).unwrap();
+    app.dispatch(AppCommand::Stop).unwrap();
+    let history = app.history().len();
+    assert!(
+        app.dispatch(AppCommand::SetCompositionMember {
+            composition: "held".into(),
+            voice: "bass-copy".into(),
+            included: false
+        })
+        .is_err()
+    );
+    assert_eq!(history, app.history().len());
+    assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+    assert_eq!(app.view_model().selected_pattern_voice, selected);
+}
 struct Directory(PathBuf);
 impl Directory {
     fn new() -> Self {
@@ -57,8 +240,13 @@ fn both_compositions_reopen_in_fresh_processes_without_copying_the_palette() {
     let range = FrameRange::new(0, 192_000).unwrap();
     let mut store = NativeProjectStore::open(&directory.project()).unwrap();
     let mut prior = None;
-    for id in ["held", "pulse"] {
-        let selected = source.select_composition(id).unwrap();
+    let edited = source
+        .set_composition_member("held", "bass-copy", false)
+        .unwrap()
+        .set_composition_member("held", "pulse-instance", true)
+        .unwrap();
+    for (base, id) in [(&source, "held"), (&source, "pulse"), (&edited, "held")] {
+        let selected = base.select_composition(id).unwrap();
         assert_eq!(source.synths(), selected.synths());
         assert_eq!(source.note_patterns(), selected.note_patterns());
         assert_eq!(source.pattern_voices(), selected.pattern_voices());

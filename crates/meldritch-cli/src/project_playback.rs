@@ -278,10 +278,36 @@ mod tests {
         callback.render_f64(&mut samples);
         let history = app.history().len();
         assert!(app.dispatch(next(&app, KeyCode::F(8))).is_err());
+        assert!(app.dispatch(next(&app, KeyCode::Char('d'))).is_err());
         assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
         assert!(Arc::ptr_eq(&published, &host.reader.snapshot()));
         assert_eq!(host.host.generation(), generation);
         assert_eq!(app.history().len(), history);
+        app.dispatch(AppCommand::SetCockpitMode(
+            meldritch_app::CockpitMode::Performance,
+        ))
+        .unwrap();
+        let select = meldritch_tui::project_level_command(
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            &app.view_model(),
+            &source,
+        )
+        .unwrap();
+        app.dispatch(select).unwrap();
+        assert_eq!(
+            app.view_model().selected_pattern_voice.as_deref(),
+            Some("voice-1-instance")
+        );
+        host.poll(&mut app).unwrap();
+        assert_eq!(host.host.generation(), generation);
+        assert!(Arc::ptr_eq(&published, &host.reader.snapshot()));
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        callback.render_f64(&mut samples);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.01));
+        app.dispatch(AppCommand::SetCockpitMode(
+            meldritch_app::CockpitMode::AllParameters,
+        ))
+        .unwrap();
         app.dispatch(AppCommand::Stop).unwrap();
         // Stop must be observed by the callback, not merely queued.
         assert!(app.dispatch(next(&app, KeyCode::F(8))).is_err());
@@ -332,6 +358,50 @@ mod tests {
                 .get(&("bass-copy".into(), "level".into())),
             Some(&0.2)
         );
+        // Construction selection is independent of the shared patch inspector.
+        let select = meldritch_tui::project_binding_command(
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            &app.view_model(),
+            &app.authored_source().unwrap(),
+        )
+        .unwrap();
+        app.dispatch(select).unwrap();
+        assert_eq!(
+            app.view_model().selected_pattern_voice.as_deref(),
+            Some("bass-copy")
+        );
+        let published = host.reader.snapshot();
+        let generation = host.host.generation();
+        app.dispatch(next(&app, KeyCode::Char('d'))).unwrap();
+        let removed = app.authored_source().unwrap();
+        assert!(!removed.is_pattern_voice_active("bass-copy"));
+        assert!(Arc::ptr_eq(&published, &host.reader.snapshot()));
+        assert_eq!(host.host.generation(), generation);
+        assert!(host.require_prepared_audio(&removed).is_err());
+        ready(&mut app, &mut host);
+        let expected = CompiledSongPatch::compile_initial(&removed)
+            .unwrap()
+            .render_default(meldritch_core::FrameRange::new(0, u64::from(host.frames)).unwrap())
+            .unwrap();
+        for (frame, sample) in expected.samples().iter().enumerate() {
+            assert_eq!(
+                host.reader.snapshot().frame(frame as u32).unwrap(),
+                &[*sample, *sample]
+            );
+        }
+        assert_eq!(
+            app.output_levels()
+                .get(&("bass-copy".into(), "level".into())),
+            Some(&0.2)
+        );
+        app.dispatch(next(&app, KeyCode::Char('a'))).unwrap();
+        ready(&mut app, &mut host);
+        assert!(
+            app.authored_source()
+                .unwrap()
+                .is_pattern_voice_active("bass-copy")
+        );
+        host.save_project(&mut app).unwrap();
         host.finish(&app).unwrap();
     }
 

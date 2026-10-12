@@ -68,6 +68,12 @@ impl CockpitMode {
 pub enum AppCommand {
     CreateComposition(CompositionDefinition),
     SelectComposition(String),
+    SetCompositionMember {
+        composition: String,
+        voice: String,
+        included: bool,
+    },
+    SelectPatternVoice(String),
     ExposeOutputLevel {
         synth: String,
         control: String,
@@ -197,6 +203,10 @@ pub struct CommandRecord {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommandResult {
+    PatternVoiceSelected {
+        voice: String,
+        changed: bool,
+    },
     CompositionEdited {
         composition: String,
         changed: bool,
@@ -560,6 +570,7 @@ pub struct CuratedControlView {
 
 #[derive(Clone, Debug)]
 pub struct AppViewModel {
+    pub selected_pattern_voice: Option<String>,
     pub output_levels: BTreeMap<(String, String), f64>,
     pub palette_pattern_editor: Option<PalettePatternEditorView>,
     pub assignments: Option<AssignmentEditorView>,
@@ -1040,6 +1051,7 @@ pub struct AppController {
     transport_commands_submitted: u64,
     transport_requested_playing: bool,
     output_levels: BTreeMap<(String, String), f64>,
+    selected_pattern_voice: Option<String>,
     project_source: Option<project::ProjectSource>,
     assignment_editor: Option<AssignmentEditor>,
     pattern_selection: Option<PatternSelection>,
@@ -1093,6 +1105,7 @@ impl AppController {
             transport_commands_submitted: playback.command_diagnostics().applied,
             project_source: None,
             output_levels: BTreeMap::new(),
+            selected_pattern_voice: None,
             transport_requested_playing: false,
             pattern_selection: None,
             assignment_editor: None,
@@ -1519,9 +1532,10 @@ impl AppController {
         let source_before = self.authored_source().map(|source| source.fingerprint());
         let observed_frame = u64::from(self.playback.status_monitor().snapshot().position);
         let result = match &command {
-            AppCommand::CreateComposition(_) | AppCommand::SelectComposition(_) => {
-                self.composition_command(&command)?
-            }
+            AppCommand::CreateComposition(_)
+            | AppCommand::SelectComposition(_)
+            | AppCommand::SetCompositionMember { .. } => self.composition_command(&command)?,
+            AppCommand::SelectPatternVoice(id) => self.select_pattern_voice(id)?,
             AppCommand::ExposeOutputLevel { .. } | AppCommand::SetOutputLevel { .. } => {
                 self.output_level_command(&command)?
             }
@@ -1980,6 +1994,7 @@ impl AppController {
                 },
             ),
             AppCommandResult::AssignmentsChanged { changed } => (*changed, vec![]),
+            AppCommandResult::PatternVoiceSelected { changed, .. } => (*changed, vec![]),
             AppCommandResult::OutputLevelExposed { changed, .. } => (*changed, vec![]),
             AppCommandResult::CompositionEdited { changed, .. } => (
                 *changed,
@@ -2181,6 +2196,7 @@ impl AppController {
             })
             .collect();
         AppViewModel {
+            selected_pattern_voice: self.selected_pattern_voice.clone(),
             output_levels: self.output_levels.clone(),
             palette_pattern_editor: self.palette_pattern_view(),
             assignments: self.assignment_view(),

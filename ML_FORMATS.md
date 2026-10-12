@@ -125,7 +125,11 @@ Runtime gain keys remain instance-owned and are applied only when active.
 Native b snapshots all declared instances into a new named composition; the first
 is explicitly selected by that construction action. F7/F8 selects while stopped
 in construction. Selection saves as the authored default; reopening starts stopped
-with authored gains. Arbitrary native membership editing remains deferred.
+with authored gains. Native a/d lowers to SetCompositionMember while stopped,
+validating and compiling the full candidate before acceptance. It preserves the
+global instance registry; v creates another instance without implicitly adding it.
+Up/Down selects by instance ID; inspector selection and runtime gains remain outside
+the authored document. Removing membership never silently retargets that selection.
 Version 2 rejects named composition fields and preserves its implicit full voice
 list. Version 3 requires at least one composition plus explicit selection. Native
 export chooses v2 for unnamed projects and v3 for named ones, checks full restored

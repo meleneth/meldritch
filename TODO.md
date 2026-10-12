@@ -63,8 +63,9 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 2 named composition checkpoint: project-v3 explicit membership over
   project-unique instances, native b/F7/F8, stopped selection and prepared PCM
   restart; inactive definition/gain scope, capture and fresh-process save/reopen
-- [ ] Slice 2 next: native selection of multiple instances sharing the same patch,
-  arbitrary composition membership authoring and composed acceptance audit
+- [x] Slice 2 instance checkpoint: native stable-ID multi-instance selection,
+  independent bindings/levels and stopped composition membership authoring
+- [ ] Slice 2 next: composed acceptance and negative-contract compatibility audit
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
 - [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
@@ -272,8 +273,9 @@ instance overlays; inactive values survive returning to a composition. Tests che
 both selections through isolated fresh-process store loading/full-split oscillator
 PCM, inactive-invalid binding rejection, v2 compatibility, bounds/references,
 typed capture and worker/callback transition without a physical device. Native
-arbitrary membership editing and multi-instance selection remain the next checkpoint;
-example 35 stays design. Timed/metapattern actions and continuous DSP migration
+arbitrary membership editing and multi-instance selection now have a checked
+checkpoint. Example 35 stays design pending its full negative-contract audit.
+Timed/metapattern actions and continuous DSP migration
 remain deferred.
 
 Named checkpoint validation: workspace offline tests, affected-crate all-targets
@@ -282,6 +284,21 @@ checks pass. Read-only CLI opening validates the v3 variant (`4b1628b55a48a382`)
 before devices. Examples 09/29 retain `41472b38b65b60ed` / `54745c74a42665cf`.
 Composition tests include both fresh-process children; native key/UI and real
 worker/production-callback checks stay headless. Commit locally without a push.
+
+Instance checkpoint: native v creates/selects another instance of the same palette
+patch, retaining the first PATCH-instance ID and assigning later numeric suffixes.
+Up/Down selects stable instance IDs independently of patch/pattern inspectors;
+p/g and exposed performance levels address exactly that identity. Membership a/d
+uses SetCompositionMember through the stopped candidate validation/compiler,
+preserving palette, other compositions and inactive selections/gains. Selecting an
+inactive instance cannot silently control another. `instance-keys.txt` specifies
+these keys; native UI/negative/capture tests and worker/callback tests prove
+selection leaves publication unchanged and membership waits for prepared PCM.
+Edited membership reopens in isolated processes with exact full/split oscillator
+audio. Workspace offline tests, affected all-targets Clippy with existing allowances,
+formatting/diff and VitePress build pass; historical 09/29 fingerprints remain
+unchanged. Full example 35 remains design until its composed negative-contract
+audit is complete. No physical listening, timed replay or DSP migration claim.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

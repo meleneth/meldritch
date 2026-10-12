@@ -10,8 +10,11 @@ audio. Named composition ownership, stopped selection and project-v3 persistence
 now implement `compositions.txt` and `compositions.project.lua`. Control tests
 restore both selections in isolated fresh processes and reconstruct typed capture;
 CLI worker/callback tests prove stop acknowledgement, prepared publication and
-inactive runtime-gain exclusion. Native arbitrary membership editing and selection
-between multiple instances of the same patch remain unfinished.
+inactive runtime-gain exclusion. `instance-keys.txt` now covers native creation and
+stable-ID selection/bindings/levels for multiple shared-patch instances, stopped
+membership add/remove, unchanged unrelated controls, typed capture reconstruction,
+edited membership publication and isolated fresh-process persistence. Full Slice 2
+status remains design pending its complete negative-contract audit.
 
 ## Pattern-selection checkpoint
 
@@ -60,6 +63,6 @@ Use the existing authoritative Rust source, independent voice compiler,
 SongAudioHost/worker/publication, typed capture and constrained Lua serializer.
 Do not build another event engine or silently reinterpret project-v2 files.
 Fresh-process composition persistence and composed native selection/publication
-tests now pass. Full acceptance still needs the remaining native instance and
-membership authoring workflow and compatibility audit. Physical listening, quantized
+tests now pass, including native instance/membership authoring. Full acceptance
+still needs the composed negative-contract and compatibility audit. Physical listening, quantized
 activation and continuous DSP migration require separate evidence.

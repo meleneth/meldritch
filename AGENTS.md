@@ -112,7 +112,10 @@ selects palette material without rebinding, source/runtime mutation or rerender;
 typed capture and independent-source persistence/render tests pass. Its full
 contract remains design. Named project-v3 composition membership/stopped selection,
 native b/F7/F8, typed capture and fresh-process persistence are now checked.
-Next close native instance selection/membership authoring and composed acceptance.
+Native v/Up/Down/p/g now author multiple shared-patch instances by stable ID;
+a/d edits named membership while stopped and performance arrows control independent
+instance levels. Typed capture and worker/persistence checks cover this checkpoint.
+Next audit composed example-35 acceptance against every required negative case.
 Do not reinterpret project-v2 or claim continuous DSP migration from this PCM path.
 Example 34's bounded empty-project workflow is accepted headlessly; physical
 listening, timed replay and continuous DSP-state migration remain unverified.

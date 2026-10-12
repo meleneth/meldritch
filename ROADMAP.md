@@ -82,8 +82,10 @@ named composition ownership/selection now has its own checked checkpoint.
 Project-v3 stores named membership/default selection; b snapshots all instances
 and F7/F8 selects after stop acknowledgement. Worker preparation gates restart;
 inactive definitions validate and runtime overlays apply only to active members.
-Both selections reopen in fresh processes. Native multi-instance selection and
-arbitrary membership authoring remain next; full example status stays design.
+Both selections and edited membership reopen in fresh processes. Native multiple
+instances, identity-based selection/bindings/levels and stopped a/d membership now
+have a checked checkpoint. Audit the full example's remaining negative contracts
+before advancing its design status.
 
 **Sound/control:** changing rhythm changes articulation without transposing;
 changing melody changes pitch without moving gate boundaries. Composition

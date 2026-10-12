@@ -41,6 +41,16 @@ impl super::AppController {
                 owner.source.create_composition(definition.clone()),
             ),
             AppCommand::SelectComposition(id) => (id.clone(), owner.source.select_composition(id)),
+            AppCommand::SetCompositionMember {
+                composition,
+                voice,
+                included,
+            } => (
+                composition.clone(),
+                owner
+                    .source
+                    .set_composition_member(composition, voice, *included),
+            ),
             _ => unreachable!(),
         };
         let next = next.map_err(AppCommandError::Instrument)?;
@@ -66,7 +76,12 @@ impl super::AppController {
         }
         let synth = source.synths().keys().next().cloned();
         let pattern = source.note_patterns().keys().next().cloned();
+        let voice = source
+            .active_pattern_voices()
+            .next()
+            .map(|voice| voice.id.clone());
         self.enable_project_source(source)?;
+        self.selected_pattern_voice = voice;
         if let Some(id) = synth {
             self.select_instrument(&id).map_err(|e| format!("{e:?}"))?;
         }
@@ -74,6 +89,25 @@ impl super::AppController {
             self.enable_pattern_editor(&id)?;
         }
         Ok(())
+    }
+    pub(crate) fn select_pattern_voice(
+        &mut self,
+        id: &str,
+    ) -> Result<super::AppCommandResult, super::AppCommandError> {
+        let source = self
+            .authored_source()
+            .ok_or_else(|| super::AppCommandError::Instrument("no project source".into()))?;
+        if !source.pattern_voices().contains_key(id) {
+            return Err(super::AppCommandError::Instrument(
+                "unknown pattern voice".into(),
+            ));
+        }
+        let changed = self.selected_pattern_voice.as_deref() != Some(id);
+        self.selected_pattern_voice = Some(id.into());
+        Ok(super::AppCommandResult::PatternVoiceSelected {
+            voice: id.into(),
+            changed,
+        })
     }
     pub(crate) fn output_level_command(
         &mut self,
@@ -211,6 +245,9 @@ impl super::AppController {
         if changed {
             self.project_source.as_mut().unwrap().source = Arc::new(next);
         }
+        if matches!(command, AppCommand::CreatePatternVoice(_)) {
+            self.selected_pattern_voice = Some(id.clone());
+        }
         Ok(AppCommandResult::PatternVoiceEdited { voice: id, changed })
     }
 
@@ -272,6 +309,7 @@ impl super::AppController {
     pub fn enable_project_source(&mut self, song: ValidatedSong) -> Result<(), String> {
         meldritch_render::song_host::CompiledSongPatch::compile_initial(&song)?;
         self.output_levels.clear();
+        self.selected_pattern_voice = None;
         let source = Arc::new(song);
         self.project_source = Some(ProjectSource {
             base: source.clone(),

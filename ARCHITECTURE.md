@@ -136,15 +136,23 @@ Project-v3 saves all definitions and membership/default selection; v2 retains it
 implicit full list and rejects named fields. Canonical IDs/membership and selection
 participate in semantic fingerprints.
 
-App `CreateComposition` / `SelectComposition` are construction actions: validate
+App `CreateComposition` / `SelectComposition` / `SetCompositionMember` are construction actions: validate
 and compile before acceptance, reject pending Play or unacknowledged Stop, and
 retain instance runtime overlays. Native b/F7/F8 lowers to those commands. The
 existing worker prepares finite PCM while stopped; NativeProjectAudio checks
 source fingerprint and ready generation before restart. Publication stays on the
 prior revision until preparation succeeds. Inactive runtime gains are retained in
 the app and filtered from the current worker submission. Neither DSP-state
-transfer nor seamless graph/interface activation is claimed. Native arbitrary
-membership editing and selection among instances sharing a patch remain missing.
+transfer nor seamless graph/interface activation is claimed. Native a/d edits
+selected membership idempotently through the same stopped candidate compiler.
+`SelectPatternVoice` owns app/editor selection by project-unique instance ID,
+independent of patch and pattern inspectors. Creating an instance selects it;
+membership/composition changes preserve that identity, including inactive selection.
+Performance Up/Down explicitly chooses active exposed controls, and level gestures
+require the exact selected instance to be active. No unrelated control is silently
+selected. Selection captures through typed history without altering source/audio;
+fresh opening selects the first active ID without recording synthetic gestures.
+Native hardware pickup/mapping and general revisioned dynamic surfaces remain open.
 Current SelectComposition explicitly changes the authored default. Future live
 composition activation must use a separate runtime/scheduled action and cannot
 silently reuse that persistence effect. This static membership checkpoint is not
@@ -322,7 +330,7 @@ the missing behavior is implemented. Required tests are acceptance obligations.
 
 | Desired capability | Existing implementation / reuse | Missing boundary and risk | Required acceptance |
 | --- | --- | --- | --- |
-| Empty project / palette / compositions | DSL project/palette/voice/CompositionDefinition and NativeProjectDefinition; app `new_empty_project`, native source loading, composition commands; TUI authoring/binding/save and `ProjectPlaybackHost`; CLI `open_project`, `NativeProjectAudio`; control `SongAudioHost::replace_source`, `NativeProjectStore`, `load_native_capture_baseline` | Self-contained v2/v3 saves and named membership/default selection reuse the existing source/host. Native instance selection/membership authoring remains incomplete. Avoid hidden templates and wholesale renaming. | Example 34 is headless accepted. Example 35 checks independent sources, named stopped selection, inactive scope and two fresh-process composition reloads; full native workflow, physical listening, timed replay and seamless activation remain open. |
+| Empty project / palette / compositions | DSL project/palette/voice/CompositionDefinition and NativeProjectDefinition; app `new_empty_project`, native source loading, composition commands/`SelectPatternVoice`; TUI authoring/binding/save and `ProjectPlaybackHost`; CLI `open_project`, `NativeProjectAudio`; control `SongAudioHost::replace_source`, `NativeProjectStore`, `load_native_capture_baseline` | Self-contained v2/v3 saves, named membership/default selection and native ID-based multi-instance authoring reuse the existing source/host. Avoid hidden templates and wholesale renaming. | Example 34 is headless accepted. Example 35 checks independent sources, named stopped selection, native instance/membership workflow, inactive scope and edited fresh-process reloads. Full negative-contract audit, physical listening, timed replay and seamless activation remain open. |
 | Authoritative state and modes | `meldritch-app/src/project.rs`: `ProjectSource.base/source`, `enable_project_source`; `lib.rs`: `AppController::dispatch`, `CockpitMode`; render host `SongLiveOverrides` | Accepted source is app-owned independently of an instrument panel; native editors mutate the same source and preserve import provenance. Mapping faders still write authored values. Separate interaction mode and instance overlays without duplicate state. | Mode switch keeps audio/transport; performance moves leave authored fingerprint/export unchanged; explicit promotion reconstructs edits; failed promotion is atomic. |
 | Patch scope / independent signals | DSL `SignalType`, `ModuleKind`, `resolve_port`, `CableDefinition`, `PatternVoiceDefinition`; render `compile_pattern_voice`, `CompiledNotePatch::render_with_filter_overrides` | Mono composition bindings execute independent pitch/gate; legacy track notes keep coupled articulation. Only four signal families and fixed voice topology execute; general graph execution remains missing. | Held pitch under an independent gate and split rendering are proved; non-amplitude envelope, broader graph execution and other families remain required. Unsupported execution must reject, never silently ignore cables. |
 | Patchable patterns / transforms | DSL `NotePatternDefinition`, `NoteEventDefinition`; `song/notes.rs`: `PatternMaterial`, compatibility `AuthoredPattern.track`; `song/voices.rs`: separate bindings; core `Pattern::events_between`, `EventOccurrence` | Native palette patterns have no track owner and independently bind mono inputs. No event-transform graph, rate adapters or polyphonic source contract. Legacy step/duration semantics differ; occurrence identity must survive transformations. | Independent gate source, initial/held pitch, adjacent retriggers and clock/overlap rejection are checked. Multi-composition reuse, transformed identities, probability/ratchet bounds and standalone reload remain open. |

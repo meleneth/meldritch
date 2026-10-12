@@ -2134,6 +2134,9 @@ fn command_result_text(result: &AppCommandResult) -> String {
         AppCommandResult::PatternEdited {
             pattern, changed, ..
         } => format!("Pattern {pattern} edited (changed: {changed})"),
+        AppCommandResult::PatternVoiceSelected { voice, .. } => {
+            format!("Instance {voice} selected")
+        }
         AppCommandResult::PatternSelectionChanged => "Note selection updated".into(),
         AppCommandResult::PatternSaveRequested => "Authored pattern save requested".into(),
         AppCommandResult::InstrumentEdited { edit, changed, .. } => format!(
@@ -2286,6 +2289,7 @@ mod tests {
             missed_artifacts: 1,
         };
         AppViewModel {
+            selected_pattern_voice: None,
             output_levels: Default::default(),
             palette_pattern_editor: None,
             assignments: None,
