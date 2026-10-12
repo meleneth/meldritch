@@ -2,7 +2,9 @@ use meldritch_app::{
     AppCommand, AppController, CockpitMode, NoteEdit, PatchCreation, PatternSignal,
     PatternVoiceDefinition,
 };
-use meldritch_control::native_capture::{NativeCommandEnvelope, NativeProjectCapture};
+use meldritch_control::native_capture::{
+    NativeCommandEnvelope, NativeProjectCapture, load_native_capture_baseline,
+};
 use meldritch_core::FrameRange;
 use meldritch_render::song_host::{CompiledSongPatch, SongLiveOverrides};
 use std::{
@@ -175,6 +177,15 @@ fn lazy_typed_capture_reconstructs_source_runtime_and_pcm_after_history_eviction
             && event["current"].as_str() == Some("0.12345678901234566")
     ));
     let mut reconstructed = directory.app();
+    reconstructed
+        .enable_native_project_source(
+            load_native_capture_baseline(
+                &directory.0,
+                &fs::read_to_string(capture.session.as_ref().unwrap().path()).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
     for (sequence, event) in events.iter().enumerate() {
         assert_eq!(event["sequence"].as_integer(), Some(sequence as i64));
         let payload =
@@ -233,6 +244,161 @@ fn lazy_typed_capture_reconstructs_source_runtime_and_pcm_after_history_eviction
             .composition()
             .is_none()
     );
+}
+
+#[test]
+fn unsupported_baseline_fails_before_creating_capture_files() {
+    let directory = Directory::new();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../songs/examples/09-curated-performance-controls");
+    for relative in [
+        "main.mlperformance",
+        "patterns/bass-line.mlpattern",
+        "synths/bass.mlsynth",
+        "synths/drone.mlsynth",
+        "dsp/echo.mldsp",
+    ] {
+        let destination = directory.0.join(relative);
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        fs::copy(fixture.join(relative), destination).unwrap();
+    }
+    let source = meldritch_dsl::load_song_directory(&directory.0).unwrap();
+    let fingerprint = source.fingerprint();
+    assert!(
+        meldritch_control::session::PerformanceSessionCapture::create_native_at(
+            &source,
+            96_000,
+            "2026-10-11T00-00-00Z"
+        )
+        .is_err()
+    );
+    assert_eq!(source.fingerprint(), fingerprint);
+    assert!(!directory.0.join("performances").exists());
+}
+
+#[test]
+fn captured_baseline_survives_multiple_authored_saves_and_root_relocation() {
+    use meldritch_control::native_project::{NativeProjectStore, load_native_project};
+    let origin = Directory::new();
+    let project = meldritch_dsl::load_project_directory(&origin.0).unwrap();
+    let mut store = NativeProjectStore::open(&project).unwrap();
+    let a = load_native_project(
+        &origin.0,
+        include_str!("../../../songs/examples/34-empty-project-patch/authored-project.lua"),
+    )
+    .unwrap();
+    store.save(&a).unwrap();
+    let mut app = origin.app();
+    app.enable_native_project_source(a.clone()).unwrap();
+    let mut capture = NativeProjectCapture::new(app.authored_source().unwrap(), 96_000);
+    for duration_ticks in [960, 1440] {
+        accept(
+            &mut app,
+            &mut capture,
+            AppCommand::EditNote {
+                pattern: "melody".into(),
+                edit: NoteEdit::Duration {
+                    id: "note-2".into(),
+                    duration_ticks,
+                },
+            },
+        );
+        accept(&mut app, &mut capture, AppCommand::SaveProject);
+        store.save(&app.authored_source().unwrap()).unwrap();
+    }
+    accept(
+        &mut app,
+        &mut capture,
+        AppCommand::SetOutputLevel {
+            voice: "voice-1-instance".into(),
+            control: "level".into(),
+            value: Some(0.12345678901234567),
+        },
+    );
+    capture.finish(&app).unwrap();
+    let captured = fs::read_to_string(capture.session.as_ref().unwrap().path()).unwrap();
+    let final_source = app.authored_source().unwrap();
+    let mut overrides = SongLiveOverrides::default();
+    overrides
+        .voice_levels
+        .insert("voice-1-instance".into(), 0.12345678901234567);
+    let range = FrameRange::new(0, 192_000).unwrap();
+    let expected = CompiledSongPatch::compile_initial(&final_source)
+        .unwrap()
+        .render(range, &overrides)
+        .unwrap();
+    let fingerprint_a = a.fingerprint();
+    drop(capture);
+    drop(app);
+    drop(store);
+    drop(origin);
+    let destination = Directory::new();
+    let baseline = load_native_capture_baseline(&destination.0, &captured).unwrap();
+    assert_eq!(baseline.fingerprint(), fingerprint_a);
+    assert_ne!(baseline.fingerprint(), final_source.fingerprint());
+    let mut restored = destination.app();
+    restored.enable_native_project_source(baseline).unwrap();
+    let document: toml::Value = toml::from_str(&captured).unwrap();
+    for event in document["events"].as_array().unwrap() {
+        let payload =
+            NativeCommandEnvelope::decode(&toml::to_string(&event["native"]).unwrap()).unwrap();
+        assert_eq!(
+            payload.source_before,
+            format!("{:016x}", restored.authored_source().unwrap().fingerprint())
+        );
+        restored.dispatch(payload.command.into()).unwrap();
+        assert_eq!(
+            payload.source_after,
+            format!("{:016x}", restored.authored_source().unwrap().fingerprint())
+        );
+    }
+    assert_eq!(
+        restored
+            .output_levels()
+            .values()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![0.12345678901234567]
+    );
+    let actual = CompiledSongPatch::compile_initial(&restored.authored_source().unwrap())
+        .unwrap()
+        .render(range, &overrides)
+        .unwrap();
+    assert_eq!(actual.samples(), expected.samples());
+    assert_eq!(fs::read_dir(&destination.0).unwrap().count(), 0);
+    for (field, value) in [
+        ("native_source", toml::Value::String("return {}".into())),
+        (
+            "native_source",
+            toml::Value::String(" ".repeat(256 * 1024 + 1)),
+        ),
+        (
+            "source_fingerprint",
+            toml::Value::String("0000000000000000".into()),
+        ),
+        ("native_command_version", toml::Value::Integer(2)),
+    ] {
+        let mut invalid = document.clone();
+        invalid.as_table_mut().unwrap().remove("events");
+        invalid["session"][field] = value;
+        assert!(
+            load_native_capture_baseline(&destination.0, &toml::to_string(&invalid).unwrap())
+                .is_err()
+        );
+    }
+    let mut missing = document.clone();
+    missing.as_table_mut().unwrap().remove("events");
+    missing["session"]
+        .as_table_mut()
+        .unwrap()
+        .remove("native_source");
+    assert!(
+        load_native_capture_baseline(&destination.0, &toml::to_string(&missing).unwrap())
+            .unwrap_err()
+            .contains("original source")
+    );
+    assert!(load_native_capture_baseline(&destination.0, &" ".repeat(1024 * 1024 + 1)).is_err());
+    assert_eq!(fs::read_dir(&destination.0).unwrap().count(), 0);
 }
 
 #[test]

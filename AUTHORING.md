@@ -72,18 +72,27 @@ validates before devices, restores inspectors without synthetic history, and
 prepares initial audio through the existing worker; it never replays capture.
 Fresh transport is stopped and runtime gains use authored defaults. Saved/unsaved
 status compares authored fingerprints, so runtime/navigation/mode gestures do not
-dirty music. Composed whole-workflow acceptance and durable capture baselines across
-saved revisions still need an audit; timed replay remains future work.
-The full example retains `design` status.
+dirty music. Composed real-key/worker/callback/fresh-process tests now establish
+bounded headless acceptance for example 34. Native captures embed their opening
+source and reconstruct after subsequent saves and original-root removal. Timed
+replay, physical listening and continuous DSP-state migration remain future work.
 
 ## Recommended immediate implementation prompt
 
-Implement only [example 34](songs/examples/34-empty-project-patch/ACCEPTANCE.md):
-empty directory → construct patch → create pattern → independent pitch/gate →
-play → modify → save → fresh-process reopen, with native keyboard controls.
-Use its project-v2 authored/invalid fixtures, serializer tests and keyboard-save
-contract. Audit and compose existing checkpoints into the full keyboard-to-fresh-
-process acceptance before changing status; invent no speculative schema.
+Start Slice 2 in [ROADMAP.md](ROADMAP.md) with the smallest readable example:
+one palette patch instantiated twice, melody pattern supplying pitch and a separate
+rhythm pattern supplying gate. Define two named compositions referencing that same
+palette, explicit selection and prepared stop/start transition semantics. Add
+invalid missing/ambiguous references and incompatible clocks before schema/code.
+Extend the existing accepted source, voice relationships, compiler and native
+serializer; do not introduce another event engine or mutable palette. Prove that
+rhythm edits change articulation without transposition, melody edits change pitch
+without moving gates, and save/fresh reopen preserves selection and shared IDs.
+Preserve example 34 and historical formats. Do not claim continuous DSP migration.
+
+The completed Slice 1 implementation prompt is retained below as historical scope.
+It established empty directory → construct patch → create pattern → independent
+pitch/gate → play → modify → save → fresh-process reopen using native keys.
 
 Reuse the existing Rust definition/importer/fingerprint machinery, moving source
 ownership out of the synth-only `InstrumentEditor` only enough to represent an

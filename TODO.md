@@ -19,7 +19,7 @@ an empty project requires no Git repository or initialization.
 - [x] Reconcile project requirements/invariants and preserve historical contracts
 - [x] Specify [example 34](songs/examples/34-empty-project-patch/ACCEPTANCE.md)
   as design only; select the immediate implementation prompt in AUTHORING.md
-- [ ] Slice 1: empty-directory project, create supported patch/pattern, independent
+- [x] Slice 1 (headless): empty-directory project, create supported patch/pattern, independent
   pitch/gate bindings, keyboard authoring, play/edit/self-contained save/reopen
 - [x] Slice 1 opening checkpoint: root adapter, no-subcommand empty overview,
   explicit headless `open-project --check`, unchanged legacy loader/cockpit,
@@ -52,8 +52,9 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 1 disk checkpoint: atomic main.project.lua save, deterministic native/
   legacy entry diagnostics, authored dirty status, fresh native inspectors and
   initial worker publication without capture/devices; runtime defaults restored
-- [ ] Slice 1 next: composed keyboard-to-fresh-process acceptance audit, including
-  durable capture baselines across authored revisions; do not claim timed replay
+- [x] Slice 1 composed acceptance: actual native keys through worker/callback,
+  save/failure/retry and isolated fresh-process reopen; embedded capture baselines
+  survive later saves and root removal. No timed replay or physical listening claim
 - [ ] Slice 2: shared palette, two compositions and independent pattern sources
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
@@ -205,9 +206,28 @@ CLI tests (37 per binary), affected-crate Clippy with existing allowances,
 formatting/diff checks and docs build pass. Real 80×24 PTY construct/bind/save,
 runtime mute/save, quit/reopen/default reset and saved read-only open/quit pass;
 fresh-process CLI --check validates. No device is opened by these checks.
-Full composed acceptance and durable capture baselines across subsequent saves
-still need audit; timed replay/epochs, physical listening, hardware and deadlines
+At this checkpoint full composed acceptance and durable capture baselines still
+needed audit; the completion checkpoint below supersedes that status.
+Timed replay/epochs, physical listening, hardware and deadlines
 remain deferred. Commit remains local; historical files/exports stay unchanged.
+
+Slice 1 completion: `keyboard-workflow.txt` composes real key lowering, authoritative
+commands, worker publication and production callback output with a fresh-process
+native reopen. Duration/waveform edits change published PCM; fixed stereo publication
+duplicates authored mono exactly. Gate disconnect/reconnect, mode continuity,
+runtime mute without authored promotion, rejected edits and failed save/retry are
+checked. `capture-baseline.txt` embeds the opening project-v2 source in native
+session headers, bounds parsing and checks its fingerprint. Reconstruction survives
+two subsequent saves and deletion of the original root. Existing sessions without
+embedded source require their original baseline; no automatic replay is added.
+Example 34 is accepted headlessly. Next is Slice 2's example-first shared palette
+and independent pattern-source routing, with explicit composition selection.
+Validation: workspace offline tests, all eight native capture tests, affected
+root/CLI/control all-targets Clippy with existing allowances, formatting/diff and
+VitePress reference/build checks pass. Examples 09/29 retain fingerprints
+`41472b38b65b60ed` / `54745c74a42665cf`. Physical listening, device deadlines,
+sample-timed replay/epochs and harvesting remain deferred. This is a local checkpoint;
+no push is required.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

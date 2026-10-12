@@ -1,6 +1,14 @@
 # Empty project → construct → pattern → independent signals → play → save → reopen
 
-Status: **design for the complete workflow**. The read-only opening checkpoint
+Status: **accept for the bounded headless workflow**. `keyboard-workflow.txt`
+binds actual native key lowering to typed commands, worker publication and the
+production callback, then opens `main.project.lua` in an isolated fresh process.
+Exact published stereo duplicates the authored mono render; full/split raw
+oscillator PCM and fingerprints survive reopen. `capture-baseline.txt` proves
+reconstruction after later saves and removal of the original root. This does not
+accept physical listening, timed replay or continuous DSP-state migration.
+
+The following records the independently verified checkpoints. The read-only opening checkpoint
 is implemented: DSL `project_directory`, CLI project-opening tests and native TUI
 tests cover empty/legacy roots, diagnostics and presentation. `opening.txt` and
 `invalid/malformed-entry.toml` specify that checkpoint. Native patch and independent
@@ -28,9 +36,10 @@ Native atomic disk save and entry discovery/TUI reopen now implement
 and ambiguity; native host checks prove initial worker/callback audio, saved
 revision status, preserved source/runtime/publication on save failure and fresh
 runtime defaults with no synthetic history/capture/device. CLI checks validate
-saved entries read-only. Full composed keyboard-to-fresh-process acceptance and
-capture-baseline persistence across saved revisions still need auditing; timed
-replay remains unimplemented. The full example retains design status.
+saved entries read-only. Composed keyboard-to-fresh-process acceptance and
+capture-baseline persistence across saved revisions are now automated; timed
+replay remains unimplemented. Run `cargo test -p meldritch-cli native_keyboard_workflow`
+and the native capture suite for the composed evidence.
 Native 80×24 PTY checks also prove file-free empty open/quit, twelve typed
 construction/runtime events and a clean final gain, and capture-path failure
 deferring another gesture/quit until successful retry without duplicates. These
@@ -56,7 +65,7 @@ Opening checks: `cargo test -p meldritch-dsl --test project_directory`,
 `cargo test -p meldritch-cli project_opening` and
 `cargo test -p meldritch-tui empty_project`. An actual no-subcommand 80×24 PTY
 draw/quit and alternate-screen restoration smoke also passes without files.
-This evidence accepts only opening; it does not accept construction or music.
+These opening tests establish only opening; the composed test establishes music.
 
 Palette checks: the same DSL suite plus `cargo test -p meldritch-app empty_project`
 and `cargo test -p meldritch-tui native_creation`. They cover typed recipe equality,
@@ -65,7 +74,7 @@ command replay, the construction bound, silence and full 80×24 inspection.
 A no-subcommand PTY smoke at the palette checkpoint accepted two `n` presses and
 clean quit/restoration without files. Native capture now deliberately writes
 accepted gestures to sessions; opening/quit without gestures still creates no files.
-Authored persistence, timed replay and physical-audio acceptance remain unfinished.
+Authored persistence is now accepted below; timed replay and physical audio remain deferred.
 
 Native editor checks: `cargo test -p meldritch-tui native_` covers patch drafts
 and independent pattern gestures. The DSL project-directory suite also rejects
@@ -85,7 +94,7 @@ requests, duplicate identities and unsupported executable wiring leave source,
 history and publication unchanged. Existing patch edits act on the same source.
 Definitions remain unsaved authored state; capture preserves typed facts but does
 not automatically reopen them. The screen must distinguish capture from saving.
-This partial checkpoint does not accept the complete save/reopen workflow.
+The palette checkpoint alone does not establish the complete save/reopen workflow.
 
 Native patch-editing checkpoint: after `n`, Ctrl-E opens the accepted instrument
 editor over the same project-owned source. Right changes its waveform; Ctrl-G
@@ -109,9 +118,8 @@ ranges/values and unknown IDs preserve accepted source/history. Native cursor
 movement/repeats cannot accidentally duplicate notes. The existing version-1
 track-owned pattern exports, Lua projections and tests retain their behavior;
 new unconnected material must reject those legacy exports instead of inventing
-an owner. All this material is still in-memory and silent, with bindings and
-persistence acceptance unfinished. Independent composition binding acceptance
-is described below.
+an owner. Unbound material is silent; independent binding and native persistence
+acceptance are described below.
 
 Binding checkpoint: `independent-voice.toml` is a typed request fixture, not a save
 format. `keyboard-bindings.txt` specifies native v/p/g. Instances are separate
@@ -133,7 +141,7 @@ suite. Tests prove pitch changes under a held gate, exact split/full rendering,
 independent disconnect/reconnect, native inspection, typed in-memory replay and
 worker publication consumed by the production callback without transport reset.
 This evidence does not open a physical device or establish DSP-state migration.
-The native cockpit reports unsupported save; device playback is specified below.
+The native cockpit supports Ctrl-S/F6 save; device playback is specified below.
 
 Native playback checkpoint: `keyboard-playback.txt` binds Space and Ctrl-Tab to
 the actual CLI/TUI adapter over SongAudioHost. Opening starts construction through
@@ -151,7 +159,7 @@ consumes its engine, so retry in that cockpit is not yet supported.
 headlessly, including callback audio, mode/source/publication identity and gate
 disconnect while the playhead advances. The TUI suite checks performance hides
 graph internals and suppresses native editing. Device/listening and deadline
-evidence remain separate; these checks do not accept the whole example.
+evidence remain separate; these playback checks alone do not establish the whole example.
 
 1. In a temporary empty directory execute `meldritch` with no subcommand. Open
    a silent valid project in a usable TUI without writing files or initializing
@@ -221,8 +229,8 @@ Preserve examples 25–33 and historical compatibility fixtures, hashes and
 base-bound instrument v1/v2, pattern/controls/project v1. Preserve Plaits f32/RNG
 exceptions. Run focused then affected full crate suites and format/diff/docs checks.
 
-Completion requires the whole workflow and negatives/compatibility. The opening
-checkpoint does not advance the complete example beyond `design`. General transformed/multi-composition routing, polyphonic signals,
+The composed workflow and negative/compatibility suites establish headless acceptance.
+General transformed/multi-composition routing, polyphonic signals,
 LFOs, normalization, libraries, quantized graph changes and DSP-state migration
 are deferred. PCM replacement proves rendered behavior, not continuous DSP state.
 Physical sound/gestures and deadlines require separate evidence.

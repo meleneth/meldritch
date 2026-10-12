@@ -195,8 +195,16 @@ symlink refusal and native/legacy ambiguity. CLI/native-host tests cover read-on
 entry checks, inspector initialization without history/capture, initial worker and
 production callback sound, saved revision status and runtime default restoration.
 Real 80×24 terminal smoke covers native construction/binding/save/quit/fresh reopen.
-These are scoped checks; composed full acceptance and durable capture baselines
-still need audit. They do not prove physical listening, timed replay or DSP migration.
+`cargo test -p meldritch-cli native_keyboard_workflow` now composes actual key
+lowering, typed commands, worker publication and the production callback without
+opening a device. It checks mode continuity, gate disconnect/reconnect, published
+duration/waveform changes, exact mono-to-stereo duplication, runtime mute, authored
+save, failure/retry and an isolated fresh-process native entry reload. Full/split
+oscillator PCM and source fingerprints must match. The native capture suite
+reconstructs source/runtime/PCM from an embedded opening baseline after two saves
+and removal of the original root; missing/forged/oversized baselines reject.
+These establish bounded headless example-34 acceptance. They do not prove physical
+listening, timed replay, Plaits RNG reproducibility or continuous DSP migration.
 
 Add later:
 - offline render throughput

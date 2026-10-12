@@ -324,6 +324,14 @@ fn atomic_disk_save_reopens_and_failed_retry_preserves_last_good_source() {
         .0;
     let obstruction = directory.0.join(".main.project.lua.tmp");
     fs::write(&obstruction, "foreign temporary").unwrap();
+    // A leftover partial/stale temporary never becomes the selected entry.
+    assert_eq!(
+        NativeProjectStore::open(&project)
+            .unwrap()
+            .source()
+            .unwrap(),
+        &source
+    );
     assert!(store.save(&edited).is_err());
     assert_eq!(fs::read(&path).unwrap(), good);
     assert_eq!(

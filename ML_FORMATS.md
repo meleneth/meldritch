@@ -97,7 +97,15 @@ an `events.native` table with a typed command and source fingerprints before/aft
 See that example's `capture.txt` and `capture-command.toml`; this is captured
 accepted state, not an authored project save or a claim of timed DSP activation.
 Legacy hosts retain their historical event representation. Native checkpoint
-storage is bounded and failure/retry behavior is tested.
+storage is bounded and failure/retry behavior is tested. Native writers also embed
+`session.native_source`, a quoted self-contained project-v2 Lua opening baseline,
+before events. `load_native_capture_baseline` bounds canonical header scanning and
+parsing, restores through the existing importer/compiler and checks the opening
+fingerprint. The original root is provenance; callers supply a destination root.
+Later saves cannot change the captured baseline. Older captures without this field
+require their original source explicitly; the loader never infers an empty baseline.
+This additive field changes neither legacy writers nor the event vocabulary and
+does not implement timed replay or execute events during project opening.
 
 Example 34 additionally defines self-contained `kind="project", version=2` Lua
 in `authored-project.lua`. It stores project identity/clock, complete supported

@@ -1089,6 +1089,7 @@ name = "meldritch"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "crossterm",
  "meldritch-app",
  "meldritch-audio",
  "meldritch-control",
@@ -1128,6 +1129,7 @@ name = "meldritch-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "crossterm",
  "meldritch-app",
  "meldritch-audio",
  "meldritch-control",

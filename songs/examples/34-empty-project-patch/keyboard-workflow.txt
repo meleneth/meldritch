@@ -1,0 +1,32 @@
+Composed headless acceptance, using native key mappings and the production callback:
+
+Open an empty root: no files, MIDI, device or seed. n constructs voice-1; c creates
+pattern-1. Enter inserts C3 at tick 0. Right twice and Up seven times, Enter inserts
+G3 at tick 960. Both start at duration 480 and velocity 0.8. Esc returns to overview.
+v creates an independent instance; p and g bind independent pitch and gate; x
+exposes level. Wait for existing worker publication, then issue typed Play to the
+production callback without a physical device. Finite nonzero samples and advancing
+transport must result. Ctrl-Tab in both directions preserves playback and source.
+
+In construction, g disconnects gate while retaining pitch: published/callback
+audio is silent after the declared zero release. g reconnects and sound returns.
+Ctrl-N reopens pattern; ] changes G3 duration to 720, changing authored and published PCM.
+Esc, Ctrl-E, Right changes oscillator waveform through the existing instrument
+editor, changing authored and published PCM again. Fixed stereo publication must
+exactly duplicate the authored mono render in both channels. Esc returns to
+overview. F6 saves the complete source.
+Ctrl-Tab, Home mutes runtime without dirtying source; F6 must save identical authored
+bytes. Invalid duration/type/identity commands reject without changing source,
+runtime, accepted history, audio generation or publication. Foreign temporary
+obstruction makes save fail without losing files/edits; repair and retry succeeds.
+
+Finish capture, destroy parent app/host and launch an isolated test child. The child
+discovers main.project.lua through the production store, initializes native
+inspectors without synthetic history, and verifies stopped transport, authored
+gain 0.8 and no runtime overlays/capture replay. Full and split raw f64 oscillator
+PCM and fingerprint equal saved expectations. No controller script, seed, original
+in-memory source or capture replay may be used. Child opening creates no files.
+
+Physical device opening/listening, controller pickup and realtime deadline evidence
+remain separate; this test substitutes only the output device with the existing
+PublishedAudioRenderer, not the command engine, worker or musical renderer.

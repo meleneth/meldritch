@@ -10,7 +10,7 @@ Status values:
 
 | Example | Capability | Status |
 | --- | --- | --- |
-| `34-empty-project-patch` | Empty/legacy opening, native patch/pattern/binding authoring, playback/modes, runtime level and lazy typed capture checked; self-contained project-v2 Lua proves fresh-process oscillator PCM/identity equality; atomic native save/reopen, dirty status, initial worker/callback audio and failure retry checked; full composed acceptance/capture-baseline audit and timed replay unfinished; physical listening unverified | design |
+| `34-empty-project-patch` | Bounded headless empty-root keyboard construction/pattern/independent pitch-gate/play/modify/save/fresh-process reopen; worker and production callback changes, exact mono-to-stereo publication, runtime/default separation, failures/retry and full/split oscillator PCM/identity equality checked. Embedded capture baselines survive later saves/root removal. Timed replay, physical listening and continuous DSP-state migration remain deferred | accept |
 | `00-minimal-synth` | Explicit oscillator-to-output patch | accept |
 | `01-synth-note-pattern` | Note pattern drives pitch and gate | accept |
 | `02-synth-parameter-pattern` | Pattern drives a synth parameter port | accept |

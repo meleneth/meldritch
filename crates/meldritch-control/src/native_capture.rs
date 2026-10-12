@@ -7,7 +7,65 @@ use meldritch_dsl::{
     ValidatedSong,
 };
 use serde::{Deserialize, Serialize};
-use std::{sync::Arc, time::Instant};
+use std::{path::Path, sync::Arc, time::Instant};
+
+/// Restore only the immutable authored baseline, never execute captured events.
+/// Caller supplies the destination root; historic song_root is provenance only.
+pub fn load_native_capture_baseline(
+    root: impl AsRef<Path>,
+    capture: &str,
+) -> Result<ValidatedSong, String> {
+    const MAX_HEADER: usize = 1024 * 1024;
+    const EVENTS: &str = "\n[[events]]\n";
+    // Bound scanning as well as parsing; event history may be much larger.
+    let prefix =
+        &capture[..capture.floor_char_boundary(capture.len().min(MAX_HEADER + EVENTS.len()))];
+    let header = match prefix.split_once(EVENTS) {
+        Some((header, _)) => header,
+        None if capture.len() <= MAX_HEADER => capture,
+        None => return Err("native capture header exceeds size bound".into()),
+    };
+    if header.len() > MAX_HEADER {
+        return Err("native capture header exceeds size bound".into());
+    }
+    let document: toml::Value = toml::from_str(header).map_err(|e| e.to_string())?;
+    if document
+        .get("meldritch")
+        .and_then(|m| m.get("kind"))
+        .and_then(toml::Value::as_str)
+        != Some("performance_session")
+        || document
+            .get("meldritch")
+            .and_then(|m| m.get("version"))
+            .and_then(toml::Value::as_integer)
+            != Some(1)
+    {
+        return Err("unsupported native capture envelope".into());
+    }
+    let session = document
+        .get("session")
+        .ok_or("missing native session header")?;
+    if session
+        .get("native_command_version")
+        .and_then(toml::Value::as_integer)
+        != Some(1)
+    {
+        return Err("unsupported native command version".into());
+    }
+    let encoded = session
+        .get("native_source")
+        .and_then(toml::Value::as_str)
+        .ok_or("capture has no embedded baseline; provide its original source explicitly")?;
+    let source = crate::native_project::load_native_project(root, encoded)?;
+    let expected = session
+        .get("source_fingerprint")
+        .and_then(toml::Value::as_str)
+        .ok_or("missing native baseline fingerprint")?;
+    if expected != format!("{:016x}", source.fingerprint()) {
+        return Err("native baseline fingerprint mismatch".into());
+    }
+    Ok(source)
+}
 
 // One bounded serialization boundary. The two conversions are generated from
 // the same vocabulary so capture cannot silently discard command arguments.

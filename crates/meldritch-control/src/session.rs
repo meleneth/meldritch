@@ -50,6 +50,7 @@ pub struct FinalSessionControl {
 pub struct PerformanceSessionCapture {
     native_append: bool,
     native_header_bytes: u64,
+    native_source: Option<String>,
     pub native_final_fingerprint: Option<u64>,
     pub path: PathBuf,
     pub temp_path: PathBuf,
@@ -144,6 +145,12 @@ impl PerformanceSessionCapture {
         if event_buffer_limit == 0 {
             return Err("session event buffer limit must be greater than zero".to_owned());
         }
+        // Freeze the immutable opening source before reserving any files.
+        let native_source = if native_append {
+            Some(crate::native_project::encode_native_project(song)?)
+        } else {
+            None
+        };
         let directory = session_root.join("performances");
         std::fs::create_dir_all(&directory)
             .map_err(|error| format!("failed to create {}: {error}", directory.display()))?;
@@ -162,6 +169,7 @@ impl PerformanceSessionCapture {
         let mut capture = Self {
             native_append,
             native_header_bytes: 0,
+            native_source,
             native_final_fingerprint: None,
             path,
             temp_path,
@@ -440,6 +448,9 @@ impl PerformanceSessionCapture {
         out.push_str("[session]\n");
         if self.native_append {
             out.push_str("native_command_version = 1\n");
+            if let Some(source) = &self.native_source {
+                push_string(&mut out, "native_source", source);
+            }
             if let Some(fingerprint) = self.native_final_fingerprint {
                 push_string(
                     &mut out,

@@ -3,21 +3,22 @@
 ## Next architecture: planned vertical slices (2026-10-11)
 
 This sequence supersedes the original phases below as the active direction.
-All full slices here remain **proposed/unimplemented**. Slice 1's empty/legacy
-opening, ownership, palette/native authoring, independent mono bindings, playback
-explicit instance runtime-level and lazy typed disk-capture checkpoints are implemented,
-without accepting its complete workflow. Historical examples 25–33 remain
+Slice 1 now has **bounded headless acceptance**. Later slices remain
+**proposed/unimplemented**. Empty/legacy opening, native patch/pattern authoring,
+independent mono bindings, playback, instance runtime level, typed capture and
+self-contained save/fresh reopen compose through existing Rust machinery.
+Historical examples 25–33 remain
 accepted within their scopes. Requirements live in [FEATURES.md](FEATURES.md),
 the code/reuse audit in [ARCHITECTURE.md](ARCHITECTURE.md), and the active queue
 in [TODO.md](TODO.md). Each slice starts with a readable scenario and invalid
 neighbors, then binds acceptance to actual app/compiler/host boundaries.
 
 Example 34 has opening/creation/binding requests, invalid neighbors and scoped tests.
-Its full construction/persistence contract remains design. Names 35–41 below are
+Its composed construction/persistence contract is accepted headlessly. Names 35–41 below are
 reserved planning names, not existing files, schema or capability claims.
 No slice requires rewriting working examples or introducing another engine.
 
-### 1. Empty project to a saved playable patch (next)
+### 1. Empty project to a saved playable patch (headless accepted)
 
 **Scenario/example:** [34-empty-project-patch](songs/examples/34-empty-project-patch/ACCEPTANCE.md).
 In a new directory run `meldritch`, enter construction, create one mono
@@ -48,9 +49,10 @@ empty root creates no files; save creates only necessary authored files.
 The bounded native format/entry is now project-v2 Lua at `main.project.lua`;
 Ctrl-S/F6 atomically saves authored state, and project opening restores it before
 devices. Native/legacy musical entry ambiguity, external modifications, symlinks
-and foreign temporaries reject. Scoped serializer/store/host/CLI checks exist;
-full composed keyboard acceptance and durable capture baselines across subsequent
-saves remain the next audit. Timed replay and multi-composition layout stay deferred.
+and foreign temporaries reject. A composed native-key test covers worker/callback
+changes, mode continuity, failures/retry and isolated fresh-process entry loading.
+Native captures embed their opening source, surviving later saves and root removal.
+Timed replay and multi-composition layout stay deferred.
 
 **Reuse/compatibility:** move existing source ownership out of the synth-only
 editor as needed; extend importer/builders, `PatchEdit`, `NoteEdit`, note

@@ -1,0 +1,29 @@
+Durable native capture baseline:
+
+On first accepted gesture, the performance_session v1 header embeds
+session.native_source: a bounded project-v2 Lua snapshot of the immutable source
+present when the cockpit opened. session.source_fingerprint verifies that source.
+The header and events are published together by the shared atomic writer. No
+sidecar, original main.project.lua, original root, Git revision or replay of an
+earlier session is needed. Empty baselines are explicit rather than inferred.
+The source snapshot excludes runtime, editor selection and draft state.
+
+Reopen saved revision A, edit and save B, then edit and save C. Captures that began
+at A must still reconstruct from A after main.project.lua contains C or is removed.
+Copy just the capture to another ordinary directory; decode the baseline there,
+verify its fingerprint, dispatch its typed events and verify source before/after
+each command. Supported deterministic oscillator PCM and runtime gain must equal
+the captured final state. Reconstruction must not write authored files or replay
+SaveProject into the filesystem. Loading a project still never replays capture.
+
+Reject missing, forged, unsupported or oversized embedded source, wrong baseline
+fingerprint and unsupported native command version. Historical native files that
+lack a baseline require an explicit original source; do not silently infer empty.
+Validate/compile the embedded source before returning it. A failure leaves accepted
+source, publication and files unchanged. Initial baseline encoding failure creates
+no capture. Header decoding is bounded to 1 MiB and ignores the event suffix;
+existing 256 KiB Lua and 64 MiB session limits remain unchanged.
+
+This is deterministic source/control reconstruction, not sample-timed playback,
+transport epoch replay, a harvesting API, physical audio acceptance or DSP-state
+migration. Plaits retains its documented RNG exception.

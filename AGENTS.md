@@ -22,7 +22,10 @@ shared writer, with bounded pending buffers and failure/retry diagnostics. Merel
 opening creates no files. A bounded self-contained project-v2 Lua serializer now
 restores native authored source and deterministic oscillator PCM in a fresh process;
 Ctrl-S/F6 now atomically saves main.project.lua; native opening restores it with
-runtime defaults and no capture replay. Timed replay remains future work.
+runtime defaults and no capture replay. Example 34 now accepts the composed
+headless keyboard-to-fresh-process workflow. Native captures embed their opening
+authored source so later saves cannot erase the reconstruction baseline.
+Timed replay remains future work.
 Git is permitted as a required installed dependency, but opening a project must
 not require a Git repository or initialization.
 
@@ -102,9 +105,10 @@ Preserve `INVARIANTS.md`. In particular:
 
 ## Current `.ml*` implementation state
 
-The immediate priority is section 21 of `TODO.md` and example 34's unfinished
-empty-project contract. Its opening, source ownership and silent palette-creation
-checkpoints are implemented; full workflow acceptance remains open.
+The immediate priority is section 21 of `TODO.md`, Slice 2's example-first shared
+palette, composition selection and independent pattern-source routing.
+Example 34's bounded empty-project workflow is accepted headlessly; physical
+listening, timed replay and continuous DSP-state migration remain unverified.
 Read the architecture, roadmap, AUTHORING.md and accepted
 examples 25–33 before implementation. Section 20 retains accepted authoring and
 unfinished work. Example 25 has headless `accept` status; example 29 now has
