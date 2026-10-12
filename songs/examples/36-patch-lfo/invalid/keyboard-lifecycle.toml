@@ -1,0 +1,5 @@
+# These typed commands reject without changing runtime, source or history.
+cases = ["unknown-target", "inactive-target", "polyphonic-target", "legacy-source", "channel-16", "pitch-128", "stale-epoch", "backwards-frame", "held-key-129", "unbound-key", "unbound-reset", "rejected-source-edit"]
+# Disconnect/queue overflow resets are explicit accepted commands, advance the
+# epoch, release gate once, and discard every previously held key. Source edits
+# invalidate the binding; changing cockpit mode or inspector selection does not.

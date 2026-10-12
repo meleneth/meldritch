@@ -594,6 +594,14 @@ pub fn session_result_fields(
     result: &meldritch_app::AppCommandResult,
 ) -> (String, Option<String>, Option<String>, Option<String>) {
     match result {
+        meldritch_app::AppCommandResult::KeyboardUpdated {
+            previous, current, ..
+        } => (
+            "runtime_keyboard".into(),
+            current.voice.clone().or_else(|| previous.voice.clone()),
+            Some(format!("{previous:?}")),
+            Some(format!("{current:?}")),
+        ),
         meldritch_app::AppCommandResult::OutputLevelExposed { synth, .. } => (
             "patch_control_interface".into(),
             Some(synth.clone()),

@@ -171,6 +171,33 @@ pub fn decode_midi(bytes: &[u8]) -> Option<MidiObservation> {
     }
 }
 
+/// Runtime lowering for an explicitly tagged binding and absolute worker frame.
+/// Caller must discard stale connection observations and retain the binding epoch
+/// attached when accepting input; never resolve a new target from UI selection.
+/// Velocity, sustain and bend require their own authored adapters, not implicit gain.
+pub fn keyboard_key_command(
+    bytes: &[u8],
+    epoch: u64,
+    frame: u64,
+) -> Option<meldritch_app::AppCommand> {
+    let MidiObservation::Note {
+        channel,
+        note,
+        pressed,
+        ..
+    } = decode_midi(bytes)?
+    else {
+        return None;
+    };
+    Some(meldritch_app::AppCommand::KeyboardKey {
+        epoch,
+        frame,
+        channel,
+        note,
+        pressed,
+    })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ApcInput {
     Grid { cell: u8, pressed: bool },

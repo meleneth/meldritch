@@ -309,6 +309,7 @@ impl super::AppController {
     pub fn enable_project_source(&mut self, song: ValidatedSong) -> Result<(), String> {
         meldritch_render::song_host::CompiledSongPatch::compile_initial(&song)?;
         self.output_levels.clear();
+        self.keyboard.invalidate();
         self.selected_pattern_voice = None;
         let source = Arc::new(song);
         self.project_source = Some(ProjectSource {

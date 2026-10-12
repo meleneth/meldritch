@@ -83,12 +83,15 @@ an empty project requires no Git repository or initialization.
 - [x] User-prioritized MIDI keyboard checkpoint: MicroLab/generic input selection,
   diagnostic, bounded reconnect queue, construction pattern entry with velocity,
   typed capture/save/reopen and playing publication; host MicroLab connection observed
-- [ ] Next keyboard slice: explicit live Pitch/Gate source bindings and runtime
-  key-held audition, note lifecycle/overflow/disconnect cleanup and capture;
+- [ ] Next keyboard slice: production live binding gesture, bounded streaming
+  key-held audition, transport overflow/disconnect cleanup and device timing;
   then authored sustain/bend/control routing and timed recording
 - [x] Keyboard renderer foundation: one shared mono kernel for offline/incremental
   worker execution, independent bounded u64 Pitch/Gate blocks, preserved DSP state,
   exact partition/offline references and atomic invalid-block recovery
+- [x] Keyboard runtime foundation: typed explicit mono-instance binding, bounded
+  channel/key priority, retrigger/fallback/release, reset epochs, capture and exact
+  worker replay; source revisions invalidate binding, fresh saves restore defaults
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
 - [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
 - [ ] Slice 6: quantized graph activation and proved compatible DSP-state continuity
@@ -471,6 +474,22 @@ remain next. Worker DSP state is ephemeral; authored persistence is unchanged.
 Verification: offline workspace suite and focused live renderer tests, affected
 all-targets Clippy with existing allowances, formatting/diff checks and VitePress
 pass. Historical 09/29 fingerprints remain `41472b38b65b60ed` / `54745c74a42665cf`.
+
+Keyboard runtime checkpoint now adds app-owned BindKeyboard/KeyboardKey/
+ResetKeyboard commands. Named active native mono instances, u64 frames and binding
+epochs replace implicit inspector routing. Bounded 128-key last-pressed priority
+keeps channel identity, emits independent Pitch/Gate and resumes held pitch without
+retrigger; explicit disconnect/overflow/panic resets reject stale commands. Source
+revisions invalidate bindings; cockpit/selection changes preserve them. Native
+capture records typed runtime commands with unchanged authored fingerprints, and
+headless reconstruction renders identical shared-worker PCM. Native saves retain
+only authored definitions. Generic note lowering handles velocity-zero release;
+velocity/sustain/bend need explicit future signal adapters. There is no production
+live binding UI, overflow/disconnect reset integration, streaming output or device
+timing yet: the current MicroLab host continues construction pattern entry.
+Verification: focused lifecycle tests and final offline workspace suite pass;
+affected all-targets Clippy with existing allowances, formatting/diff checks and
+documentation build pass. Historical 09/29 fingerprints remain unchanged.
 
 Investigation and ownership decisions: [AUTHORING.md](AUTHORING.md). The first
 implemented slice is [the instrument editor](INSTRUMENT_EDITOR.md): example 25

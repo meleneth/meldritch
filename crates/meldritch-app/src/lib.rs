@@ -9,6 +9,8 @@ mod assignments;
 pub use assignments::*;
 mod project;
 pub use project::*;
+mod keyboard;
+pub use keyboard::{KeyboardResetReason, KeyboardView};
 
 use meldritch_audio::device_output::PlaybackControl;
 use meldritch_audio::realtime_queue::{QueueDiagnostics, QueueFull};
@@ -66,6 +68,22 @@ impl CockpitMode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommand {
+    BindKeyboard {
+        voice: Option<String>,
+        frame: u64,
+    },
+    KeyboardKey {
+        epoch: u64,
+        frame: u64,
+        channel: u8,
+        note: u8,
+        pressed: bool,
+    },
+    ResetKeyboard {
+        epoch: u64,
+        frame: u64,
+        reason: KeyboardResetReason,
+    },
     CreateComposition(CompositionDefinition),
     SelectComposition(String),
     SetCompositionMember {
@@ -203,6 +221,13 @@ pub struct CommandRecord {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AppCommandResult {
+    KeyboardUpdated {
+        previous: Box<KeyboardView>,
+        current: Box<KeyboardView>,
+        /// Bind/unbind cleanup targets the previous instance, not the new one.
+        output_voice: Option<String>,
+        outputs: Vec<meldritch_render::song_render::LiveVoiceInput>,
+    },
     PatternVoiceSelected {
         voice: String,
         changed: bool,
@@ -570,6 +595,7 @@ pub struct CuratedControlView {
 
 #[derive(Clone, Debug)]
 pub struct AppViewModel {
+    pub keyboard: KeyboardView,
     pub selected_pattern_voice: Option<String>,
     pub output_levels: BTreeMap<(String, String), f64>,
     pub palette_pattern_editor: Option<PalettePatternEditorView>,
@@ -1051,6 +1077,7 @@ pub struct AppController {
     transport_commands_submitted: u64,
     transport_requested_playing: bool,
     output_levels: BTreeMap<(String, String), f64>,
+    keyboard: keyboard::KeyboardState,
     selected_pattern_voice: Option<String>,
     project_source: Option<project::ProjectSource>,
     assignment_editor: Option<AssignmentEditor>,
@@ -1105,6 +1132,7 @@ impl AppController {
             transport_commands_submitted: playback.command_diagnostics().applied,
             project_source: None,
             output_levels: BTreeMap::new(),
+            keyboard: keyboard::KeyboardState::default(),
             selected_pattern_voice: None,
             transport_requested_playing: false,
             pattern_selection: None,
@@ -1532,6 +1560,9 @@ impl AppController {
         let source_before = self.authored_source().map(|source| source.fingerprint());
         let observed_frame = u64::from(self.playback.status_monitor().snapshot().position);
         let result = match &command {
+            AppCommand::BindKeyboard { .. }
+            | AppCommand::KeyboardKey { .. }
+            | AppCommand::ResetKeyboard { .. } => self.keyboard_command(&command)?,
             AppCommand::CreateComposition(_)
             | AppCommand::SelectComposition(_)
             | AppCommand::SetCompositionMember { .. } => self.composition_command(&command)?,
@@ -1962,6 +1993,12 @@ impl AppController {
             }
         };
         let (changed, dirty_ranges) = match &result {
+            AppCommandResult::KeyboardUpdated {
+                previous,
+                current,
+                outputs,
+                ..
+            } => (previous != current || !outputs.is_empty(), vec![]),
             AppCommandResult::ParameterEdited { target, changed } => (
                 *changed,
                 if *changed {
@@ -2145,12 +2182,18 @@ impl AppController {
                 previous, current, ..
             } => (previous != current, Vec::new()),
         };
+        let source_after = self.authored_source().map(|source| source.fingerprint());
+        // A binding belongs to the compiled authored revision. Source changes
+        // require an explicit fresh binding; UI selection/mode changes do not.
+        if source_before != source_after {
+            self.keyboard.invalidate();
+        }
         self.record(CommandRecord {
             sequence: self.next_sequence,
             result: result.clone(),
             observed_frame,
             source_before,
-            source_after: self.authored_source().map(|source| source.fingerprint()),
+            source_after,
             command,
             changed,
             dirty_ranges,
@@ -2196,6 +2239,7 @@ impl AppController {
             })
             .collect();
         AppViewModel {
+            keyboard: self.keyboard.view.clone(),
             selected_pattern_voice: self.selected_pattern_voice.clone(),
             output_levels: self.output_levels.clone(),
             palette_pattern_editor: self.palette_pattern_view(),

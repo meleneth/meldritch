@@ -288,6 +288,13 @@ All invalid/live-keyboard.toml cases preserve state through subsequent valid
 rendering. Polyphonic live construction rejects, free amplitude wiring remains
 audible under low gate, and absolute origins beyond u32/near u64::MAX work.
 Source/history/files remain unchanged; no MIDI/device live audition is implied.
+`cargo test -p meldritch-control --test keyboard_lifecycle` executes the runtime
+trace and every invalid/keyboard-lifecycle.toml case. It proves bounded/channel-aware
+held priority, independent signals, reset epochs, atomic rejection, source/mode
+ownership, typed capture at frames above u32 and exact reconstructed worker PCM.
+Fresh authored Lua reload restores defaults. MIDI note lowering preserves epoch,
+frame/channel and zero-velocity release; unsupported control input stays unmapped.
+This is not timed device replay or production disconnect/overflow handling.
 
 Add later:
 - offline render throughput

@@ -1,7 +1,7 @@
 //! Native command encoding and observation over the shared session writer.
 //! No scheduler or alternate musical state: decoded commands use AppController.
 use crate::session::{CapturedSessionEvent, PerformanceSessionCapture, session_result_fields};
-use meldritch_app::{AppCommand, AppController, CockpitMode};
+use meldritch_app::{AppCommand, AppController, CockpitMode, KeyboardResetReason};
 use meldritch_dsl::{
     CompositionDefinition, InstrumentEdit, NoteEdit, PatchCreation, PatchEdit, PatternSignal,
     PatternVoiceDefinition, ValidatedSong,
@@ -104,6 +104,9 @@ native_commands! {
     units { Play, Stop, Rewind, TogglePatternEditor, ToggleInstrumentEditor, TogglePatchEditor, PatchBackspace, PatchSubmit, SavePattern, SaveInstrument, SaveProject }
     tuples { CreateComposition(definition: CompositionDefinition), SelectComposition(id: String), SelectPatternVoice(id: String), CreatePatch(creation: PatchCreation), EditPatch(edit: PatchEdit), CreatePatternVoice(voice: PatternVoiceDefinition), EditInstrument(edit: InstrumentEdit), SelectInstrument(id: String), SelectPalettePattern(id: String), PatchCharacter(character: char), PatchScroll(delta: i32), SetCockpitMode(mode: CockpitMode) }
     structs {
+        BindKeyboard { voice: Option<String>, frame: u64 },
+        KeyboardKey { epoch: u64, frame: u64, channel: u8, note: u8, pressed: bool },
+        ResetKeyboard { epoch: u64, frame: u64, reason: KeyboardResetReason },
         SetCompositionMember { composition: String, voice: String, included: bool },
         ExposeOutputLevel { synth: String, control: String },
         SetOutputLevel { voice: String, control: String, value: Option<f64> },

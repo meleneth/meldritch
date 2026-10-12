@@ -167,7 +167,12 @@ The renderer prerequisite now exists: LiveMonoRenderer shares MonoState with the
 offline mono renderer and preserves DSP across bounded, prevalidated u64 blocks.
 Varied partitions exactly match offline tremolo/reset/rate/filter/release and
 FM/harmonic Plaits; independent pitch/gate and atomic rejection are checked.
-Device-facing streaming publication and runtime input lifecycle remain next.
+App runtime lifecycle now adds explicit named-mono binding, bounded channel/key
+priority, retrigger/fallback/release and cleanup epochs. Capture reconstructs
+identical worker events/PCM without changing authored source. Next connect an
+explicit binding gesture, epoch-tagged ingress and disconnect/overflow resets
+to device-facing streaming publication. Live audition and device-clock timing
+remain unimplemented; sustain/bend/velocity need explicit adapters.
 
 ### 4. Normalled patch and an atomic dynamic interface recipe
 

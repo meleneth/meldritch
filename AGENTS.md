@@ -134,8 +134,13 @@ The live renderer foundation now extracts shared MonoState from the existing
 offline mono kernel. LiveMonoRenderer accepts bounded sequential u64 Pitch/Gate
 blocks and carries oscillator/envelope/filter/control state between blocks.
 Partition/offline equality, independent signals, invalid-block recovery and
-FM/harmonic Plaits are checked headlessly. Streaming publication, app-owned
-keyboard lifecycle and device audition remain open; reuse this renderer next.
+FM/harmonic Plaits are checked headlessly. App-owned keyboard lifecycle now has
+typed explicit active-mono binding, bounded channel/key priority, independent
+Pitch/Gate, reset epochs and deterministic captured-command/worker PCM replay.
+Authored revisions invalidate binding; UI selection/mode preserve it. MIDI
+lowering carries explicit epoch/frame and velocity-zero releases. Production
+binding UI, transport cleanup integration, streaming publication and device
+audition remain open; connect these existing components next.
 Example 35's native pattern-selection checkpoint is implemented: PgUp/PgDn
 selects palette material without rebinding, source/runtime mutation or rerender;
 typed capture and independent-source persistence/render tests pass. Its full

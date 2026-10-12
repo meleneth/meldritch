@@ -218,8 +218,9 @@ are reused, but physical listening and continuous graph-state migration stay ope
 Required evidence: exact existing offline PCM, varied block partitions, pitch
 under held Gate, explicit retrigger/reset, envelope release/filter tail and variable
 LFO phase continuity, invalid-block recovery, u64 timeline and unchanged source.
-Device-facing live MIDI routing, key lifecycle/cleanup, streaming publication,
-audition, sustain/bend and timed capture remain unimplemented in this checkpoint.
+Device-facing live MIDI routing, streaming publication, audition, sustain/bend
+and device-clock timed capture remain unimplemented in this checkpoint. The app
+runtime lifecycle extension below supplies typed key ownership and capture.
 
 Evidence: live_mono_worker_blocks_preserve_existing_pcm_and_u64_event_timing checks
 varied partitions against existing offline PCM for tremolo, cabled reset,
@@ -228,7 +229,50 @@ unchanged. live_pitch_gate_and_atomic_invalid_block_recovery_follow_explicit_cab
 checks independent pitch/gate references, release/retrigger, free amplitude wiring,
 all invalid/live-keyboard.toml cases, polyphonic rejection and origins near u64::MAX.
 DSP state/cursor are ephemeral worker state; authored saves retain their existing
-meaning. There is no serialized live-state/replay or graph revision continuity yet.
+meaning. DSP state serialization and graph revision continuity remain open.
+
+## Keyboard runtime lifecycle checkpoint
+
+keyboard-lifecycle.toml is an executable runtime trace, not new project schema.
+BindKeyboard explicitly chooses an active native mono instance and an absolute
+u64 worker frame. Binding changes advance an epoch and clear held keys; emitted
+release targets the previous instance through KeyboardUpdated.output_voice.
+KeyboardKey carries that epoch, frame, channel and note. Pitch and Gate remain
+separate outputs: press emits Pitch then high Gate, including repeated-key
+retrigger. Last-pressed key wins. Releasing the winner resumes a still-held key
+with Pitch alone; releasing the final key emits low Gate while pitch holds.
+Releasing other/unheld keys never articulates. Channel is part of key identity.
+
+At most 128 distinct keys are held. Reject invalid pitches/channels, backwards
+frames, stale epochs, unbound input/reset and unknown/inactive targets before
+changing runtime, source or history. Native polyphonic definitions already reject
+at import; legacy sources cannot be bound. All invalid/keyboard-lifecycle.toml
+cases require automated evidence. Equal frames preserve dispatch order.
+Explicit ResetKeyboard reasons Disconnect, Overflow and Panic clear held keys,
+release once and advance the epoch. Old queued commands cannot affect new state.
+An adapter must perform this reset and discard pre-reset queued observations
+after transport overflow/disconnect; that production integration is still open.
+
+Mode and inspector selection preserve binding. Accepted authored revision changes
+invalidate it, clear held keys and require explicit rebinding; this is a fresh
+voice policy, not seamless graph-state migration. Rejected source changes must
+retain it. Runtime commands do not alter authored source/fingerprints or save
+defaults. Native capture records their full typed arguments, including u64 frame
+and reset reason. Fresh authored reload restores no held-key/binding state.
+This checkpoint proves command reconstruction and identical worker PCM; it does
+not implement wall-clock MIDI scheduling or timed device playback/replay.
+
+Evidence: control/tests/keyboard_lifecycle.rs executes the trace into the shared
+LiveMonoRenderer, checks nonzero PCM before final release and silence afterwards
+for this envelope-wired patch, reconstructs the capture into identical signals/PCM,
+and checks unchanged native source plus fresh authored reload. It tests all
+negative cases, reset reasons, bound-capacity retrigger, mode and selection
+preservation, authored invalidation and same-pitch/channel identity.
+devices::keyboard_key_command lowers valid note packets with caller-supplied
+epoch/frame; velocity-zero releases, channel 15 and u64 frames are retained.
+Malformed packets, sustain/modulation/bend are not lowered to implicit controls.
+There is no TUI live binding gesture or device streaming in this checkpoint;
+MicroLab production support remains pattern step entry plus diagnostic.
 
 ## Remaining full Slice 3 contract
 

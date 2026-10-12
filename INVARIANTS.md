@@ -267,6 +267,16 @@ Historical formats retain explicit compatibility adapters.
 | Time and ordering | Absolute positions are u64; loop/rewind use explicit epochs. Same-frame events have deterministic order and bounded expansion. End-exclusive notes/gates cannot be left stuck by disconnect, cancellation or graph replacement. | Core/typed Lua use u64; legacy host/session and finite PCM lengths use u32. Example 34's mono bindings order ends/reset, held pitch updates, then rises; adjacent gates retrigger and disconnected gate resolves low. General epochs/ordering and continuous-DSP disconnect remain open. |
 | Reproducibility | Saves retain every accepted authored semantic input, stable identity, dependency pin, asset content fingerprint and supported random commitment, or reject loss. Missing/incompatible references diagnose before activation. Updates are deliberate. Capture baselines must remain independent of subsequent authored saves. | Base-bound Lua and bounded self-contained project-v2 save/reopen exist; v2 checks full restored source equality and fresh-process oscillator PCM. Native replacement rejects external edits/symlinks and preserves the previous good entry on failure. Native captures embed their opening source; bounded import checks its fingerprint and reconstructs after later saves/root removal. Older captures require their original source. Dependency locks and timed replay remain open. Plaits f32/RNG exceptions above remain authorized. |
 
+Runtime keyboard ownership requires separate acceptance of production cleanup.
+The app's current bounded mono keyboard lifecycle separates typed Pitch/Gate
+outputs from authored patterns,
+retains channel identity, tags commands with binding epoch/u64 frame and rejects
+stale/budget/invalid commands atomically. Disconnect/overflow/panic reset commands
+clear held keys and advance the epoch; source revisions invalidate the binding.
+Adapters must discard old ingress and issue resets before fresh input after loss.
+That transport integration and device streaming remain requirements, not current
+guarantees. Runtime keys/bindings are not persisted as authored defaults.
+
 Acceptance must separately prove source correctness, published/consumed audio,
 state-transition semantics and physical behavior. Conservative full-horizon
 invalidation is the current authoring fallback; it must be reported honestly

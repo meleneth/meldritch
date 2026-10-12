@@ -82,10 +82,16 @@ replay, physical listening and continuous DSP-state migration remain future work
 ## Recommended immediate implementation prompt
 
 User-prioritized keyboard work: MicroLab mk3 now has native construction pattern
-step entry, explicit device selection and a decoded-input diagnostic. Next author
-the smallest explicit live keyboard Pitch/Gate binding and a runtime mono-note
-audition contract. LiveMonoRenderer now provides the shared incremental mono
+step entry, explicit device selection and a decoded-input diagnostic.
+LiveMonoRenderer now provides the shared incremental mono
 kernel with independent u64 Pitch/Gate events and proved block-state continuity.
+App-owned BindKeyboard/KeyboardKey/ResetKeyboard now provide named mono binding,
+128-key channel-aware last-pressed priority, retrigger/fallback/release and reset
+epochs. Native capture reconstructs identical worker events/PCM without changing
+authored source; saves restore no held-key state. Next connect an explicit binding
+gesture and epoch-tagged MIDI ingress to bounded worker streaming, including
+overflow/disconnect reset and source/transport cleanup. These APIs are not yet
+connected to production key-held audio.
 Reuse it with the existing voice compiler, scheduler and safe worker/
 publication boundary. Key-held performance must not rewrite saved patterns or
 patch defaults. Prove retrigger/release, zero-velocity release, overflow/disconnect/

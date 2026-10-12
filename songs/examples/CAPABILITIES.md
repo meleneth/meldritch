@@ -8,6 +8,13 @@ Status values:
 - `play` — the example renders or plays as specified
 - `accept` — automated acceptance coverage proves the observable behavior
 
+Example 36 also has a headless runtime keyboard checkpoint: explicit active-mono
+binding, bounded channel/key priority, independent Pitch/Gate, reset epochs,
+atomic negatives, typed capture and identical reconstructed worker PCM. Runtime
+bindings/held keys remain excluded from authored saves. Production binding UI,
+MIDI transport resets, device streaming and audition remain open; full status
+stays `design`.
+
 | Example | Capability | Status |
 | --- | --- | --- |
 | `36-patch-lfo` | First graph-control checkpoint: mono LFO → explicit bipolar/unit-interval scale → envelope multiplier → VCA; typed rate/phase/reset/scale drafts, shared fan-out/per-instance reset origins, independent reference and split PCM, worker/callback publication, capture and fresh-process persistence checked headlessly. Explicit PitchModulate vibrato/depth, amplitude/pitch fan-out, negative contracts and isolated reopen also checked. Explicit ControlHertz/filter cutoff, affine clamp/default precedence, sample/tail references and playing publication also checked. Explicit bipolar attenuation now checks envelope-controlled shared depth, independent amplitude wiring and full capture reconstruction. Explicit Hertz rate cables now check integrated phase, all four waveforms, reset ordering, capture, full/split isolated reopen and playing feedback rejection. Generic MIDI/MicroLab native pattern step entry now checks velocity, mode/release gating, queue epochs/overflow, playing publication, capture and save/reopen; host discovery/connection observed, live audition unimplemented. Shared incremental mono DSP now checks independent u64 Pitch/Gate blocks, exact offline/partition PCM, FM/harmonic Plaits and atomic invalid-block recovery; streaming/device audition remains open. Plaits/pitch chains, event/control cadence and broader scopes remain open | design |

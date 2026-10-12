@@ -2167,6 +2167,10 @@ fn draw_status_with_title(
 
 fn command_result_text(result: &AppCommandResult) -> String {
     match result {
+        AppCommandResult::KeyboardUpdated { current, .. } => format!(
+            "Keyboard {:?}: pitch {:?}, gate {}, held {}",
+            current.voice, current.pitch, current.gate, current.held_keys
+        ),
         AppCommandResult::CompositionEdited {
             composition,
             changed,
@@ -2347,6 +2351,7 @@ mod tests {
             missed_artifacts: 1,
         };
         AppViewModel {
+            keyboard: meldritch_app::KeyboardView::default(),
             selected_pattern_voice: None,
             output_levels: Default::default(),
             palette_pattern_editor: None,
