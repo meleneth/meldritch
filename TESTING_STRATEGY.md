@@ -228,8 +228,12 @@ two instances sharing a patch, exact-ID bindings/gains, idempotent membership,
 unknown-reference/pending-transport rejection and capture reconstruction. Edited
 membership also reopens in the isolated children; worker tests compare its exact
 PCM while retaining inactive gains. TUI checks a single selected control and an
-explicit inactive selection. The full example-35 acceptance audit remains open;
-continuous DSP migration is not proved.
+explicit inactive selection. The completed example-35 audit executes every
+`invalid/audit.toml` case, checks shared patch edits across both compositions and
+runs `keyboard-workflow.toml` from an empty root through playing shared edits,
+worker/callback publication, save and isolated fresh-process reopen for each
+selection. Its ACCEPTANCE.md maps every requirement to executable evidence.
+Continuous DSP migration and physical listening are not proved.
 
 Add later:
 - offline render throughput

@@ -1,20 +1,24 @@
 # Shared palette, independent sources and named compositions
 
-Status: **design for the full Slice 2 contract**. Native palette-pattern selection
-and independent source routing are implemented;
-`cargo test -p meldritch-control --test palette_routing` proves real native keys,
-shared-patch source fan-out/independent gains, save/reopen and typed capture
-reconstruction. TUI screen checks show selected IDs; the CLI host test proves
-selection preserves source, runtime gains, worker generation and playing callback
-audio. Named composition ownership, stopped selection and project-v3 persistence
-now implement `compositions.txt` and `compositions.project.lua`. Control tests
-restore both selections in isolated fresh processes and reconstruct typed capture;
-CLI worker/callback tests prove stop acknowledgement, prepared publication and
-inactive runtime-gain exclusion. `instance-keys.txt` now covers native creation and
-stable-ID selection/bindings/levels for multiple shared-patch instances, stopped
-membership add/remove, unchanged unrelated controls, typed capture reconstruction,
-edited membership publication and isolated fresh-process persistence. Full Slice 2
-status remains design pending its complete negative-contract audit.
+Status: **accept for the bounded headless Slice 2 contract**. The native keyboard
+workflow starts in an empty directory, authors one shared patch, three independent
+patterns and two instances, constructs two compositions, plays, edits the shared
+patch during playback, saves and reopens each selection in a fresh process.
+The audit below maps requirements to executable checks. Original v2 material stays
+unchanged; `compositions.project.lua` demonstrates the v3 variant.
+
+Accepted scope: mono independent pitch/gate instances, fixed stereo one-bar native
+playback, static named membership and stopped composition selection. The existing
+background worker publishes immutable finite PCM; this proves callback consumption,
+not physical listening, deadlines or continuous DSP-state migration. Source traces
+are inspectable bindings plus authored tick/frame event sequences, not a live CV
+scope. Instance IDs are unique within the project; compositions reference them.
+Deleting referenced palette material means removing it from an external saved
+candidate and validating that candidate. An interactive palette-delete command is
+not provided by this slice. General clocks/polyphonic inputs/event combiners,
+quantized activation, metapattern scheduling, hardware mappings/pickup, timed replay
+and physical acceptance remain future requirements, not restrictions on the
+intended architecture.
 
 ## Pattern-selection checkpoint
 
@@ -46,7 +50,7 @@ selection and incompatible bound clocks to reject without source/runtime/history
 or selection changes. Failed bindings leave publication unchanged. Preserve
 example 34's keys, source hashes and capture/importer contracts.
 
-## Named-composition checkpoint and remaining Slice 2 contract
+## Named compositions
 
 Two explicitly named compositions now use different subsets of the same palette,
 persist both plus explicit selection, and reopen independently. Selection
@@ -63,6 +67,31 @@ Use the existing authoritative Rust source, independent voice compiler,
 SongAudioHost/worker/publication, typed capture and constrained Lua serializer.
 Do not build another event engine or silently reinterpret project-v2 files.
 Fresh-process composition persistence and composed native selection/publication
-tests now pass, including native instance/membership authoring. Full acceptance
-still needs the composed negative-contract and compatibility audit. Physical listening, quantized
-activation and continuous DSP migration require separate evidence.
+tests pass, including native instance/membership authoring. Physical listening,
+quantized activation and continuous DSP migration require separate evidence.
+
+## Completed acceptance audit
+
+Test names are under `crates/`; commands execute their full files, including the
+isolated children invoked by parent tests.
+
+| Requirement | Executable evidence |
+| --- | --- |
+| Empty-root construction → independent melody/rhythm → two instances/compositions → play/edit/save/reopen | CLI `project_playback::tests::native_two_composition_keyboard_workflow_publishes_and_reopens_each_selection` executes `keyboard-workflow.toml`, compares published stereo to source PCM, consumes audio with the production callback and invokes fresh-process reopen for both selections. |
+| Independent pitch/gate timing, fan-out and authored/runtime levels | Control `palette_routing::shared_patch_fanout_keeps_pitch_gate_and_instance_gain_independent` compares every frame with an oscillator reference, edits each source separately and checks independent gain sums. |
+| Native pattern selection, cursor/visibility/identity and capture; no rebinding | Control `palette_routing::native_keys_route_two_patterns_and_selection_survives_typed_capture`, its track-owner/clock negatives, TUI `native_pattern_selection_is_visible_without_rebinding`, and CLI `native_palette_selection_preserves_playing_audio_and_runtime_gain`. |
+| Named membership/default selection, canonical IDs, all palette persistence, exact full/split PCM | Control `compositions::both_compositions_reopen_in_fresh_processes_without_copying_the_palette` checks both selections and edited membership through isolated child processes and direct member-only compilation. |
+| Shared definition edit reaches every referencing instance/composition, overlays remain independent | Control `compositions::one_shared_patch_edit_changes_each_composition_and_preserves_instance_overlays`; composed CLI workflow edits the shared oscillator while playing and checks replacement PCM. |
+| Instance selection independent of inspectors; exact-ID bindings/levels; idempotent a/d; no inactive retarget | Control `compositions::native_shared_instance_keys_membership_and_controls_reconstruct_without_retargeting` and TUI `shared_instance_surface_highlights_one_id_and_guards_overview_gestures`. |
+| Failed membership/selection preserves accepted state; pending transport/running activation rejected | Control `compositions::invalid_instance_selection_and_membership_preserve_accepted_state`, `malformed_or_inactive_composition_material_and_pending_play_reject`, and CLI `native_composition_transition_requires_stopped_transport_and_prepared_audio`. |
+| Prior audio retained until prepared; inactive gains retained/excluded; failed bound edits preserve playing publication | CLI composition-transition and composed keyboard tests assert source/worker/publication/history continuity and exact active-member PCM. |
+| Missing/multiple selection, duplicate composition/member IDs, inactive malformed definitions and bounds | Control `compositions::malformed_or_inactive_composition_material_and_pending_play_reject`; `audited_invalid_candidates_reject_referenced_deletion_chords_combination_and_clocks` executes every `invalid/audit.toml` case. Native/legacy entry ambiguity remains covered by control `native_project` tests. |
+| Conflicting instance IDs, chords/overlapping gates, undeclared combination, referenced patch/pattern removal and incompatible clocks | Control audited-invalid-candidates test checks diagnostics and unchanged source/selection/runtime/history; duplicate-instance/chord typed requests also reject. Inactive referenced material validates too. |
+| Typed capture reconstruction, source fingerprints and excluded runtime defaults | Control native-key composition tests reconstruct from the embedded baseline; fresh-process CLI/control children restore stopped authored defaults without replay or new capture/files. |
+| Historical compatibility | Workspace offline suite includes examples 25–34, legacy formats, constrained Lua, Plaits, pickup, patch transactions, save failure/retry and capture baselines. Read-only CLI validation retains example 09/29 fingerprints `41472b38b65b60ed` / `54745c74a42665cf`. |
+
+Run `cargo test -p meldritch-control --test compositions --test palette_routing`
+and `cargo test -p meldritch-cli native_`, plus TUI and workspace suites. The root
+binary includes the CLI tests too, so workspace verification protects both entry
+points. Formatting, affected all-targets Clippy with existing allowances, diff
+checks and the VitePress build complete documentation/compatibility validation.

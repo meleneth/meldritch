@@ -231,6 +231,185 @@ fn pcm(source: &meldritch_dsl::ValidatedSong, range: FrameRange) -> Vec<u8> {
 }
 
 #[test]
+fn audited_invalid_candidates_reject_referenced_deletion_chords_combination_and_clocks() {
+    let directory = Directory::new();
+    let source = load_native_project(&directory.0, FIXTURE).unwrap();
+    let mut app = directory.app();
+    app.enable_native_project_source(source.clone()).unwrap();
+    app.dispatch(AppCommand::SetOutputLevel {
+        voice: "bass-copy".into(),
+        control: "level".into(),
+        value: Some(0.2),
+    })
+    .unwrap();
+    let accepted = app.authored_source().unwrap();
+    let selected = app.view_model().selected_pattern_voice;
+    let runtime = app.output_levels().clone();
+    let history = app.history().len();
+    let cases: toml::Value = toml::from_str(include_str!(
+        "../../../songs/examples/35-project-palette-routing/invalid/audit.toml"
+    ))
+    .unwrap();
+    for case in cases["cases"].as_array().unwrap() {
+        let kind = case["kind"].as_str().unwrap();
+        let mut definition = source.native_project_definition().unwrap();
+        let result = match kind {
+            "multiple_selections" => load_native_project(
+                &directory.0,
+                &FIXTURE.replace(
+                    "selected_composition = \"held\"",
+                    "selected_composition = { \"held\", \"pulse\" }",
+                ),
+            ),
+            "multiple_pitch_sources" => load_native_project(
+                &directory.0,
+                &FIXTURE.replace(
+                    "pitch_pattern = \"melody\"",
+                    "pitch_pattern = { \"melody\", \"rhythm\" }",
+                ),
+            ),
+            "multiple_gate_sources" => load_native_project(
+                &directory.0,
+                &FIXTURE.replace(
+                    "gate_pattern = \"rhythm\"",
+                    "gate_pattern = { \"rhythm\", \"short-rhythm\" }",
+                ),
+            ),
+            _ => {
+                match kind {
+                    "duplicate_instance" => definition.voices.push(definition.voices[0].clone()),
+                    "remove_patch" => definition.patches.clear(),
+                    "remove_pitch_pattern" => {
+                        definition.patterns.retain(|pattern| pattern.id != "melody")
+                    }
+                    "remove_inactive_gate_pattern" => definition
+                        .patterns
+                        .retain(|pattern| pattern.id != "short-rhythm"),
+                    "pitch_chord" => {
+                        let melody = definition
+                            .patterns
+                            .iter_mut()
+                            .find(|pattern| pattern.id == "melody")
+                            .unwrap();
+                        melody.notes[1].start_tick = 0;
+                    }
+                    "gate_overlap" => {
+                        let rhythm = definition
+                            .patterns
+                            .iter_mut()
+                            .find(|pattern| pattern.id == "short-rhythm")
+                            .unwrap();
+                        rhythm.notes[0].duration_ticks = 1440;
+                    }
+                    "clock_length" => definition.patterns[0].length_ticks = 7680,
+                    "clock_loop" => definition.patterns[0].looped = false,
+                    _ => panic!("unexecuted audit case {kind}"),
+                }
+                meldritch_dsl::ValidatedSong::restore_native_project(&directory.0, &definition)
+            }
+        };
+        let error = result.unwrap_err();
+        if let Some(expected) = case.get("expect") {
+            assert!(
+                error.contains(expected.as_str().unwrap()),
+                "{kind}: {error}"
+            );
+        }
+        assert!(Arc::ptr_eq(&accepted, &app.authored_source().unwrap()));
+        assert_eq!(app.view_model().selected_pattern_voice, selected);
+        assert_eq!(app.output_levels(), &runtime);
+        assert_eq!(app.history().len(), history);
+    }
+    // The actual accepted-command path rejects duplicate IDs and bound chords too.
+    for command in [
+        AppCommand::CreatePatternVoice(source.pattern_voices()["bass-copy"].clone()),
+        AppCommand::EditNote {
+            pattern: "melody".into(),
+            edit: NoteEdit::Insert {
+                start_tick: 0,
+                duration_ticks: 480,
+                pitch: 60,
+                velocity: 0.8,
+            },
+        },
+    ] {
+        assert!(app.dispatch(command).is_err());
+        assert!(Arc::ptr_eq(&accepted, &app.authored_source().unwrap()));
+        assert_eq!(app.view_model().selected_pattern_voice, selected);
+        assert_eq!(app.output_levels(), &runtime);
+        assert_eq!(app.history().len(), history);
+    }
+    assert_eq!(fs::read_dir(&directory.0).unwrap().count(), 0);
+}
+
+#[test]
+fn one_shared_patch_edit_changes_each_composition_and_preserves_instance_overlays() {
+    use meldritch_app::{
+        InstrumentEdit, InstrumentParameter, InstrumentParameterId, InstrumentValue,
+        InstrumentWaveform,
+    };
+    let directory = Directory::new();
+    let source = load_native_project(&directory.0, FIXTURE).unwrap();
+    let range = FrameRange::new(0, 192_000).unwrap();
+    let mut app = directory.app();
+    app.enable_native_project_source(source.clone()).unwrap();
+    app.dispatch(AppCommand::SetOutputLevel {
+        voice: "bass-copy".into(),
+        control: "level".into(),
+        value: Some(0.2),
+    })
+    .unwrap();
+    let runtime = app.output_levels().clone();
+    app.dispatch(AppCommand::EditInstrument(InstrumentEdit {
+        target: InstrumentParameterId {
+            synth: "voice-1".into(),
+            module: "osc".into(),
+            parameter: InstrumentParameter::Waveform,
+        },
+        value: InstrumentValue::Waveform(InstrumentWaveform::Triangle),
+    }))
+    .unwrap();
+    let edited = app.authored_source().unwrap();
+    assert_eq!(edited.synths().len(), 1);
+    assert_eq!(edited.pattern_voices(), source.pattern_voices());
+    assert_eq!(edited.note_patterns(), source.note_patterns());
+    assert_eq!(edited.compositions(), source.compositions());
+    assert_eq!(app.output_levels(), &runtime);
+    for id in ["held", "pulse"] {
+        let selected = edited.select_composition(id).unwrap();
+        assert!(pcm(&selected, range) != pcm(&source.select_composition(id).unwrap(), range));
+        // Every referencing instance receives the edited oscillator, while its
+        // independent authored level and event bindings stay byte-for-byte stable.
+        let patch = CompiledSongPatch::compile_initial(&selected).unwrap();
+        let full = patch.render_default(range).unwrap();
+        let mut sum = vec![0.0; full.samples().len()];
+        let normalization = 1.0 / (selected.active_pattern_voices().count() as f64).sqrt();
+        for voice in selected.active_pattern_voices() {
+            let mut definition = selected.native_project_definition().unwrap();
+            definition.version = 2;
+            definition.compositions.clear();
+            definition.selected_composition = None;
+            definition
+                .voices
+                .retain(|candidate| candidate.id == voice.id);
+            let solo =
+                meldritch_dsl::ValidatedSong::restore_native_project(&directory.0, &definition)
+                    .unwrap();
+            let solo = CompiledSongPatch::compile_initial(&solo)
+                .unwrap()
+                .render_default(range)
+                .unwrap();
+            for (sum, value) in sum.iter_mut().zip(solo.samples()) {
+                *sum += value * normalization;
+            }
+        }
+        for (actual, expected) in full.samples().iter().zip(sum) {
+            assert!((actual - expected).abs() < 1e-12);
+        }
+    }
+}
+
+#[test]
 fn both_compositions_reopen_in_fresh_processes_without_copying_the_palette() {
     let directory = Directory::new();
     let source = load_native_project(&directory.0, FIXTURE).unwrap();

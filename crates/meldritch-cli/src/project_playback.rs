@@ -220,6 +220,260 @@ mod tests {
         ProjectFixture { path, project }
     }
 
+    // Actual frontend lowering, with only the device output replaced in tests.
+    fn native_gesture(
+        app: &mut AppController,
+        host: &mut NativeProjectAudio,
+        key: crossterm::event::KeyEvent,
+    ) -> Result<String, String> {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        use meldritch_tui::{
+            TuiAction, project_binding_command, project_composition_command,
+            project_construction_command, project_editor_action, project_level_command,
+            project_pattern_command, project_save_key,
+        };
+        host.prepare_action(app)?;
+        if project_save_key(key) {
+            return host.save_project(app);
+        }
+        let model = app.view_model();
+        if key.code == KeyCode::Tab && key.modifiers == KeyModifiers::CONTROL {
+            app.handle_input(AppInput::ToggleCockpitMode)
+                .map_err(|e| format!("{e:?}"))?;
+        } else {
+            let source = app.authored_source().unwrap();
+            let command = project_level_command(key, &model, &source)
+                .or_else(|| project_composition_command(key, &model, &source))
+                .or_else(|| project_binding_command(key, &model, &source))
+                .or_else(|| project_pattern_command(key, &model, &source));
+            if let Some(command) = command {
+                app.dispatch(command).map_err(|e| format!("{e:?}"))?;
+            } else if let Some(command) = project_construction_command(key, &source) {
+                let result = app.dispatch(command).map_err(|e| format!("{e:?}"))?;
+                let meldritch_app::AppCommandResult::PatchEdited { synth, .. } = result else {
+                    panic!("creation result")
+                };
+                app.dispatch(AppCommand::SelectInstrument(synth))
+                    .map_err(|e| format!("{e:?}"))?;
+            } else if let Some(TuiAction::Input(input)) = project_editor_action(key, &model) {
+                app.handle_input(input).map_err(|e| format!("{e:?}"))?;
+            } else {
+                panic!("unmapped native key {key:?}");
+            }
+        }
+        host.poll(app)?;
+        Ok(String::new())
+    }
+
+    #[test]
+    fn native_two_composition_keyboard_workflow_publishes_and_reopens_each_selection() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let project = project();
+        let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
+        let mut host = NativeProjectAudio::new(&app, engine).unwrap();
+        host.poll(&mut app).unwrap();
+        assert_eq!(std::fs::read_dir(project.root()).unwrap().count(), 0);
+        let script: toml::Value = toml::from_str(include_str!(
+            "../../../songs/examples/35-project-palette-routing/keyboard-workflow.toml"
+        ))
+        .unwrap();
+        for key in script["construction"].as_array().unwrap() {
+            let code = match key.as_str().unwrap() {
+                "Enter" => KeyCode::Enter,
+                "Esc" => KeyCode::Esc,
+                "Right" => KeyCode::Right,
+                "Up" => KeyCode::Up,
+                "PageUp" => KeyCode::PageUp,
+                "PageDown" => KeyCode::PageDown,
+                "F6" => KeyCode::F(6),
+                "F7" => KeyCode::F(7),
+                "F8" => KeyCode::F(8),
+                key if key.len() == 1 => KeyCode::Char(key.chars().next().unwrap()),
+                key => panic!("unexecuted workflow key {key}"),
+            };
+            native_gesture(&mut app, &mut host, KeyEvent::new(code, KeyModifiers::NONE)).unwrap();
+        }
+        let source = app.authored_source().unwrap();
+        assert_eq!(
+            (
+                source.synths().len(),
+                source.note_patterns().len(),
+                source.pattern_voices().len(),
+                source.compositions().len()
+            ),
+            (1, 3, 2, 2)
+        );
+        assert_eq!(
+            source.compositions()["composition-1"].voices,
+            ["voice-1-instance"]
+        );
+        assert_eq!(
+            source.compositions()["composition-2"].voices,
+            ["voice-1-instance-2"]
+        );
+        assert_eq!(
+            source.pattern_voices()["voice-1-instance"]
+                .pitch_pattern
+                .as_deref(),
+            Some("pattern-1")
+        );
+        assert_eq!(
+            source.pattern_voices()["voice-1-instance-2"]
+                .pitch_pattern
+                .as_deref(),
+            Some("pattern-1")
+        );
+        let mut callback = PublishedAudioRenderer::from_engine(
+            host.reader.clone(),
+            2,
+            u32::MAX,
+            host.engine.take().unwrap(),
+        )
+        .unwrap();
+        let ready = |app: &mut AppController, host: &mut NativeProjectAudio| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                host.poll(app).unwrap();
+                if host
+                    .require_prepared_audio(&app.authored_source().unwrap())
+                    .is_ok()
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "composed workflow render timeout"
+                );
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        let mut previous = None;
+        for id in ["composition-1", "composition-2"] {
+            if app.authored_source().unwrap().selected_composition() != Some(id) {
+                native_gesture(
+                    &mut app,
+                    &mut host,
+                    KeyEvent::new(KeyCode::F(8), KeyModifiers::NONE),
+                )
+                .unwrap();
+            }
+            ready(&mut app, &mut host);
+            let accepted = app.authored_source().unwrap();
+            let patch = CompiledSongPatch::compile_initial(&accepted).unwrap();
+            let rendered = patch
+                .render_default(meldritch_core::FrameRange::new(0, u64::from(host.frames)).unwrap())
+                .unwrap();
+            for (frame, sample) in rendered.samples().iter().enumerate() {
+                assert_eq!(
+                    host.reader.snapshot().frame(frame as u32).unwrap(),
+                    &[*sample, *sample]
+                );
+            }
+            if let Some(previous) = previous {
+                assert_ne!(rendered.samples(), previous);
+            }
+            app.dispatch(AppCommand::Play).unwrap();
+            let mut samples = vec![0.0; 512];
+            callback.render_f64(&mut samples);
+            assert!(samples.iter().any(|sample| sample.abs() > 0.01));
+            let published = host.reader.snapshot();
+            let generation = host.host.generation();
+            let history = app.history().len();
+            for command in [
+                AppCommand::BindPatternVoice {
+                    voice: "voice-1-instance".into(),
+                    signal: PatternSignal::Gate,
+                    pattern: Some("missing".into()),
+                },
+                AppCommand::EditNote {
+                    pattern: "pattern-1".into(),
+                    edit: NoteEdit::Insert {
+                        start_tick: 0,
+                        duration_ticks: 480,
+                        pitch: 60,
+                        velocity: 0.8,
+                    },
+                },
+            ] {
+                assert!(app.dispatch(command).is_err());
+                host.poll(&mut app).unwrap();
+                assert!(Arc::ptr_eq(&accepted, &app.authored_source().unwrap()));
+                assert!(Arc::ptr_eq(&published, &host.reader.snapshot()));
+                assert_eq!(host.host.generation(), generation);
+                assert_eq!(app.history().len(), history);
+                assert_eq!(app.view_model().transport.state, TransportState::Playing);
+            }
+            if id == "composition-1" {
+                for event in [
+                    KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
+                    KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+                    KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                ] {
+                    native_gesture(&mut app, &mut host, event).unwrap();
+                }
+                ready(&mut app, &mut host);
+                assert_ne!(
+                    accepted.fingerprint(),
+                    app.authored_source().unwrap().fingerprint()
+                );
+                assert_eq!(app.view_model().transport.state, TransportState::Playing);
+                callback.render_f64(&mut samples);
+                assert!(samples.iter().any(|sample| sample.abs() > 0.01));
+            }
+            app.dispatch(AppCommand::Stop).unwrap();
+            callback.render_f64(&mut samples);
+            let accepted = app.authored_source().unwrap();
+            let patch = CompiledSongPatch::compile_initial(&accepted).unwrap();
+            let rendered = patch
+                .render_default(meldritch_core::FrameRange::new(0, u64::from(host.frames)).unwrap())
+                .unwrap();
+            for (frame, sample) in rendered.samples().iter().enumerate() {
+                assert_eq!(
+                    host.reader.snapshot().frame(frame as u32).unwrap(),
+                    &[*sample, *sample]
+                );
+            }
+            previous = Some(rendered.samples().to_vec());
+            native_gesture(
+                &mut app,
+                &mut host,
+                KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE),
+            )
+            .unwrap();
+            std::fs::write(
+                project.root().join("expected.fingerprint"),
+                format!("{:016x}", accepted.fingerprint()),
+            )
+            .unwrap();
+            let pcm: Vec<_> = patch
+                .render_default(meldritch_core::FrameRange::new(0, 192_000).unwrap())
+                .unwrap()
+                .samples()
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect();
+            std::fs::write(project.root().join("expected.pcm"), pcm).unwrap();
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "project_playback::tests::native_keyboard_reopen_child",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env("MELDRITCH_KEYBOARD_TEST_ROOT", project.root())
+                .env("MELDRITCH_TWO_COMPOSITION_ID", id)
+                .output()
+                .unwrap();
+            assert!(
+                child.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&child.stdout),
+                String::from_utf8_lossy(&child.stderr)
+            );
+        }
+        host.finish(&app).unwrap();
+    }
+
     #[test]
     fn native_composition_transition_requires_stopped_transport_and_prepared_audio() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -479,47 +733,12 @@ mod tests {
     #[test]
     fn native_keyboard_workflow_saves_and_reopens_in_a_fresh_process() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-        use meldritch_tui::{
-            TuiAction, project_binding_command, project_construction_command,
-            project_editor_action, project_level_command, project_pattern_command,
-            project_save_key,
-        };
         let project = project();
         let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
         let mut host = NativeProjectAudio::new(&app, engine).unwrap();
         host.poll(&mut app).unwrap();
         assert_eq!(std::fs::read_dir(project.root()).unwrap().count(), 0);
-        // Exercise the actual frontend's lowering helpers; only device output is replaced.
-        let gesture = |app: &mut AppController, host: &mut NativeProjectAudio, key: KeyEvent| {
-            host.prepare_action(app).unwrap();
-            if project_save_key(key) {
-                return host.save_project(app);
-            }
-            let model = app.view_model();
-            if key.code == KeyCode::Tab && key.modifiers == KeyModifiers::CONTROL {
-                app.handle_input(AppInput::ToggleCockpitMode).unwrap();
-            } else {
-                let source = app.authored_source().unwrap();
-                let command = project_level_command(key, &model, &source)
-                    .or_else(|| project_binding_command(key, &model, &source))
-                    .or_else(|| project_pattern_command(key, &model, &source));
-                if let Some(command) = command {
-                    app.dispatch(command).unwrap();
-                } else if let Some(command) = project_construction_command(key, &source) {
-                    let result = app.dispatch(command).unwrap();
-                    let meldritch_app::AppCommandResult::PatchEdited { synth, .. } = result else {
-                        panic!("creation result")
-                    };
-                    app.dispatch(AppCommand::SelectInstrument(synth)).unwrap();
-                } else if let Some(TuiAction::Input(input)) = project_editor_action(key, &model) {
-                    app.handle_input(input).unwrap();
-                } else {
-                    panic!("unmapped native key {key:?}");
-                }
-            }
-            host.poll(app).unwrap();
-            Ok(String::new())
-        };
+        let gesture = native_gesture;
         let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
         let control = |code| KeyEvent::new(code, KeyModifiers::CONTROL);
         for event in [
@@ -729,6 +948,18 @@ mod tests {
         let project = meldritch_dsl::load_project_directory(&root).unwrap();
         let store = meldritch_control::native_project::NativeProjectStore::open(&project).unwrap();
         let source = store.source().unwrap();
+        if let Ok(id) = std::env::var("MELDRITCH_TWO_COMPOSITION_ID") {
+            assert_eq!(source.selected_composition(), Some(id.as_str()));
+            assert_eq!(
+                (
+                    source.synths().len(),
+                    source.note_patterns().len(),
+                    source.pattern_voices().len(),
+                    source.compositions().len()
+                ),
+                (1, 3, 2, 2)
+            );
+        }
         let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
         app.enable_native_project_source(source.clone()).unwrap();
         let mut host = NativeProjectAudio::with_store(&app, engine, store).unwrap();

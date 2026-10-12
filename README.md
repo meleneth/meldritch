@@ -53,6 +53,8 @@ At the overview, **v** creates and selects another instance of the chosen patch;
 **a/d** adds/removes the selected instance in a named composition while stopped.
 Performance arrows address the selected active instance's level, so shared-patch
 instances remain independently controllable. Inactive selection never retargets.
+Example 35 now accepts this bounded workflow headlessly, including both composition
+selections, shared edits, negative diagnostics and fresh-process reopen.
 Timed replay and stateful graph transitions remain proposed. Existing commands
 remain valid.
 Git is allowed as a required installed dependency; opening needs no repository

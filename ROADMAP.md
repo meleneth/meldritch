@@ -15,7 +15,7 @@ neighbors, then binds acceptance to actual app/compiler/host boundaries.
 
 Example 34 has opening/creation/binding requests, invalid neighbors and scoped tests.
 Its composed construction/persistence contract is accepted headlessly. Example 35
-now specifies the next contract and implements its pattern-selection checkpoint.
+also accepts the bounded native shared-palette/two-composition workflow headlessly.
 Names 36–41 below are
 reserved planning names, not existing files, schema or capability claims.
 No slice requires rewriting working examples or introducing another engine.
@@ -77,15 +77,16 @@ One pattern also feeds two separately identified instances.
 through typed app commands without rebinding or rerendering. Native keys can now
 author melody and rhythm separately and bind their pitch/gate independently.
 The executable v2 fixture/tests prove one shared patch, two independent runtime
-gains, save/reopen and capture reconstruction. Full example status remains design:
-named composition ownership/selection now has its own checked checkpoint.
+gains, save/reopen and capture reconstruction. Named composition ownership/selection
+and the composed empty-root workflow now have headless acceptance.
 Project-v3 stores named membership/default selection; b snapshots all instances
 and F7/F8 selects after stop acknowledgement. Worker preparation gates restart;
 inactive definitions validate and runtime overlays apply only to active members.
 Both selections and edited membership reopen in fresh processes. Native multiple
 instances, identity-based selection/bindings/levels and stopped a/d membership now
-have a checked checkpoint. Audit the full example's remaining negative contracts
-before advancing its design status.
+have a checked checkpoint. The completed audit checks negative candidates/typed
+requests, shared edits across compositions and both fresh-process selections.
+See the acceptance file for the executable mapping and explicit deferred scope.
 
 **Sound/control:** changing rhythm changes articulation without transposing;
 changing melody changes pitch without moving gate boundaries. Composition

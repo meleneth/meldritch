@@ -1,0 +1,45 @@
+# Whole native-project candidate mutations. Tests execute every case against
+# compositions.project.lua; rejection never replaces accepted source or audio.
+[[cases]]
+kind = "duplicate_instance"
+expect = "duplicate pattern voice identity"
+
+[[cases]]
+kind = "remove_patch"
+expect = "unknown voice synth"
+
+[[cases]]
+kind = "remove_pitch_pattern"
+expect = "unknown bound note pattern"
+
+[[cases]]
+kind = "remove_inactive_gate_pattern"
+expect = "unknown bound note pattern"
+
+[[cases]]
+kind = "pitch_chord"
+expect = "ambiguous simultaneous pitch or overlapping gate events"
+
+[[cases]]
+kind = "gate_overlap"
+expect = "ambiguous simultaneous pitch or overlapping gate events"
+
+[[cases]]
+kind = "clock_length"
+expect = "share the voice length and loop policy"
+
+[[cases]]
+kind = "clock_loop"
+expect = "share the voice length and loop policy"
+
+# A singular selected_composition and singular pitch_pattern/gate_pattern are the
+# current bounded schema. Lists fail conversion; they never choose/merge silently.
+# This does not forbid future explicit event combiners or polyphonic processors.
+[[cases]]
+kind = "multiple_selections"
+
+[[cases]]
+kind = "multiple_pitch_sources"
+
+[[cases]]
+kind = "multiple_gate_sources"

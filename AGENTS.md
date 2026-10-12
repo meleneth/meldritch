@@ -105,17 +105,20 @@ Preserve `INVARIANTS.md`. In particular:
 
 ## Current `.ml*` implementation state
 
-The immediate priority is section 21 of `TODO.md`, Slice 2's example-first shared
-palette, composition selection and independent pattern-source routing.
+The immediate priority is section 21 of `TODO.md`, Slice 3's example-first graph
+LFO, explicit unit/rate adapters, combination and reset/scope contracts.
 Example 35's native pattern-selection checkpoint is implemented: PgUp/PgDn
 selects palette material without rebinding, source/runtime mutation or rerender;
 typed capture and independent-source persistence/render tests pass. Its full
-contract remains design. Named project-v3 composition membership/stopped selection,
+contract now accepts the bounded headless workflow. Named project-v3 composition membership/stopped selection,
 native b/F7/F8, typed capture and fresh-process persistence are now checked.
 Native v/Up/Down/p/g now author multiple shared-patch instances by stable ID;
 a/d edits named membership while stopped and performance arrows control independent
 instance levels. Typed capture and worker/persistence checks cover this checkpoint.
-Next audit composed example-35 acceptance against every required negative case.
+Example 35's completed audit covers every required negative, shared edits across
+compositions and an empty-root keyboard/worker/callback/fresh-process workflow.
+Referenced palette removal rejects external candidates; no interactive palette
+delete command is implemented. Read its acceptance scope before extending it.
 Do not reinterpret project-v2 or claim continuous DSP migration from this PCM path.
 Example 34's bounded empty-project workflow is accepted headlessly; physical
 listening, timed replay and continuous DSP-state migration remain unverified.

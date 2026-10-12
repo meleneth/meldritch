@@ -1,0 +1,11 @@
+# Native keys from an empty directory. Same patch and melody, separate rhythms:
+# composition-1 = held first instance; composition-2 = pulsed second instance.
+# Stop before selecting a composition. Ctrl-S/F6 saves the whole shared palette.
+construction = [
+  "n", "c", "Enter", "Right", "Right",
+  "Up", "Up", "Up", "Up", "Up", "Up", "Up", "Enter", "Esc",
+  "c", "Enter", "]", "]", "]", "]", "]", "]", "Esc",
+  "v", "PageUp", "p", "PageDown", "g", "x",
+  "c", "Enter", "Esc", "v", "g", "PageUp", "PageUp", "p",
+  "b", "d", "b", "F8", "Up", "d", "F7", "F6",
+]

@@ -1,7 +1,8 @@
 # Active TODO
 
-Immediate priority: shared palette and named compositions in section 21 and
-[ROADMAP.md](ROADMAP.md). The bounded empty-project workflow is accepted headlessly.
+Immediate priority: graph LFOs and explicit modulation semantics in section 21 and
+[ROADMAP.md](ROADMAP.md). The bounded empty-project and shared-palette workflows
+are accepted headlessly.
 Sections 20/19 retain accepted work, unfinished work and historical
 verification; their older next-step recommendations are superseded.
 The completed showcase milestones remain completion history.
@@ -55,7 +56,7 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 1 composed acceptance: actual native keys through worker/callback,
   save/failure/retry and isolated fresh-process reopen; embedded capture baselines
   survive later saves and root removal. No timed replay or physical listening claim
-- [ ] Slice 2: shared palette, two compositions and independent pattern sources
+- [x] Slice 2: shared palette, two compositions and independent pattern sources
 - [x] Slice 2 pattern-selection checkpoint: typed SelectPalettePattern, native
   PageUp/PageDown without rebinding, visible selection, separate melody/rhythm
   source key workflow, shared patch/two-instance render and independent gains;
@@ -65,7 +66,7 @@ an empty project requires no Git repository or initialization.
   restart; inactive definition/gain scope, capture and fresh-process save/reopen
 - [x] Slice 2 instance checkpoint: native stable-ID multi-instance selection,
   independent bindings/levels and stopped composition membership authoring
-- [ ] Slice 2 next: composed acceptance and negative-contract compatibility audit
+- [x] Slice 2 composed acceptance and negative-contract compatibility audit
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
 - [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
@@ -299,6 +300,26 @@ audio. Workspace offline tests, affected all-targets Clippy with existing allowa
 formatting/diff and VitePress build pass; historical 09/29 fingerprints remain
 unchanged. Full example 35 remains design until its composed negative-contract
 audit is complete. No physical listening, timed replay or DSP migration claim.
+
+Slice 2 completion supersedes the earlier design-status checkpoints above.
+Example 35 now accepts its bounded headless contract. `invalid/audit.toml` executes
+duplicate instances, referenced patch/pattern removal (including inactive material),
+chords/overlapping gates, multiple selection/source lists and length/loop mismatches.
+Typed duplicate/chord requests preserve accepted source/runtime/selection/history;
+worker tests additionally retain playing publication/generation on failed bindings
+and chords. A shared oscillator edit reaches every referencing composition without
+copying definitions or changing runtime gains. `keyboard-workflow.toml` authors
+one patch, three patterns, two instances and two distinct compositions from an
+empty root. Production-callback tests play, edit the shared patch during playback,
+save and reopen both selections in isolated processes with exact full/split f64
+PCM and authored defaults. The acceptance file maps every contract to its test.
+Referenced-material deletion is an external candidate validation boundary; an
+interactive palette-delete command remains future work. No historical examples
+were rewritten and no runtime/schema changes were needed for this audit.
+Workspace offline tests and affected all-targets Clippy with existing allowances
+pass. Formatting/diff, VitePress and unchanged 09/29 fingerprint checks complete
+the checkpoint. Next: Slice 3, graph LFOs with explicit unit/rate/combination and
+phase/reset semantics; write example 36 and inspect the existing modulation first.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

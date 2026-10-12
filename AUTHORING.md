@@ -81,14 +81,17 @@ replay, physical listening and continuous DSP-state migration remain future work
 
 ## Recommended immediate implementation prompt
 
-Audit Slice 2's composed example-35 acceptance against its required negatives:
-ambiguous/missing composition selection, duplicate instance IDs, unsupported
-chords/combination, referenced-material deletion and incompatible clocks. Map each
-contract to an executable test and document unavailable operations honestly.
-Exercise the complete native multi-instance/membership workflow through existing
-worker publication and fresh-process persistence. Preserve example 34, project-v2/v3
-and historical formats. Advance status only when every stated observable behavior
-is proved; do not add another event engine or claim continuous DSP migration.
+Start Slice 3 with example 36 before adding schema. Inspect the existing Lfo,
+LfoRate, ModulationMatrix, typed ports, synth compiler, worker invalidation and
+native patch persistence. Choose the smallest executable graph-LFO scenario that
+improves a saved native bass patch: explicit pitch/filter adapters and declared
+combination, shared fan-out, tempo/free-running phase and reset semantics.
+Separate this initial contract from later per-voice/rate-modulated/event-rate
+modulation. Rust owns validation and execution; Lua describes the same source.
+Prove full/split deterministic rendering, bounded callback publication, typed
+editing, save/reopen and negative units/rates/cycle/combination cases. Preserve
+examples 25–35 and project-v2/v3; do not introduce a second modulation engine or
+claim seamless DSP-state migration from finite PCM replacement.
 
 Example 35 now specifies this contract. Its pattern-selection checkpoint is
 implemented: native PgUp/PgDn lowers to SelectPalettePattern, preserves source,
@@ -103,7 +106,10 @@ instance-owned and do not contaminate another composition. Native instance
 selection/membership now follows `instance-keys.txt`: stable-ID v/Up/Down/p/g,
 stopped a/d, independent performance levels and explicit inactive selection.
 Capture reconstruction, edited membership publication and fresh-process tests pass.
-Continue with the full example-35 acceptance audit.
+The full example-35 audit now passes: explicit invalid candidate/typed-request
+checks, shared edits in both compositions, and the composed empty-root native
+keyboard/worker/callback workflow with fresh-process reopen for both selections.
+Its acceptance file contains the requirement-to-test mapping and deferred scope.
 Do not invent another palette or event engine.
 
 The completed Slice 1 implementation prompt is retained below as historical scope.
