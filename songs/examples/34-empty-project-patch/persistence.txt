@@ -1,0 +1,30 @@
+Self-contained serializer checkpoint (headless, before native Save/Open wiring):
+
+authored-project.lua returns kind="project", version=2, independent of the legacy
+base-bound project v1 format. Its project metadata, complete supported mono patch
+graphs, independent tick-based patterns and composition voice bindings restore
+the existing ValidatedSong source. No original song, dummy track, journal,
+controller script, asset directory or Git repository is needed.
+
+The serializer accepts the authored source, never a runtime/editor projection.
+Patch-owned output-level declarations and authored instance levels persist;
+runtime gain, transport, selections and draft text do not. Loading a snapshot
+does not replay capture. Stable IDs, deleted-note counters and every supported
+graph default survive fresh-process reload. Deterministic oscillator PCM must be
+identical, including split-range rendering. Plaits retains its documented RNG
+exception; this checkpoint makes no fresh-process RNG or DSP-state claim.
+
+Reject unknown fields/kinds/versions, duplicate identities, dangling bindings,
+incompatible signal families, incomplete or unsupported executable graphs,
+invalid note identities/timing/values and non-finite clock or musical values.
+Reject export of legacy tracks, DSPs, assets, parameters, controller mappings or
+other source state that v2 cannot represent; never silently omit them.
+
+Use the existing constrained non-realtime Lua VM (256 KiB source, instruction
+and memory limits), graph importer, note validators, semantic fingerprints and
+voice compiler. Bound snapshots to 32 patches, 32 patterns, 32 instances and
+4096 notes per pattern. Validate the complete source before returning it.
+Failed decode/compile must not mutate an existing application or publication.
+
+Native atomic disk save, entry-point selection, dirty-state feedback and TUI
+fresh reopen are subsequent checkpoints, not accepted by this serializer test.

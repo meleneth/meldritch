@@ -52,7 +52,17 @@ the old checkpoint/pending facts, and the cockpit defers further gestures/clean
 quit until retry succeeds. Tests reconstruct source, UI/runtime state and raw PCM
 in a fresh app after original history eviction. This is not a timed replay API or
 standalone authored save. Source/runtime stay in memory; command facts persist.
-Self-contained save/reopen and timed replay remain next.
+The self-contained serializer checkpoint now uses the readable
+`authored-project.lua` and invalid neighbor in example 34. Project-v2 Lua contains
+metadata, complete supported mono palette graphs, independent tick-based patterns
+and composition instances/bindings. It reuses the constrained VM and existing
+Rust importers/compiler, preserves stable IDs and all defaults, and rejects any
+source state it cannot represent. Export accepts authoritative source rather than
+editor/runtime projections. Fresh-process oscillator rendering matches raw PCM
+and split ranges without the original directory; Plaits authored settings round
+trip under its existing RNG exception. This is an in-memory serializer, not yet a
+native filesystem Save/Open workflow. Atomic disk save, entry discovery, TUI
+fresh reopen and timed replay remain next.
 The full example retains `design` status.
 
 ## Recommended immediate implementation prompt
@@ -60,8 +70,9 @@ The full example retains `design` status.
 Implement only [example 34](songs/examples/34-empty-project-patch/ACCEPTANCE.md):
 empty directory → construct patch → create pattern → independent pitch/gate →
 play → modify → save → fresh-process reopen, with native keyboard controls.
-First add its smallest readable authored/invalid fixtures and failing acceptance
-bindings. Choose additive save syntax there; invent no speculative schema.
+Use its project-v2 authored/invalid fixtures and serializer tests. Add the smallest
+disk save/entry-discovery fixtures before extending that contract; invent no
+speculative schema.
 
 Reuse the existing Rust definition/importer/fingerprint machinery, moving source
 ownership out of the synth-only `InstrumentEditor` only enough to represent an

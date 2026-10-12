@@ -179,6 +179,19 @@ Useful properties:
 
 ## Performance tests
 
+Example 34's self-contained serializer acceptance is
+`cargo test -p meldritch-control --test native_project`. Its isolated child process
+receives only authored Lua and expected raw PCM/fingerprint: the original root is
+removed before launch. Check full/split oscillator rendering, deleted-note identity
+counters, independent bindings, optional filter defaults, Plaits authored settings
+(without exact RNG/PCM claims), empty/unbound palettes and runtime-overlay exclusion.
+Negative cases cover bounded source/material, unknown fields/kinds/versions,
+duplicate identities, dangling or incompatible wiring, malformed note/clock/value
+data, unavailable Lua facilities and instruction budgets. Legacy source cannot
+silently lose tracks/assets/DSP/controller state through v2 export. These tests
+establish serialization/reconstruction, not native disk save, TUI reopen, physical
+listening, timed replay or DSP-state migration.
+
 Add later:
 - offline render throughput
 - worker saturation

@@ -336,7 +336,7 @@ impl ValidatedSong {
         Ok((next, selected, earliest))
     }
     pub fn restore_authored_pattern(&self, pattern: &AuthoredPattern) -> Result<Self, String> {
-        let mut next = if self.note_patterns.contains_key(&pattern.id) {
+        let next = if self.note_patterns.contains_key(&pattern.id) {
             self.clone()
         } else {
             self.create_note_pattern(
@@ -352,6 +352,25 @@ impl ValidatedSong {
             || prior.looped != pattern.looped
         {
             return Err("unsupported pattern owner/length/loop edit".into());
+        }
+        next.restore_pattern_material(&PatternMaterial {
+            id: pattern.id.clone(),
+            length_ticks: pattern.length_ticks,
+            looped: pattern.looped,
+            next_note_id: pattern.next_note_id,
+            notes: pattern.notes.clone(),
+        })
+    }
+    /// Restore stable identities into the same note source without inventing a track.
+    pub fn restore_pattern_material(&self, pattern: &PatternMaterial) -> Result<Self, String> {
+        let mut next = if self.note_patterns.contains_key(&pattern.id) {
+            self.clone()
+        } else {
+            self.create_palette_pattern(&pattern.id, pattern.length_ticks, pattern.looped)?
+        };
+        let prior = next.pattern_material(&pattern.id)?;
+        if prior.length_ticks != pattern.length_ticks || prior.looped != pattern.looped {
+            return Err("unsupported pattern length/loop edit".into());
         }
         let length = next.authoring_frame(pattern.length_ticks)?;
         let mut events = Vec::new();

@@ -17,7 +17,14 @@ runtime facts now persist through native typed disk capture as specified by
 meldritch-control --test native_capture` checks lazy file creation, bounded pending
 buffers, failure recovery without duplication, history/source-continuity diagnostics,
 confined paths and reconstruction of source/runtime/PCM after history eviction.
-Timed replay and self-contained save/reopen remain unimplemented.
+The bounded self-contained serializer checkpoint is now implemented as specified
+by `persistence.txt`, `authored-project.lua` and its invalid neighbor.
+`cargo test -p meldritch-control --test native_project` proves authored-only
+round trips, deleted-note counters, optional filter/defaults, independent bindings,
+Plaits authored settings, bounds/diagnostics and fresh-process raw oscillator PCM
+equality without the original root. Runtime overlays do not enter the format.
+Native atomic disk save, entry discovery/TUI reopen and timed replay remain
+unimplemented; the full workflow therefore retains design status.
 Native 80×24 PTY checks also prove file-free empty open/quit, twelve typed
 construction/runtime events and a clean final gain, and capture-path failure
 deferring another gesture/quit until successful retry without duplicates. These
@@ -33,8 +40,9 @@ commands preserve it, and immutable provenance stays unchanged. Run
 `cargo test -p meldritch-app project_source` for this checkpoint. It uses legacy
 example 09 as import provenance, not as an empty-project seed. Typed silent palette
 creation is also implemented, as specified by the construction checkpoint below.
-No new authored format exists; add readable authored fixtures before extending
-its schema. See
+Project-v2 Lua is additive; base-bound project-v1/instrument-v1/v2 exports retain
+their existing contracts. The new serializer neither writes files nor changes
+entry discovery. See
 [the roadmap](../../../ROADMAP.md) and
 [implementation prompt](../../../AUTHORING.md#recommended-immediate-implementation-prompt).
 

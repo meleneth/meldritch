@@ -17,6 +17,8 @@ mod parameters;
 pub use parameters::*;
 mod project_directory;
 pub use project_directory::*;
+mod native_project;
+pub use native_project::*;
 mod voices;
 pub use voices::*;
 

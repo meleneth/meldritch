@@ -179,6 +179,33 @@ fn instantiate(id: &str, kind: ModuleKind) -> Result<ModuleDefinition, String> {
     })
 }
 impl ValidatedSong {
+    /// Import a complete native mono palette graph through the existing importer.
+    /// Executable lowering still belongs to the caller's acceptance boundary.
+    pub fn restore_palette_patch(&self, graph: SynthDefinition) -> Result<Self, String> {
+        if !valid_id(&graph.id)
+            || graph.polyphony != 1
+            || graph.inputs.len() > 32
+            || graph.inputs.iter().any(|i| !valid_id(&i.id))
+            || graph.modules.iter().any(|m| !valid_id(&m.id))
+            || graph
+                .modules
+                .iter()
+                .any(|m| m.kind == ModuleKind::AudioOutput && m.channels.unwrap_or(1) != 1)
+        {
+            return Err("native palette requires valid identities and mono graph layout".into());
+        }
+        if self.synths.contains_key(&graph.id) || self.samplers.contains_key(&graph.id) {
+            return Err(format!("duplicate instrument id '{}'", graph.id));
+        }
+        if self.synths.len() + self.samplers.len() >= 32 {
+            return Err("construction exceeds 32 instruments".into());
+        }
+        let mut candidate = self.clone();
+        candidate.synths.insert(graph.id.clone(), graph.clone());
+        let candidate = candidate.replace_patch(graph.clone())?;
+        candidate.validate_executable_patch(&graph.id)?;
+        Ok(candidate)
+    }
     /// Build on a clone and reuse operation/importer validation; intermediate
     /// drafts remain private. Executable compilation belongs to the app boundary.
     pub fn create_patch(&self, creation: &PatchCreation) -> Result<Self, String> {

@@ -99,6 +99,19 @@ accepted state, not an authored project save or a claim of timed DSP activation.
 Legacy hosts retain their historical event representation. Native checkpoint
 storage is bounded and failure/retry behavior is tested.
 
+Example 34 additionally defines self-contained `kind="project", version=2` Lua
+in `authored-project.lua`. It stores project identity/clock, complete supported
+mono synth graphs (including exposed output-level declarations), independent
+tick-based pattern material and mono instance pitch/gate bindings. Rust restores
+the existing source through graph/note/voice validators and the executable compiler.
+The encoder rejects omitted/lossy source state by full restored-source equality.
+Runtime gains, transport, editor selections, capture and drafts are excluded.
+The existing constrained VM/source limit applies, with explicit palette/instance/
+note bounds in `persistence.txt`. Headless fresh-process reload is accepted for
+deterministic oscillator PCM; Plaits retains its documented RNG exception.
+This checkpoint adds no automatic entry selection or native disk save. Legacy
+base-bound project-v1 and instrument-v1/v2 formats remain unchanged.
+
 Lua API v1 adds an explicit composition adapter, without changing the authored
 TOML entrypoint or migrating historical songs. `main.lua` chooses a confined
 existing song and defines headless control behavior. Saved Lua envelopes retain

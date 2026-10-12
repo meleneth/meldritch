@@ -31,35 +31,39 @@ impl ProjectDirectory {
         if let Some(song) = &self.composition {
             return song.clone();
         }
-        let mut source = ValidatedSong {
-            root: self.root.clone(),
-            performance: PerformanceDefinition {
-                id: "project".into(),
-                title: "Untitled project".into(),
-                bpm: 120.0,
-                sample_rate: 48_000,
-                midi_devices: vec![],
-                tracks: vec![],
-                lanes: vec![],
-                pages: vec![],
-                controls: vec![],
-                modifiers: vec![],
-                modifier_controls: vec![],
-                actions: vec![],
-                ui: PerformanceUiDefinition::default(),
-            },
-            synths: BTreeMap::new(),
-            samplers: BTreeMap::new(),
-            sample_banks: BTreeMap::new(),
-            note_patterns: BTreeMap::new(),
-            parameter_patterns: BTreeMap::new(),
-            dsps: BTreeMap::new(),
-            pattern_voices: BTreeMap::new(),
-            fingerprint: 0,
-        };
-        source.refresh_authoring_fingerprint();
-        source
+        empty_project_source(&self.root)
     }
+}
+
+pub(super) fn empty_project_source(root: &Path) -> ValidatedSong {
+    let mut source = ValidatedSong {
+        root: root.to_path_buf(),
+        performance: PerformanceDefinition {
+            id: "project".into(),
+            title: "Untitled project".into(),
+            bpm: 120.0,
+            sample_rate: 48_000,
+            midi_devices: vec![],
+            tracks: vec![],
+            lanes: vec![],
+            pages: vec![],
+            controls: vec![],
+            modifiers: vec![],
+            modifier_controls: vec![],
+            actions: vec![],
+            ui: PerformanceUiDefinition::default(),
+        },
+        synths: BTreeMap::new(),
+        samplers: BTreeMap::new(),
+        sample_banks: BTreeMap::new(),
+        note_patterns: BTreeMap::new(),
+        parameter_patterns: BTreeMap::new(),
+        dsps: BTreeMap::new(),
+        pattern_voices: BTreeMap::new(),
+        fingerprint: 0,
+    };
+    source.refresh_authoring_fingerprint();
+    source
 }
 
 pub fn load_project_directory(path: impl AsRef<Path>) -> Result<ProjectDirectory, SongLoadError> {

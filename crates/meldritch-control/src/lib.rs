@@ -15,6 +15,7 @@ pub mod assignments;
 pub mod instrument;
 pub mod led_demo;
 pub mod native_capture;
+pub mod native_project;
 pub mod pattern;
 pub mod performance;
 pub mod pickup;

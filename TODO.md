@@ -46,7 +46,10 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 1 capture checkpoint: lazy typed accepted sessions over shared writer,
   per-command source/control observations, bounded pending buffers, atomic
   checkpoints/failure retry, clean quit and fresh-app source/runtime/PCM reconstruction
-- [ ] Slice 1 next: self-contained save/fresh reload
+- [x] Slice 1 serializer checkpoint: self-contained project-v2 Lua over existing
+  graph/note/voice validators, whole-source loss detection, stable identities,
+  authored-only controls and fresh-process deterministic oscillator PCM equality
+- [ ] Slice 1 next: atomic native disk save, entry discovery and TUI fresh reopen
 - [ ] Slice 2: shared palette, two compositions and independent pattern sources
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
@@ -168,6 +171,21 @@ recovering without duplication. Sparse file-limit and finished-session tests pas
 No audio device is opened by these native capture smoke tests. Commit stays local.
 Standalone saves, CLI capture reconstruction, timed replay/epochs, capture rotation,
 performance harvesting and physical audio/hardware acceptance remain deferred.
+
+Self-contained serializer checkpoint: `authored-project.lua`, its invalid neighbor
+and `persistence.txt` define additive project-v2 Lua. The encoder accepts the
+authoritative source rather than editor/runtime projections; import reuses mono
+graph validation, shared stable-note restoration, independent voice bindings and
+the existing compiler. Full restored-source equality refuses unsupported or lossy
+state. Five parent tests plus an isolated fresh-process child prove authored-only
+round trips, deleted-note counters, empty/unbound palettes, edited filter defaults,
+independent bindings, Plaits authored settings, bounded/invalid input diagnostics
+and byte-identical full/split oscillator PCM after deleting the original root.
+`cargo test --workspace --offline`, DSL/control all-targets Clippy with existing
+allowances, formatting/diff checks and docs build pass. Examples 09 and 29 retain
+fingerprints `41472b38b65b60ed` and `54745c74a42665cf`. No native entry discovery,
+disk save or TUI fresh reopen is claimed; those remain the next checkpoint.
+Legacy project-v1/instrument-v1/v2 exports and examples 25–33 are unchanged.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 
