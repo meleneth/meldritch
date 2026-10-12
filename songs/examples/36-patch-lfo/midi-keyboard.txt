@@ -1,0 +1,15 @@
+# MicroLab mk3 / generic MIDI keyboard checkpoint
+# List ports without a song, audio, capture or project writes:
+meldritch midi-keyboard-check
+# Select exactly one input; inspect velocity, releases, bend and CCs:
+meldritch midi-keyboard-check --port MicroLab --seconds 20
+# Native project only; retain explicit selection across reconnect:
+meldritch open-project . --midi-keyboard MicroLab
+# In construction mode, create a blank palette pattern with c, or open Ctrl-N.
+# MIDI note-on inserts at the current cursor, duration 480 ticks (clipped at end),
+# velocity / 127. Arrows move the cursor. Repeated pitch/tick selects the note.
+# Note-off / note-on-zero never insert; performance and closed editors never edit.
+# Overlapping notes in a mono-bound pitch source reject without changing audio.
+# Bind pitch and gate independently, close the editor, Space plays the pattern.
+# Ctrl-S saves authored notes; accepted edits enter the native capture separately.
+# This checkpoint is pattern entry, not key-held live audition or timed recording.

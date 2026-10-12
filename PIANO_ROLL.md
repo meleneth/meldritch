@@ -1,5 +1,15 @@
 # Lua APC Mini MK2 piano roll
 
+Native project MIDI keyboard step entry is also available through
+`meldritch open-project . --midi-keyboard MicroLab`. In construction, open the
+palette pattern with Ctrl-N; note-on inserts at the current cursor with velocity
+and 480-tick duration clipped at the end. Repeat pitch/tick selects an existing
+note; arrows move time. Releases, bend/pedal messages, hidden editors and performance
+mode never author notes. Pitch/gate bindings remain explicit and independent.
+Save/capture reuse native project paths. Use `meldritch midi-keyboard-check` to list
+ports and `--port MicroLab --seconds 20` to monitor input without audio or files.
+This is step entry; key-held audition and timed recording remain future work.
+
 The first piano-roll slice creates and edits a synth-backed note pattern using
 the existing note compiler, background worker and audio publication. Rust owns
 the validated song source and stable note identities; Lua owns grid orientation,

@@ -123,6 +123,13 @@ drafts, independent signal references, amplitude separation, capture reconstruct
 playing publication and fresh reopen are checked. An explicit Hertz rate cable now
 integrates LFO phase per sample, with reset ordering, all four waveforms, tempo,
 capture, fresh reopen and playing rejection tests. Broader scope/cadence remain open.
+User-prioritized MicroLab mk3 support now adds generic explicit native MIDI input
+selection, a standalone keyboard diagnostic and construction pattern step entry.
+Velocity, release/mode gating, queue overflow/epoch invalidation, typed capture,
+worker publication and save/reopen are checked headlessly. Host MicroLab discovery
+and connection were observed. Live key-held input, sustain/bend routing, timed
+recording and physical gestures/listening remain open; prioritize the runtime
+pitch/gate keyboard slice alongside the modulation queue.
 Example 35's native pattern-selection checkpoint is implemented: PgUp/PgDn
 selects palette material without rebinding, source/runtime mutation or rerender;
 typed capture and independent-source persistence/render tests pass. Its full

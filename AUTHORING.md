@@ -81,6 +81,16 @@ replay, physical listening and continuous DSP-state migration remain future work
 
 ## Recommended immediate implementation prompt
 
+User-prioritized keyboard work: MicroLab mk3 now has native construction pattern
+step entry, explicit device selection and a decoded-input diagnostic. Next author
+the smallest explicit live keyboard Pitch/Gate binding and a runtime mono-note
+audition contract. Reuse the existing voice compiler, scheduler and safe worker/
+publication boundary. Key-held performance must not rewrite saved patterns or
+patch defaults. Prove retrigger/release, zero-velocity release, overflow/disconnect/
+target cleanup, source/runtime separation and deterministic capture; report
+physical latency/listening separately. Sustain/bend need explicit authored routing.
+Keep this user-facing keyboard work alongside the remaining modulation queue.
+
 Continue Slice 3's example 36 from its working tremolo/vibrato/filter/depth/rate
 checkpoints. Define the smallest explicit control-cadence/latching example and
 its consumer timing contract before adding schema. Reuse control_order, ControlPlan,

@@ -1,0 +1,28 @@
+[[cases]]
+kind = "note_off"
+bytes = [128, 60, 64]
+[[cases]]
+kind = "note_on_zero"
+bytes = [144, 60, 0]
+[[cases]]
+kind = "pitch_bend"
+bytes = [224, 0, 64]
+[[cases]]
+kind = "modulation"
+bytes = [176, 1, 127]
+[[cases]]
+kind = "sustain"
+bytes = [176, 64, 127]
+[[cases]]
+kind = "short_message"
+bytes = [144, 60]
+[[cases]]
+kind = "invalid_data"
+bytes = [144, 128, 127]
+[[cases]]
+kind = "realtime"
+bytes = [248]
+[[cases]]
+kind = "mono_overlap"
+bytes = [144, 67, 127]
+reject = true

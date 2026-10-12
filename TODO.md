@@ -80,6 +80,12 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 3 rate checkpoint: explicit Hertz input, deterministic phase integration,
   reset ordering, independent waveform references, capture and playing publication
 - [ ] Slice 3 next: explicit control/event cadence and broader instantiation scopes
+- [x] User-prioritized MIDI keyboard checkpoint: MicroLab/generic input selection,
+  diagnostic, bounded reconnect queue, construction pattern entry with velocity,
+  typed capture/save/reopen and playing publication; host MicroLab connection observed
+- [ ] Next keyboard slice: explicit live Pitch/Gate source bindings and runtime
+  key-held audition, note lifecycle/overflow/disconnect cleanup and capture;
+  then authored sustain/bend/control routing and timed recording
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
 - [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
 - [ ] Slice 6: quantized graph activation and proved compatible DSP-state continuity
@@ -428,6 +434,23 @@ allowances, formatting/diff checks and VitePress pass. Historical 09/29
 fingerprints remain `41472b38b65b60ed` / `54745c74a42665cf`.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
+
+MicroLab mk3 checkpoint adds `midi-keyboard-check` and explicit native
+`open-project --midi-keyboard MicroLab` entry through the existing decoder, queue,
+typed note editor, capture, source compiler, worker and immutable publication.
+All channels are accepted for step entry; messages resolve selection/cursor at
+control-thread dispatch. Existing pitch/tick selects without overwriting velocity;
+new notes use 480 ticks clipped at pattern end. Releases and non-note input do not
+edit. Mono source overlaps reject with source/history/audio unchanged. Port match
+must be unique; invalidated connection epochs and overflow remain inspectable.
+MicroLab mk3 discovery and input connection were observed on the host. Physical
+gestures/listening, key-held audition and timed recording remain pending; the latter
+must introduce explicit runtime input bindings instead of rewriting patterns.
+
+Keyboard verification: focused native/transport tests, offline workspace suite,
+affected all-targets Clippy with existing allowances, formatting/diff and VitePress.
+Headless tests preserve independent gate binding, note identities/velocity, source
+and published audio on rejection, and reconstruct every captured fingerprint.
 
 Investigation and ownership decisions: [AUTHORING.md](AUTHORING.md). The first
 implemented slice is [the instrument editor](INSTRUMENT_EDITOR.md): example 25

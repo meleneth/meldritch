@@ -161,6 +161,39 @@ fan-out, full/split/fresh-process render equality, typed drafts/capture and play
 publication. Wrong units/ranges, missing/duplicate/unused inputs and rate feedback
 reject with source/history/audio unchanged. Broader cadence/scopes remain open.
 
+## MIDI keyboard entry checkpoint (user-prioritized)
+
+midi-keyboard.txt demonstrates MicroLab mk3 input through the generic keyboard
+decoder and existing typed note editor. Port selection is explicit, nonempty and
+must match exactly one input; ambiguity rejects instead of choosing a device.
+No MIDI opens without the flag, or during --check. A standalone diagnostic lists
+ports without project files/audio and monitors decoded notes, velocity, releases,
+14-bit bend, modulation CC1 and sustain CC64; configurable CC flags must not collide.
+
+Native MIDI callbacks enqueue bounded observations only. Control-thread dispatch
+inserts note-on into the visible construction palette editor at the current cursor,
+with 480-tick duration clipped to the pattern end and velocity / 127. Existing
+pitch/tick selects without overwriting it. Release, note-on-zero, malformed messages,
+CC/bend, hidden editors and performance mode never author notes. Selection/cursor
+are evaluated at dispatch, not hardware arrival. Pitch and gate bindings remain
+independent; input does not silently connect a pattern to an instrument.
+
+Disconnect invalidates queued observations from the old connection. Reconnect
+requires the same unique name match; queue overflow is reported, never silently
+claimed as lossless recording. Accepted commands use native capture, whole-project
+save/reopen and the existing worker/publication path. Failure preserves source and
+published audio. Headless acceptance must exercise decoded input, boundaries,
+mode gating, velocity, capture/reopen and publication. Physical MicroLab gestures,
+key-held audition, sustain/bend performance routing and timed recording remain open.
+
+Evidence: native_midi_keyboard_entry_publishes_captures_and_reopens_without_live_voice_claims
+checks velocity/channel, editor and mode gating, clipping, overlap rejection,
+existing-note identity, every invalid/keyboard.toml case, stale connection events,
+playing callback publication, typed reconstruction and authored save/reopen.
+Keyboard transport tests cover unique matching and bounded overflow/epochs.
+MicroLab mk3 port discovery and a real input connection were observed; physical
+gestures/listening and reconnect interactions remain unverified.
+
 ## Remaining full Slice 3 contract
 
 Broader explicit addition/clamping,

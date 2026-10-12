@@ -386,6 +386,61 @@ pub fn decode_keyboard(bytes: &[u8], modulation_cc: u8, sustain_cc: u8) -> Optio
     })
 }
 
+/// Construction-only step entry; routing and live performance remain separate.
+/// Resolve the visible palette and cursor on the control thread, not in MIDI I/O.
+pub fn keyboard_step_command(
+    bytes: &[u8],
+    view: &meldritch_app::AppViewModel,
+) -> Option<meldritch_app::AppCommand> {
+    use meldritch_app::{AppCommand, CockpitMode, NoteEdit, note_name};
+    if view.cockpit_mode != CockpitMode::AllParameters {
+        return None;
+    }
+    let editor = view.palette_pattern_editor.as_ref().filter(|e| e.visible)?;
+    // A patch editor can obscure an otherwise visible pattern projection.
+    if view.instrument_editor.as_ref().is_some_and(|e| e.visible) {
+        return None;
+    }
+    let KeyboardInput::Note {
+        note,
+        velocity,
+        pressed: true,
+        ..
+    } = decode_keyboard(bytes, 1, 64)?
+    else {
+        return None;
+    };
+    if let Some(existing) = editor
+        .pattern
+        .notes
+        .iter()
+        .find(|n| n.start_tick == editor.cursor_tick && n.note == note_name(note))
+    {
+        return Some(AppCommand::SelectNote {
+            pattern: editor.pattern.id.clone(),
+            id: existing.id.clone(),
+        });
+    }
+    let duration_ticks = 480.min(
+        editor
+            .pattern
+            .length_ticks
+            .checked_sub(editor.cursor_tick)?,
+    );
+    if duration_ticks == 0 {
+        return None;
+    }
+    Some(AppCommand::EditNote {
+        pattern: editor.pattern.id.clone(),
+        edit: NoteEdit::Insert {
+            start_tick: editor.cursor_tick,
+            duration_ticks,
+            pitch: note,
+            velocity,
+        },
+    })
+}
+
 /// Simulated transport sends real dispatcher inputs and observes its output.
 /// The same semantic frames can be encoded by MIDI, HID or TUI adapters.
 pub struct SimulatedDevice {

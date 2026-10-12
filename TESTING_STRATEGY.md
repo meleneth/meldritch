@@ -273,6 +273,13 @@ produce identical source and PCM. Every invalid/rate.toml case preserves source
 and history, including out-of-range declared clamps and typed rate feedback.
 The playing host combines two Hertz adapters for rate and cutoff, plus depth and
 pitch fan-out, and checks that feedback rejection preserves published PCM.
+`cargo test -p meldritch-cli keyboard` also exercises native MIDI step entry:
+velocity/all channels, repeat selection, hidden/performance gating, end clipping,
+mono overlap rejection, invalid message fixtures, stale epochs, worker/callback
+publication, native capture reconstruction and save/reopen. Pure transport tests
+check unique matching and bounded queue overflow. CLI parsing rejects keyboard
+input with --check and invalid CC ranges. Physical MicroLab discovery/connection
+was observed separately; these tests do not accept key-held audition or gestures.
 
 Add later:
 - offline render throughput

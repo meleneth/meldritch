@@ -18,6 +18,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
+mod keyboard;
 mod project_playback;
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -323,6 +324,9 @@ enum Command {
         /// Inspect the root without opening a terminal, audio or MIDI.
         #[arg(long)]
         check: bool,
+        /// Native construction pattern entry from one uniquely matching MIDI input.
+        #[arg(long, conflicts_with = "check")]
+        midi_keyboard: Option<String>,
     },
     /// Run a bounded Lua-authored APC Mini MK2 LED animation (no audio).
     ApcLuaColors {
@@ -401,6 +405,17 @@ enum Command {
         /// Seconds to listen for incoming control messages.
         #[arg(long, default_value_t = 10)]
         seconds: u64,
+    },
+    /// List MIDI keyboard inputs or monitor decoded notes/bend/CCs, without audio.
+    MidiKeyboardCheck {
+        #[arg(long)]
+        port: Option<String>,
+        #[arg(long, default_value_t = 10)]
+        seconds: u64,
+        #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u8).range(0..=127))]
+        modulation_cc: u8,
+        #[arg(long, default_value_t = 64, value_parser = clap::value_parser!(u8).range(0..=127))]
+        sustain_cc: u8,
     },
     /// Capture and transform a range from a WAV into a derived artifact.
     TransformChunk {
@@ -906,8 +921,13 @@ fn run(cli: Cli) -> Result<(), String> {
     match cli.command.unwrap_or(Command::OpenProject {
         project: PathBuf::from("."),
         check: false,
+        midi_keyboard: None,
     }) {
-        Command::OpenProject { project, check } => open_project(project, check),
+        Command::OpenProject {
+            project,
+            check,
+            midi_keyboard,
+        } => open_project_keyboard(project, check, midi_keyboard),
         Command::ApcLuaColors {
             source,
             dry_run,
@@ -1000,6 +1020,12 @@ fn run(cli: Cli) -> Result<(), String> {
                 .map_err(|e| e.to_string())
         }
         Command::MidiControlsCheck { song, seconds } => midi_controls_check(song, seconds),
+        Command::MidiKeyboardCheck {
+            port,
+            seconds,
+            modulation_cc,
+            sustain_cc,
+        } => keyboard::check(port, seconds, modulation_cc, sustain_cc),
         Command::TransformChunk {
             input,
             kind,
@@ -3107,7 +3133,16 @@ fn connect_apc_feedback(
     }))
 }
 
+#[cfg(test)]
 fn open_project(path: PathBuf, check: bool) -> Result<(), String> {
+    open_project_keyboard(path, check, None)
+}
+
+fn open_project_keyboard(
+    path: PathBuf,
+    check: bool,
+    midi_keyboard: Option<String>,
+) -> Result<(), String> {
     let project = meldritch_dsl::load_project_directory(path).map_err(|error| error.to_string())?;
     let native = meldritch_control::native_project::NativeProjectStore::open(&project)?;
     if check {
@@ -3134,6 +3169,9 @@ fn open_project(path: PathBuf, check: bool) -> Result<(), String> {
         return Ok(());
     }
     if project.composition().is_some() {
+        if midi_keyboard.is_some() {
+            return Err("--midi-keyboard pattern entry requires a native project; legacy song MIDI bindings remain script-owned".into());
+        }
         tui_song(
             project.root().to_owned(),
             None,
@@ -3156,6 +3194,9 @@ fn open_project(path: PathBuf, check: bool) -> Result<(), String> {
             app.enable_native_project_source(source.clone())?;
         }
         let mut host = project_playback::NativeProjectAudio::with_store(&app, engine, native)?;
+        if let Some(port) = midi_keyboard {
+            host.enable_keyboard(port)?;
+        }
         meldritch_tui::run_project_with_host(&mut app, &project, &mut host)
             .map_err(|error| format!("failed to open project cockpit: {error}"))
     }
@@ -7323,6 +7364,24 @@ mod tests {
         ));
         assert!(Cli::try_parse_from(["meldritch", "not-a-command"]).is_err());
         assert!(Cli::try_parse_from(["meldritch", "validate-song"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "meldritch",
+                "open-project",
+                "--check",
+                "--midi-keyboard",
+                "MicroLab"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["meldritch", "midi-keyboard-check", "--modulation-cc", "128"])
+                .is_err()
+        );
+        assert!(
+            matches!(Cli::try_parse_from(["meldritch", "midi-keyboard-check", "--port", "MicroLab"]).unwrap().command,
+            Some(Command::MidiKeyboardCheck { port: Some(port), .. }) if port == "MicroLab")
+        );
     }
 
     #[test]

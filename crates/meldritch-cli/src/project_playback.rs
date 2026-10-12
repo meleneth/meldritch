@@ -21,9 +21,14 @@ pub(crate) struct NativeProjectAudio {
     submitted_fingerprint: u64,
     ready_generation: Option<u64>,
     frames: u32,
+    keyboard: Option<crate::keyboard::NativeKeyboard>,
 }
 
 impl NativeProjectAudio {
+    pub(crate) fn enable_keyboard(&mut self, port: String) -> Result<(), String> {
+        self.keyboard = Some(crate::keyboard::NativeKeyboard::new(port)?);
+        Ok(())
+    }
     fn require_prepared_audio(&self, source: &meldritch_app::ValidatedSong) -> Result<(), String> {
         if source.fingerprint() != self.submitted_fingerprint
             || self.ready_generation != Some(self.host.generation())
@@ -77,20 +82,24 @@ impl NativeProjectAudio {
             submitted_fingerprint: source.fingerprint(),
             ready_generation: None,
             frames,
+            keyboard: None,
         })
     }
 }
 
 impl ProjectPlaybackHost for NativeProjectAudio {
     fn persistence_status(&self, app: &AppController) -> String {
-        if app
+        let saved: String = if app
             .authored_source()
             .is_some_and(|source| Some(source.fingerprint()) == self.store.saved_fingerprint())
         {
             "Saved authored project · main.project.lua".into()
         } else {
             "Unsaved authored project · Ctrl-S/F6 to save".into()
-        }
+        };
+        self.keyboard
+            .as_ref()
+            .map_or(saved.clone(), |k| format!("{saved} · {}", k.status))
     }
     fn save_project(&mut self, app: &mut AppController) -> Result<String, String> {
         app.dispatch(AppCommand::SaveProject)
@@ -116,6 +125,22 @@ impl ProjectPlaybackHost for NativeProjectAudio {
         self.capture
             .checkpoint(app)
             .map_err(|error| format!("capture checkpoint: {error}"))?;
+        if let Some(keyboard) = &mut self.keyboard {
+            keyboard.poll();
+            for _ in 0..meldritch_control::QUEUE_CAPACITY {
+                let Some(event) = keyboard.next() else { break };
+                if event.is_current()
+                    && let Some(command) = meldritch_control::devices::keyboard_step_command(
+                        &event.bytes,
+                        &app.view_model(),
+                    )
+                {
+                    app.dispatch(command)
+                        .map_err(|e| format!("MIDI note entry rejected: {e:?}"))?;
+                    self.capture.checkpoint(app)?;
+                }
+            }
+        }
         let source = app.authored_source().ok_or("no authored project source")?;
         if source.fingerprint() != self.submitted_fingerprint {
             // This first native playback slice has one fixed one-bar PCM layout.
@@ -190,6 +215,200 @@ mod tests {
         sync::Arc,
         time::{Duration, Instant},
     };
+
+    #[test]
+    fn native_midi_keyboard_entry_publishes_captures_and_reopens_without_live_voice_claims() {
+        use meldritch_app::CockpitMode;
+        use meldritch_control::native_capture::{
+            NativeCommandEnvelope, load_native_capture_baseline,
+        };
+        let project = project();
+        let source = meldritch_control::native_project::load_native_project(
+            project.root(),
+            include_str!("../../../songs/examples/36-patch-lfo/main.project.lua"),
+        )
+        .unwrap();
+        let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
+        app.enable_native_project_source(source).unwrap();
+        let mut host = NativeProjectAudio::new(&app, engine).unwrap();
+        let (keyboard, route) = crate::keyboard::NativeKeyboard::simulated();
+        host.keyboard = Some(keyboard);
+        let ready = |app: &mut AppController, host: &mut NativeProjectAudio| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                host.poll(app).unwrap();
+                if host.ready_generation == Some(host.host.generation()) {
+                    break;
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        ready(&mut app, &mut host);
+        let initial_audio = host.reader.snapshot();
+        app.dispatch(AppCommand::SelectPalettePattern("melody".into()))
+            .unwrap();
+        app.dispatch(AppCommand::SetCockpitMode(CockpitMode::AllParameters))
+            .unwrap();
+        // Closed editor must not accidentally record incoming keys.
+        let before = app.authored_source().unwrap();
+        route.observe(&[0x90, 60, 99]);
+        host.poll(&mut app).unwrap();
+        assert!(Arc::ptr_eq(&before, &app.authored_source().unwrap()));
+        app.dispatch(AppCommand::TogglePatternEditor).unwrap();
+        app.dispatch(AppCommand::EditNote {
+            pattern: "melody".into(),
+            edit: NoteEdit::Delete {
+                id: "note-1".into(),
+            },
+        })
+        .unwrap();
+        ready(&mut app, &mut host);
+        app.dispatch(AppCommand::Play).unwrap();
+        let generation = host.host.generation();
+        assert!(route.observe(&[0x93, 60, 99])); // All MIDI channels accepted for entry.
+        host.poll(&mut app).unwrap();
+        ready(&mut app, &mut host);
+        assert!(host.host.generation() > generation);
+        let source = app.authored_source().unwrap();
+        let melody = source.pattern_material("melody").unwrap();
+        assert_eq!(melody.notes.len(), 1);
+        assert_eq!(melody.notes[0].note, "C4");
+        assert_eq!(melody.notes[0].velocity, 99.0 / 127.0);
+        assert_eq!(melody.notes[0].duration_ticks, 480);
+        assert_eq!(
+            source.pattern_voices()["bass-instance"]
+                .gate_pattern
+                .as_deref(),
+            Some("rhythm")
+        );
+        assert!(
+            (0..host.frames).any(|f| initial_audio.frame(f) != host.reader.snapshot().frame(f))
+        );
+        // Repeating a key selects, preserving authored velocity and identity.
+        route.observe(&[0x90, 60, 1]);
+        host.poll(&mut app).unwrap();
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        assert_eq!(
+            app.view_model()
+                .palette_pattern_editor
+                .unwrap()
+                .selected_note
+                .as_deref(),
+            Some(melody.notes[0].id.as_str())
+        );
+        let history = app.history().len();
+        let audio = host.reader.snapshot();
+        route.observe(&[0x90, 67, 127]); // Overlapping mono pitch-source notes reject.
+        assert!(host.poll(&mut app).is_err());
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        assert!(Arc::ptr_eq(&audio, &host.reader.snapshot()));
+        assert_eq!(history, app.history().len());
+        app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+        route.observe(&[0x90, 69, 127]); // An obscured pattern must not receive notes.
+        host.poll(&mut app).unwrap();
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+        let negatives: toml::Value = toml::from_str(include_str!(
+            "../../../songs/examples/36-patch-lfo/invalid/keyboard.toml"
+        ))
+        .unwrap();
+        app.dispatch(AppCommand::TogglePatternEditor).unwrap();
+        for case in negatives["cases"].as_array().unwrap() {
+            let bytes: Vec<_> = case["bytes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_integer().unwrap() as u8)
+                .collect();
+            let history = app.history().len();
+            let published = host.reader.snapshot();
+            route.observe(&bytes);
+            if case.get("reject").and_then(toml::Value::as_bool) == Some(true) {
+                assert!(host.poll(&mut app).is_err());
+            } else {
+                host.poll(&mut app).unwrap();
+            }
+            assert!(
+                Arc::ptr_eq(&source, &app.authored_source().unwrap()),
+                "{}",
+                case["kind"]
+            );
+            assert_eq!(app.history().len(), history);
+            assert!(Arc::ptr_eq(&published, &host.reader.snapshot()));
+        }
+        app.dispatch(AppCommand::SetCockpitMode(CockpitMode::Performance))
+            .unwrap();
+        route.observe(&[0x90, 67, 127]);
+        host.poll(&mut app).unwrap();
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        app.dispatch(AppCommand::SetCockpitMode(CockpitMode::AllParameters))
+            .unwrap();
+        app.dispatch(AppCommand::MovePatternCursor {
+            tick_delta: 3600,
+            pitch_delta: 0,
+        })
+        .unwrap();
+        route.observe(&[0x90, 64, 127]);
+        ready(&mut app, &mut host);
+        let source = app.authored_source().unwrap();
+        let notes = source.pattern_material("melody").unwrap().notes;
+        assert_eq!(notes.last().unwrap().duration_ticks, 240);
+        let audio = host.reader.snapshot();
+        let history = app.history().len();
+        route.observe(&[0x90, 69, 127]);
+        route.invalidate(); // A queued old-connection event must never author a note.
+        host.poll(&mut app).unwrap();
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        assert!(Arc::ptr_eq(&audio, &host.reader.snapshot()));
+        assert_eq!(app.history().len(), history);
+        let mut callback = PublishedAudioRenderer::from_engine(
+            host.reader.clone(),
+            2,
+            u32::MAX,
+            host.engine.take().unwrap(),
+        )
+        .unwrap();
+        let mut samples = [0.0; 512];
+        callback.render_f64(&mut samples);
+        assert!(samples.iter().any(|s| s.abs() > 0.01));
+        assert_eq!(app.view_model().transport.state, TransportState::Playing);
+        host.save_project(&mut app).unwrap();
+        host.finish(&app).unwrap();
+        let reopened =
+            meldritch_control::native_project::NativeProjectStore::open(&project).unwrap();
+        assert_eq!(
+            reopened.source().unwrap().fingerprint(),
+            source.fingerprint()
+        );
+        let expected = CompiledSongPatch::compile_initial(&source)
+            .unwrap()
+            .render_default(meldritch_core::FrameRange::new(0, u64::from(host.frames)).unwrap())
+            .unwrap();
+        for (frame, sample) in expected.samples().iter().enumerate() {
+            assert_eq!(audio.frame(frame as u32).unwrap(), &[*sample, *sample]);
+        }
+        let session =
+            std::fs::read_to_string(host.capture.session.as_ref().unwrap().path()).unwrap();
+        let baseline = load_native_capture_baseline(project.root(), &session).unwrap();
+        let (mut replay, _) = AppController::new_empty_project(&project).unwrap();
+        replay.enable_native_project_source(baseline).unwrap();
+        let document: toml::Value = toml::from_str(&session).unwrap();
+        for event in document["events"].as_array().unwrap() {
+            let envelope =
+                NativeCommandEnvelope::decode(&toml::to_string(&event["native"]).unwrap()).unwrap();
+            replay.dispatch(envelope.command.into()).unwrap();
+            assert_eq!(
+                envelope.source_after,
+                format!("{:016x}", replay.authored_source().unwrap().fingerprint())
+            );
+        }
+        assert_eq!(
+            replay.authored_source().unwrap().fingerprint(),
+            source.fingerprint()
+        );
+        assert!(host.stream.is_none());
+    }
 
     struct ProjectFixture {
         path: PathBuf,

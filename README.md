@@ -40,6 +40,17 @@ legacy/native entries, symlinks and external entry edits diagnose explicitly.
 The composed native-key workflow is accepted headlessly, including fresh-process
 reopen and exact deterministic oscillator rendering. Native captures embed their
 opening source so subsequent saves cannot erase the reconstruction baseline.
+For MicroLab mk3 or another MIDI keyboard, `meldritch midi-keyboard-check` lists
+inputs without a song or audio. `meldritch midi-keyboard-check --port MicroLab
+--seconds 20` monitors decoded notes, velocity, bend and CCs. Start a native project
+with `meldritch open-project . --midi-keyboard MicroLab`; select a pattern and open
+**Ctrl-N** in construction mode. Notes insert at the cursor with MIDI velocity;
+arrows move the cursor. Close the editor and use Space to play the independently
+bound pattern, then Ctrl-S to save. This checkpoint provides step entry;
+key-held live audition, pedal/bend performance routing and timed recording are
+still queued. Port matching is explicit and rejects ambiguity; reconnect retries
+without accepting stale messages. Headless entry/publication/persistence tests
+pass; MicroLab port discovery/connection has been observed, gestures/listening have not.
 In construction, **PageUp/PageDown** selects palette patterns at the overview or
 pattern editor. Selection keeps bindings unchanged; **p/g** explicitly binds the
 selected pattern's pitch/gate. This lets melody and rhythm come from different

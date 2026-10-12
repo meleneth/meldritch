@@ -7,6 +7,18 @@ issue source edits; they are not automatically performance overlays. Dynamic
 patch interfaces and coherent graph/interface revisions are future requirements.
 Lua remains declarative on the bounded control plane.
 
+Native project keyboard input now has explicit `open-project --midi-keyboard`
+port selection and a standalone `midi-keyboard-check` diagnostic. CLI keyboard.rs
+owns unique matching, connection/reconnect probes and a bounded MidiInputQueue;
+callbacks only enqueue observations. devices::keyboard_step_command lowers
+note-on into the visible construction palette editor's existing EditNote/SelectNote
+commands. The selected cursor/pattern is resolved on the control thread, and
+capture checkpoints surround accepted dispatches. Other messages/modes never edit.
+Dropped observations are reported and old connection epochs invalidate queued
+events. Live voice allocation, sustain/bend routing and timed keyboard capture
+remain unimplemented. MicroLab mk3 discovery and input connection were observed;
+physical key/pedal gestures and listening have not been accepted.
+
 Composed authoring now adds `{name="save_project"}` through the existing typed
 host bridge. It requests a unique authored Lua export and does not render or
 mutate musical state. The version-1 `kind="project"` envelope composes existing

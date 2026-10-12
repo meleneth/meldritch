@@ -149,6 +149,21 @@ tempo and split-render tests pass, audible assertions show expected modulation,
 and save/reopen preserves the graph. Depends on slice 1; slice 2 supplies expanded
 instance-scope acceptance without blocking the first mono demonstration.
 
+### User-prioritized keyboard work alongside slices 3–4
+
+Example 36's MIDI entry
+checkpoint now connects the MicroLab mk3/generic keyboard to native construction
+patterns through existing typed edits, capture, worker publication and save/reopen.
+Unique port matching, bounded queues, stale epochs, mode gating and overlap
+rejection are checked headlessly; host discovery/connection was observed.
+Next, author an explicit live Pitch/Gate source binding and play a selected mono
+instance without changing its saved patterns. Accept note-on/off/zero-velocity,
+retrigger and all-notes cleanup on overflow/disconnect/target changes, runtime/source
+separation, bounded worker/callback scheduling and deterministic capture. Show
+measured latency and listening evidence separately. Sustain/bend must have authored
+routing; do not emulate live audition by rewriting patterns or looping a held-note
+PCM buffer. Reuse the existing voice compiler and scheduler, not a second engine.
+
 ### 4. Normalled patch and an atomic dynamic interface recipe
 
 **Scenario/example:** proposed `37-normalled-patch-recipe`: a default envelope
