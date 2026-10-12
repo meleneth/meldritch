@@ -8,6 +8,7 @@ use crate::{ControlPlane, Input, Result, SurfaceFrame};
 pub struct ObservedMidi {
     pub device: std::sync::Arc<str>,
     pub bytes: [u8; 3],
+    pub binding_epoch: u64,
     current: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 impl ObservedMidi {
@@ -38,6 +39,7 @@ impl MidiInputQueue {
             sender: self.sender.clone(),
             dropped: self.dropped.clone(),
             current: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            binding_epoch: Default::default(),
         }
     }
     pub fn next(&self) -> Option<ObservedMidi> {
@@ -54,8 +56,13 @@ pub struct MidiInputRoute {
     sender: std::sync::mpsc::SyncSender<ObservedMidi>,
     dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,
     current: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    binding_epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 impl MidiInputRoute {
+    pub fn set_binding_epoch(&self, epoch: u64) {
+        self.binding_epoch
+            .store(epoch, std::sync::atomic::Ordering::Release);
+    }
     /// Invalidate every queued observation from this connection, without
     /// disturbing another connection's FIFO entries or accepted domain facts.
     pub fn invalidate(&self) {
@@ -72,6 +79,9 @@ impl MidiInputRoute {
             .try_send(ObservedMidi {
                 device: self.device.clone(),
                 bytes,
+                binding_epoch: self
+                    .binding_epoch
+                    .load(std::sync::atomic::Ordering::Acquire),
                 current: self.current.clone(),
             })
             .is_err()

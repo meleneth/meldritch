@@ -294,7 +294,15 @@ held priority, independent signals, reset epochs, atomic rejection, source/mode
 ownership, typed capture at frames above u32 and exact reconstructed worker PCM.
 Fresh authored Lua reload restores defaults. MIDI note lowering preserves epoch,
 frame/channel and zero-velocity release; unsupported control input stays unmapped.
-This is not timed device replay or production disconnect/overflow handling.
+Native audition now tests production disconnect/overflow handling headlessly with
+the shared worker and callback: `cargo test -p meldritch-cli keyboard` compares
+held-note PCM past one bar, retrigger/fallback/release, mode/source ownership,
+source/transport cleanup and typed capture reconstruction. A paused-worker test
+proves the event budget reserves release and rejects before acceptance at u64
+frames above u32. `cargo test -p meldritch-audio --test streaming_audio` checks
+timed finite publication, stale/late data, ring fullness, callback transport cleanup
+and zero allocations/deallocations. Physical interaction/deadlines, timestamps,
+simultaneous arranged/live routing and timed device replay are not accepted.
 
 Add later:
 - offline render throughput

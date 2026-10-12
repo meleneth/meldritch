@@ -1,0 +1,20 @@
+# Native project, main.project.lua from this directory; explicit mono bass-instance.
+# meldritch open-project . --midi-keyboard MicroLab
+# Space transport is stopped for the first audition subset.
+F9
+# Bind the selected active instance. Open the shared device stream lazily.
+# Wait through the documented four-second startup mute + 100ms fade.
+midi 90 30 7f
+# C3 pitch then high gate. Hold beyond the authored bar: oscillator/LFO continue,
+# no pattern retrigger, no looping held-note PCM and no authored note edit.
+midi 91 37 7f
+# G3 on channel 1 becomes the newest key and retriggers.
+midi 91 37 00
+# Zero velocity releases G3; resumes held C3 without retrigger.
+Ctrl-Tab
+# Mode changes preserve held state and DSP; no construction step entry while bound.
+midi 80 30 00
+# Final release follows the authored envelope/VCA; the base fixture becomes silent.
+F9
+# Unbind, discard queued input and buffered audition audio. Selection changes
+# never retarget a held gesture. Save/reopen restores definitions, no live binding.

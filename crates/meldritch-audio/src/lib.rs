@@ -9,6 +9,7 @@ pub mod device_output;
 pub mod published_audio;
 pub mod realtime_queue;
 pub mod realtime_status;
+pub mod streaming_audio;
 pub mod transport;
 
 #[derive(Clone, Debug, PartialEq)]

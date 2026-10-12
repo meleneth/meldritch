@@ -15,7 +15,17 @@ note-on into the visible construction palette editor's existing EditNote/SelectN
 commands. The selected cursor/pattern is resolved on the control thread, and
 capture checkpoints surround accepted dispatches. Other messages/modes never edit.
 Dropped observations are reported and old connection epochs invalidate queued
-events. Live voice allocation, sustain/bend routing and timed keyboard capture
+events. F9 now binds an explicit active native mono instance while transport is
+stopped. Callback observations carry a binding epoch captured at ingress; new
+bindings/resets discard old queued input. LiveKeyboardWorker accepts timed typed
+keys and their independent Pitch/Gate outputs at one locked worker frontier,
+then renders the shared MonoState kernel off the audio thread. A fixed timed PCM
+ring feeds the existing output callback. Overflow/disconnect resets clear held keys
+and invalidate buffered audio; accepted pending events remain ordered, with one
+reserved release slot. Mode/selection never retarget held gestures. Source or
+transport changes release binding; source changes start a fresh voice after F9,
+not migrated DSP state. Unsupported controls stay unmapped. Sustain/bend/velocity
+adapters, polyphonic/simultaneous pattern/live routing and timed device replay
 remain unimplemented. MicroLab mk3 discovery and input connection were observed;
 physical key/pedal gestures and listening have not been accepted.
 

@@ -434,6 +434,12 @@ pub fn project_save_key(key: KeyEvent) -> bool {
                 && !key.modifiers.contains(KeyModifiers::ALT)))
 }
 
+pub fn project_keyboard_key(key: KeyEvent) -> bool {
+    key.kind == KeyEventKind::Press
+        && key.code == KeyCode::F(9)
+        && key.modifiers == KeyModifiers::NONE
+}
+
 /// Reuse accepted editor bindings while the project has no playable composition.
 /// Transport/backing showcase actions are not exposed by this silent cockpit.
 pub fn project_editor_action(key: KeyEvent, view: &AppViewModel) -> Option<TuiAction> {
@@ -668,6 +674,9 @@ pub fn run_empty_project(project: &ProjectDirectory) -> io::Result<()> {
 
 /// Host adapters own devices and the existing song renderer; the TUI owns neither.
 pub trait ProjectPlaybackHost {
+    fn toggle_keyboard(&mut self, _app: &mut AppController) -> Result<(), String> {
+        Err("No MIDI keyboard host attached".into())
+    }
     fn persistence_status(&self, _app: &AppController) -> String {
         "Unsaved authored project".into()
     }
@@ -702,7 +711,9 @@ fn draw_project_performance(
             "{} active patch instances · Authored definitions retained",
             source.active_pattern_voices().count()
         )),
-        Line::from("Space: play/stop · Ctrl-Tab: construction · q/Esc: quit"),
+        Line::from(
+            "Space: play/stop · F9: MIDI audition (stopped) · Ctrl-Tab: construction · q/Esc: quit",
+        ),
         Line::from("Up/Down: select · Left/Right: level · Home: mute · End: default"),
         Line::from("Ctrl-S/F6: save project · capture does not replace saving"),
         Line::from(status.to_owned()),
@@ -812,8 +823,11 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                     );
                 }
             })?;
-            if event::poll(Duration::from_millis(100))?
-                && let Event::Key(key) = event::read()?
+            if event::poll(Duration::from_millis(if model.keyboard.voice.is_some() {
+                5
+            } else {
+                100
+            }))? && let Event::Key(key) = event::read()?
             {
                 let editing = model.instrument_editor.as_ref().is_some_and(|e| e.visible)
                     || model
@@ -837,6 +851,13 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                     status = match host.save_project(app) {
                         Ok(message) => message,
                         Err(error) => format!("Save failed; authored edits retained: {error}"),
+                    };
+                    continue;
+                }
+                if project_keyboard_key(key) {
+                    status = match host.toggle_keyboard(app) {
+                        Ok(()) => "Keyboard audition binding changed · F9 to release".into(),
+                        Err(error) => format!("Keyboard audition unavailable: {error}"),
                     };
                     continue;
                 }

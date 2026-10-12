@@ -218,9 +218,10 @@ are reused, but physical listening and continuous graph-state migration stay ope
 Required evidence: exact existing offline PCM, varied block partitions, pitch
 under held Gate, explicit retrigger/reset, envelope release/filter tail and variable
 LFO phase continuity, invalid-block recovery, u64 timeline and unchanged source.
-Device-facing live MIDI routing, streaming publication, audition, sustain/bend
-and device-clock timed capture remain unimplemented in this checkpoint. The app
-runtime lifecycle extension below supplies typed key ownership and capture.
+The renderer foundation alone does not provide device-facing routing/publication.
+The app lifecycle and stopped-transport audition extensions below now supply
+bounded typed key ownership, streaming and capture. Sustain/bend adapters and
+device-clock timed capture/replay remain unimplemented.
 
 Evidence: live_mono_worker_blocks_preserve_existing_pcm_and_u64_event_timing checks
 varied partitions against existing offline PCM for tremolo, cabled reset,
@@ -250,8 +251,8 @@ at import; legacy sources cannot be bound. All invalid/keyboard-lifecycle.toml
 cases require automated evidence. Equal frames preserve dispatch order.
 Explicit ResetKeyboard reasons Disconnect, Overflow and Panic clear held keys,
 release once and advance the epoch. Old queued commands cannot affect new state.
-An adapter must perform this reset and discard pre-reset queued observations
-after transport overflow/disconnect; that production integration is still open.
+The audition adapter below now performs these resets and discards pre-reset
+queued observations after overflow/disconnect.
 
 Mode and inspector selection preserve binding. Accepted authored revision changes
 invalidate it, clear held keys and require explicit rebinding; this is a fresh
@@ -271,8 +272,60 @@ preservation, authored invalidation and same-pitch/channel identity.
 devices::keyboard_key_command lowers valid note packets with caller-supplied
 epoch/frame; velocity-zero releases, channel 15 and u64 frames are retained.
 Malformed packets, sustain/modulation/bend are not lowered to implicit controls.
-There is no TUI live binding gesture or device streaming in this checkpoint;
-MicroLab production support remains pattern step entry plus diagnostic.
+This lifecycle checkpoint is extended by the production audition contract below.
+
+## Stopped-transport keyboard audition checkpoint
+
+keyboard-audition.txt demonstrates F9 binding of the selected active native mono
+instance. Explicit --midi-keyboard selection is required; no-keyboard/no-selection,
+inactive target and pending/playing transport reject before device/binding edits.
+F9 unbinds a current target; selection and Ctrl-Tab preserve it. MIDI keys while
+bound never author notes, regardless of editor/mode. Authored revisions invalidate
+binding and require fresh F9; Play/Stop/Rewind release it. Saves/reopen retain only
+authored definitions. Audition is mono while arrangement is stopped in this subset;
+simultaneous pattern/live routing remains a future requirement.
+
+Use the existing mono compiler/LiveMonoRenderer on a worker. Render 256-frame
+blocks, normally at most 1024 frames ahead, into a fixed 4096-frame timed PCM ring.
+Device clock and event frames are u64. Acceptance and scheduling share one locked
+frontier on control/worker threads; the callback never takes that lock. MIDI
+observations retain connection validity plus ingress binding epoch. Queued input
+must not retarget after binding/reset. The callback copies finite PCM and rejects
+stale/late data, without allocation/deallocation, DSP, files or logging. Advance
+clock through silence and reject late samples instead of replaying them later.
+On underflow, worker DSP catches up through skipped frames. Preserve state across
+normal blocks and modes; never loop a held-note PCM clip. Existing device startup
+mute/fade and safety conversion apply. Display held target/count and gap telemetry.
+
+At most 128 events enter a live block; ordinary dispatch stops at 126 pending
+events, preserving room for a low Gate reset. Overflow/disconnect reset typed
+app state, retain already accepted ordered events, invalidate buffered PCM and
+drop pre-reset ingress. Unsupported CC/bend input must not trigger a reset or
+implicit parameter change. Reset may briefly silence output; this contract does
+not claim click-free transition or DSP-state migration.
+
+Evidence: native_keyboard_audition_streams_shared_dsp_and_cleans_lost_input compares
+real worker and production callback PCM with the shared direct renderer beyond
+one bar, including retrigger/fallback/final release. It verifies source Arc/FP,
+mode continuity, stale ingress, overflow/disconnect, authored/transport invalidation,
+unbind and typed capture reconstruction with headless transport consumption.
+pending_keyboard_budget_reserves_release_and_rejects_before_acceptance executes
+deterministic backpressure at a u64 origin above u32. audio/tests/streaming_audio.rs
+checks timed ring negatives, stale epochs/gaps/late data, transport cleanup,
+conversion/clamp and zero callback allocation/deallocation. Negative cases are
+listed in invalid/keyboard-audition.toml. Existing authored reload tests still
+exclude live state. Device-opening failure reports unavailable audio with edits
+retained; physical gestures/listening/latency are not headless acceptance.
+
+Timestamped capture retains accepted scheduled frames, resets and fingerprints.
+If checkpoint failure prevents input processing, release audition with a typed
+unbind retained in bounded history for retry. Do not leave a sounding held gate
+dependent on filesystem recovery. native_keyboard_capture_failure_releases_audition_and_retries_typed_cleanup
+proves repair records the accepted key and cleanup exactly once. Ordinary
+arrangement playback is unaffected by disabling this audition lane.
+It does not yet record exact device-consumption gaps/activation or implement timed
+replay. MIDI timestamp mapping, velocity/sustain/bend adapters, polyphonic input,
+simultaneous arranged/live routes and deadline measurements remain deferred.
 
 ## Remaining full Slice 3 contract
 

@@ -138,6 +138,7 @@ pub struct PublishedAudioRenderer {
     error_reporter: StreamErrorReporter,
     last_missing_chunk: Option<usize>,
     startup_gain: Option<StartupGain>,
+    streaming: Option<crate::streaming_audio::StreamingConsumer>,
 }
 
 impl PublishedAudioRenderer {
@@ -207,6 +208,7 @@ impl PublishedAudioRenderer {
             error_reporter,
             last_missing_chunk: None,
             startup_gain: None,
+            streaming: None,
         })
     }
 
@@ -220,16 +222,28 @@ impl PublishedAudioRenderer {
         self.fill(output)
     }
 
+    pub fn with_streaming(mut self, consumer: crate::streaming_audio::StreamingConsumer) -> Self {
+        self.streaming = Some(consumer);
+        self
+    }
+
     fn fill<T>(&mut self, output: &mut [T]) -> bool
     where
         T: DeviceSample + FromSample<Sample>,
     {
         self.apply_commands();
+        if let Some(streaming) = &mut self.streaming {
+            streaming.begin_callback();
+        }
         let audio = self.audio.snapshot();
         let mut finished = false;
         let mut callback_underrun = false;
         let mut rendered = false;
         for output_frame in output.chunks_mut(self.device_channels) {
+            let live = self
+                .streaming
+                .as_mut()
+                .map_or(0.0, |streaming| streaming.next_sample());
             let gain = if let Some(startup) = &mut self.startup_gain {
                 let gain = startup.next();
                 if startup.complete() {
@@ -241,7 +255,7 @@ impl PublishedAudioRenderer {
             };
             let Some(frame) = self.transport.next_frame() else {
                 for sample in output_frame {
-                    *sample = T::from_sample(0.0);
+                    *sample = T::from_sample(live.clamp(-1.0, 1.0) * gain);
                 }
                 finished = self.transport.is_finished();
                 continue;
@@ -256,14 +270,14 @@ impl PublishedAudioRenderer {
                         let sample = if gain == 0.0 {
                             0.0
                         } else {
-                            source_frame[source_channel].clamp(-1.0, 1.0) * gain
+                            (source_frame[source_channel] + live).clamp(-1.0, 1.0) * gain
                         };
                         *output_sample = T::from_sample(sample);
                     }
                 }
                 Err(chunk_index) => {
                     for sample in output_frame {
-                        *sample = T::from_sample(0.0);
+                        *sample = T::from_sample(live.clamp(-1.0, 1.0) * gain);
                     }
                     callback_underrun = true;
                     if self.last_missing_chunk != Some(chunk_index) {
@@ -288,6 +302,11 @@ impl PublishedAudioRenderer {
 
     fn apply_commands(&mut self) {
         while let Some(command) = self.commands.try_pop() {
+            // Audition is independent of stopped arrangement transport. Every
+            // explicit transport action invalidates it before another sample.
+            if let Some(streaming) = &self.streaming {
+                streaming.deactivate();
+            }
             match command {
                 TransportCommand::Play => self.transport.play(),
                 TransportCommand::Stop => self.transport.stop(),
@@ -330,6 +349,17 @@ impl RealtimePlaybackSession {
         control: &PlaybackControl,
         engine: PlaybackEngine,
     ) -> Result<Self, String> {
+        Self::open_default_streaming(audio, sample_rate, loops, control, engine, None)
+    }
+
+    pub fn open_default_streaming(
+        audio: AudioSnapshotReader,
+        sample_rate: SampleRate,
+        loops: u32,
+        control: &PlaybackControl,
+        engine: PlaybackEngine,
+        streaming: Option<crate::streaming_audio::StreamingConsumer>,
+    ) -> Result<Self, String> {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -346,6 +376,7 @@ impl RealtimePlaybackSession {
         let command_monitor = control.command_monitor.clone();
         let status_monitor = control.status_monitor.clone();
         let mut state = PublishedAudioRenderer::from_engine(audio, config.channels, loops, engine)?;
+        state.streaming = streaming;
         state.mute_device_startup(config.sample_rate);
         let error_reporter = state.error_reporter();
         let stream = build_stream(

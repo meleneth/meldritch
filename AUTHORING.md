@@ -88,10 +88,14 @@ kernel with independent u64 Pitch/Gate events and proved block-state continuity.
 App-owned BindKeyboard/KeyboardKey/ResetKeyboard now provide named mono binding,
 128-key channel-aware last-pressed priority, retrigger/fallback/release and reset
 epochs. Native capture reconstructs identical worker events/PCM without changing
-authored source; saves restore no held-key state. Next connect an explicit binding
-gesture and epoch-tagged MIDI ingress to bounded worker streaming, including
-overflow/disconnect reset and source/transport cleanup. These APIs are not yet
-connected to production key-held audio.
+authored source; saves restore no held-key state. F9 now connects named mono
+audition, ingress binding epochs and overflow/disconnect resets to a shared-kernel
+worker and bounded timed PCM callback lane. Arrangement must be stopped; source
+or transport edits release it, and mode/selection preserve it. Headless held-key
+audio/capture and callback allocation safety pass; physical listening is pending.
+Next author the smallest explicit velocity/sustain/bend signal adapter example,
+keeping pitch/gate independent and reusing this path. Simultaneous arranged/live
+routing and broader clock/graph activation require separate accepted contracts.
 Reuse it with the existing voice compiler, scheduler and safe worker/
 publication boundary. Key-held performance must not rewrite saved patterns or
 patch defaults. Prove retrigger/release, zero-velocity release, overflow/disconnect/

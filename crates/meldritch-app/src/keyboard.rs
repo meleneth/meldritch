@@ -39,6 +39,12 @@ impl KeyboardState {
 }
 
 impl AppController {
+    pub fn keyboard_transport_stopped(&self) -> bool {
+        !self.transport_requested_playing
+            && self.playback.command_diagnostics().applied >= self.transport_commands_submitted
+            && self.playback.status_monitor().snapshot().state
+                == meldritch_audio::transport::TransportState::Stopped
+    }
     #[must_use]
     pub fn keyboard(&self) -> &KeyboardView {
         &self.keyboard.view
@@ -63,6 +69,9 @@ impl AppController {
         match command {
             AppCommand::BindKeyboard { voice, .. } => {
                 if let Some(id) = voice {
+                    if !self.keyboard_transport_stopped() {
+                        return Err(fail("stop transport before keyboard audition"));
+                    }
                     let source = self
                         .authored_source()
                         .ok_or_else(|| fail("no project source"))?;

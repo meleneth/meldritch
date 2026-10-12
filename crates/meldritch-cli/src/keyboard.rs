@@ -32,6 +32,9 @@ pub(crate) struct NativeKeyboard {
     selection: String,
     queue: MidiInputQueue,
     connection: Option<Connection>,
+    input_route: Option<MidiInputRoute>,
+    binding_epoch: u64,
+    disconnected: bool,
     next_probe: Instant,
     pub(crate) status: String,
 }
@@ -46,6 +49,9 @@ impl NativeKeyboard {
                 selection: "simulated".into(),
                 queue,
                 connection: None,
+                input_route: Some(route.clone()),
+                binding_epoch: 0,
+                disconnected: false,
                 next_probe: Instant::now() + Duration::from_secs(60),
                 status: "MIDI: simulated construction entry".into(),
             },
@@ -58,6 +64,9 @@ impl NativeKeyboard {
             selection,
             queue: MidiInputQueue::default(),
             connection: None,
+            input_route: None,
+            binding_epoch: 0,
+            disconnected: false,
             next_probe: Instant::now(),
             status: String::new(),
         };
@@ -94,6 +103,7 @@ impl NativeKeyboard {
         if self.connection.is_none() {
             if let Some(index) = index {
                 let route = self.queue.route("keyboard");
+                route.set_binding_epoch(self.binding_epoch);
                 let callback_route = route.clone();
                 let connection = midi
                     .connect(
@@ -106,6 +116,7 @@ impl NativeKeyboard {
                     )
                     .map_err(|e| format!("MIDI keyboard connection failed: {e}"))?;
                 self.status = format!("MIDI: connected {}", names[index]);
+                self.input_route = Some(route.clone());
                 self.connection = Some(Connection {
                     _input: connection,
                     route,
@@ -120,12 +131,37 @@ impl NativeKeyboard {
     }
 
     fn disconnect(&mut self) {
+        if let Some(route) = self.input_route.take() {
+            route.invalidate();
+            self.disconnected = true;
+        }
         if let Some(connection) = self.connection.take() {
             connection.route.invalidate();
         }
     }
+    #[cfg(test)]
+    pub(crate) fn simulate_disconnect(&mut self) {
+        self.disconnect();
+    }
 
-    pub(crate) fn poll(&mut self) {
+    pub(crate) fn set_binding_epoch(&mut self, epoch: u64) {
+        self.binding_epoch = epoch;
+        if let Some(route) = &self.input_route {
+            route.set_binding_epoch(epoch);
+        }
+        // Only the control thread drains; packets racing this change retain
+        // their captured epoch and are rejected at dispatch.
+        for _ in 0..meldritch_control::QUEUE_CAPACITY {
+            if self.next().is_none() {
+                break;
+            }
+        }
+    }
+    pub(crate) fn binding_epoch(&self) -> u64 {
+        self.binding_epoch
+    }
+
+    pub(crate) fn poll(&mut self) -> Option<meldritch_app::KeyboardResetReason> {
         if Instant::now() >= self.next_probe
             && let Err(error) = self.probe()
         {
@@ -137,7 +173,11 @@ impl NativeKeyboard {
         if dropped != 0 {
             self.status =
                 format!("MIDI: dropped {dropped} messages; entry is not lossless recording");
+            self.disconnected = false;
+            return Some(meldritch_app::KeyboardResetReason::Overflow);
         }
+        std::mem::take(&mut self.disconnected)
+            .then_some(meldritch_app::KeyboardResetReason::Disconnect)
     }
 
     pub(crate) fn next(&self) -> Option<meldritch_control::devices::ObservedMidi> {

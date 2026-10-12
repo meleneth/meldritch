@@ -2185,7 +2185,15 @@ impl AppController {
         let source_after = self.authored_source().map(|source| source.fingerprint());
         // A binding belongs to the compiled authored revision. Source changes
         // require an explicit fresh binding; UI selection/mode changes do not.
-        if source_before != source_after {
+        if source_before != source_after && self.keyboard.view.voice.is_some() {
+            self.keyboard.invalidate();
+        }
+        if self.keyboard.view.voice.is_some()
+            && matches!(
+                command,
+                AppCommand::Play | AppCommand::Stop | AppCommand::Rewind
+            )
+        {
             self.keyboard.invalidate();
         }
         self.record(CommandRecord {

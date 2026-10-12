@@ -138,9 +138,14 @@ FM/harmonic Plaits are checked headlessly. App-owned keyboard lifecycle now has
 typed explicit active-mono binding, bounded channel/key priority, independent
 Pitch/Gate, reset epochs and deterministic captured-command/worker PCM replay.
 Authored revisions invalidate binding; UI selection/mode preserve it. MIDI
-lowering carries explicit epoch/frame and velocity-zero releases. Production
-binding UI, transport cleanup integration, streaming publication and device
-audition remain open; connect these existing components next.
+lowering carries explicit epoch/frame and velocity-zero releases. Native F9 now
+binds the selected active mono instance while arrangement transport is stopped.
+One worker streams 256-frame shared-kernel blocks into a fixed timed PCM ring
+consumed by the existing callback. Ingress epochs, overflow/disconnect cleanup,
+source/transport release, mode continuity and exact held-key PCM beyond a bar are
+checked headlessly. Callback allocation/deallocation tests pass. Physical
+gestures/listening/deadlines, velocity/sustain/bend adapters, polyphonic and
+simultaneous arranged/live routing, and timed device replay remain open.
 Example 35's native pattern-selection checkpoint is implemented: PgUp/PgDn
 selects palette material without rebinding, source/runtime mutation or rerender;
 typed capture and independent-source persistence/render tests pass. Its full

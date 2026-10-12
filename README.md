@@ -46,11 +46,17 @@ inputs without a song or audio. `meldritch midi-keyboard-check --port MicroLab
 with `meldritch open-project . --midi-keyboard MicroLab`; select a pattern and open
 **Ctrl-N** in construction mode. Notes insert at the cursor with MIDI velocity;
 arrows move the cursor. Close the editor and use Space to play the independently
-bound pattern, then Ctrl-S to save. This checkpoint provides step entry;
-key-held live audition, pedal/bend performance routing and timed recording are
-still queued. Port matching is explicit and rejects ambiguity; reconnect retries
+bound pattern, then Ctrl-S to save. With transport stopped, **F9** binds the selected
+active mono instance for held-key audition; F9 again releases it. Wait through the
+device's four-second startup mute and 100 ms fade. Mode/selection changes preserve
+the binding; starting transport or editing authored source releases it. Held keys
+do not create pattern notes, even with the pattern editor open. The same worker
+DSP continues across short streaming blocks. Sustain/bend, live velocity routing,
+simultaneous pattern/live routing and timed recording remain queued.
+Port matching is explicit and rejects ambiguity; reconnect retries
 without accepting stale messages. Headless entry/publication/persistence tests
-pass; MicroLab port discovery/connection has been observed, gestures/listening have not.
+pass, including shared worker/callback held-key audition. MicroLab port
+discovery/connection has been observed; physical gestures/listening have not.
 In construction, **PageUp/PageDown** selects palette patterns at the overview or
 pattern editor. Selection keeps bindings unchanged; **p/g** explicitly binds the
 selected pattern's pitch/gate. This lets melody and rhythm come from different

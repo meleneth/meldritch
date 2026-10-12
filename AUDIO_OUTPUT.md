@@ -1,5 +1,29 @@
 # Live output startup
 
+Native F9 MIDI audition now adds one bounded timed mono PCM lane to the existing
+device callback. The shared mono DSP kernel runs on a named worker in 256-frame
+blocks, normally at most 1024 frames ahead; the ring holds at most 4096 frames.
+The callback copies atomic PCM slots, advances a u64 device-frame clock through
+silence/stopped transport, rejects stale epochs/late frames and applies the same
+startup gain, safety clamp and sample-format conversion. It never executes DSP,
+locks the worker or drops PCM heap owners. Stale-slot examination is bounded to
+the ring capacity per callback. Missing data yields silence with gap telemetry;
+the worker advances DSP through missed frames rather than replaying old samples.
+
+Audition currently requires stopped arrangement transport. Play/Stop/Rewind
+disable buffered audition before the next callback samples; F9/source changes
+also invalidate it. This is fresh-voice audition and continuous DSP within a fixed
+graph, not graph migration or simultaneous arranged/live routing. Reset may
+introduce a brief silence while stale buffered PCM is discarded. Frame scheduling
+uses the locked render frontier, not MIDI timestamps or a claimed DAC clock.
+Run `cargo test -p meldritch-audio --test streaming_audio` for timed publication,
+stale/late/backpressure negatives and zero callback allocation/deallocation.
+CLI keyboard audition tests compare production worker/callback PCM with the
+shared renderer past a full authored bar and cover input loss and capture facts.
+Physical listening/deadlines and timed replay remain unverified.
+Capture checkpoint failure releases audition through typed cleanup retained for
+retry, so filesystem failure cannot indefinitely sustain a keyboard gate.
+
 Every newly opened audio-device stream starts at zero output gain for four
 seconds, then rises linearly to unity over 100 ms. Timing uses the actual
 configured device sample rate and counts output frames, including silence while

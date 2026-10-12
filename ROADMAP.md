@@ -156,8 +156,8 @@ checkpoint now connects the MicroLab mk3/generic keyboard to native construction
 patterns through existing typed edits, capture, worker publication and save/reopen.
 Unique port matching, bounded queues, stale epochs, mode gating and overlap
 rejection are checked headlessly; host discovery/connection was observed.
-Next, author an explicit live Pitch/Gate source binding and play a selected mono
-instance without changing its saved patterns. Accept note-on/off/zero-velocity,
+The bounded keyboard objective now supports explicit live Pitch/Gate binding and
+playing a named mono instance without changing its saved patterns. Accept note-on/off/zero-velocity,
 retrigger and all-notes cleanup on overflow/disconnect/target changes, runtime/source
 separation, bounded worker/callback scheduling and deterministic capture. Show
 measured latency and listening evidence separately. Sustain/bend must have authored
@@ -169,10 +169,13 @@ Varied partitions exactly match offline tremolo/reset/rate/filter/release and
 FM/harmonic Plaits; independent pitch/gate and atomic rejection are checked.
 App runtime lifecycle now adds explicit named-mono binding, bounded channel/key
 priority, retrigger/fallback/release and cleanup epochs. Capture reconstructs
-identical worker events/PCM without changing authored source. Next connect an
-explicit binding gesture, epoch-tagged ingress and disconnect/overflow resets
-to device-facing streaming publication. Live audition and device-clock timing
-remain unimplemented; sustain/bend/velocity need explicit adapters.
+identical worker events/PCM without changing authored source. Native F9 now
+connects stopped-transport mono audition, epoch-tagged ingress and loss cleanup
+to the existing callback through a bounded timed PCM ring and shared-DSP worker.
+Headless held-key PCM, source/runtime capture and callback allocation safety pass.
+Next accept explicit velocity/sustain/bend adapters and physical interaction.
+Simultaneous arranged/live routing, MIDI/device timestamp mapping, timed replay
+and graph-state preservation remain separate unfinished contracts.
 
 ### 4. Normalled patch and an atomic dynamic interface recipe
 

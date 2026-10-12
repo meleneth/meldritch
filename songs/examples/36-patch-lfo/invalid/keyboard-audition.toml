@@ -1,0 +1,3 @@
+cases = ["no-keyboard", "no-selection", "device-unavailable", "playing-bind", "stale-input", "midi-overflow", "disconnect", "pending-budget", "source-change", "transport-cleanup", "capture-write-failure"]
+# Audio ring negatives: no partial publication or non-finite device sample.
+ring_cases = ["zero-capacity", "empty-batch", "nonfinite", "full", "backwards", "frame-overflow"]

@@ -8,7 +8,10 @@ note; arrows move time. Releases, bend/pedal messages, hidden editors and perfor
 mode never author notes. Pitch/gate bindings remain explicit and independent.
 Save/capture reuse native project paths. Use `meldritch midi-keyboard-check` to list
 ports and `--port MicroLab --seconds 20` to monitor input without audio or files.
-This is step entry; key-held audition and timed recording remain future work.
+Step entry remains separate from F9's stopped-transport live mono audition.
+While explicitly bound, MIDI keys never insert notes in the visible editor;
+F9 releases audition, and source/transport edits invalidate it. Timed recording
+and explicit velocity/sustain/bend adapters remain future work.
 
 The first piano-roll slice creates and edits a synth-backed note pattern using
 the existing note compiler, background worker and audio publication. Rust owns

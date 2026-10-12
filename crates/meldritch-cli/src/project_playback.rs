@@ -22,9 +22,56 @@ pub(crate) struct NativeProjectAudio {
     ready_generation: Option<u64>,
     frames: u32,
     keyboard: Option<crate::keyboard::NativeKeyboard>,
+    live: Option<crate::live_keyboard::LiveKeyboardWorker>,
+    live_producer: Option<meldritch_audio::streaming_audio::StreamingProducer>,
+    live_consumer: Option<meldritch_audio::streaming_audio::StreamingConsumer>,
+    live_control: meldritch_audio::streaming_audio::StreamingControl,
+    #[cfg(test)]
+    headless_output: bool,
 }
 
 impl NativeProjectAudio {
+    fn ensure_stream(&mut self, app: &AppController) -> Result<(), String> {
+        #[cfg(test)]
+        if self.headless_output {
+            return Ok(());
+        }
+        if self.stream.is_none() {
+            let source = app.authored_source().ok_or("no project source")?;
+            let engine = self.engine.take().ok_or(
+                "device initialization failed; audio unavailable; authored edits retained",
+            )?;
+            self.stream = Some(RealtimePlaybackSession::open_default_streaming(
+                self.reader.clone(),
+                source.performance().sample_rate(),
+                u32::MAX,
+                app.playback_control(),
+                engine,
+                self.live_consumer.take(),
+            )?);
+        }
+        Ok(())
+    }
+    fn bind_keyboard(
+        &mut self,
+        app: &mut AppController,
+        voice: Option<String>,
+    ) -> Result<(), String> {
+        if self.live.is_none() {
+            self.live = Some(crate::live_keyboard::LiveKeyboardWorker::new(
+                self.live_producer
+                    .take()
+                    .ok_or("keyboard worker unavailable")?,
+                self.live_control.clone(),
+            )?);
+        }
+        self.live.as_ref().unwrap().bind(app, voice)?;
+        self.capture.checkpoint(app)?;
+        if let Some(keyboard) = &mut self.keyboard {
+            keyboard.set_binding_epoch(app.keyboard().epoch);
+        }
+        Ok(())
+    }
     pub(crate) fn enable_keyboard(&mut self, port: String) -> Result<(), String> {
         self.keyboard = Some(crate::keyboard::NativeKeyboard::new(port)?);
         Ok(())
@@ -56,6 +103,8 @@ impl NativeProjectAudio {
         let initial = PublishedAudio::from_block(&AudioBlock::silent(2, frames), 6000)
             .map_err(|error| format!("invalid project publication: {error:?}"))?;
         let (publisher, reader) = audio_publication(initial);
+        let (live_producer, live_consumer, live_control) =
+            meldritch_audio::streaming_audio::streaming_audio(4096, 0)?;
         let patch = CompiledSongPatch::compile_initial(&source)?;
         let mut host = SongAudioHost::new(source.as_ref().clone(), patch, publisher, frames, 6000);
         if !source.pattern_voices().is_empty() || !source.compositions().is_empty() {
@@ -83,11 +132,38 @@ impl NativeProjectAudio {
             ready_generation: None,
             frames,
             keyboard: None,
+            live: None,
+            live_producer: Some(live_producer),
+            live_consumer: Some(live_consumer),
+            live_control,
+            #[cfg(test)]
+            headless_output: false,
         })
     }
 }
 
 impl ProjectPlaybackHost for NativeProjectAudio {
+    fn toggle_keyboard(&mut self, app: &mut AppController) -> Result<(), String> {
+        if app.keyboard().voice.is_some() {
+            return self.bind_keyboard(app, None);
+        }
+        if self.keyboard.is_none() {
+            return Err("open-project --midi-keyboard PORT is required".into());
+        }
+        let id = app
+            .view_model()
+            .selected_pattern_voice
+            .ok_or("select an active mono instance first")?;
+        let source = app.authored_source().ok_or("no project source")?;
+        if !source.is_pattern_voice_active(&id) {
+            return Err("selected instance is inactive".into());
+        }
+        if !app.keyboard_transport_stopped() {
+            return Err("stop transport before keyboard audition".into());
+        }
+        self.ensure_stream(app)?;
+        self.bind_keyboard(app, Some(id))
+    }
     fn persistence_status(&self, app: &AppController) -> String {
         let saved: String = if app
             .authored_source()
@@ -97,6 +173,18 @@ impl ProjectPlaybackHost for NativeProjectAudio {
         } else {
             "Unsaved authored project · Ctrl-S/F6 to save".into()
         };
+        let audition = app
+            .keyboard()
+            .voice
+            .as_deref()
+            .map_or(String::new(), |voice| {
+                format!(
+                    " · Live keys → {voice}: held {} · stream gaps {} · F9 release",
+                    app.keyboard().held_keys,
+                    self.live_control.underruns()
+                )
+            });
+        let saved = format!("{saved}{audition} · F9 MIDI audition (stopped)");
         self.keyboard
             .as_ref()
             .map_or(saved.clone(), |k| format!("{saved} · {}", k.status))
@@ -119,17 +207,69 @@ impl ProjectPlaybackHost for NativeProjectAudio {
         self.capture.checkpoint(app)
     }
     fn finish(&mut self, app: &AppController) -> Result<(), String> {
-        self.capture.finish(app)
+        self.capture.finish(app)?;
+        self.live_control.deactivate();
+        Ok(())
     }
     fn poll(&mut self, app: &mut AppController) -> Result<(), String> {
-        self.capture
-            .checkpoint(app)
-            .map_err(|error| format!("capture checkpoint: {error}"))?;
+        if let Err(error) = self.capture.checkpoint(app) {
+            // Do not leave a live gate sounding indefinitely while persistence
+            // prevents normal input/loss processing. Keep typed cleanup in the
+            // bounded app history for the same capture's later retry.
+            self.live_control.deactivate();
+            if app.keyboard().voice.is_some() {
+                if let Some(live) = &self.live {
+                    live.bind(app, None)?;
+                }
+                if let Some(keyboard) = &mut self.keyboard {
+                    keyboard.set_binding_epoch(app.keyboard().epoch);
+                }
+            }
+            return Err(format!(
+                "capture checkpoint: {error}; keyboard audition released"
+            ));
+        }
+        if let Some(live) = &self.live {
+            if let Err(error) = live.synchronize(app) {
+                self.bind_keyboard(app, None)?;
+                return Err(format!("keyboard worker: {error}"));
+            }
+        }
         if let Some(keyboard) = &mut self.keyboard {
-            keyboard.poll();
+            if keyboard.binding_epoch() != app.keyboard().epoch {
+                keyboard.set_binding_epoch(app.keyboard().epoch);
+            }
+            if let Some(reason) = keyboard.poll() {
+                if app.keyboard().voice.is_some() {
+                    self.live
+                        .as_ref()
+                        .ok_or("no live worker")?
+                        .reset(app, reason)?;
+                    self.capture.checkpoint(app)?;
+                }
+                keyboard.set_binding_epoch(app.keyboard().epoch);
+            }
             for _ in 0..meldritch_control::QUEUE_CAPACITY {
                 let Some(event) = keyboard.next() else { break };
-                if event.is_current()
+                if !event.is_current() || event.binding_epoch != app.keyboard().epoch {
+                    continue;
+                }
+                if app.keyboard().voice.is_some() {
+                    if let Err(error) = self.live.as_ref().ok_or("no live worker")?.key(
+                        app,
+                        &event.bytes,
+                        event.binding_epoch,
+                    ) {
+                        self.live
+                            .as_ref()
+                            .unwrap()
+                            .reset(app, meldritch_app::KeyboardResetReason::Overflow)?;
+                        self.capture.checkpoint(app)?;
+                        keyboard.set_binding_epoch(app.keyboard().epoch);
+                        return Err(format!("MIDI live input reset: {error}"));
+                    }
+                    self.capture.checkpoint(app)?;
+                } else if event.is_current()
                     && let Some(command) = meldritch_control::devices::keyboard_step_command(
                         &event.bytes,
                         &app.view_model(),
@@ -189,16 +329,10 @@ impl ProjectPlaybackHost for NativeProjectAudio {
             return Err("create an explicit patch instance with v before playback".into());
         }
         self.require_prepared_audio(&source)?;
-        if self.stream.is_none() {
-            let engine = self.engine.take().ok_or("device initialization failed; playback is unavailable in this cockpit; authored edits are retained")?;
-            self.stream = Some(RealtimePlaybackSession::open_default(
-                self.reader.clone(),
-                source.performance().sample_rate(),
-                u32::MAX,
-                app.playback_control(),
-                engine,
-            )?);
+        if app.keyboard().voice.is_some() {
+            self.bind_keyboard(app, None)?;
         }
+        self.ensure_stream(app)?;
         app.dispatch(AppCommand::Play)
             .map(|_| ())
             .map_err(|error| format!("{error:?}"))
@@ -215,6 +349,329 @@ mod tests {
         sync::Arc,
         time::{Duration, Instant},
     };
+
+    #[test]
+    fn native_keyboard_audition_streams_shared_dsp_and_cleans_lost_input() {
+        use meldritch_app::{AppCommandResult, CockpitMode};
+        use meldritch_core::FrameRange;
+        use meldritch_render::song_render::{LiveVoiceEvent, compile_pattern_voice};
+        let project = project();
+        let source = meldritch_control::native_project::load_native_project(
+            project.root(),
+            include_str!("../../../songs/examples/36-patch-lfo/main.project.lua"),
+        )
+        .unwrap();
+        let fingerprint = source.fingerprint();
+        let patch =
+            compile_pattern_voice(&source, &source.pattern_voices()["bass-instance"]).unwrap();
+        let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
+        app.enable_native_project_source(source).unwrap();
+        let mut host = NativeProjectAudio::new(&app, engine).unwrap();
+        assert!(host.toggle_keyboard(&mut app).is_err()); // No keyboard.
+        let (keyboard, route) = crate::keyboard::NativeKeyboard::simulated();
+        host.keyboard = Some(keyboard);
+        let mut callback = PublishedAudioRenderer::from_engine(
+            host.reader.clone(),
+            2,
+            u32::MAX,
+            host.engine.take().unwrap(),
+        )
+        .unwrap()
+        .with_streaming(host.live_consumer.take().unwrap());
+        host.headless_output = true;
+        host.poll(&mut app).unwrap();
+        let source_arc = app.authored_source().unwrap();
+        route.observe(&[0x90, 70, 127]); // Old ingress cannot be retargeted by F9.
+        host.toggle_keyboard(&mut app).unwrap();
+        assert_eq!(app.keyboard().voice.as_deref(), Some("bass-instance"));
+        route.observe(&[0x90, 48, 127]);
+        host.poll(&mut app).unwrap();
+        app.dispatch(AppCommand::SetCockpitMode(CockpitMode::Performance))
+            .unwrap();
+        host.poll(&mut app).unwrap();
+        assert_eq!(app.keyboard().held_keys, 1);
+        assert!(Arc::ptr_eq(&source_arc, &app.authored_source().unwrap()));
+        let mut reference = patch.live_renderer(48, 0).unwrap();
+        let pump =
+            |host: &mut NativeProjectAudio,
+             app: &mut AppController,
+             callback: &mut PublishedAudioRenderer,
+             reference: &mut meldritch_render::song_render::LiveMonoRenderer| {
+                let start = host.live_control.clock();
+                let end = start + 256;
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while host.live.as_ref().unwrap().frontier() < end {
+                    assert!(Instant::now() < deadline, "worker stalled");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                let events: Vec<_> = app
+                    .history()
+                    .iter()
+                    .filter_map(|record| match (&record.command, &record.result) {
+                        (
+                            AppCommand::KeyboardKey { frame, .. },
+                            AppCommandResult::KeyboardUpdated { outputs, .. },
+                        ) if *frame >= start && *frame < end => Some(
+                            outputs
+                                .iter()
+                                .copied()
+                                .map(|input| LiveVoiceEvent {
+                                    frame: *frame,
+                                    input,
+                                })
+                                .collect::<Vec<_>>(),
+                        ),
+                        _ => None,
+                    })
+                    .flatten()
+                    .collect();
+                let expected = reference
+                    .render(FrameRange::new(start, end).unwrap(), &events)
+                    .unwrap();
+                let mut output = [0.0; 512];
+                callback.render_f64(&mut output);
+                for (actual, expected) in output.chunks_exact(2).zip(
+                    expected
+                        .samples()
+                        .chunks_exact(usize::from(expected.channels())),
+                ) {
+                    assert_eq!(actual, &[expected[0] * 0.8, expected[0] * 0.8]);
+                }
+                host.poll(app).unwrap();
+                output.iter().any(|value| value.abs() > 0.01)
+            };
+        let mut heard = false;
+        for _ in 0..400 {
+            heard |= pump(&mut host, &mut app, &mut callback, &mut reference);
+        }
+        assert!(heard);
+        assert!(app.keyboard().gate); // Held beyond the authored bar and pattern releases.
+        route.observe(&[0x91, 55, 127]);
+        host.poll(&mut app).unwrap();
+        for _ in 0..6 {
+            pump(&mut host, &mut app, &mut callback, &mut reference);
+        }
+        route.observe(&[0x91, 55, 0]);
+        host.poll(&mut app).unwrap();
+        assert_eq!(app.keyboard().pitch, Some(48));
+        for _ in 0..6 {
+            pump(&mut host, &mut app, &mut callback, &mut reference);
+        }
+        route.observe(&[0x80, 48, 0]);
+        host.poll(&mut app).unwrap();
+        for _ in 0..6 {
+            pump(&mut host, &mut app, &mut callback, &mut reference);
+        }
+        assert!(!pump(&mut host, &mut app, &mut callback, &mut reference));
+        assert_eq!(app.authored_source().unwrap().fingerprint(), fingerprint);
+        // Overflow: pre-loss queued messages must not revive any key.
+        route.observe(&[0x90, 60, 127]);
+        host.poll(&mut app).unwrap();
+        let epoch = app.keyboard().epoch;
+        for _ in 0..65 {
+            route.observe(&[0x90, 60, 127]);
+        }
+        host.poll(&mut app).unwrap();
+        assert!(app.keyboard().epoch > epoch);
+        assert_eq!(app.keyboard().held_keys, 0);
+        assert!(!app.keyboard().gate);
+        route.observe(&[0x90, 60, 127]);
+        host.poll(&mut app).unwrap();
+        assert_eq!(app.keyboard().held_keys, 1);
+        host.keyboard.as_mut().unwrap().simulate_disconnect();
+        host.poll(&mut app).unwrap();
+        assert_eq!(app.keyboard().held_keys, 0);
+        route.observe(&[0x90, 60, 127]); // Disconnected route is stale.
+        host.poll(&mut app).unwrap();
+        assert_eq!(app.keyboard().held_keys, 0);
+        // An authored edit requires fresh binding and immediately disables old PCM on poll.
+        app.dispatch(AppCommand::CreatePalettePattern {
+            id: "new".into(),
+            length_ticks: 3840,
+            looped: true,
+        })
+        .unwrap();
+        host.poll(&mut app).unwrap();
+        assert!(app.keyboard().voice.is_none());
+        assert!(!host.live_control.enabled());
+        let mut silence = [9.0; 512];
+        callback.render_f64(&mut silence);
+        assert!(silence.iter().all(|s| *s == 0.0));
+        // F9 rejects pending/playing transport; Space/typed Play release audition.
+        host.toggle_keyboard(&mut app).unwrap();
+        app.dispatch(AppCommand::Play).unwrap();
+        assert!(app.keyboard().voice.is_none());
+        assert!(host.toggle_keyboard(&mut app).is_err());
+        callback.render_f64(&mut silence);
+        assert!(!host.live_control.enabled());
+        host.poll(&mut app).unwrap();
+        assert!(host.toggle_keyboard(&mut app).is_err());
+        app.dispatch(AppCommand::Stop).unwrap();
+        callback.render_f64(&mut silence);
+        host.poll(&mut app).unwrap();
+        host.toggle_keyboard(&mut app).unwrap();
+        host.toggle_keyboard(&mut app).unwrap();
+        assert!(app.keyboard().voice.is_none());
+        host.finish(&app).unwrap();
+        let text = std::fs::read_to_string(host.capture.session.as_ref().unwrap().path()).unwrap();
+        assert!(text.contains("runtime_keyboard"));
+        assert!(text.contains("Disconnect"));
+        assert!(text.contains("Overflow"));
+        // Reconstruct accepted source/runtime facts through the typed vocabulary.
+        // Drain transport commands headlessly; no timed hardware replay is implied.
+        let (mut replay, replay_engine) = AppController::new_empty_project(&project).unwrap();
+        replay
+            .enable_native_project_source(
+                meldritch_control::native_capture::load_native_capture_baseline(
+                    project.root(),
+                    &text,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let (_, replay_reader) = meldritch_audio::audio_publication::audio_publication(
+            PublishedAudio::from_block(&AudioBlock::silent(2, 1), 1).unwrap(),
+        );
+        let mut replay_callback =
+            PublishedAudioRenderer::from_engine(replay_reader, 2, u32::MAX, replay_engine).unwrap();
+        let document: toml::Value = toml::from_str(&text).unwrap();
+        for event in document["events"].as_array().unwrap() {
+            let envelope = meldritch_control::native_capture::NativeCommandEnvelope::decode(
+                &toml::to_string(&event["native"]).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                envelope.source_before,
+                format!("{:016x}", replay.authored_source().unwrap().fingerprint())
+            );
+            replay.dispatch(envelope.command.into()).unwrap();
+            replay_callback.render_f64(&mut [0.0; 2]);
+            assert_eq!(
+                envelope.source_after,
+                format!("{:016x}", replay.authored_source().unwrap().fingerprint())
+            );
+        }
+        assert_eq!(replay.keyboard(), app.keyboard());
+        std::fs::remove_dir_all(project.root()).unwrap();
+    }
+
+    #[test]
+    fn native_keyboard_audition_without_selected_material_is_atomic_and_device_free() {
+        let project = project();
+        let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
+        let mut host = NativeProjectAudio::new(&app, engine).unwrap();
+        host.keyboard = Some(crate::keyboard::NativeKeyboard::simulated().0);
+        let source = app.authored_source().unwrap();
+        let history = app.history().len();
+        assert!(
+            host.toggle_keyboard(&mut app)
+                .unwrap_err()
+                .contains("select")
+        );
+        assert!(host.engine.is_some());
+        assert!(host.stream.is_none());
+        assert!(host.live.is_none());
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        assert_eq!(app.history().len(), history);
+        assert!(meldritch_tui::project_keyboard_key(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::F(9),
+                crossterm::event::KeyModifiers::NONE
+            )
+        ));
+        let mut key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::F(9),
+            crossterm::event::KeyModifiers::CONTROL,
+        );
+        assert!(!meldritch_tui::project_keyboard_key(key));
+        key.modifiers = crossterm::event::KeyModifiers::NONE;
+        key.kind = crossterm::event::KeyEventKind::Repeat;
+        assert!(!meldritch_tui::project_keyboard_key(key));
+        key.kind = crossterm::event::KeyEventKind::Release;
+        assert!(!meldritch_tui::project_keyboard_key(key));
+        app.enable_native_project_source(
+            meldritch_control::native_project::load_native_project(
+                project.root(),
+                include_str!("../../../songs/examples/36-patch-lfo/main.project.lua"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        host.engine = None; // A failed output device cannot accept a binding.
+        let history = app.history().len();
+        assert!(host.toggle_keyboard(&mut app).is_err());
+        assert_eq!(app.history().len(), history);
+        assert!(app.keyboard().voice.is_none());
+        std::fs::remove_dir_all(project.root()).unwrap();
+    }
+
+    #[test]
+    fn native_keyboard_capture_failure_releases_audition_and_retries_typed_cleanup() {
+        let project = project();
+        let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
+        app.enable_native_project_source(
+            meldritch_control::native_project::load_native_project(
+                project.root(),
+                include_str!("../../../songs/examples/36-patch-lfo/main.project.lua"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let mut host = NativeProjectAudio::new(&app, engine).unwrap();
+        let (keyboard, route) = crate::keyboard::NativeKeyboard::simulated();
+        host.keyboard = Some(keyboard);
+        host.headless_output = true;
+        host.toggle_keyboard(&mut app).unwrap();
+        let path = host.capture.session.as_ref().unwrap().path().to_path_buf();
+        let backup = path.with_extension("saved");
+        std::fs::rename(&path, &backup).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        route.observe(&[0x90, 48, 127]);
+        assert!(host.poll(&mut app).is_err());
+        assert!(app.keyboard().gate); // Accepted gesture awaiting failed checkpoint.
+        assert!(host.poll(&mut app).is_err());
+        assert!(app.keyboard().voice.is_none());
+        assert!(!host.live_control.enabled());
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::rename(&backup, &path).unwrap();
+        host.poll(&mut app).unwrap();
+        host.finish(&app).unwrap();
+        let document: toml::Value =
+            toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let commands: Vec<_> = document["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| {
+                meldritch_control::native_capture::NativeCommandEnvelope::decode(
+                    &toml::to_string(&event["native"]).unwrap(),
+                )
+                .unwrap()
+                .command
+            })
+            .collect();
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|c| matches!(
+                    c,
+                    meldritch_control::native_capture::NativeProjectCommand::KeyboardKey { .. }
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|c| matches!(
+                    c,
+                    meldritch_control::native_capture::NativeProjectCommand::BindKeyboard { .. }
+                ))
+                .count(),
+            2
+        );
+        std::fs::remove_dir_all(project.root()).unwrap();
+    }
 
     #[test]
     fn native_midi_keyboard_entry_publishes_captures_and_reopens_without_live_voice_claims() {

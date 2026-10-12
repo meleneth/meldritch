@@ -83,9 +83,12 @@ an empty project requires no Git repository or initialization.
 - [x] User-prioritized MIDI keyboard checkpoint: MicroLab/generic input selection,
   diagnostic, bounded reconnect queue, construction pattern entry with velocity,
   typed capture/save/reopen and playing publication; host MicroLab connection observed
-- [ ] Next keyboard slice: production live binding gesture, bounded streaming
-  key-held audition, transport overflow/disconnect cleanup and device timing;
-  then authored sustain/bend/control routing and timed recording
+- [x] Keyboard audition: native F9 explicit stopped-transport mono binding,
+  bounded shared-DSP worker streaming, ingress epochs/loss cleanup, typed capture
+  and callback PCM/allocation acceptance headlessly
+- [ ] Next keyboard slices: explicit velocity/sustain/bend adapters, physical
+  interaction/listening/deadlines; simultaneous arranged/live routing and timed
+  device capture/replay need their own activation/clock contracts
 - [x] Keyboard renderer foundation: one shared mono kernel for offline/incremental
   worker execution, independent bounded u64 Pitch/Gate blocks, preserved DSP state,
   exact partition/offline references and atomic invalid-block recovery
@@ -490,6 +493,26 @@ timing yet: the current MicroLab host continues construction pattern entry.
 Verification: focused lifecycle tests and final offline workspace suite pass;
 affected all-targets Clippy with existing allowances, formatting/diff checks and
 documentation build pass. Historical 09/29 fingerprints remain unchanged.
+
+Stopped-transport audition checkpoint: native F9 binds/releases the selected
+active mono instance. LiveKeyboardWorker compiles/renders the existing mono
+kernel in 256-frame blocks, normally <=1024 frames ahead, into a fixed 4096-frame
+timed PCM ring attached to the existing callback. No held-note PCM loops or DSP
+in callbacks. Ingress binding epochs prevent stale retargeting; loss resets
+discard old ingress/PCM while preserving ordered accepted events and room for a
+release. Source/transport edits release audition; modes/selection preserve it.
+Headless tests compare held PCM beyond one bar, retrigger/fallback/release, source
+Arc/FP, loss/source/transport cleanup and complete typed capture reconstruction.
+Ring tests prove finite atomic publication, stale/late/backpressure diagnostics,
+u64 clock and zero callback allocations/deallocations. Saves still exclude holds.
+Capture-write failure releases audition through typed pending cleanup and retries
+without duplicating the accepted key or unbind; arrangement audio is unaffected.
+Physical gestures/listening/deadlines, velocity/sustain/bend adapters, polyphonic
+and simultaneous arranged/live routing, MIDI timestamps and timed replay are open.
+Verification: focused keyboard/stream tests, final offline workspace suite,
+affected all-targets Clippy with the existing allowances, formatting/diff checks
+and documentation build pass. Historical 09/29 fingerprints remain
+`41472b38b65b60ed` / `54745c74a42665cf`.
 
 Investigation and ownership decisions: [AUTHORING.md](AUTHORING.md). The first
 implemented slice is [the instrument editor](INSTRUMENT_EDITOR.md): example 25
