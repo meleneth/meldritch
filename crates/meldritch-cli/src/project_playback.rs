@@ -475,6 +475,106 @@ mod tests {
     }
 
     #[test]
+    fn native_graph_lfo_rate_edit_republishes_and_invalid_units_keep_playing_audio() {
+        use meldritch_dsl::{GraphLfoRate, GraphLfoSettings, PatchEdit, PatchOperation};
+        let project = project();
+        let source = meldritch_control::native_project::load_native_project(
+            project.root(),
+            include_str!("../../../songs/examples/36-patch-lfo/main.project.lua"),
+        )
+        .unwrap();
+        let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
+        app.enable_native_project_source(source).unwrap();
+        let mut host = NativeProjectAudio::new(&app, engine).unwrap();
+        let ready = |app: &mut AppController, host: &mut NativeProjectAudio| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                host.poll(app).unwrap();
+                if host
+                    .require_prepared_audio(&app.authored_source().unwrap())
+                    .is_ok()
+                {
+                    break;
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        ready(&mut app, &mut host);
+        let mut callback = PublishedAudioRenderer::from_engine(
+            host.reader.clone(),
+            2,
+            u32::MAX,
+            host.engine.take().unwrap(),
+        )
+        .unwrap();
+        app.dispatch(AppCommand::Play).unwrap();
+        let mut samples = vec![0.0; 512];
+        callback.render_f64(&mut samples);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.01));
+        let source = app.authored_source().unwrap();
+        let published = host.reader.snapshot();
+        let generation = host.host.generation();
+        let history = app.history().len();
+        assert!(
+            app.dispatch(AppCommand::EditPatch(PatchEdit {
+                synth: "bass".into(),
+                operations: vec![
+                    PatchOperation::Disconnect {
+                        from: "shape.control".into(),
+                        to: "amp.level".into()
+                    },
+                    PatchOperation::Connect {
+                        from: "slow.control".into(),
+                        to: "amp.level".into()
+                    },
+                ]
+            }))
+            .is_err()
+        );
+        host.poll(&mut app).unwrap();
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        assert!(Arc::ptr_eq(&published, &host.reader.snapshot()));
+        assert_eq!(host.host.generation(), generation);
+        assert_eq!(history, app.history().len());
+        assert_eq!(app.view_model().transport.state, TransportState::Playing);
+        app.dispatch(AppCommand::EditPatch(PatchEdit {
+            synth: "bass".into(),
+            operations: vec![PatchOperation::ConfigureLfo {
+                module: "slow".into(),
+                settings: GraphLfoSettings {
+                    rate: GraphLfoRate::Beats(0.5),
+                    ..GraphLfoSettings::default()
+                },
+            }],
+        }))
+        .unwrap();
+        assert!(Arc::ptr_eq(&published, &host.reader.snapshot()));
+        ready(&mut app, &mut host);
+        assert!(!Arc::ptr_eq(&published, &host.reader.snapshot()));
+        let expected = CompiledSongPatch::compile_initial(&app.authored_source().unwrap())
+            .unwrap()
+            .render_default(meldritch_core::FrameRange::new(0, u64::from(host.frames)).unwrap())
+            .unwrap();
+        assert!(
+            (0..host.frames)
+                .any(|frame| published.frame(frame) != host.reader.snapshot().frame(frame))
+        );
+        for (frame, sample) in expected.samples().iter().enumerate() {
+            assert_eq!(
+                host.reader.snapshot().frame(frame as u32).unwrap(),
+                &[*sample, *sample]
+            );
+        }
+        callback.render_f64(&mut samples);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.01));
+        assert_eq!(app.view_model().transport.state, TransportState::Playing);
+        host.save_project(&mut app).unwrap();
+        host.finish(&app).unwrap();
+        assert!(host.stream.is_none());
+    }
+
+    #[test]
     fn native_composition_transition_requires_stopped_transport_and_prepared_audio() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         let project = project();

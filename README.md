@@ -55,6 +55,11 @@ Performance arrows address the selected active instance's level, so shared-patch
 instances remain independently controllable. Inactive selection never retargets.
 Example 35 now accepts this bounded workflow headlessly, including both composition
 selections, shared edits, negative diagnostics and fresh-process reopen.
+Example 36 adds a working tremolo graph: LFO → explicit scale → envelope multiplier
+→ VCA. Open `songs/examples/36-patch-lfo`; Ctrl-E/Ctrl-G inspects and edits the same
+typed graph. See [patch commands](PATCH_EDITOR.md). Static Hertz/beat timing,
+explicit gate reset and authored save/reopen are checked headlessly; broader LFO
+modulation remains in progress.
 Timed replay and stateful graph transitions remain proposed. Existing commands
 remain valid.
 Git is allowed as a required installed dependency; opening needs no repository

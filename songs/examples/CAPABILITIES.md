@@ -10,6 +10,7 @@ Status values:
 
 | Example | Capability | Status |
 | --- | --- | --- |
+| `36-patch-lfo` | First graph-control checkpoint: mono LFO → explicit bipolar/unit-interval scale → envelope multiplier → VCA; typed rate/phase/reset/scale drafts, shared fan-out/per-instance reset origins, independent reference and split PCM, worker/callback publication, capture and fresh-process persistence checked headlessly. Full pitch/filter adapters, variable-rate integration, event cadence and broader scopes remain open | design |
 | `35-project-palette-routing` | Bounded headless empty-root shared-patch/native multi-instance/independent-source workflow; named project-v3 composition membership, stopped selection, worker/callback publication, play/edit/save/fresh-process reopen for both selections; typed capture, inactive identity/gain scope, shared edits and all negative-contract cases checked. Interactive palette deletion, broader clocks, timed replay, physical listening and DSP migration remain deferred | accept |
 | `34-empty-project-patch` | Bounded headless empty-root keyboard construction/pattern/independent pitch-gate/play/modify/save/fresh-process reopen; worker and production callback changes, exact mono-to-stereo publication, runtime/default separation, failures/retry and full/split oscillator PCM/identity equality checked. Embedded capture baselines survive later saves/root removal. Timed replay, physical listening and continuous DSP-state migration remain deferred | accept |
 | `00-minimal-synth` | Explicit oscillator-to-output patch | accept |

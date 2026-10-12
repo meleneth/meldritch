@@ -235,6 +235,19 @@ worker/callback publication, save and isolated fresh-process reopen for each
 selection. Its ACCEPTANCE.md maps every requirement to executable evidence.
 Continuous DSP migration and physical listening are not proved.
 
+Example 36's tremolo checkpoint uses `cargo test -p meldritch-control --test
+graph_lfo` for independent per-frame oscillator/LFO/gate references, 60/120 BPM,
+Hertz/fractional-beat timing, adjacent cabled reset, no implicit loop reset,
+shared fan-out, per-instance reset origins, full/split equality, invalid graph/
+settings/scope/cadence/bounds, typed native drafts/capture and an isolated persisted
+child. `cargo test -p meldritch-cli native_graph_lfo` verifies worker/production
+callback rate changes while playing, exact stereo PCM, invalid-unit rejection
+without publication/history changes and authored saving. Callback code is unchanged;
+the control plan allocates during worker compilation and evaluates bounded stack
+arrays during worker rendering. Neither these checks nor finite PCM looping prove
+continuous modulation state across publications or physical deadline/listening
+acceptance. Full example-36 status stays design until the remaining contract passes.
+
 Add later:
 - offline render throughput
 - worker saturation

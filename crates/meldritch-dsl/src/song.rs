@@ -23,6 +23,8 @@ mod voices;
 pub use voices::*;
 mod compositions;
 pub use compositions::*;
+mod control_graph;
+pub use control_graph::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,6 +45,9 @@ pub enum ModuleKind {
     TempoDelay,
     AudioOutput,
     Plaits,
+    Lfo,
+    ControlScale,
+    ControlMultiply,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -67,6 +72,10 @@ impl PatchInput {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModuleDefinition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lfo: Option<GraphLfoSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scale: Option<ControlScaleSettings>,
     id: String,
     kind: ModuleKind,
     plaits: Option<PlaitsSettings>,
@@ -85,6 +94,12 @@ pub struct ModuleDefinition {
 }
 
 impl ModuleDefinition {
+    pub const fn lfo(&self) -> Option<GraphLfoSettings> {
+        self.lfo
+    }
+    pub const fn scale(&self) -> Option<ControlScaleSettings> {
+        self.scale
+    }
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
@@ -1669,6 +1684,8 @@ struct RawSynth {
 
 #[derive(Debug, Deserialize)]
 struct RawModule {
+    lfo: Option<GraphLfoSettings>,
+    scale: Option<ControlScaleSettings>,
     id: String,
     #[serde(rename = "type")]
     kind: String,
@@ -3236,6 +3253,9 @@ fn parse_synth(path: &Path, raw: RawSynthFile) -> Result<SynthDefinition, SongLo
             "vca" => ModuleKind::Vca,
             "low_pass" => ModuleKind::LowPass,
             "audio_output" => ModuleKind::AudioOutput,
+            "lfo" => ModuleKind::Lfo,
+            "control_scale" => ModuleKind::ControlScale,
+            "control_multiply" => ModuleKind::ControlMultiply,
             unknown => {
                 return Err(SongLoadError::one(
                     path,
@@ -3311,7 +3331,11 @@ fn parse_synth(path: &Path, raw: RawSynthFile) -> Result<SynthDefinition, SongLo
                 ));
             }
         }
+        control_graph::validate_control_settings(kind, module.lfo, module.scale)
+            .map_err(|e| SongLoadError::one(path, e))?;
         modules.push(ModuleDefinition {
+            lfo: module.lfo,
+            scale: module.scale,
             plaits: validate_plaits(path, kind, &module)?,
             id: module.id,
             kind,
@@ -3447,7 +3471,11 @@ fn load_dsp(path: &Path) -> Result<DspDefinition, SongLoadError> {
                 }
             }
         }
+        control_graph::validate_control_settings(kind, module.lfo, module.scale)
+            .map_err(|e| SongLoadError::one(path, e))?;
         modules.push(ModuleDefinition {
+            lfo: module.lfo,
+            scale: module.scale,
             plaits: validate_plaits(path, kind, &module)?,
             id: module.id,
             kind,
@@ -3768,6 +3796,16 @@ fn resolve_port(
         )
     })?;
     let signal = match (*kind, direction, port) {
+        (ModuleKind::Lfo, PortDirection::Input, "reset") => SignalType::Gate,
+        (
+            ModuleKind::Lfo | ModuleKind::ControlScale | ModuleKind::ControlMultiply,
+            PortDirection::Output,
+            "control",
+        )
+        | (ModuleKind::ControlScale, PortDirection::Input, "control")
+        | (ModuleKind::ControlMultiply, PortDirection::Input, "left" | "right") => {
+            SignalType::Control
+        }
         (ModuleKind::Plaits, PortDirection::Output, "audio")
         | (ModuleKind::Plaits, PortDirection::Output, "aux")
         | (ModuleKind::Oscillator, PortDirection::Output, "audio")
@@ -4721,6 +4759,33 @@ fn fingerprint_song(
             fingerprint.u64(module.decay.map_or(0, f64::to_bits));
             fingerprint.u64(module.sustain.map_or(0, f64::to_bits));
             fingerprint.u64(module.release.map_or(0, f64::to_bits));
+            if let Some(settings) = module.lfo {
+                fingerprint.string("graph-lfo-v1-audio-per-instance");
+                fingerprint.u64(settings.shape as u64);
+                match settings.rate {
+                    GraphLfoRate::Hertz(value) => {
+                        fingerprint.u64(0);
+                        fingerprint.u64(value.to_bits());
+                    }
+                    GraphLfoRate::Beats(value) => {
+                        fingerprint.u64(1);
+                        fingerprint.u64(value.to_bits());
+                    }
+                }
+                fingerprint.u64(settings.phase.to_bits());
+                fingerprint.u64(settings.reset as u64);
+            }
+            if let Some(settings) = module.scale {
+                fingerprint.string("control-scale-v1-bipolar-to-unit-interval");
+                for value in [
+                    settings.gain,
+                    settings.offset,
+                    settings.clamp_min,
+                    settings.clamp_max,
+                ] {
+                    fingerprint.u64(value.to_bits());
+                }
+            }
         }
         for cable in &synth.cables {
             fingerprint.string(&cable.from);

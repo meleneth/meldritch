@@ -172,6 +172,7 @@ fn parse_operation(words: &[&str]) -> Result<PatchOperation, String> {
         ["add", id, kind] => Ok(PatchOperation::Instantiate { id: (*id).into(), kind: match *kind {
             "oscillator" => ModuleKind::Oscillator, "plaits" => ModuleKind::Plaits, "adsr" => ModuleKind::Adsr,
             "vca" => ModuleKind::Vca, "low_pass" => ModuleKind::LowPass, "audio_output" => ModuleKind::AudioOutput,
+            "lfo" => ModuleKind::Lfo, "control_scale" => ModuleKind::ControlScale, "control_multiply" => ModuleKind::ControlMultiply,
             _ => return Err(format!("unsupported synth module '{kind}'")),
         } }),
         ["remove", id, policy] => Ok(PatchOperation::Remove { id: (*id).into(), cables: match *policy {
@@ -180,6 +181,21 @@ fn parse_operation(words: &[&str]) -> Result<PatchOperation, String> {
         } }),
         ["connect", from, to] => Ok(PatchOperation::Connect { from: (*from).into(), to: (*to).into() }),
         ["disconnect", from, to] => Ok(PatchOperation::Disconnect { from: (*from).into(), to: (*to).into() }),
+        ["lfo", module, shape, rate_kind, value, "phase", phase, "reset", reset] => {
+            use meldritch_dsl::{GraphLfoSettings, GraphLfoRate, GraphLfoShape, LfoReset};
+            let value = value.parse().map_err(|_| "LFO rate requires a number")?;
+            Ok(PatchOperation::ConfigureLfo { module: (*module).into(), settings: GraphLfoSettings {
+                shape: match *shape { "sine" => GraphLfoShape::Sine, "triangle" => GraphLfoShape::Triangle, "saw" => GraphLfoShape::Saw, "square" => GraphLfoShape::Square, _ => return Err("LFO shape requires sine/triangle/saw/square".into()) },
+                rate: match *rate_kind { "beats" => GraphLfoRate::Beats(value), "hertz" => GraphLfoRate::Hertz(value), _ => return Err("LFO rate requires beats or hertz".into()) },
+                phase: phase.parse().map_err(|_| "LFO phase requires a number")?,
+                reset: match *reset { "none" => LfoReset::None, "gate_rise" => LfoReset::GateRise, _ => return Err("LFO reset requires none or gate_rise".into()) },
+                ..GraphLfoSettings::default()
+            } })
+        }
+        ["scale", module, gain, offset, min, max] => Ok(PatchOperation::ConfigureControlScale { module: (*module).into(), settings: meldritch_dsl::ControlScaleSettings {
+            gain: gain.parse().map_err(|_| "scale gain requires a number")?, offset: offset.parse().map_err(|_| "scale offset requires a number")?,
+            clamp_min: min.parse().map_err(|_| "scale minimum requires a number")?, clamp_max: max.parse().map_err(|_| "scale maximum requires a number")?,
+        } }),
         ["set", module, parameter, value] => {
             let parameter = match *parameter {
                 "waveform" => InstrumentParameter::Waveform, "model" => InstrumentParameter::Model,

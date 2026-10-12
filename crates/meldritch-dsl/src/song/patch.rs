@@ -10,6 +10,14 @@ pub enum DependentCables {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PatchOperation {
+    ConfigureLfo {
+        module: String,
+        settings: GraphLfoSettings,
+    },
+    ConfigureControlScale {
+        module: String,
+        settings: ControlScaleSettings,
+    },
     Instantiate {
         id: String,
         kind: ModuleKind,
@@ -101,6 +109,8 @@ pub struct ModulePort {
     pub endpoint: String,
     pub direction: PortDirection,
     pub signal: SignalType,
+    pub unit: Option<ControlUnit>,
+    pub evaluation: Option<ControlEvaluation>,
 }
 impl ModuleDefinition {
     /// Enumerate through the same port resolver used by the importer/editor.
@@ -109,7 +119,9 @@ impl ModuleDefinition {
         let inputs = BTreeMap::new();
         let mut ports = vec![];
         for direction in [PortDirection::Input, PortDirection::Output] {
-            for name in ["pitch", "gate", "control", "audio", "level", "aux"] {
+            for name in [
+                "pitch", "gate", "control", "audio", "level", "aux", "reset", "left", "right",
+            ] {
                 let endpoint = format!("{}.{}", self.id, name);
                 if let Ok(signal) = resolve_port(
                     Path::new("module ports"),
@@ -119,6 +131,10 @@ impl ModuleDefinition {
                     direction,
                 ) {
                     ports.push(ModulePort {
+                        unit: self.control_unit(name, direction),
+                        evaluation: self
+                            .control_unit(name, direction)
+                            .map(|_| ControlEvaluation::Audio),
                         endpoint,
                         direction,
                         signal,
@@ -140,6 +156,9 @@ impl ModuleKind {
             Self::TempoDelay => "tempo_delay",
             Self::AudioOutput => "audio_output",
             Self::Plaits => "plaits",
+            Self::Lfo => "lfo",
+            Self::ControlScale => "control_scale",
+            Self::ControlMultiply => "control_multiply",
         }
     }
 }
@@ -161,6 +180,8 @@ fn instantiate(id: &str, kind: ModuleKind) -> Result<ModuleDefinition, String> {
         return Err("tempo_delay belongs to DSP graphs; unsupported in this synth editor".into());
     }
     Ok(ModuleDefinition {
+        lfo: (kind == ModuleKind::Lfo).then(GraphLfoSettings::default),
+        scale: (kind == ModuleKind::ControlScale).then(ControlScaleSettings::default),
         id: id.into(),
         kind,
         plaits: (kind == ModuleKind::Plaits).then(PlaitsSettings::default),
@@ -245,7 +266,8 @@ impl ValidatedSong {
             .get(synth)
             .ok_or_else(|| format!("unknown synth '{synth}'"))?;
         let with_filter = graph.modules.iter().any(|m| m.kind == ModuleKind::LowPass);
-        let expected_modules = if with_filter { 5 } else { 4 };
+        let control_order = graph.control_order()?;
+        let expected_modules = if with_filter { 5 } else { 4 } + control_order.len();
         let patched_plaits_gate = graph.modules.iter().any(|m| {
             m.kind == ModuleKind::Plaits
                 && graph
@@ -253,7 +275,18 @@ impl ValidatedSong {
                     .iter()
                     .any(|c| c.from == "input.gate" && c.to == format!("{}.gate", m.id))
         });
-        let expected_cables = if with_filter { 6 } else { 5 } + usize::from(patched_plaits_gate);
+        let control_cables: usize = graph
+            .modules
+            .iter()
+            .map(|m| match m.kind {
+                ModuleKind::Lfo => usize::from(m.lfo.unwrap().reset == LfoReset::GateRise),
+                ModuleKind::ControlScale => 1,
+                ModuleKind::ControlMultiply => 2,
+                _ => 0,
+            })
+            .sum();
+        let expected_cables =
+            if with_filter { 6 } else { 5 } + usize::from(patched_plaits_gate) + control_cables;
         if graph.modules.len() != expected_modules || graph.cables.len() != expected_cables {
             return Err("unsupported note topology: one source, ADSR, VCA, output and optional low-pass with exactly the executable cables required".into());
         }
@@ -288,6 +321,32 @@ impl ValidatedSong {
             }
             let graph = next.synths.get_mut(&edit.synth).unwrap();
             match operation {
+                PatchOperation::ConfigureLfo { module, settings } => {
+                    control_graph::validate_control_settings(
+                        ModuleKind::Lfo,
+                        Some(*settings),
+                        None,
+                    )?;
+                    let target = graph
+                        .modules
+                        .iter_mut()
+                        .find(|m| &m.id == module && m.kind == ModuleKind::Lfo)
+                        .ok_or("unknown LFO module")?;
+                    target.lfo = Some(*settings);
+                }
+                PatchOperation::ConfigureControlScale { module, settings } => {
+                    control_graph::validate_control_settings(
+                        ModuleKind::ControlScale,
+                        None,
+                        Some(*settings),
+                    )?;
+                    let target = graph
+                        .modules
+                        .iter_mut()
+                        .find(|m| &m.id == module && m.kind == ModuleKind::ControlScale)
+                        .ok_or("unknown scale module")?;
+                    target.scale = Some(*settings);
+                }
                 PatchOperation::Instantiate { id, kind } => {
                     if graph.modules.len() >= 32 {
                         return Err("patch exceeds 32 modules".into());
@@ -432,6 +491,8 @@ impl ValidatedSong {
                 .modules
                 .iter()
                 .map(|m| RawModule {
+                    lfo: m.lfo,
+                    scale: m.scale,
                     id: m.id.clone(),
                     kind: m.kind.name().into(),
                     model: m.plaits.map(|p| p.model),
@@ -478,6 +539,8 @@ impl ValidatedSong {
             // Reject irrelevant settings rather than preserve a misleading configuration.
             let mut allowed = instantiate(&m.id, m.kind)?;
             match m.kind {
+                ModuleKind::Lfo => allowed.lfo = m.lfo,
+                ModuleKind::ControlScale => allowed.scale = m.scale,
                 ModuleKind::Oscillator => {
                     allowed.waveform = m.waveform.clone();
                     allowed.frequency_hz = m.frequency_hz;

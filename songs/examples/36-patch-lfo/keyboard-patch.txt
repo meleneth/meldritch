@@ -1,0 +1,12 @@
+clear
+disconnect env.control amp.level
+add slow lfo
+add unipolar control_scale
+add shape control_multiply
+lfo slow sine beats 1 phase 0 reset none
+scale unipolar 0.5 0.5 0 1
+connect slow.control unipolar.control
+connect env.control shape.left
+connect unipolar.control shape.right
+connect shape.control amp.level
+commit

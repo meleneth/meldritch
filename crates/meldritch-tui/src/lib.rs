@@ -576,10 +576,36 @@ fn draw_instrument_editor(
                     lines.push(
                         m.ports()
                             .iter()
-                            .map(|p| format!("{} {:?}/{:?}", p.endpoint, p.direction, p.signal))
+                            .map(|p| {
+                                format!(
+                                    "{} {:?}/{:?}{}",
+                                    p.endpoint,
+                                    p.direction,
+                                    p.signal,
+                                    p.unit
+                                        .map_or(String::new(), |unit| format!("/{unit:?}/Audio"))
+                                )
+                            })
                             .collect::<Vec<_>>()
                             .join(" | "),
                     );
+                    if let Some(settings) = m.lfo() {
+                        lines.push(format!(
+                            "LFO {:?} {:?} phase {} {:?}/{:?} reset {:?}",
+                            settings.shape,
+                            settings.rate,
+                            settings.phase,
+                            settings.evaluation,
+                            settings.scope,
+                            settings.reset
+                        ));
+                    }
+                    if let Some(settings) = m.scale() {
+                        lines.push(format!(
+                            "Scale gain {} offset {} clamp {}..{}",
+                            settings.gain, settings.offset, settings.clamp_min, settings.clamp_max
+                        ));
+                    }
                     for p in source
                         .instrument_parameters(&editor.synth)
                         .unwrap_or_default()

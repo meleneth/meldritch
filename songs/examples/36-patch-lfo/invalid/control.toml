@@ -1,0 +1,34 @@
+[[cases]]
+kind = "rate_zero"
+[[cases]]
+kind = "rate_nonfinite"
+[[cases]]
+kind = "scale_nonfinite"
+[[cases]]
+kind = "module_limit"
+[[cases]]
+kind = "phase_nonfinite"
+[[cases]]
+kind = "scale_reversed"
+[[cases]]
+kind = "missing_input"
+[[cases]]
+kind = "missing_reset"
+[[cases]]
+kind = "reset_without_policy"
+[[cases]]
+kind = "bipolar_to_vca"
+[[cases]]
+kind = "audio_to_scale"
+[[cases]]
+kind = "duplicate_input"
+[[cases]]
+kind = "unused_module"
+[[cases]]
+kind = "cycle"
+[[cases]]
+kind = "polyphony"
+[[cases]]
+kind = "scope"
+[[cases]]
+kind = "evaluation"

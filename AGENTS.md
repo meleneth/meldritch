@@ -107,6 +107,11 @@ Preserve `INVARIANTS.md`. In particular:
 
 The immediate priority is section 21 of `TODO.md`, Slice 3's example-first graph
 LFO, explicit unit/rate adapters, combination and reset/scope contracts.
+Example 36's first tremolo checkpoint now renders Lfo/ControlScale/ControlMultiply
+in the existing mono voice compiler. Explicit audio/per-instance settings,
+unit validation, typed drafts, gate reset, fan-out, capture, worker publication and
+fresh-process persistence are checked headlessly. Full example status stays design;
+pitch/filter ports, variable-rate phase and broader scope/cadence remain open.
 Example 35's native pattern-selection checkpoint is implemented: PgUp/PgDn
 selects palette material without rebinding, source/runtime mutation or rerender;
 typed capture and independent-source persistence/render tests pass. Its full

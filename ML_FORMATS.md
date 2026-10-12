@@ -106,6 +106,17 @@ Later saves cannot change the captured baseline. Older captures without this fie
 require their original source explicitly; the loader never infers an empty baseline.
 This additive field changes neither legacy writers nor the event vocabulary and
 does not implement timed replay or execute events during project opening.
+Example 36 adds ordinary synth module kinds `lfo`, `control_scale` and
+`control_multiply` to the same graph snapshots and TOML importer. Required `lfo`
+settings declare shape, tagged Hertz/Beats rate, phase, audio evaluation,
+per-instance scope and none/gate-rise reset. Required `scale` settings declare
+gain/offset and unit-interval clamp endpoints. Units belong to typed port metadata;
+LFO/scale input is bipolar and scale/multiplier/ADSR output is unit interval.
+Native v2/v3 saves retain these settings and reject invalid/unused/cyclic graphs.
+Typed ConfigureLfo/ConfigureControlScale operations reuse EditPatch and capture;
+historical graphs with absent settings retain their fingerprints. The first
+executable control DAG ends at VCA level; broader modulation remains proposed.
+
 Example 35 extends native command version 1 with `select_palette_pattern`, a
 typed selection fact with an explicit pattern ID. Selection changes neither
 authored source nor bindings; project-v2 saves exclude cursor/editor selection.

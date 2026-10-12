@@ -304,6 +304,8 @@ impl CompiledFilteredNotePatch {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompiledNotePatch {
+    control: Option<Box<crate::song_control::ControlPlan>>,
+    bpm: f64,
     song_fingerprint: u64,
     synth_id: String,
     sample_rate: u32,
@@ -782,7 +784,12 @@ impl CompiledNotePatch {
             0.0
         };
         let mut active_end = None;
+        let mut control_values = [0.0; 33];
+        let mut control_origins = [0; 32];
+        let control_tempo = meldritch_core::Tempo::new(self.bpm, self.sample_rate)
+            .map_err(|e| SongRenderError::InvalidPatternVoice(e.to_string()))?;
         for absolute_frame in 0..range.end() {
+            let mut gate_rise = false;
             if active_end == Some(absolute_frame) {
                 envelope.note_off();
                 oscillator.note_off();
@@ -815,6 +822,7 @@ impl CompiledNotePatch {
                 {
                     envelope.note_on();
                     oscillator.note_on(1.0);
+                    gate_rise = true;
                     active_end = Some(absolute_frame + (event.end - event.start));
                 }
             } else {
@@ -827,12 +835,23 @@ impl CompiledNotePatch {
                     velocity = event.velocity;
                     envelope.note_on();
                     oscillator.note_on(velocity);
+                    gate_rise = true;
                     active_end = Some(absolute_frame + (event.end - event.start));
                 }
             }
             // The compiled cables route VCA into the optional filter.
-            let mut sample =
-                oscillator.next(frequency, self.sample_rate) * envelope.next_value() * velocity;
+            let envelope_value = envelope.next_value();
+            let level = self.control.as_ref().map_or(envelope_value, |plan| {
+                plan.value_at(
+                    absolute_frame,
+                    gate_rise,
+                    envelope_value,
+                    control_tempo,
+                    &mut control_values,
+                    &mut control_origins,
+                )
+            });
+            let mut sample = oscillator.next(frequency, self.sample_rate) * level * velocity;
             if let Some(filter_settings) = &self.filter {
                 sample = filter.process(
                     sample,
@@ -1290,6 +1309,12 @@ fn compile_note_definition(
     let amplifier = exactly_one_module(synth.modules(), ModuleKind::Vca)?;
     let output = exactly_one_module(synth.modules(), ModuleKind::AudioOutput)?;
     let filter = optional_one_module(synth.modules(), ModuleKind::LowPass)?;
+    let control = crate::song_control::ControlPlan::compile(synth)
+        .map_err(SongRenderError::InvalidPatternVoice)?;
+    if control.is_some() {
+        song.validate_executable_patch(synth_id)
+            .map_err(SongRenderError::InvalidPatternVoice)?;
+    }
     for (from, to) in [
         (
             "input.pitch".to_owned(),
@@ -1319,6 +1344,9 @@ fn compile_note_definition(
             format!("{}.level", amplifier.id()),
         ),
     ] {
+        if control.is_some() && to == format!("{}.level", amplifier.id()) {
+            continue;
+        }
         if !synth
             .cables()
             .iter()
@@ -1357,6 +1385,8 @@ fn compile_note_definition(
     let waveform_name = oscillator.waveform().unwrap_or("sine");
     let waveform = parse_waveform(oscillator.id(), waveform_name)?;
     Ok(CompiledNotePatch {
+        control: control.map(Box::new),
+        bpm: song.performance().bpm(),
         song_fingerprint: song.fingerprint(),
         synth_id: synth.id().to_owned(),
         sample_rate: song.performance().sample_rate(),

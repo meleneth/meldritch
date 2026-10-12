@@ -81,17 +81,25 @@ replay, physical listening and continuous DSP-state migration remain future work
 
 ## Recommended immediate implementation prompt
 
-Start Slice 3 with example 36 before adding schema. Inspect the existing Lfo,
-LfoRate, ModulationMatrix, typed ports, synth compiler, worker invalidation and
-native patch persistence. Choose the smallest executable graph-LFO scenario that
-improves a saved native bass patch: explicit pitch/filter adapters and declared
-combination, shared fan-out, tempo/free-running phase and reset semantics.
-Separate this initial contract from later per-voice/rate-modulated/event-rate
-modulation. Rust owns validation and execution; Lua describes the same source.
-Prove full/split deterministic rendering, bounded callback publication, typed
-editing, save/reopen and negative units/rates/cycle/combination cases. Preserve
-examples 25–35 and project-v2/v3; do not introduce a second modulation engine or
-claim seamless DSP-state migration from finite PCM replacement.
+Continue Slice 3's example 36 from its working tremolo checkpoint. Add the smallest
+explicit pitch/filter modulation path with unit adapters and declared combination,
+reusing control_order, ControlPlan, the Lfo kernel, independent pitch/gate voice,
+typed PatchEdit, worker/publication and native save/capture. Do not hard-code a
+destination in Lfo or reinterpret unit-interval level as pitch/Hz. Write the next
+musical/negative fixture before schema; preserve the tremolo and examples 25–35.
+Keep variable-rate integration, event cadence and broader scopes explicitly open
+until their own contracts are executable. Prove deterministic full/split audio,
+inspectable ports/settings, typed edits, negative unit/rate/cycle/combination,
+worker/callback publication and fresh-process reopen. Do not claim continuous
+DSP-state migration from finite PCM replacement.
+
+Example 36's first checkpoint is implemented: audio-rate/per-instance Lfo,
+ControlScale and ControlMultiply form an explicit amplitude-control DAG, with
+Hertz/beat rate, phase, cabled gate reset, shared fan-out and separate reset origins.
+Native patch commands configure all settings; the scrolling inspector exposes
+units/audio cadence and graph settings. Independent sample references, exact split
+renders, typed capture and fresh-process persistence pass. Performance controls
+are still explicitly declared; internal LFO settings are not auto-exposed.
 
 Example 35 now specifies this contract. Its pattern-selection checkpoint is
 implemented: native PgUp/PgDn lowers to SelectPalettePattern, preserves source,

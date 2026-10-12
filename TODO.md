@@ -68,6 +68,11 @@ an empty project requires no Git repository or initialization.
   independent bindings/levels and stopped composition membership authoring
 - [x] Slice 2 composed acceptance and negative-contract compatibility audit
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
+- [x] Slice 3 tremolo checkpoint: explicit LFO/scale/clamp/multiply control DAG,
+  audio/per-instance rate/phase/cabled reset, fan-out, typed native drafts/capture,
+  worker publication, independent sample/split tests and fresh-process save/reopen
+- [ ] Slice 3 next: pitch/filter unit adapters and declared combination, then
+  variable-rate integration, event cadence and broader instantiation scopes
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
 - [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
 - [ ] Slice 6: quantized graph activation and proved compatible DSP-state continuity
@@ -320,6 +325,30 @@ Workspace offline tests and affected all-targets Clippy with existing allowances
 pass. Formatting/diff, VitePress and unchanged 09/29 fingerprint checks complete
 the checkpoint. Next: Slice 3, graph LFOs with explicit unit/rate/combination and
 phase/reset semantics; write example 36 and inspect the existing modulation first.
+
+Slice 3 tremolo checkpoint: [example 36](songs/examples/36-patch-lfo/ACCEPTANCE.md)
+extends the existing typed synth graph with Lfo, ControlScale and ControlMultiply.
+Complete candidate validation checks unit/rate/scope/reset and all bounded control
+dependencies; compilation lowers dependency indices, and the ordinary mono voice
+worker evaluates one source per sample/instance in bounded stack arrays. The Lfo
+kernel remains destination-independent; waveform/rate/phase and cabled gate-reset
+settings fingerprint alongside affine/clamp policy and explicit multiplication.
+Legacy matrix behavior and absent-settings fingerprints are unchanged. Native
+Ctrl-G drafts configure settings and show ports/units/cadence; EditPatch capture
+reconstructs the same source. Independent sample references, 60/120 BPM, Hertz and
+fractional periods, adjacent reset, fan-out, separate instance reset origins,
+negative settings/graphs and full/split renders pass. Isolated fresh-process saves
+retain graph/PCM without replay. Worker/production callback tests prove rate edits
+while playing and failed-unit publication/history continuity. Full example status
+stays design: pitch/filter adapters, variable-rate integration, event cadence and
+broader scopes remain open. No callback code or historical musical fixtures changed.
+
+Verification: offline workspace tests, the graph-LFO suite (six parent tests plus
+its isolated reopen child), and affected all-targets Clippy with existing allowances
+pass. Formatting/diff checks and the VitePress build pass. Read-only project checking
+reports example 36 fingerprint `47ef98d84d4c31b3`; historical examples 09 and 29
+retain `41472b38b65b60ed` and `54745c74a42665cf`. Physical listening, deadline
+benchmarks and continuous stateful DSP migration remain unverified.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

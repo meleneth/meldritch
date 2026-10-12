@@ -236,9 +236,21 @@ reset history and combiner policies participate in fingerprints/invalidation.
 Legacy `ModulationMatrix` explicitly sums/clamps a fixed catalog. Keep that
 behavior for historical showcases and lower it to explicit combiners when
 exposing it as graph data; do not transfer implicit summation into new cables.
-No loadable LFO `ModuleKind` exists today. Current low-pass cutoff/Plaits timbre
-are editable targets rather than general signal inputs; adding an LFO also needs
-typed parameter-port lowering, not merely a new oscillator algorithm.
+Example 36 now loads Lfo/ControlScale/ControlMultiply in the ordinary synth graph.
+`control_graph::control_order` validates a bounded control DAG, unit compatibility,
+explicit reset and reachability to VCA level. `song_control::ControlPlan` lowers
+indexed dependencies and reuses the static-rate Lfo kernel; a 33-value/32-origin
+worker stack evaluates sources once per sample/instance. Gate rises set that
+LFO's origin before evaluation when the authored reset cable/policy requires it.
+End/reset, held pitch and gate rises retain the existing voice ordering. Graph
+settings enter the semantic fingerprint; old absent settings add no hash input.
+Typed configurations reuse PatchEdit, capture and whole-project save/reopen.
+Control ModulePort metadata exposes bipolar/unit-interval units and audio cadence;
+scope is explicitly per instance. This is a bounded amplitude-control extension,
+not general audio DAG execution. Low-pass cutoff/Plaits timbre remain editable
+targets rather than signal inputs. Pitch/filter adapters, integrated variable-rate
+phase, event cadence, global/per-voice scopes and seeded graph randomness remain
+open. Legacy matrix summation/clamping and its seeded waveform behavior are unchanged.
 
 Normalization is patch-authored policy resolved into active connections, with
 current values projected separately. Static normal routes use explicit priority
@@ -334,7 +346,7 @@ the missing behavior is implemented. Required tests are acceptance obligations.
 | Authoritative state and modes | `meldritch-app/src/project.rs`: `ProjectSource.base/source`, `enable_project_source`; `lib.rs`: `AppController::dispatch`, `CockpitMode`; render host `SongLiveOverrides` | Accepted source is app-owned independently of an instrument panel; native editors mutate the same source and preserve import provenance. Mapping faders still write authored values. Separate interaction mode and instance overlays without duplicate state. | Mode switch keeps audio/transport; performance moves leave authored fingerprint/export unchanged; explicit promotion reconstructs edits; failed promotion is atomic. |
 | Patch scope / independent signals | DSL `SignalType`, `ModuleKind`, `resolve_port`, `CableDefinition`, `PatternVoiceDefinition`; render `compile_pattern_voice`, `CompiledNotePatch::render_with_filter_overrides` | Mono composition bindings execute independent pitch/gate; legacy track notes keep coupled articulation. Only four signal families and fixed voice topology execute; general graph execution remains missing. | Held pitch under an independent gate and split rendering are proved; non-amplitude envelope, broader graph execution and other families remain required. Unsupported execution must reject, never silently ignore cables. |
 | Patchable patterns / transforms | DSL `NotePatternDefinition`, `NoteEventDefinition`; `song/notes.rs`: `PatternMaterial`, compatibility `AuthoredPattern.track`; `song/voices.rs`: separate bindings; core `Pattern::events_between`, `EventOccurrence` | Native palette patterns have no track owner and independently bind mono inputs. No event-transform graph, rate adapters or polyphonic source contract. Legacy step/duration semantics differ; occurrence identity must survive transformations. | Independent gate source, initial/held pitch, adjacent retriggers, multi-composition reuse/fresh reload and clock/chord/overlap rejection are checked. Transformed identities and probability/ratchet bounds remain open. |
-| LFOs / rates / combination | `meldritch-render/src/modulation.rs`: `Lfo`, `LfoRate`, `ModulationMatrix`; DSP envelope/follower kernels | Fixed destinations and implicit route sum; no graph LFO/parameter ports, integrated variable-rate phase, scope or reset contract. | Shared fan-out equals one source; per-voice phases differ as authored; rate modulation/reset/tempo, split render and feedback-delay tests; reject units/rate/combination ambiguity. |
+| LFOs / rates / combination | Existing `modulation::Lfo`/`LfoRate`; DSL `control_graph`, ModuleKind Lfo/ControlScale/ControlMultiply; render `song_control::ControlPlan`; typed patch configurations and persistence | Mono VCA control DAG now executes explicit units/audio cadence/per-instance scope, static rate, fan-out and cabled reset. Pitch/filter parameter ports, integrated variable-rate phase, event cadence and broader scopes remain missing. Legacy matrix stays separate/compatible. | Example 36 checks oscillator/phase/gate references, tempo/Hertz/split rendering, fan-out and separate reset origins, invalid graphs/units, typed edits/capture, worker publication and fresh reopen. Full modulated-rate/scope/feedback and physical tests remain open. |
 | Normalization | Explicit synth inputs/cables and single occupied-input rejection in `song/patch.rs` | No authored policy/resolution. Blending defaults would hide a second graph. | Default route, override, disable, save/reload; combiner required for mixing; dynamic selector's decisions visible/fingerprinted. |
 | Atomic graph revisions | DSL `PatchEdit`, `preview_patch`, `replace_patch`, `edit_patch`; app `edit_patch`, `patch_submit`; tests `patch_authoring.rs` | Bounded clone/compile transaction exists (32 modules/128 cables/128 operations), keyboard stale-base protection; no general transaction/cable IDs, normalization or interface revision. | Complete candidate succeeds despite incomplete draft; failures/stale bases keep source/history/audio; concurrent interface and graph update; preserved IDs and deterministic replay. |
 | Stateful activation | render `SongRerenderWorker`; audio `AudioSnapshotPublisher::publish`, `PublishedAudio`; control `SongAudioHost` generations | Full finite rerender, fixed channels/frames/chunk layout, u32 PCM horizon, no live DSP migration/crossfade. Latest-wins cannot be a structural action log. | Quantized readiness/miss/cancel; preserve oscillator/envelope/filter checkpoints, drain delay tails, release removed gates; stale workers cannot roll back; allocation/deadline checks separately. |

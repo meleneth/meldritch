@@ -15,6 +15,7 @@ pub mod modulation;
 pub mod performance_fx;
 pub mod phrases;
 mod plaits;
+mod song_control;
 pub mod song_host;
 pub mod song_render;
 pub mod stereo_fx;

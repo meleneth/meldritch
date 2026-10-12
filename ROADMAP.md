@@ -16,7 +16,7 @@ neighbors, then binds acceptance to actual app/compiler/host boundaries.
 Example 34 has opening/creation/binding requests, invalid neighbors and scoped tests.
 Its composed construction/persistence contract is accepted headlessly. Example 35
 also accepts the bounded native shared-palette/two-composition workflow headlessly.
-Names 36–41 below are
+Example 36 now has its first executable tremolo checkpoint. Names 37–41 below are
 reserved planning names, not existing files, schema or capability claims.
 No slice requires rewriting working examples or introducing another engine.
 
@@ -109,10 +109,18 @@ full/split audio prove independence. Depends on slice 1.
 
 ### 3. A modulated bass through explicit graph controls
 
-**Scenario/example:** proposed `36-patch-lfo`: one beat-synchronized LFO feeds
+**Scenario/example:** [36-patch-lfo](songs/examples/36-patch-lfo/ACCEPTANCE.md): one beat-synchronized LFO feeds
 filter cutoff and oscillator pitch through separate explicit unit adapters;
 envelope controls LFO depth and pattern gate resets it. A free-running variant
 demonstrates the different transport contract.
+
+**First checkpoint implemented:** mono LFO → explicit bipolar/unit-interval
+scale/clamp and envelope multiplier → VCA, inside the existing note compiler.
+Static audio-rate/per-instance settings, Hertz/beats phase, cabled gate reset,
+shared fan-out, typed graph drafts, capture and fresh-process persistence now have
+headless tests. Worker/callback tests prove playing rate edits and invalid-unit
+publication continuity. Full example remains design: pitch/filter adapters,
+variable-rate integration, event cadence and broader scopes are still required.
 
 **Sound/control:** shared phase sweeps both destinations; depth/rate/reset are
 inspectable. Demonstrate explicit sum/scale/clamp, event versus audio/control
