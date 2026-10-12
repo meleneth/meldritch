@@ -702,3 +702,226 @@ fn graph_lfo_reopen_child() {
     assert_eq!(split, expected);
     assert_eq!(fs::read_dir(&root).unwrap().count(), before);
 }
+
+#[test]
+fn filter_hertz_draft_matches_independent_recurrence_and_fresh_process() {
+    use meldritch_dsl::{ControlHertzSettings, PatchEdit, PatchOperation};
+    let directory = Directory::new();
+    let mut app = directory.app();
+    app.enable_native_project_source(load_native_project(&directory.0, FIXTURE).unwrap())
+        .unwrap();
+    app.dispatch(AppCommand::SelectInstrument("bass".into()))
+        .unwrap();
+    app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+    app.dispatch(AppCommand::TogglePatchEditor).unwrap();
+    let before = app.authored_source().unwrap();
+    let lines: Vec<_> = include_str!("../../../songs/examples/36-patch-lfo/filter-patch.txt")
+        .lines()
+        .collect();
+    for (index, line) in lines.iter().enumerate() {
+        for c in line.chars() {
+            app.dispatch(AppCommand::PatchCharacter(c)).unwrap();
+        }
+        app.dispatch(AppCommand::PatchSubmit).unwrap();
+        if index + 1 < lines.len() {
+            assert!(Arc::ptr_eq(&before, &app.authored_source().unwrap()));
+        }
+    }
+    assert_ne!(
+        before.fingerprint(),
+        app.authored_source().unwrap().fingerprint()
+    );
+    for settings in [
+        ControlHertzSettings::default(),
+        ControlHertzSettings {
+            gain_hz: -1800.0,
+            offset_hz: 2000.0,
+            ..ControlHertzSettings::default()
+        },
+        ControlHertzSettings {
+            gain_hz: 0.0,
+            offset_hz: 2500.0,
+            ..ControlHertzSettings::default()
+        },
+        ControlHertzSettings {
+            gain_hz: 10000.0,
+            offset_hz: -1000.0,
+            clamp_min_hz: 100.0,
+            clamp_max_hz: 1500.0,
+        },
+    ] {
+        let command = AppCommand::EditPatch(PatchEdit {
+            synth: "bass".into(),
+            operations: vec![PatchOperation::ConfigureControlHertz {
+                module: "cutoff".into(),
+                settings,
+            }],
+        });
+        let encoded = toml::to_string(
+            &meldritch_control::native_capture::NativeProjectCommand::try_from(&command).unwrap(),
+        )
+        .unwrap();
+        let decoded: meldritch_control::native_capture::NativeProjectCommand =
+            toml::from_str(&encoded).unwrap();
+        app.dispatch(decoded.into()).unwrap();
+        let source = app.authored_source().unwrap();
+        let patch = CompiledSongPatch::compile_initial(&source).unwrap();
+        let audio = patch
+            .render_default(FrameRange::new(0, 192000).unwrap())
+            .unwrap();
+        let mut oscillator = Oscillator::new(Waveform::Sine);
+        let mut state = [0.0, 0.0];
+        for (frame, actual) in audio.samples().iter().enumerate() {
+            let control = (std::f64::consts::TAU * (frame as f64 / 24000.0).fract())
+                .sin()
+                .mul_add(0.5, 0.5);
+            let frequency = control
+                .mul_add(settings.gain_hz, settings.offset_hz)
+                .clamp(settings.clamp_min_hz, settings.clamp_max_hz);
+            let wave = oscillator.next(440.0 * 2_f64.powf((48.0 - 69.0) / 12.0), 48000);
+            let input = wave * if frame % 96000 < 84000 { control } else { 0.0 };
+            // Independent scalar trapezoidal-integrator recurrence; default Q=0.
+            let g = (std::f64::consts::PI * frequency / 48000.0).tan();
+            let a = 1.0 / (1.0 + g * (g + 2.0));
+            let band = a * (state[0] + g * (input - state[1]));
+            let low = state[1] + g * band;
+            state = [2.0 * band - state[0], 2.0 * low - state[1]];
+            assert!((actual - low * 0.8).abs() < 1e-12, "frame {frame}");
+        }
+        assert_fresh_process(&directory, &source);
+    }
+    let source = app.authored_source().unwrap();
+    let patch = CompiledSongPatch::compile_initial(&source).unwrap();
+    let mut overrides = meldritch_render::song_host::SongLiveOverrides::default();
+    overrides.synth_filters.insert(
+        meldritch_render::song_host::SynthFilterTarget {
+            synth_id: "bass".into(),
+            module_id: "tone".into(),
+        },
+        meldritch_render::song_host::SongFilterLiveOverrides {
+            cutoff_hz: Some(1000.0),
+            resonance: None,
+        },
+    );
+    assert!(
+        patch
+            .render(FrameRange::new(0, 96000).unwrap(), &overrides)
+            .is_err()
+    );
+    let ports = source.synths()["bass"]
+        .modules()
+        .iter()
+        .flat_map(|m| m.ports())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ports
+            .iter()
+            .find(|p| p.endpoint == "tone.cutoff")
+            .unwrap()
+            .unit,
+        Some(meldritch_dsl::ControlUnit::Hertz)
+    );
+}
+
+#[test]
+fn invalid_filter_adapters_leave_source_and_history_unchanged() {
+    use meldritch_dsl::{ControlHertzSettings, ModuleKind, PatchEdit, PatchOperation};
+    let directory = Directory::new();
+    let mut app = directory.app();
+    app.enable_native_project_source(load_native_project(&directory.0, FIXTURE).unwrap())
+        .unwrap();
+    let connect = |from: &str, to: &str| PatchOperation::Connect {
+        from: from.into(),
+        to: to.into(),
+    };
+    let disconnect = |from: &str, to: &str| PatchOperation::Disconnect {
+        from: from.into(),
+        to: to.into(),
+    };
+    let base = vec![
+        disconnect("amp.audio", "out.audio"),
+        PatchOperation::Instantiate {
+            id: "tone".into(),
+            kind: ModuleKind::LowPass,
+        },
+        PatchOperation::Instantiate {
+            id: "cutoff".into(),
+            kind: ModuleKind::ControlHertz,
+        },
+        connect("amp.audio", "tone.audio"),
+        connect("tone.audio", "out.audio"),
+        connect("unipolar.control", "cutoff.control"),
+        connect("cutoff.control", "tone.cutoff"),
+    ];
+    let before = app.authored_source().unwrap();
+    let cases: toml::Value = toml::from_str(include_str!(
+        "../../../songs/examples/36-patch-lfo/invalid/filter.toml"
+    ))
+    .unwrap();
+    for case in cases["cases"].as_array().unwrap() {
+        let kind = case["kind"].as_str().unwrap();
+        let mut operations = base.clone();
+        match kind {
+            "nonfinite" | "range" | "clamp_reversed" => {
+                operations.push(PatchOperation::ConfigureControlHertz {
+                    module: "cutoff".into(),
+                    settings: match kind {
+                        "nonfinite" => ControlHertzSettings {
+                            gain_hz: f64::INFINITY,
+                            ..ControlHertzSettings::default()
+                        },
+                        "range" => ControlHertzSettings {
+                            clamp_max_hz: 30000.0,
+                            ..ControlHertzSettings::default()
+                        },
+                        _ => ControlHertzSettings {
+                            clamp_min_hz: 1000.0,
+                            clamp_max_hz: 100.0,
+                            ..ControlHertzSettings::default()
+                        },
+                    },
+                })
+            }
+            "missing_input" => operations.push(disconnect("unipolar.control", "cutoff.control")),
+            "missing_output" => operations.push(disconnect("cutoff.control", "tone.cutoff")),
+            "bipolar_input" => {
+                operations.push(disconnect("unipolar.control", "cutoff.control"));
+                operations.push(connect("slow.control", "cutoff.control"));
+            }
+            "unit_interval_to_cutoff" => {
+                operations.push(disconnect("cutoff.control", "tone.cutoff"));
+                operations.push(connect("unipolar.control", "tone.cutoff"));
+            }
+            "hertz_to_vca" => {
+                operations.push(disconnect("shape.control", "amp.level"));
+                operations.push(connect("cutoff.control", "amp.level"));
+            }
+            "duplicate_cutoff" => operations.push(connect("env.control", "tone.cutoff")),
+            "second_adapter" => operations.push(PatchOperation::Instantiate {
+                id: "extra".into(),
+                kind: ModuleKind::ControlHertz,
+            }),
+            "no_control_modules" => {
+                for id in ["slow", "unipolar", "shape", "cutoff"] {
+                    operations.push(PatchOperation::Remove {
+                        id: id.into(),
+                        cables: meldritch_dsl::DependentCables::Disconnect,
+                    });
+                }
+                operations.push(connect("env.control", "amp.level"));
+                operations.push(connect("env.control", "tone.cutoff"));
+            }
+            _ => panic!("unexecuted filter negative {kind}"),
+        }
+        assert!(
+            app.dispatch(AppCommand::EditPatch(PatchEdit {
+                synth: "bass".into(),
+                operations
+            }))
+            .is_err(),
+            "accepted {kind}"
+        );
+        assert!(Arc::ptr_eq(&before, &app.authored_source().unwrap()));
+        assert!(app.history().is_empty());
+    }
+}

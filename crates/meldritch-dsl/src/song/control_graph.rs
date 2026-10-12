@@ -6,10 +6,16 @@ use super::*;
 pub enum ControlUnit {
     Bipolar,
     UnitInterval,
+    Hertz,
 }
 impl ModuleDefinition {
     pub fn control_unit(&self, port: &str, direction: PortDirection) -> Option<ControlUnit> {
         match (self.kind, direction, port) {
+            (ModuleKind::ControlHertz, PortDirection::Input, "control") => {
+                Some(ControlUnit::UnitInterval)
+            }
+            (ModuleKind::ControlHertz, PortDirection::Output, "control")
+            | (ModuleKind::LowPass, PortDirection::Input, "cutoff") => Some(ControlUnit::Hertz),
             (ModuleKind::Lfo, PortDirection::Output, "control")
             | (ModuleKind::PitchModulate, PortDirection::Input, "control")
             | (ModuleKind::ControlScale, PortDirection::Input, "control") => {
@@ -27,6 +33,47 @@ impl ModuleDefinition {
             _ => None,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControlHertzSettings {
+    pub gain_hz: f64,
+    pub offset_hz: f64,
+    pub clamp_min_hz: f64,
+    pub clamp_max_hz: f64,
+}
+impl Default for ControlHertzSettings {
+    fn default() -> Self {
+        Self {
+            gain_hz: 1800.0,
+            offset_hz: 200.0,
+            clamp_min_hz: 20.0,
+            clamp_max_hz: 20000.0,
+        }
+    }
+}
+pub(super) fn validate_hertz_settings(
+    kind: ModuleKind,
+    settings: Option<ControlHertzSettings>,
+) -> Result<(), String> {
+    if (kind == ModuleKind::ControlHertz) != settings.is_some() {
+        return Err("Hertz settings must match module kind".into());
+    }
+    if let Some(s) = settings {
+        if ![s.gain_hz, s.offset_hz, s.clamp_min_hz, s.clamp_max_hz]
+            .iter()
+            .all(|v| v.is_finite())
+            || !(-20000.0..=20000.0).contains(&s.gain_hz)
+            || !(-20000.0..=20000.0).contains(&s.offset_hz)
+            || s.clamp_min_hz < 20.0
+            || s.clamp_max_hz > 20000.0
+            || s.clamp_min_hz > s.clamp_max_hz
+        {
+            return Err("Hertz adapter requires finite gain/offset in -20000..20000 and ordered clamps in 20..20000 Hz".into());
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
@@ -179,7 +226,7 @@ pub(super) fn validate_control_settings(
 }
 impl SynthDefinition {
     /// Validate the complete bounded control DAG and return dependency order.
-    /// Every new control node must reach VCA level or oscillator pitch;
+    /// Every new control node must reach VCA level, oscillator pitch or filter cutoff;
     /// no hidden/ignored branches.
     pub fn control_order(&self) -> Result<Vec<String>, String> {
         let controls: BTreeSet<_> = self
@@ -192,11 +239,15 @@ impl SynthDefinition {
                         | ModuleKind::ControlScale
                         | ModuleKind::ControlMultiply
                         | ModuleKind::PitchModulate
+                        | ModuleKind::ControlHertz
                 )
             })
             .map(|m| m.id.as_str())
             .collect();
         if controls.is_empty() {
+            if self.cables.iter().any(|c| c.to.ends_with(".cutoff")) {
+                return Err("filter cutoff requires an explicit Hertz adapter".into());
+            }
             return Ok(vec![]);
         }
         if self.modules.len() > 32 || self.cables.len() > 128 {
@@ -333,8 +384,48 @@ impl SynthDefinition {
             )?;
             order.push(adapter.id.clone());
         }
+        let hertz = self
+            .modules
+            .iter()
+            .filter(|m| m.kind == ModuleKind::ControlHertz)
+            .collect::<Vec<_>>();
+        let cutoff_cables = self
+            .cables
+            .iter()
+            .filter(|c| c.to.ends_with(".cutoff"))
+            .collect::<Vec<_>>();
+        match (hertz.as_slice(), cutoff_cables.as_slice()) {
+            ([], []) => {}
+            ([adapter], [cable]) => {
+                let filter = self
+                    .modules
+                    .iter()
+                    .find(|m| m.kind == ModuleKind::LowPass)
+                    .ok_or("Hertz adapter requires a low-pass filter")?;
+                if cable.from != format!("{}.control", adapter.id)
+                    || cable.to != format!("{}.cutoff", filter.id)
+                    || cable.signal != SignalType::Control
+                {
+                    return Err("filter cutoff requires explicit Hertz adapter output".into());
+                }
+                visit(
+                    self,
+                    &format!("{}.control", adapter.id),
+                    false,
+                    &mut BTreeSet::new(),
+                    &mut order,
+                )?;
+                order.push(adapter.id.clone());
+            }
+            _ => {
+                return Err(
+                    "filter lowering requires one Hertz adapter and one cutoff cable or neither"
+                        .into(),
+                );
+            }
+        }
         if controls.len() != order.len() {
-            return Err("unused control module outside executable VCA/pitch graph".into());
+            return Err("unused control module outside executable VCA/pitch/filter graph".into());
         }
         Ok(order)
     }

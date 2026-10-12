@@ -1,0 +1,10 @@
+clear
+disconnect amp.audio out.audio
+add tone low_pass
+add cutoff control_hertz
+hertz cutoff 1800 200 20 20000
+connect amp.audio tone.audio
+connect tone.audio out.audio
+connect unipolar.control cutoff.control
+connect cutoff.control tone.cutoff
+commit

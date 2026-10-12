@@ -49,6 +49,7 @@ pub enum ModuleKind {
     ControlScale,
     ControlMultiply,
     PitchModulate,
+    ControlHertz,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -74,6 +75,8 @@ impl PatchInput {
 #[serde(deny_unknown_fields)]
 pub struct ModuleDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    hertz: Option<ControlHertzSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pitch_modulation: Option<PitchModulationSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     lfo: Option<GraphLfoSettings>,
@@ -97,6 +100,9 @@ pub struct ModuleDefinition {
 }
 
 impl ModuleDefinition {
+    pub const fn hertz(&self) -> Option<ControlHertzSettings> {
+        self.hertz
+    }
     pub const fn pitch_modulation(&self) -> Option<PitchModulationSettings> {
         self.pitch_modulation
     }
@@ -1690,6 +1696,7 @@ struct RawSynth {
 
 #[derive(Debug, Deserialize)]
 struct RawModule {
+    hertz: Option<ControlHertzSettings>,
     pitch_modulation: Option<PitchModulationSettings>,
     lfo: Option<GraphLfoSettings>,
     scale: Option<ControlScaleSettings>,
@@ -3264,6 +3271,7 @@ fn parse_synth(path: &Path, raw: RawSynthFile) -> Result<SynthDefinition, SongLo
             "control_scale" => ModuleKind::ControlScale,
             "control_multiply" => ModuleKind::ControlMultiply,
             "pitch_modulate" => ModuleKind::PitchModulate,
+            "control_hertz" => ModuleKind::ControlHertz,
             unknown => {
                 return Err(SongLoadError::one(
                     path,
@@ -3343,7 +3351,10 @@ fn parse_synth(path: &Path, raw: RawSynthFile) -> Result<SynthDefinition, SongLo
             .map_err(|e| SongLoadError::one(path, e))?;
         control_graph::validate_pitch_settings(kind, module.pitch_modulation)
             .map_err(|e| SongLoadError::one(path, e))?;
+        control_graph::validate_hertz_settings(kind, module.hertz)
+            .map_err(|e| SongLoadError::one(path, e))?;
         modules.push(ModuleDefinition {
+            hertz: module.hertz,
             pitch_modulation: module.pitch_modulation,
             lfo: module.lfo,
             scale: module.scale,
@@ -3486,7 +3497,10 @@ fn load_dsp(path: &Path) -> Result<DspDefinition, SongLoadError> {
             .map_err(|e| SongLoadError::one(path, e))?;
         control_graph::validate_pitch_settings(kind, module.pitch_modulation)
             .map_err(|e| SongLoadError::one(path, e))?;
+        control_graph::validate_hertz_settings(kind, module.hertz)
+            .map_err(|e| SongLoadError::one(path, e))?;
         modules.push(ModuleDefinition {
+            hertz: module.hertz,
             pitch_modulation: module.pitch_modulation,
             lfo: module.lfo,
             scale: module.scale,
@@ -3810,6 +3824,8 @@ fn resolve_port(
         )
     })?;
     let signal = match (*kind, direction, port) {
+        (ModuleKind::ControlHertz, _, "control")
+        | (ModuleKind::LowPass, PortDirection::Input, "cutoff") => SignalType::Control,
         (ModuleKind::PitchModulate, _, "pitch") => SignalType::Pitch,
         (ModuleKind::PitchModulate, PortDirection::Input, "control") => SignalType::Control,
         (ModuleKind::Lfo, PortDirection::Input, "reset") => SignalType::Gate,
@@ -4794,6 +4810,17 @@ fn fingerprint_song(
             if let Some(settings) = module.pitch_modulation {
                 fingerprint.string("pitch-modulate-v1-semitones-audio-per-instance");
                 fingerprint.u64(settings.depth_semitones.to_bits());
+            }
+            if let Some(settings) = module.hertz {
+                fingerprint.string("control-hertz-v1-audio-per-instance");
+                for value in [
+                    settings.gain_hz,
+                    settings.offset_hz,
+                    settings.clamp_min_hz,
+                    settings.clamp_max_hz,
+                ] {
+                    fingerprint.u64(value.to_bits());
+                }
             }
             if let Some(settings) = module.scale {
                 fingerprint.string("control-scale-v1-bipolar-to-unit-interval");

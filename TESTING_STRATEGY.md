@@ -252,6 +252,15 @@ isolated full/split reopen, and every invalid/pitch.toml case with source/histor
 continuity. The worker test adds the pitch adapter while playing and checks PCM.
 Full example-36 status stays design until the remaining contract passes.
 
+The filter checkpoint tests explicit Hertz scaling/clamps at positive/zero/negative
+gain against independent coefficient/integrator recurrence, filter tails, typed
+draft/settings/capture roundtrips, unit metadata and isolated full/split reopen.
+Every invalid/filter.toml case preserves source/history. Cabled cutoff overrides
+reject. The worker test combines tremolo/vibrato/filter while playing and verifies
+exact stereo publication and invalid-input source/history/publication continuity.
+The legacy automated-filter regression test rejects graph controls on its distinct
+historical lowering, while the unchanged example-02 automation render still passes.
+
 Add later:
 - offline render throughput
 - worker saturation

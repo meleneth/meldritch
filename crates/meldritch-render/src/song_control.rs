@@ -2,8 +2,8 @@
 use crate::modulation::{Lfo, LfoRate, LfoShape};
 use meldritch_core::Tempo;
 use meldritch_dsl::{
-    ControlScaleSettings, GraphLfoRate, GraphLfoSettings, GraphLfoShape, LfoReset, ModuleKind,
-    SynthDefinition,
+    ControlHertzSettings, ControlScaleSettings, GraphLfoRate, GraphLfoSettings, GraphLfoShape,
+    LfoReset, ModuleKind, SynthDefinition,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -21,12 +21,17 @@ pub(crate) enum ControlNode {
         input: usize,
         depth_semitones: f64,
     },
+    Hertz {
+        input: usize,
+        settings: ControlHertzSettings,
+    },
 }
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ControlPlan {
     pub nodes: Vec<ControlNode>,
     pub output: usize,
     pub pitch_offset: Option<usize>,
+    pub cutoff: Option<usize>,
 }
 impl ControlPlan {
     pub fn compile(graph: &SynthDefinition) -> Result<Option<Self>, String> {
@@ -73,6 +78,10 @@ impl ControlPlan {
                     input: resolve(&format!("{id}.control"))?,
                     depth_semitones: module.pitch_modulation().unwrap().depth_semitones,
                 },
+                ModuleKind::ControlHertz => ControlNode::Hertz {
+                    input: resolve(&format!("{id}.control"))?,
+                    settings: module.hertz().unwrap(),
+                },
                 _ => return Err("unsupported lowered control node".into()),
             });
         }
@@ -82,6 +91,15 @@ impl ControlPlan {
             .find(|m| m.kind() == ModuleKind::Vca)
             .ok_or("missing VCA")?;
         Ok(Some(Self {
+            cutoff: order
+                .iter()
+                .position(|id| {
+                    graph
+                        .modules()
+                        .iter()
+                        .any(|m| m.id() == id && m.kind() == ModuleKind::ControlHertz)
+                })
+                .map(|index| index + 1),
             pitch_offset: order
                 .iter()
                 .position(|id| {
@@ -135,6 +153,9 @@ impl ControlPlan {
                     input,
                     depth_semitones,
                 } => values[*input] * depth_semitones,
+                ControlNode::Hertz { input, settings } => values[*input]
+                    .mul_add(settings.gain_hz, settings.offset_hz)
+                    .clamp(settings.clamp_min_hz, settings.clamp_max_hz),
             };
         }
         values[self.output]

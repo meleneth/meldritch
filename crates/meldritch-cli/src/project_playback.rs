@@ -615,6 +615,85 @@ mod tests {
         callback.render_f64(&mut samples);
         assert!(samples.iter().any(|sample| sample.abs() > 0.01));
         assert_eq!(app.view_model().transport.state, TransportState::Playing);
+        let published = host.reader.snapshot();
+        app.dispatch(AppCommand::EditPatch(PatchEdit {
+            synth: "bass".into(),
+            operations: vec![
+                PatchOperation::Disconnect {
+                    from: "amp.audio".into(),
+                    to: "out.audio".into(),
+                },
+                PatchOperation::Instantiate {
+                    id: "tone".into(),
+                    kind: meldritch_dsl::ModuleKind::LowPass,
+                },
+                PatchOperation::Instantiate {
+                    id: "cutoff".into(),
+                    kind: meldritch_dsl::ModuleKind::ControlHertz,
+                },
+                PatchOperation::Connect {
+                    from: "amp.audio".into(),
+                    to: "tone.audio".into(),
+                },
+                PatchOperation::Connect {
+                    from: "tone.audio".into(),
+                    to: "out.audio".into(),
+                },
+                PatchOperation::Connect {
+                    from: "unipolar.control".into(),
+                    to: "cutoff.control".into(),
+                },
+                PatchOperation::Connect {
+                    from: "cutoff.control".into(),
+                    to: "tone.cutoff".into(),
+                },
+            ],
+        }))
+        .unwrap();
+        assert!(Arc::ptr_eq(&published, &host.reader.snapshot()));
+        ready(&mut app, &mut host);
+        let expected = CompiledSongPatch::compile_initial(&app.authored_source().unwrap())
+            .unwrap()
+            .render_default(meldritch_core::FrameRange::new(0, u64::from(host.frames)).unwrap())
+            .unwrap();
+        assert!(
+            (0..host.frames)
+                .any(|frame| published.frame(frame) != host.reader.snapshot().frame(frame))
+        );
+        for (frame, sample) in expected.samples().iter().enumerate() {
+            assert_eq!(
+                host.reader.snapshot().frame(frame as u32).unwrap(),
+                &[*sample, *sample]
+            );
+        }
+        let source = app.authored_source().unwrap();
+        let publication = host.reader.snapshot();
+        let generation = host.host.generation();
+        let history = app.history().len();
+        assert!(
+            app.dispatch(AppCommand::EditPatch(PatchEdit {
+                synth: "bass".into(),
+                operations: vec![
+                    PatchOperation::Disconnect {
+                        from: "cutoff.control".into(),
+                        to: "tone.cutoff".into()
+                    },
+                    PatchOperation::Connect {
+                        from: "unipolar.control".into(),
+                        to: "tone.cutoff".into()
+                    },
+                ]
+            }))
+            .is_err()
+        );
+        host.poll(&mut app).unwrap();
+        assert!(Arc::ptr_eq(&source, &app.authored_source().unwrap()));
+        assert!(Arc::ptr_eq(&publication, &host.reader.snapshot()));
+        assert_eq!(generation, host.host.generation());
+        assert_eq!(history, app.history().len());
+        callback.render_f64(&mut samples);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.01));
+        assert_eq!(app.view_model().transport.state, TransportState::Playing);
         host.save_project(&mut app).unwrap();
         host.finish(&app).unwrap();
         assert!(host.stream.is_none());

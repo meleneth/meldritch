@@ -74,9 +74,40 @@ sample references, typed capture vocabulary and isolated full/split reopen.
 The native_graph_lfo worker test adds the adapter while playing and verifies
 publication against authored PCM through the production callback without devices.
 
+## Filter checkpoint: explicit Hertz adapter
+
+Apply filter-patch.txt to the tremolo or vibrato patch. Insert the existing
+low_pass in the explicit audio chain. control_hertz takes unit-interval Control
+and emits Hertz Control via input × gain_hz + offset_hz, clamped to authored
+clamp_min_hz/clamp_max_hz. Gain/offset are finite in -20000..20000;
+clamps are ordered within 20..20000 Hz. The typed low_pass.cutoff input accepts
+Hertz only. A cable replaces the filter's configured cutoff default; cutoff
+overrides must reject on this cabled path. Uncabled historical defaults/overrides
+retain their behavior. Existing filter DSP applies its documented physical
+1 Hz..0.49 × sample-rate safety range after the authored adapter clamp.
+
+One adapter may feed the one filter; no hidden sums, cross-family conversions,
+additional filter chains or feedback. LFO → scale fans out to amplitude and
+cutoff; vibrato may also share the same LFO. Evaluation remains audio/per-instance.
+Required evidence: independent coefficient/filter recurrence reference across
+silence/tails, full/split and fresh-process PCM, negative/zero gain and clamp
+behavior, typed atomic drafts/settings/capture, worker publication while playing,
+unit/range/missing/duplicate/unused adapter rejection with unchanged source/history.
+Checkpoint evidence: filter_hertz_draft_matches_independent_recurrence_and_fresh_process
+and invalid_filter_adapters_leave_source_and_history_unchanged check the draft,
+settings/capture vocabulary, filter recurrence/tails, all negatives and isolated
+full/split reopen. native_graph_lfo checks combined tremolo/vibrato/filter worker
+publication while playing and failed-unit publication/history continuity.
+Normalization remains a future authored policy; this first parameter port declares
+its cable/default precedence explicitly rather than claiming configurable normals.
+Historical automated-filter lowering retains its fixed audio/automation ordering
+and rejects graph controls/cutoff cables rather than silently discarding them.
+legacy_filter_automation_rejects_new_graph_controls_instead_of_ignoring_them
+checks this compatibility boundary; it does not introduce a second graph engine.
+
 ## Remaining full Slice 3 contract
 
-Filter unit adapters, broader explicit addition/clamping, modulatable LFO rate,
+Broader explicit addition/clamping, modulatable LFO rate,
 envelope-controlled depth, event/control-rate latching and global/per-voice scopes
 remain requirements. Reset/stop/rewind and composition clocks need their full scope
 contracts. General feedback requires an explicit executable delay. Native controls

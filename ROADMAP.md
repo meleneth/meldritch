@@ -122,7 +122,9 @@ headless tests. Worker/callback tests prove playing rate edits and invalid-unit
 publication continuity. A second checkpoint now adds explicit PitchModulate
 vibrato/depth, shared amplitude/pitch fan-out and typed draft/capture/save/reopen
 tests with independent sample references. One oscillator adapter is supported;
-Plaits and pitch chains reject. Full example remains design: filter adapters,
+Plaits and pitch chains reject. A third checkpoint adds a typed Hertz cutoff
+adapter, authored clamping, cable/default precedence, independent filter-tail
+references, fresh reopen and playing publication. Full example remains design:
 variable-rate integration, event cadence and broader scopes are still required.
 
 **Sound/control:** shared phase sweeps both destinations; depth/rate/reset are

@@ -114,7 +114,10 @@ fresh-process persistence are checked headlessly. Full example status stays desi
 An explicit PitchModulate adapter now adds bipolar Control × semitone depth to
 independent Pitch, sharing the LFO with amplitude. Typed drafts/depth edits,
 sample/split references, rejection, worker publication and fresh reopen are checked.
-Filter ports, variable-rate phase and broader scope/cadence remain open.
+ControlHertz now drives a typed low_pass.cutoff port through explicit scaling and
+clamps. Independent filter recurrence/tail references, drafts, capture vocabulary,
+worker publication and fresh reopen are checked; cabled cutoff overrides reject.
+Variable-rate phase and broader scope/cadence remain open.
 Example 35's native pattern-selection checkpoint is implemented: PgUp/PgDn
 selects palette material without rebinding, source/runtime mutation or rerender;
 typed capture and independent-source persistence/render tests pass. Its full

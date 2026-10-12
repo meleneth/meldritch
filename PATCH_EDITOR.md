@@ -11,7 +11,7 @@ Press Ctrl-E, then Ctrl-G. Type a command and Enter to stage it:
 
 | Command | Behavior |
 | --- | --- |
-| `add ID TYPE` | Instantiate oscillator, plaits, adsr, vca, low_pass, audio_output, lfo, control_scale, control_multiply or pitch_modulate with inspectable defaults |
+| `add ID TYPE` | Instantiate oscillator, plaits, adsr, vca, low_pass, audio_output, lfo, control_scale, control_multiply, pitch_modulate or control_hertz with inspectable defaults |
 | `remove ID reject` | Remove only when no dependent cable remains |
 | `remove ID disconnect` | Explicitly remove the module and all its dependent cables |
 | `connect MODULE.PORT MODULE.PORT` | Connect one compatible output to an unoccupied input |
@@ -20,6 +20,7 @@ Press Ctrl-E, then Ctrl-G. Type a command and Enter to stage it:
 | `lfo ID SHAPE beats/hertz VALUE phase PHASE reset none/gate_rise` | Configure sine/triangle/saw/square, cycle beats or Hertz, phase and explicit reset; audio/per-instance scope |
 | `scale ID GAIN OFFSET MIN MAX` | Configure explicit bipolar → unit-interval affine scaling and clamping |
 | `pitch-depth ID SEMITONES` | Configure pitch_modulate depth in -24..24; output Pitch = input Pitch + bipolar Control × depth, audio/per-instance |
+| `hertz ID GAIN OFFSET MIN MAX` | Configure explicit unit-interval → Hertz affine scaling and authored clamping, audio/per-instance |
 | `commit` | Validate complete graph and compile before replacing source/publishing |
 | `clear` | Discard staged commands |
 | `save` / Ctrl-S | Save the committed selected instrument, never an incomplete draft |
@@ -46,8 +47,14 @@ Every control node must reach VCA level or the oscillator pitch adapter;
 units/rate validate and multiple cables still require an explicit combiner.
 Inspect settings and typed ports in the scrolling graph pane. A gate-rise-reset
 LFO requires input.gate → ID.reset; reset-none rejects that cable. Unsupported
-filter modulation, Plaits/chain pitch lowering, polyphonic control lowering, event cadence and globals
+Plaits/chain pitch lowering, polyphonic control lowering, event cadence and globals
 remain future work; the fixed audio chain remains the current executable subset.
+
+ControlHertz adds one explicit unit-interval → Hertz adapter feeding low_pass.cutoff.
+That cable replaces the configured cutoff default; the inspector labels the default
+inactive, and cutoff overrides reject rather than bypassing the cable. Filter
+resonance stays configured/overridable. The existing DSP's physical frequency bound
+still applies after the authored adapter clamp. Configurable normalization is open.
 
 The inspector lists module IDs/types, typed input/output endpoints, authored
 values/ranges, explicit cables and draft validation/compilation diagnostics.

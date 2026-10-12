@@ -761,6 +761,16 @@ impl CompiledNotePatch {
         if cutoff_override.is_some_and(|value| !value.is_finite() || value <= 0.0) {
             return Err(SongRenderError::InvalidCutoffOverride);
         }
+        if cutoff_override.is_some()
+            && self
+                .control
+                .as_ref()
+                .is_some_and(|plan| plan.cutoff.is_some())
+        {
+            return Err(SongRenderError::InvalidPatternVoice(
+                "cabled filter cutoff cannot accept an uncabled cutoff override".into(),
+            ));
+        }
         if resonance_override
             .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
         {
@@ -865,7 +875,10 @@ impl CompiledNotePatch {
             if let Some(filter_settings) = &self.filter {
                 sample = filter.process(
                     sample,
-                    cutoff_override.unwrap_or(filter_settings.cutoff_hz),
+                    self.control.as_ref().and_then(|plan| plan.cutoff).map_or(
+                        cutoff_override.unwrap_or(filter_settings.cutoff_hz),
+                        |index| control_values[index],
+                    ),
                     resonance_override.unwrap_or(filter_settings.resonance),
                     FilterMode::LowPass,
                     self.sample_rate,
@@ -1951,6 +1964,21 @@ pub fn compile_filtered_note_song(
                 id: track.synth_id().to_owned(),
             })?;
     let oscillator = exactly_one_module(synth.modules(), ModuleKind::Oscillator)?;
+    // This historical automation renderer owns a different, fixed audio order.
+    // Never accept new graph controls and then silently discard their cables.
+    if synth.modules().iter().any(|m| {
+        matches!(
+            m.kind(),
+            ModuleKind::Lfo
+                | ModuleKind::ControlScale
+                | ModuleKind::ControlMultiply
+                | ModuleKind::PitchModulate
+                | ModuleKind::ControlHertz
+        )
+    }) || synth.cables().iter().any(|c| c.to().ends_with(".cutoff"))
+    {
+        return Err(SongRenderError::InvalidPatternVoice("legacy automated-filter lowering does not support graph controls/cutoff cables; use the mono note graph path".into()));
+    }
     let filter = exactly_one_module(synth.modules(), ModuleKind::LowPass)?;
     let envelope = exactly_one_module(synth.modules(), ModuleKind::Adsr)?;
     let amplifier = exactly_one_module(synth.modules(), ModuleKind::Vca)?;

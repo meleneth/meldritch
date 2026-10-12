@@ -222,6 +222,49 @@ fn synth_parameter_pattern_drives_filter_cutoff_sample_accurately() {
 }
 
 #[test]
+fn legacy_filter_automation_rejects_new_graph_controls_instead_of_ignoring_them() {
+    use meldritch_dsl::{ModuleKind, PatchEdit, PatchOperation};
+    let song = load_song_directory(example("02-synth-parameter-pattern")).unwrap();
+    let synth = song.synths().values().next().unwrap();
+    let env = synth
+        .modules()
+        .iter()
+        .find(|m| m.kind() == ModuleKind::Adsr)
+        .unwrap();
+    let filter = synth
+        .modules()
+        .iter()
+        .find(|m| m.kind() == ModuleKind::LowPass)
+        .unwrap();
+    let candidate = song
+        .preview_patch(&PatchEdit {
+            synth: synth.id().into(),
+            operations: vec![
+                PatchOperation::Instantiate {
+                    id: "cutoff".into(),
+                    kind: ModuleKind::ControlHertz,
+                },
+                PatchOperation::Connect {
+                    from: format!("{}.control", env.id()),
+                    to: "cutoff.control".into(),
+                },
+                PatchOperation::Connect {
+                    from: "cutoff.control".into(),
+                    to: format!("{}.cutoff", filter.id()),
+                },
+            ],
+        })
+        .unwrap();
+    assert!(
+        compile_filtered_note_song(&candidate)
+            .unwrap_err()
+            .to_string()
+            .contains("legacy automated-filter")
+    );
+    assert!(compile_filtered_note_song(&song).is_ok());
+}
+
+#[test]
 fn automated_filter_patch_is_sample_identical_across_chunks() {
     let song =
         load_song_directory(example("02-synth-parameter-pattern")).expect("song should load");

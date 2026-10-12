@@ -612,6 +612,25 @@ fn draw_instrument_editor(
                             settings.depth_semitones
                         ));
                     }
+                    if let Some(settings) = m.hertz() {
+                        lines.push(format!(
+                            "Hertz gain {} offset {} clamp {}..{} Hz (Audio/PerInstance)",
+                            settings.gain_hz,
+                            settings.offset_hz,
+                            settings.clamp_min_hz,
+                            settings.clamp_max_hz
+                        ));
+                    }
+                    if graph
+                        .cables()
+                        .iter()
+                        .any(|c| c.to() == format!("{}.cutoff", m.id()))
+                    {
+                        lines.push(
+                            "Cutoff: cabled Hertz; configured cutoff is the inactive default"
+                                .into(),
+                        );
+                    }
                     for p in source
                         .instrument_parameters(&editor.synth)
                         .unwrap_or_default()

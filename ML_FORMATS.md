@@ -121,7 +121,12 @@ settings (finite -24..24). Its independent Pitch input/output and bipolar Contro
 input explicitly add a semitone offset. ConfigurePitchModulation reuses EditPatch.
 One adapter between input.pitch and oscillator.pitch is lowered at audio rate;
 Plaits and chained pitch adapters reject. These settings fingerprint and survive
-native save/reopen. Broader modulation remains proposed.
+native save/reopen. The filter checkpoint adds `control_hertz` with required
+`hertz` gain_hz/offset_hz/clamp_min_hz/clamp_max_hz settings, typed unit-interval
+input/Hertz output, and one cabled low_pass.cutoff port. ConfigureControlHertz
+uses the same typed patch/capture path. The cable replaces the configured cutoff
+default; uncabled cutoff overrides reject on this path. Old uncabled behavior and
+absent-settings fingerprints are preserved. Broader modulation remains proposed.
 
 Example 35 extends native command version 1 with `select_palette_pattern`, a
 typed selection fact with an explicit pattern ID. Selection changes neither

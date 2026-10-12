@@ -1,0 +1,22 @@
+[[cases]]
+kind = "nonfinite"
+[[cases]]
+kind = "range"
+[[cases]]
+kind = "clamp_reversed"
+[[cases]]
+kind = "missing_input"
+[[cases]]
+kind = "missing_output"
+[[cases]]
+kind = "bipolar_input"
+[[cases]]
+kind = "unit_interval_to_cutoff"
+[[cases]]
+kind = "hertz_to_vca"
+[[cases]]
+kind = "duplicate_cutoff"
+[[cases]]
+kind = "second_adapter"
+[[cases]]
+kind = "no_control_modules"

@@ -174,6 +174,7 @@ fn parse_operation(words: &[&str]) -> Result<PatchOperation, String> {
             "vca" => ModuleKind::Vca, "low_pass" => ModuleKind::LowPass, "audio_output" => ModuleKind::AudioOutput,
             "lfo" => ModuleKind::Lfo, "control_scale" => ModuleKind::ControlScale, "control_multiply" => ModuleKind::ControlMultiply,
             "pitch_modulate" => ModuleKind::PitchModulate,
+            "control_hertz" => ModuleKind::ControlHertz,
             _ => return Err(format!("unsupported synth module '{kind}'")),
         } }),
         ["remove", id, policy] => Ok(PatchOperation::Remove { id: (*id).into(), cables: match *policy {
@@ -182,6 +183,10 @@ fn parse_operation(words: &[&str]) -> Result<PatchOperation, String> {
         } }),
         ["connect", from, to] => Ok(PatchOperation::Connect { from: (*from).into(), to: (*to).into() }),
         ["disconnect", from, to] => Ok(PatchOperation::Disconnect { from: (*from).into(), to: (*to).into() }),
+        ["hertz", module, gain, offset, min, max] => Ok(PatchOperation::ConfigureControlHertz { module: (*module).into(), settings: meldritch_dsl::ControlHertzSettings {
+            gain_hz: gain.parse().map_err(|_| "Hertz gain requires a number")?, offset_hz: offset.parse().map_err(|_| "Hertz offset requires a number")?,
+            clamp_min_hz: min.parse().map_err(|_| "Hertz minimum requires a number")?, clamp_max_hz: max.parse().map_err(|_| "Hertz maximum requires a number")?,
+        } }),
         ["pitch-depth", module, depth] => Ok(PatchOperation::ConfigurePitchModulation { module: (*module).into(), settings: meldritch_dsl::PitchModulationSettings {
             depth_semitones: depth.parse().map_err(|_| "pitch depth requires semitones")?,
         } }),

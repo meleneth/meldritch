@@ -81,8 +81,8 @@ replay, physical listening and continuous DSP-state migration remain future work
 
 ## Recommended immediate implementation prompt
 
-Continue Slice 3's example 36 from its working tremolo/vibrato checkpoints. Add the smallest
-explicit filter modulation path with unit adapters and declared combination,
+Continue Slice 3's example 36 from its working tremolo/vibrato/filter checkpoints.
+Add the smallest explicit envelope-controlled modulation-depth path,
 reusing control_order, ControlPlan, the Lfo kernel, independent pitch/gate voice,
 typed PatchEdit, worker/publication and native save/capture. Do not hard-code a
 destination in Lfo or reinterpret unit-interval level as pitch/Hz. Write the next
@@ -106,6 +106,11 @@ draft command. One bipolar LFO fans out to amplitude and semitone pitch offset;
 independent references, zero/negative depth, failure continuity, worker publication
 and isolated full/split save/reopen are checked. Continue with filter adapters;
 variable-rate LFO integration and broader scope/cadence remain open.
+
+The filter checkpoint adds ControlHertz and low_pass.cutoff, with an explicit
+unit-interval → Hertz affine/clamp transform. Cabled cutoff replaces its configured
+default and rejects overrides on that path. Sample/tail references, typed atomic
+drafts/settings/capture, playing publication and fresh-process PCM are checked.
 
 Example 35 now specifies this contract. Its pattern-selection checkpoint is
 implemented: native PgUp/PgDn lowers to SelectPalettePattern, preserves source,

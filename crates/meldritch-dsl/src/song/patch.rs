@@ -10,6 +10,10 @@ pub enum DependentCables {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PatchOperation {
+    ConfigureControlHertz {
+        module: String,
+        settings: ControlHertzSettings,
+    },
     ConfigurePitchModulation {
         module: String,
         settings: PitchModulationSettings,
@@ -125,6 +129,7 @@ impl ModuleDefinition {
         for direction in [PortDirection::Input, PortDirection::Output] {
             for name in [
                 "pitch", "gate", "control", "audio", "level", "aux", "reset", "left", "right",
+                "cutoff",
             ] {
                 let endpoint = format!("{}.{}", self.id, name);
                 if let Ok(signal) = resolve_port(
@@ -164,6 +169,7 @@ impl ModuleKind {
             Self::ControlScale => "control_scale",
             Self::ControlMultiply => "control_multiply",
             Self::PitchModulate => "pitch_modulate",
+            Self::ControlHertz => "control_hertz",
         }
     }
 }
@@ -185,6 +191,7 @@ fn instantiate(id: &str, kind: ModuleKind) -> Result<ModuleDefinition, String> {
         return Err("tempo_delay belongs to DSP graphs; unsupported in this synth editor".into());
     }
     Ok(ModuleDefinition {
+        hertz: (kind == ModuleKind::ControlHertz).then(ControlHertzSettings::default),
         pitch_modulation: (kind == ModuleKind::PitchModulate)
             .then(PitchModulationSettings::default),
         lfo: (kind == ModuleKind::Lfo).then(GraphLfoSettings::default),
@@ -290,6 +297,7 @@ impl ValidatedSong {
                 ModuleKind::ControlScale => 1,
                 ModuleKind::ControlMultiply => 2,
                 ModuleKind::PitchModulate => 2,
+                ModuleKind::ControlHertz => 2,
                 _ => 0,
             })
             .sum();
@@ -329,6 +337,18 @@ impl ValidatedSong {
             }
             let graph = next.synths.get_mut(&edit.synth).unwrap();
             match operation {
+                PatchOperation::ConfigureControlHertz { module, settings } => {
+                    control_graph::validate_hertz_settings(
+                        ModuleKind::ControlHertz,
+                        Some(*settings),
+                    )?;
+                    let target = graph
+                        .modules
+                        .iter_mut()
+                        .find(|m| &m.id == module && m.kind == ModuleKind::ControlHertz)
+                        .ok_or("unknown Hertz adapter")?;
+                    target.hertz = Some(*settings);
+                }
                 PatchOperation::ConfigurePitchModulation { module, settings } => {
                     control_graph::validate_pitch_settings(
                         ModuleKind::PitchModulate,
@@ -511,6 +531,7 @@ impl ValidatedSong {
                 .modules
                 .iter()
                 .map(|m| RawModule {
+                    hertz: m.hertz,
                     pitch_modulation: m.pitch_modulation,
                     lfo: m.lfo,
                     scale: m.scale,
@@ -560,6 +581,7 @@ impl ValidatedSong {
             // Reject irrelevant settings rather than preserve a misleading configuration.
             let mut allowed = instantiate(&m.id, m.kind)?;
             match m.kind {
+                ModuleKind::ControlHertz => allowed.hertz = m.hertz,
                 ModuleKind::PitchModulate => allowed.pitch_modulation = m.pitch_modulation,
                 ModuleKind::Lfo => allowed.lfo = m.lfo,
                 ModuleKind::ControlScale => allowed.scale = m.scale,

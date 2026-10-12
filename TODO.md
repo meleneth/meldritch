@@ -73,7 +73,9 @@ an empty project requires no Git repository or initialization.
   worker publication, independent sample/split tests and fresh-process save/reopen
 - [x] Slice 3 vibrato checkpoint: explicit PitchModulate combination/depth,
   shared LFO amplitude/pitch fan-out, typed drafts/capture, rejection and reopen
-- [ ] Slice 3 next: filter unit adapters and declared combination, then
+- [x] Slice 3 filter checkpoint: typed Hertz adapter/cutoff port, explicit clamp
+  and cable/default precedence, sample/tail/split references and playing publication
+- [ ] Slice 3 next: envelope-controlled modulation depth, then
   variable-rate integration, event cadence and broader instantiation scopes
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
 - [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
@@ -367,6 +369,24 @@ the graph suite (eight parent tests plus isolated child runs), affected all-targ
 Clippy with existing allowances, formatting/diff and VitePress checks pass.
 Historical 09/29 fingerprints remain unchanged. Physical listening/deadlines and
 continuous stateful DSP migration remain unverified.
+
+Slice 3 filter checkpoint: ControlHertz explicitly converts unit-interval Control
+to Hertz with authored gain/offset/clamps; low_pass.cutoff consumes that cable
+instead of its configured fallback. Overrides cannot silently bypass a cutoff
+cable. The existing dependency plan, worker and stateful filter remain authoritative.
+Example 36's filter-patch draft and typed settings/capture vocabulary roundtrip;
+independent coefficient/integrator references prove sound and tails at positive,
+negative, zero and clamped gain, plus isolated full/split reopen. Eleven invalid
+contracts retain source/history, and playing worker/callback checks cover combined
+tremolo/vibrato/filter publication and invalid Hertz input continuity. Full example
+stays design; modulatable depth/rate, broader scopes/cadence and normalization
+remain open. Physical listening and continuous stateful DSP migration are unverified.
+Legacy automated-filter lowering now rejects graph controls rather than ignoring
+their cables, while its historical audio/automation ordering and tests stay intact.
+Verification: offline workspace tests, the graph suite (ten parent tests plus
+isolated reopen children), 24 render-example tests, affected all-targets Clippy
+with existing allowances, formatting/diff checks and VitePress pass. Historical
+09/29 fingerprints remain `41472b38b65b60ed` / `54745c74a42665cf`.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 
