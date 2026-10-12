@@ -1620,7 +1620,18 @@ impl AppController {
                 parameter_delta,
             } => self.instrument_navigation(*synth_delta, *parameter_delta)?,
             AppCommand::SaveProject => {
-                if self.instrument_editor.is_none()
+                let native = self
+                    .project_source
+                    .as_ref()
+                    .is_some_and(|owner| owner.source.performance().tracks().is_empty());
+                if native {
+                    self.project_source
+                        .as_ref()
+                        .unwrap()
+                        .source
+                        .native_project_definition()
+                        .map_err(AppCommandError::Instrument)?;
+                } else if self.instrument_editor.is_none()
                     || self.pattern_selection.is_none()
                     || self.assignment_editor.is_none()
                 {

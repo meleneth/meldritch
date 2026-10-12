@@ -277,9 +277,9 @@ pub fn draw_project_pattern(
                 voice.pitch_pattern.as_deref() == Some(&editor.pattern.id)
                     || voice.gate_pattern.as_deref() == Some(&editor.pattern.id)
             }) {
-                "Unsaved project · Bindings/playback at overview"
+                "Bindings/playback at overview · Ctrl-S/F6 save project"
             } else {
-                "Unsaved source: no composition bindings · Bind at overview"
+                "Source: no composition bindings · Bind at overview · Ctrl-S/F6 save"
             },
         ),
         Line::from(status.to_owned()),
@@ -315,6 +315,15 @@ pub fn empty_project_quit(key: KeyEvent) -> bool {
     key.kind == KeyEventKind::Press
         && (matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
             || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)))
+}
+
+/// Native save covers the accepted project even while an editor has a draft.
+pub fn project_save_key(key: KeyEvent) -> bool {
+    key.kind == KeyEventKind::Press
+        && ((key.code == KeyCode::F(6) && key.modifiers == KeyModifiers::NONE)
+            || (matches!(key.code, KeyCode::Char('s' | 'S'))
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT)))
 }
 
 /// Reuse accepted editor bindings while the project has no playable composition.
@@ -421,7 +430,7 @@ fn draw_project_construction_selected(
         Line::from(
             "n/c: patch/pattern · Ctrl-E/N: editors · Space: play · Ctrl-Tab mode · q: quit",
         ),
-        Line::from("Unsaved authored project; capture does not replace saving"),
+        Line::from("Ctrl-S/F6: save project · capture does not replace saving"),
         Line::from(status.to_owned()),
     ];
     if !source.pattern_voices().is_empty() {
@@ -526,6 +535,12 @@ pub fn run_empty_project(project: &ProjectDirectory) -> io::Result<()> {
 
 /// Host adapters own devices and the existing song renderer; the TUI owns neither.
 pub trait ProjectPlaybackHost {
+    fn persistence_status(&self, _app: &AppController) -> String {
+        "Unsaved authored project".into()
+    }
+    fn save_project(&mut self, _app: &mut AppController) -> Result<String, String> {
+        Err("No project persistence host attached; edits retained".into())
+    }
     /// Flush accepted facts before another gesture, preserving bounded capture.
     fn prepare_action(&mut self, _app: &AppController) -> Result<(), String> {
         Ok(())
@@ -556,7 +571,7 @@ fn draw_project_performance(
         )),
         Line::from("Space: play/stop · Ctrl-Tab: construction · q/Esc: quit"),
         Line::from("Up/Down: select · Left/Right: level · Home: mute · End: default"),
-        Line::from("Unsaved authored project; capture does not replace saving"),
+        Line::from("Ctrl-S/F6: save project · capture does not replace saving"),
         Line::from(status.to_owned()),
     ];
     let mut count = 0;
@@ -613,6 +628,7 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                 status = format!("Project update pending: {error}");
             }
             let model = app.view_model();
+            let display_status = format!("{} · {status}", host.persistence_status(app));
             terminal.terminal.draw(|frame| {
                 if model.cockpit_mode == meldritch_app::CockpitMode::Performance {
                     draw_project_performance(
@@ -620,7 +636,7 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                         project,
                         &app.authored_source().unwrap(),
                         &model,
-                        &status,
+                        &display_status,
                     );
                 } else if let Some(editor) = &model.instrument_editor
                     && editor.visible
@@ -629,18 +645,18 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                         frame,
                         &model,
                         editor,
-                        &StatusMessage::info(format!("{status} · Unsaved project")),
+                        &StatusMessage::info(display_status.clone()),
                     );
                 } else if let Some(editor) = &model.palette_pattern_editor
                     && editor.visible
                 {
-                    draw_project_pattern(frame, editor, &status);
+                    draw_project_pattern(frame, editor, &display_status);
                 } else {
                     draw_project_construction_selected(
                         frame,
                         &view,
                         &app.authored_source().unwrap(),
-                        &status,
+                        &display_status,
                         model.instrument_editor.as_ref().map(|e| e.synth.as_str()),
                     );
                 }
@@ -666,13 +682,20 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                     status = format!("Capture checkpoint failed; gesture deferred: {error}");
                     continue;
                 }
+                if project_save_key(key) {
+                    status = match host.save_project(app) {
+                        Ok(message) => message,
+                        Err(error) => format!("Save failed; authored edits retained: {error}"),
+                    };
+                    continue;
+                }
                 if !editing
                     && key.kind == KeyEventKind::Press
                     && key.code == KeyCode::Char(' ')
                     && key.modifiers == KeyModifiers::NONE
                 {
                     status = match host.toggle_playback(app) {
-                        Ok(()) => "Transport request accepted; project remains unsaved".into(),
+                        Ok(()) => "Transport request accepted".into(),
                         Err(error) => format!("Playback unavailable: {error}"),
                     };
                     continue;
@@ -723,7 +746,7 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                         Ok(AppCommandResult::PatternSaveRequested) => {
                             "New-project saving is not implemented; edits retained in memory".into()
                         }
-                        Ok(_) => "Accepted pattern action; project remains unsaved".into(),
+                        Ok(_) => "Accepted pattern action".into(),
                         Err(e) => format!("Note rejected; source retained: {e:?}"),
                     };
                 } else if !editing
@@ -758,7 +781,7 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
                                     app.observe_instrument_save(message.into());
                                     message.into()
                                 }
-                                Ok(_) => "Accepted editor action; project remains unsaved".into(),
+                                Ok(_) => "Accepted editor action".into(),
                                 Err(e) => format!("Edit rejected; source retained: {e:?}"),
                             };
                         }
@@ -778,6 +801,25 @@ pub fn run_project_with_host<H: ProjectPlaybackHost>(
 mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
+
+    #[test]
+    fn native_save_is_global_but_repeats_and_releases_do_not_save() {
+        for (code, modifiers) in [
+            (KeyCode::F(6), KeyModifiers::NONE),
+            (KeyCode::Char('s'), KeyModifiers::CONTROL),
+        ] {
+            assert!(project_save_key(KeyEvent::new(code, modifiers)));
+            for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+                let mut key = KeyEvent::new(code, modifiers);
+                key.kind = kind;
+                assert!(!project_save_key(key));
+            }
+        }
+        assert!(!project_save_key(KeyEvent::new(
+            KeyCode::Char('s'),
+            KeyModifiers::NONE
+        )));
+    }
 
     #[test]
     fn native_level_is_explicit_and_performance_keys_preserve_authored_defaults() {

@@ -27,4 +27,5 @@ voice compiler. Bound snapshots to 32 patches, 32 patterns, 32 instances and
 Failed decode/compile must not mutate an existing application or publication.
 
 Native atomic disk save, entry-point selection, dirty-state feedback and TUI
-fresh reopen are subsequent checkpoints, not accepted by this serializer test.
+fresh reopen are specified separately in keyboard-save.txt and checked through
+the store/CLI/native host and real terminal smoke, not this serializer alone.

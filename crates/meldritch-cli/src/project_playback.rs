@@ -12,6 +12,7 @@ use meldritch_render::song_host::CompiledSongPatch;
 use meldritch_tui::ProjectPlaybackHost;
 
 pub(crate) struct NativeProjectAudio {
+    store: meldritch_control::native_project::NativeProjectStore,
     capture: meldritch_control::native_capture::NativeProjectCapture,
     host: SongAudioHost,
     reader: AudioSnapshotReader,
@@ -23,7 +24,19 @@ pub(crate) struct NativeProjectAudio {
 }
 
 impl NativeProjectAudio {
+    #[cfg(test)]
     pub(crate) fn new(app: &AppController, engine: PlaybackEngine) -> Result<Self, String> {
+        let source = app.authored_source().ok_or("no authored project source")?;
+        let store = meldritch_control::native_project::NativeProjectStore::open(
+            &meldritch_dsl::load_project_directory(source.root()).map_err(|e| e.to_string())?,
+        )?;
+        Self::with_store(app, engine, store)
+    }
+    pub(crate) fn with_store(
+        app: &AppController,
+        engine: PlaybackEngine,
+        store: meldritch_control::native_project::NativeProjectStore,
+    ) -> Result<Self, String> {
         let source = app.authored_source().ok_or("no authored project source")?;
         let frames = u32::try_from(source.authoring_frame(3840)?)
             .map_err(|_| "project loop exceeds PCM capacity")?;
@@ -31,8 +44,20 @@ impl NativeProjectAudio {
             .map_err(|error| format!("invalid project publication: {error:?}"))?;
         let (publisher, reader) = audio_publication(initial);
         let patch = CompiledSongPatch::compile_initial(&source)?;
-        let host = SongAudioHost::new(source.as_ref().clone(), patch, publisher, frames, 6000);
+        let mut host = SongAudioHost::new(source.as_ref().clone(), patch, publisher, frames, 6000);
+        if !source.pattern_voices().is_empty() {
+            for voice in source.pattern_voices().values() {
+                if !voice.looped || source.authoring_frame(voice.length_ticks)? != u64::from(frames)
+                {
+                    return Err(
+                        "native playback currently requires looping one-bar instances".into(),
+                    );
+                }
+            }
+            host.replace_source(source.as_ref().clone())?;
+        }
         Ok(Self {
+            store,
             capture: meldritch_control::native_capture::NativeProjectCapture::new(
                 source.clone(),
                 frames,
@@ -49,6 +74,30 @@ impl NativeProjectAudio {
 }
 
 impl ProjectPlaybackHost for NativeProjectAudio {
+    fn persistence_status(&self, app: &AppController) -> String {
+        if app
+            .authored_source()
+            .is_some_and(|source| Some(source.fingerprint()) == self.store.saved_fingerprint())
+        {
+            "Saved authored project · main.project.lua".into()
+        } else {
+            "Unsaved authored project · Ctrl-S/F6 to save".into()
+        }
+    }
+    fn save_project(&mut self, app: &mut AppController) -> Result<String, String> {
+        app.dispatch(AppCommand::SaveProject)
+            .map_err(|e| format!("{e:?}"))?;
+        self.capture.checkpoint(app)?;
+        let path = self.store.save(
+            app.authored_source()
+                .ok_or("no authored project source")?
+                .as_ref(),
+        )?;
+        Ok(format!(
+            "Saved {} · runtime gain and capture remain separate",
+            path.file_name().unwrap().to_string_lossy()
+        ))
+    }
     fn prepare_action(&mut self, app: &AppController) -> Result<(), String> {
         self.capture.checkpoint(app)
     }
@@ -162,6 +211,97 @@ mod tests {
         std::fs::create_dir(&path).unwrap();
         let project = meldritch_dsl::load_project_directory(&path).unwrap();
         ProjectFixture { path, project }
+    }
+
+    #[test]
+    fn native_saved_reopen_prepares_audio_and_resets_runtime_without_capture_or_device() {
+        let project = project();
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let relative = "songs/examples/34-empty-project-patch/authored-project.lua";
+        let example = if manifest.join(relative).is_file() {
+            manifest.join(relative)
+        } else {
+            manifest.join("../..").join(relative)
+        };
+        let source = meldritch_control::native_project::load_native_project(
+            project.root(),
+            &std::fs::read_to_string(example).unwrap(),
+        )
+        .unwrap();
+        let mut store =
+            meldritch_control::native_project::NativeProjectStore::open(&project).unwrap();
+        store.save(&source).unwrap();
+        let (mut app, engine) = AppController::new_empty_project(&project).unwrap();
+        app.enable_native_project_source(source).unwrap();
+        assert!(app.history().is_empty());
+        assert!(app.output_levels().is_empty());
+        assert!(app.view_model().instrument_editor.is_some());
+        assert!(app.view_model().palette_pattern_editor.is_some());
+        let mut host = NativeProjectAudio::new(&app, engine).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while host.ready_generation != Some(host.host.generation()) {
+            host.poll(&mut app).unwrap();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(host.persistence_status(&app).starts_with("Saved"));
+        assert_eq!(std::fs::read_dir(project.root()).unwrap().count(), 1);
+        assert!(host.capture.session.is_none());
+        assert!(host.stream.is_none());
+        assert_eq!(app.view_model().transport.state, TransportState::Stopped);
+        let mut callback = PublishedAudioRenderer::from_engine(
+            host.reader.clone(),
+            2,
+            u32::MAX,
+            host.engine.take().unwrap(),
+        )
+        .unwrap();
+        app.dispatch(AppCommand::Play).unwrap();
+        let mut samples = vec![0.0; 512];
+        callback.render_f64(&mut samples);
+        assert!(samples.iter().any(|v| v.abs() > 0.01));
+        app.dispatch(AppCommand::SetOutputLevel {
+            voice: "voice-1-instance".into(),
+            control: "level".into(),
+            value: Some(0.0),
+        })
+        .unwrap();
+        host.save_project(&mut app).unwrap();
+        assert!(host.persistence_status(&app).starts_with("Saved"));
+        assert_eq!(app.output_levels().len(), 1);
+        app.dispatch(AppCommand::EditNote {
+            pattern: "melody".into(),
+            edit: NoteEdit::Duration {
+                id: "note-2".into(),
+                duration_ticks: 960,
+            },
+        })
+        .unwrap();
+        assert!(host.persistence_status(&app).starts_with("Unsaved"));
+        let accepted = app.authored_source().unwrap();
+        let published = host.reader.snapshot();
+        let generation = host.host.generation();
+        std::fs::write(project.root().join(".main.project.lua.tmp"), "obstructed").unwrap();
+        assert!(host.save_project(&mut app).is_err());
+        assert!(Arc::ptr_eq(&accepted, &app.authored_source().unwrap()));
+        assert!(Arc::ptr_eq(&published, &host.reader.snapshot()));
+        assert_eq!(host.host.generation(), generation);
+        assert_eq!(app.output_levels().len(), 1);
+        std::fs::remove_file(project.root().join(".main.project.lua.tmp")).unwrap();
+        host.save_project(&mut app).unwrap();
+        assert!(host.persistence_status(&app).starts_with("Saved"));
+        let reloaded =
+            meldritch_control::native_project::NativeProjectStore::open(&project).unwrap();
+        let (mut fresh, _) = AppController::new_empty_project(&project).unwrap();
+        fresh
+            .enable_native_project_source(reloaded.source().unwrap().clone())
+            .unwrap();
+        assert!(fresh.output_levels().is_empty());
+        assert_eq!(
+            fresh.authored_source().unwrap().pattern_voices()["voice-1-instance"].level,
+            0.8
+        );
+        host.finish(&app).unwrap();
     }
 
     #[test]

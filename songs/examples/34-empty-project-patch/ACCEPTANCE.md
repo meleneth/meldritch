@@ -23,8 +23,14 @@ by `persistence.txt`, `authored-project.lua` and its invalid neighbor.
 round trips, deleted-note counters, optional filter/defaults, independent bindings,
 Plaits authored settings, bounds/diagnostics and fresh-process raw oscillator PCM
 equality without the original root. Runtime overlays do not enter the format.
-Native atomic disk save, entry discovery/TUI reopen and timed replay remain
-unimplemented; the full workflow therefore retains design status.
+Native atomic disk save and entry discovery/TUI reopen now implement
+`keyboard-save.txt`. Store tests check failure/retry, external changes, symlinks
+and ambiguity; native host checks prove initial worker/callback audio, saved
+revision status, preserved source/runtime/publication on save failure and fresh
+runtime defaults with no synthetic history/capture/device. CLI checks validate
+saved entries read-only. Full composed keyboard-to-fresh-process acceptance and
+capture-baseline persistence across saved revisions still need auditing; timed
+replay remains unimplemented. The full example retains design status.
 Native 80×24 PTY checks also prove file-free empty open/quit, twelve typed
 construction/runtime events and a clean final gain, and capture-path failure
 deferring another gesture/quit until successful retry without duplicates. These
@@ -41,8 +47,8 @@ commands preserve it, and immutable provenance stays unchanged. Run
 example 09 as import provenance, not as an empty-project seed. Typed silent palette
 creation is also implemented, as specified by the construction checkpoint below.
 Project-v2 Lua is additive; base-bound project-v1/instrument-v1/v2 exports retain
-their existing contracts. The new serializer neither writes files nor changes
-entry discovery. See
+their existing contracts. Serializer calls remain file-free; the NativeProjectStore
+and CLI/TUI adapters own explicit save/discovery. See
 [the roadmap](../../../ROADMAP.md) and
 [implementation prompt](../../../AUTHORING.md#recommended-immediate-implementation-prompt).
 
@@ -88,7 +94,8 @@ cable is draft-only. Incomplete commits and stale drafts leave accepted source
 and history unchanged; completing the filter chain commits atomically. Esc exits
 the draft panel, then parameters, without quitting. A `q` typed inside a draft is
 text, while q at the project overview quits. Repeats/releases never edit. Native
-save requests explicitly report unsupported new-project saving and retain edits.
+save requests now write the whole accepted project through Ctrl-S/F6; staged drafts
+remain excluded and failed saves retain edits.
 Imported provenance stays empty; no baseline fixture, authored files or device are
 added. Native accepted gesture captures remain separate from provenance/source.
 

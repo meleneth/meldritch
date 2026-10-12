@@ -109,7 +109,15 @@ then control validates every palette patch and the complete executable compositi
 Export checks full restored-source equality and Lua round-trip equality, rejecting
 unsupported legacy state instead of dropping it. Tests prove fresh-process raw
 oscillator PCM and authored identity equality without original-root dependencies;
-runtime overlays are excluded. Native disk save/entry discovery remain proposed.
+runtime overlays are excluded. `NativeProjectStore` owns atomic disk replacement
+at `main.project.lua`, bounded read-only entry discovery and expected-byte conflict
+checks. CLI selects native versus legacy musical entries before devices; ambiguity
+rejects. App native loading restores inspector selections without recording fake
+gestures; the native host submits loaded voices to the existing worker immediately.
+TUI Ctrl-S/F6 invokes the host save boundary in both modes and inspectors, while
+saved/unsaved status compares accepted source to the last successful save.
+Capture remains separate. Durable capture baselines across later authored saves
+and composed end-to-end acceptance still need audit; timed replay is unimplemented.
 It does not provide general dynamic surfaces or
 stateful DSP migration.
 Compilers may receive a selected composition projection, but that view
@@ -283,7 +291,7 @@ the missing behavior is implemented. Required tests are acceptance obligations.
 
 | Desired capability | Existing implementation / reuse | Missing boundary and risk | Required acceptance |
 | --- | --- | --- | --- |
-| Empty project / palette / compositions | DSL project/palette/voice definitions and NativeProjectDefinition; app `new_empty_project`; TUI native authoring/binding commands and `ProjectPlaybackHost`; CLI `open_project`, `NativeProjectAudio`; control `SongAudioHost::replace_source`, `native_project` | Native authoring/binding/playback/modes, instance output-level overlays, lazy typed capture and self-contained v2 serialization reuse the existing source/host. Native disk save/entry discovery and multiple compositions are missing. Avoid hidden templates and wholesale renaming. | Scoped app/TUI/worker/callback/session and fresh-process serializer checks pass; physical listening, disk save/TUI fresh reopen and multiple compositions remain open. |
+| Empty project / palette / compositions | DSL project/palette/voice definitions and NativeProjectDefinition; app `new_empty_project`, native source loading; TUI authoring/binding/save and `ProjectPlaybackHost`; CLI `open_project`, `NativeProjectAudio`; control `SongAudioHost::replace_source`, `NativeProjectStore` | Native authoring/binding/playback/modes, runtime level, typed capture and self-contained v2 save/reopen reuse the existing source/host. Multiple compositions are missing. Avoid hidden templates and wholesale renaming. | Scoped app/TUI/worker/callback/session/store and fresh-process checks pass; composed full acceptance, capture-baseline persistence, physical listening and multiple compositions remain open. |
 | Authoritative state and modes | `meldritch-app/src/project.rs`: `ProjectSource.base/source`, `enable_project_source`; `lib.rs`: `AppController::dispatch`, `CockpitMode`; render host `SongLiveOverrides` | Accepted source is app-owned independently of an instrument panel; native editors mutate the same source and preserve import provenance. Mapping faders still write authored values. Separate interaction mode and instance overlays without duplicate state. | Mode switch keeps audio/transport; performance moves leave authored fingerprint/export unchanged; explicit promotion reconstructs edits; failed promotion is atomic. |
 | Patch scope / independent signals | DSL `SignalType`, `ModuleKind`, `resolve_port`, `CableDefinition`, `PatternVoiceDefinition`; render `compile_pattern_voice`, `CompiledNotePatch::render_with_filter_overrides` | Mono composition bindings execute independent pitch/gate; legacy track notes keep coupled articulation. Only four signal families and fixed voice topology execute; general graph execution remains missing. | Held pitch under an independent gate and split rendering are proved; non-amplitude envelope, broader graph execution and other families remain required. Unsupported execution must reject, never silently ignore cables. |
 | Patchable patterns / transforms | DSL `NotePatternDefinition`, `NoteEventDefinition`; `song/notes.rs`: `PatternMaterial`, compatibility `AuthoredPattern.track`; `song/voices.rs`: separate bindings; core `Pattern::events_between`, `EventOccurrence` | Native palette patterns have no track owner and independently bind mono inputs. No event-transform graph, rate adapters or polyphonic source contract. Legacy step/duration semantics differ; occurrence identity must survive transformations. | Independent gate source, initial/held pitch, adjacent retriggers and clock/overlap rejection are checked. Multi-composition reuse, transformed identities, probability/ratchet bounds and standalone reload remain open. |
@@ -296,8 +304,8 @@ the missing behavior is implemented. Required tests are acceptance obligations.
 | Capture / harvest / persistence | control `project::{encode_project,load_project,save_project}`, instrument/pattern/assignment envelopes; `session::PerformanceSessionCapture`; typed Lua `Journal` and replay | Project v1 is base-bound selected synth/pattern + controls, not a directory project. Legacy capture uses debug strings/u32 and retains history. Lua replay proves state, not timed PCM. | Complete independent saves, unchanged-source text; rejected/omitted edits cannot vanish; typed u64/epochs >u32, crash/retry; exact supported replay and non-destructive harvest; RNG exceptions declared. |
 | Libraries / assets | Song-root confinement, IDs, semantic fingerprinting, pinned Plaits Cargo dependency | No project dependency resolver/lock or external definition instances; moving upstream assets can break reproducibility. | Copy versus pinned reference; offline cached resolution; upstream change does not change music; missing/wrong digest/version and override conflict reject; portable asset bundle. |
 
-Unresolved decisions to settle with examples: self-contained save file layout and
-reopen selection; pitch representation/initial value; polyphonic signal identity;
+Unresolved decisions to settle with examples: multi-composition directory layout
+and selection beyond the bounded native entry; polyphonic signal identity;
 modulation cadence and smoothing; normalization priority vocabulary; state
 compatibility descriptors and resource budgets; simultaneous metapattern/live
 action precedence; library digest/override merge rules. The requirements above

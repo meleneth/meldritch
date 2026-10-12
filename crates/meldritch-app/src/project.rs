@@ -13,6 +13,25 @@ pub(crate) struct ProjectSource {
 }
 
 impl super::AppController {
+    /// Fresh native load selects inspectors without recording synthetic gestures.
+    pub fn enable_native_project_source(&mut self, source: ValidatedSong) -> Result<(), String> {
+        source.native_project_definition()?;
+        for id in source.synths().keys() {
+            meldritch_render::song_render::validate_palette_synth(&source, id)
+                .map_err(|e| e.to_string())?;
+            source.instrument_parameters(id)?;
+        }
+        let synth = source.synths().keys().next().cloned();
+        let pattern = source.note_patterns().keys().next().cloned();
+        self.enable_project_source(source)?;
+        if let Some(id) = synth {
+            self.select_instrument(&id).map_err(|e| format!("{e:?}"))?;
+        }
+        if let Some(id) = pattern {
+            self.enable_pattern_editor(&id)?;
+        }
+        Ok(())
+    }
     pub(crate) fn output_level_command(
         &mut self,
         command: &super::AppCommand,

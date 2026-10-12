@@ -97,7 +97,7 @@ fn fresh_process_needs_only_the_snapshot_and_preserves_raw_pcm() {
     let destination = Directory::new();
     let source = load_native_project(&origin.0, EXAMPLE).unwrap();
     fs::write(
-        destination.0.join("project.lua"),
+        destination.0.join("main.project.lua"),
         encode_native_project(&source).unwrap(),
     )
     .unwrap();
@@ -129,19 +129,21 @@ fn fresh_process_needs_only_the_snapshot_and_preserves_raw_pcm() {
 #[ignore = "executed by the isolated fresh-process parent"]
 fn fresh_process_child() {
     let root = PathBuf::from(std::env::var_os("MELDRITCH_NATIVE_PROJECT_TEST_ROOT").unwrap());
-    let source = load_native_project(
-        &root,
-        &fs::read_to_string(root.join("project.lua")).unwrap(),
-    )
-    .unwrap();
+    let project = meldritch_dsl::load_project_directory(&root).unwrap();
+    let store = meldritch_control::native_project::NativeProjectStore::open(&project).unwrap();
+    let source = store.source().unwrap();
+    let (mut app, _) = AppController::new_empty_project(&project).unwrap();
+    app.enable_native_project_source(source.clone()).unwrap();
+    assert!(app.history().is_empty());
+    assert!(app.output_levels().is_empty());
     assert_eq!(
         format!("{:016x}", source.fingerprint()),
         fs::read_to_string(root.join("fingerprint")).unwrap()
     );
     let expected = fs::read(root.join("expected.pcm")).unwrap();
-    assert_eq!(pcm(&source, FrameRange::new(0, 192_000).unwrap()), expected);
-    let mut split = pcm(&source, FrameRange::new(0, 17_123).unwrap());
-    split.extend(pcm(&source, FrameRange::new(17_123, 192_000).unwrap()));
+    assert_eq!(pcm(source, FrameRange::new(0, 192_000).unwrap()), expected);
+    let mut split = pcm(source, FrameRange::new(0, 17_123).unwrap());
+    split.extend(pcm(source, FrameRange::new(17_123, 192_000).unwrap()));
     assert_eq!(split, expected);
 }
 
@@ -296,4 +298,105 @@ fn complete_edited_graph_defaults_and_independent_bindings_round_trip() {
         load_native_project(&directory.0, &encode_native_project(&source).unwrap()).unwrap(),
         source
     );
+}
+
+#[test]
+fn atomic_disk_save_reopens_and_failed_retry_preserves_last_good_source() {
+    use meldritch_control::native_project::NativeProjectStore;
+    let directory = Directory::new();
+    let project = meldritch_dsl::load_project_directory(&directory.0).unwrap();
+    let mut store = NativeProjectStore::open(&project).unwrap();
+    assert!(store.source().is_none());
+    let source = load_native_project(&directory.0, EXAMPLE).unwrap();
+    let path = store.save(&source).unwrap();
+    let good = fs::read(&path).unwrap();
+    let reopened = NativeProjectStore::open(&project).unwrap();
+    assert_eq!(reopened.source().unwrap(), &source);
+    let edited = source
+        .edit_note(
+            "melody",
+            &NoteEdit::Velocity {
+                id: "note-2".into(),
+                velocity: 0.6,
+            },
+        )
+        .unwrap()
+        .0;
+    let obstruction = directory.0.join(".main.project.lua.tmp");
+    fs::write(&obstruction, "foreign temporary").unwrap();
+    assert!(store.save(&edited).is_err());
+    assert_eq!(fs::read(&path).unwrap(), good);
+    assert_eq!(
+        fs::read_to_string(&obstruction).unwrap(),
+        "foreign temporary"
+    );
+    assert_eq!(store.saved_fingerprint(), Some(source.fingerprint()));
+    fs::remove_file(&obstruction).unwrap();
+    store.save(&edited).unwrap();
+    assert_eq!(
+        NativeProjectStore::open(&project)
+            .unwrap()
+            .source()
+            .unwrap(),
+        &edited
+    );
+    let saved = fs::read(&path).unwrap();
+    fs::write(&path, b"external edit").unwrap();
+    assert!(store.save(&source).unwrap_err().contains("externally"));
+    assert_eq!(fs::read(&path).unwrap(), b"external edit");
+    assert!(!obstruction.exists());
+    fs::write(&path, saved).unwrap();
+    fs::write(
+        directory.0.join("main.mlperformance"),
+        "foreign legacy entry",
+    )
+    .unwrap();
+    assert!(store.save(&source).unwrap_err().contains("legacy"));
+    fs::write(
+        directory.0.join("main.mlperformance"),
+        include_str!("../../../songs/examples/00-minimal-synth/main.mlperformance"),
+    )
+    .unwrap();
+    fs::create_dir(directory.0.join("synths")).unwrap();
+    fs::write(
+        directory.0.join("synths/drone.mlsynth"),
+        include_str!("../../../songs/examples/00-minimal-synth/synths/drone.mlsynth"),
+    )
+    .unwrap();
+    let legacy = meldritch_dsl::load_project_directory(&directory.0).unwrap();
+    assert!(
+        NativeProjectStore::open(&legacy)
+            .err()
+            .unwrap()
+            .contains("ambiguous")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn disk_boundary_rejects_symlinks_and_never_writes_foreign_targets() {
+    use meldritch_control::native_project::NativeProjectStore;
+    let directory = Directory::new();
+    let outside = Directory::new();
+    let foreign = outside.0.join("foreign.lua");
+    fs::write(&foreign, EXAMPLE).unwrap();
+    let project = meldritch_dsl::load_project_directory(&directory.0).unwrap();
+    let entry = directory.0.join("main.project.lua");
+    std::os::unix::fs::symlink(&foreign, &entry).unwrap();
+    assert!(NativeProjectStore::open(&project).is_err());
+    fs::remove_file(&entry).unwrap();
+    let mut store = NativeProjectStore::open(&project).unwrap();
+    let source = load_native_project(&directory.0, EXAMPLE).unwrap();
+    let temporary = directory.0.join(".main.project.lua.tmp");
+    std::os::unix::fs::symlink(&foreign, &temporary).unwrap();
+    assert!(store.save(&source).is_err());
+    assert_eq!(fs::read_to_string(&foreign).unwrap(), EXAMPLE);
+    assert!(
+        temporary
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert!(!entry.exists());
 }

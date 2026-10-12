@@ -61,8 +61,19 @@ source state it cannot represent. Export accepts authoritative source rather tha
 editor/runtime projections. Fresh-process oscillator rendering matches raw PCM
 and split ranges without the original directory; Plaits authored settings round
 trip under its existing RNG exception. This is an in-memory serializer, not yet a
-native filesystem Save/Open workflow. Atomic disk save, entry discovery, TUI
-fresh reopen and timed replay remain next.
+native filesystem Save/Open workflow by itself. The disk checkpoint now uses
+`keyboard-save.txt`: Ctrl-S/F6 dispatches SaveProject and writes `main.project.lua`
+through host-owned NativeProjectStore. It syncs a newly created temporary file,
+checks expected entry bytes again, then atomically renames. Symlinks, foreign
+temporaries, external edits and legacy entry conflicts reject; failed saves retain
+source/runtime/publication and the previous good entry. This is atomic replacement,
+not an OS power-loss or adversarial filesystem race guarantee. Native opening
+validates before devices, restores inspectors without synthetic history, and
+prepares initial audio through the existing worker; it never replays capture.
+Fresh transport is stopped and runtime gains use authored defaults. Saved/unsaved
+status compares authored fingerprints, so runtime/navigation/mode gestures do not
+dirty music. Composed whole-workflow acceptance and durable capture baselines across
+saved revisions still need an audit; timed replay remains future work.
 The full example retains `design` status.
 
 ## Recommended immediate implementation prompt
@@ -70,9 +81,9 @@ The full example retains `design` status.
 Implement only [example 34](songs/examples/34-empty-project-patch/ACCEPTANCE.md):
 empty directory → construct patch → create pattern → independent pitch/gate →
 play → modify → save → fresh-process reopen, with native keyboard controls.
-Use its project-v2 authored/invalid fixtures and serializer tests. Add the smallest
-disk save/entry-discovery fixtures before extending that contract; invent no
-speculative schema.
+Use its project-v2 authored/invalid fixtures, serializer tests and keyboard-save
+contract. Audit and compose existing checkpoints into the full keyboard-to-fresh-
+process acceptance before changing status; invent no speculative schema.
 
 Reuse the existing Rust definition/importer/fingerprint machinery, moving source
 ownership out of the synth-only `InstrumentEditor` only enough to represent an

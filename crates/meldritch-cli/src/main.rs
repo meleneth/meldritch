@@ -3109,6 +3109,7 @@ fn connect_apc_feedback(
 
 fn open_project(path: PathBuf, check: bool) -> Result<(), String> {
     let project = meldritch_dsl::load_project_directory(path).map_err(|error| error.to_string())?;
+    let native = meldritch_control::native_project::NativeProjectStore::open(&project)?;
     if check {
         if let Some(song) = project.composition() {
             println!(
@@ -3116,6 +3117,13 @@ fn open_project(path: PathBuf, check: bool) -> Result<(), String> {
                 project.root().display(),
                 song.performance().id(),
                 song.fingerprint()
+            );
+        } else if let Some(source) = native.source() {
+            println!(
+                "valid project · {} · authored '{}' · fingerprint {:016x}",
+                project.root().display(),
+                source.performance().id(),
+                source.fingerprint()
             );
         } else {
             println!(
@@ -3144,7 +3152,10 @@ fn open_project(path: PathBuf, check: bool) -> Result<(), String> {
         )
     } else {
         let (mut app, engine) = meldritch_app::AppController::new_empty_project(&project)?;
-        let mut host = project_playback::NativeProjectAudio::new(&app, engine)?;
+        if let Some(source) = native.source() {
+            app.enable_native_project_source(source.clone())?;
+        }
+        let mut host = project_playback::NativeProjectAudio::with_store(&app, engine, native)?;
         meldritch_tui::run_project_with_host(&mut app, &project, &mut host)
             .map_err(|error| format!("failed to open project cockpit: {error}"))
     }
@@ -7338,6 +7349,35 @@ mod tests {
         std::fs::remove_dir(&path).unwrap();
         assert!(result.is_ok(), "{result:?}");
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn native_project_entry_check_validates_without_replay_or_filesystem_writes() {
+        let root = std::env::temp_dir().join(format!(
+            "meldritch-native-check-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let example = std::fs::read_to_string(example_song_path(
+            "songs/examples/34-empty-project-patch/authored-project.lua",
+        ))
+        .unwrap();
+        let entry = root.join("main.project.lua");
+        std::fs::write(&entry, &example).unwrap();
+        assert!(open_project(root.clone(), true).is_ok());
+        assert_eq!(std::fs::read_to_string(&entry).unwrap(), example);
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        for invalid in ["return {}".to_owned(), " ".repeat(256 * 1024 + 1)] {
+            std::fs::write(&entry, &invalid).unwrap();
+            assert!(open_project(root.clone(), true).is_err());
+            assert_eq!(std::fs::read_to_string(&entry).unwrap(), invalid);
+            assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
     use super::*;
 

@@ -21,7 +21,8 @@ Native accepted gestures now lazily create typed timestamped sessions through th
 shared writer, with bounded pending buffers and failure/retry diagnostics. Merely
 opening creates no files. A bounded self-contained project-v2 Lua serializer now
 restores native authored source and deterministic oscillator PCM in a fresh process;
-native disk save/automatic reopen and timed replay remain future work.
+Ctrl-S/F6 now atomically saves main.project.lua; native opening restores it with
+runtime defaults and no capture replay. Timed replay remains future work.
 Git is permitted as a required installed dependency, but opening a project must
 not require a Git repository or initialization.
 

@@ -45,6 +45,13 @@ script. Save graph, pattern IDs/counter/ticks, bindings, defaults and exposed
 controls. Do not serialize transport, pickup or runtime overrides. Opening an
 empty root creates no files; save creates only necessary authored files.
 
+The bounded native format/entry is now project-v2 Lua at `main.project.lua`;
+Ctrl-S/F6 atomically saves authored state, and project opening restores it before
+devices. Native/legacy musical entry ambiguity, external modifications, symlinks
+and foreign temporaries reject. Scoped serializer/store/host/CLI checks exist;
+full composed keyboard acceptance and durable capture baselines across subsequent
+saves remain the next audit. Timed replay and multi-composition layout stay deferred.
+
 **Reuse/compatibility:** move existing source ownership out of the synth-only
 editor as needed; extend importer/builders, `PatchEdit`, `NoteEdit`, note
 compilation, host/publication and Lua serializers. Native note editing dispatches

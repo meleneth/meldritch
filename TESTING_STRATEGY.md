@@ -189,8 +189,14 @@ Negative cases cover bounded source/material, unknown fields/kinds/versions,
 duplicate identities, dangling or incompatible wiring, malformed note/clock/value
 data, unavailable Lua facilities and instruction budgets. Legacy source cannot
 silently lose tracks/assets/DSP/controller state through v2 export. These tests
-establish serialization/reconstruction, not native disk save, TUI reopen, physical
-listening, timed replay or DSP-state migration.
+establish serialization/reconstruction. Additional store tests cover atomic native
+save/reopen, failure retry without overwriting foreign temporaries, external edits,
+symlink refusal and native/legacy ambiguity. CLI/native-host tests cover read-only
+entry checks, inspector initialization without history/capture, initial worker and
+production callback sound, saved revision status and runtime default restoration.
+Real 80×24 terminal smoke covers native construction/binding/save/quit/fresh reopen.
+These are scoped checks; composed full acceptance and durable capture baselines
+still need audit. They do not prove physical listening, timed replay or DSP migration.
 
 Add later:
 - offline render throughput

@@ -10,7 +10,7 @@ Status values:
 
 | Example | Capability | Status |
 | --- | --- | --- |
-| `34-empty-project-patch` | Empty/legacy opening, native patch/pattern/binding authoring, playback/modes, runtime level and lazy typed disk capture checked through shared host/worker/callback/session writer; bounded checkpoint retry and fresh-app reconstruction pass; self-contained project-v2 Lua serializer proves authored-only fresh-process oscillator PCM/identity equality; physical listening unverified; native disk save/entry discovery/TUI reopen and timed replay unfinished | design |
+| `34-empty-project-patch` | Empty/legacy opening, native patch/pattern/binding authoring, playback/modes, runtime level and lazy typed capture checked; self-contained project-v2 Lua proves fresh-process oscillator PCM/identity equality; atomic native save/reopen, dirty status, initial worker/callback audio and failure retry checked; full composed acceptance/capture-baseline audit and timed replay unfinished; physical listening unverified | design |
 | `00-minimal-synth` | Explicit oscillator-to-output patch | accept |
 | `01-synth-note-pattern` | Note pattern drives pitch and gate | accept |
 | `02-synth-parameter-pattern` | Pattern drives a synth parameter port | accept |

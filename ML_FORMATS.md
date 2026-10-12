@@ -109,8 +109,15 @@ Runtime gains, transport, editor selections, capture and drafts are excluded.
 The existing constrained VM/source limit applies, with explicit palette/instance/
 note bounds in `persistence.txt`. Headless fresh-process reload is accepted for
 deterministic oscillator PCM; Plaits retains its documented RNG exception.
-This checkpoint adds no automatic entry selection or native disk save. Legacy
-base-bound project-v1 and instrument-v1/v2 formats remain unchanged.
+Native Ctrl-S/F6 now saves this subset at `main.project.lua`. The control-owned
+store loads it only for project opening, after DSL root discovery and before
+devices. Existing `main.lua` scripts are unrelated. Both musical entries present
+(`main.project.lua` and `main.mlperformance`) diagnose ambiguity. Native entries
+must be ordinary bounded files; symlinks/unknown snapshots reject instead of
+becoming empty projects. Save checks original/last-saved bytes, rejects external
+changes and foreign `.main.project.lua.tmp`, then syncs/atomically renames its own
+temporary file. Capture files are never entry candidates. Legacy base-bound
+project-v1 and instrument-v1/v2 formats remain unchanged.
 
 Lua API v1 adds an explicit composition adapter, without changing the authored
 TOML entrypoint or migrating historical songs. `main.lua` chooses a confined

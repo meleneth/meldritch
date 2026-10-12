@@ -31,8 +31,14 @@ This path is checked headlessly through the production callback; physical
 listening remains unverified. Accepted gestures now create a timestamped typed
 capture under `performances/`; opening alone creates no files. Capture preserves
 construction/runtime commands but does not replace authored saving or automatically
-reopen the project. Save/reopen, timed replay and stateful
-graph transitions remain proposed. Existing commands remain valid.
+reopen the project. **Ctrl-S/F6** saves the complete authored project as
+`main.project.lua`; starting `meldritch` there restores patches, patterns, bindings
+and exposed controls. Transport starts stopped and runtime gain starts at authored
+defaults. Save works in either mode and editors; it excludes staged drafts.
+The screen distinguishes saved/unsaved authored revisions from capture. Conflicting
+legacy/native entries, symlinks and external entry edits diagnose explicitly.
+Timed replay and stateful graph transitions remain proposed. Existing commands
+remain valid.
 Git is allowed as a required installed dependency; opening needs no repository
 or initialization. Empty opening creates no files or audio/MIDI streams.
 

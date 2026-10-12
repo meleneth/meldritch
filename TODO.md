@@ -49,7 +49,11 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 1 serializer checkpoint: self-contained project-v2 Lua over existing
   graph/note/voice validators, whole-source loss detection, stable identities,
   authored-only controls and fresh-process deterministic oscillator PCM equality
-- [ ] Slice 1 next: atomic native disk save, entry discovery and TUI fresh reopen
+- [x] Slice 1 disk checkpoint: atomic main.project.lua save, deterministic native/
+  legacy entry diagnostics, authored dirty status, fresh native inspectors and
+  initial worker publication without capture/devices; runtime defaults restored
+- [ ] Slice 1 next: composed keyboard-to-fresh-process acceptance audit, including
+  durable capture baselines across authored revisions; do not claim timed replay
 - [ ] Slice 2: shared palette, two compositions and independent pattern sources
 - [ ] Slice 3: graph LFO, explicit unit/rate/combination and reset/scope contracts
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
@@ -186,6 +190,24 @@ allowances, formatting/diff checks and docs build pass. Examples 09 and 29 retai
 fingerprints `41472b38b65b60ed` and `54745c74a42665cf`. No native entry discovery,
 disk save or TUI fresh reopen is claimed; those remain the next checkpoint.
 Legacy project-v1/instrument-v1/v2 exports and examples 25–33 are unchanged.
+
+Native disk checkpoint: `keyboard-save.txt` specifies Ctrl-S/F6 in either mode
+and inspectors. Typed SaveProject accepts the bounded source independently of
+legacy editor panels; NativeProjectStore owns expected-byte checks, bounded entry
+reads, synced new temporary files and atomic rename to main.project.lua. Foreign
+temporaries/symlinks/external edits/ambiguous legacy entries reject without loss.
+Opening restores native inspectors without synthetic accepted history and submits
+loaded voices to the existing worker immediately, with stopped transport and
+authored runtime gains. Tests prove saved versus authored-dirty status, untouched
+source/runtime/publication/generation on failed save, retry and fresh defaults.
+Workspace tests pass; final focused store checks (seven parents plus isolated child),
+CLI tests (37 per binary), affected-crate Clippy with existing allowances,
+formatting/diff checks and docs build pass. Real 80×24 PTY construct/bind/save,
+runtime mute/save, quit/reopen/default reset and saved read-only open/quit pass;
+fresh-process CLI --check validates. No device is opened by these checks.
+Full composed acceptance and durable capture baselines across subsequent saves
+still need audit; timed replay/epochs, physical listening, hardware and deadlines
+remain deferred. Commit remains local; historical files/exports stay unchanged.
 
 ## 20. Instrument and pattern authoring (priority over section 19)
 

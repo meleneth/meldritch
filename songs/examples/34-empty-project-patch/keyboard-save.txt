@@ -1,0 +1,32 @@
+Native disk save/reopen checkpoint:
+
+From an empty root: n, c, Enter, Esc, v, p, g, x; F6 or Ctrl-S saves the
+complete accepted authored source as main.project.lua (project v2). Save works
+from the overview, either editor, and performance mode. Staged patch drafts are
+excluded. Existing legacy TUI/editor save keys and formats remain unchanged.
+
+Ctrl-Tab, Home changes only runtime gain; save again, quit, run meldritch again.
+The saved patch, pattern, independent bindings and exposed control reappear.
+Transport starts stopped, gain starts at authored 0.8, and no capture is replayed.
+The loaded audio renders through the existing worker before Space can play it.
+Opening/checking/quit without gestures creates no capture or audio device.
+
+Display saved versus unsaved authored revision separately from capture. Source
+edits make it unsaved; runtime gestures, selections, mode and save requests do
+not. A failed save reports edits retained/unsaved and keeps the previous file,
+source, runtime and published audio. Retry after repairing the cause succeeds.
+
+No mandatory entry exists until explicit save. main.project.lua is distinct
+from the legacy main.lua control script and main.mlperformance composition.
+If both musical entries exist, diagnose ambiguity; do not silently choose one.
+Reject entry symlinks, malformed/unsupported snapshots, oversized entries, and
+external file changes since opening/last save. Do not overwrite a foreign
+.main.project.lua.tmp. Write a new temporary file, sync it, recheck the expected
+entry, then atomically rename. Remove only this attempt's owned temporary file
+on failure. OS power-loss durability and adversarial concurrent filesystem
+replacement are not guarantees of this checkpoint.
+
+Prove fresh-process CLI --check, TUI keyboard routing, raw oscillator PCM,
+existing worker/callback publication, runtime reset, read-only opening, save
+failure/retry and legacy compatibility. Physical listening and realtime deadline
+claims remain deferred. The full example's remaining contract is audited separately.
