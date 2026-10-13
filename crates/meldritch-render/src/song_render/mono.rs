@@ -7,6 +7,10 @@ pub(super) struct MonoState {
     filter: StateVariableFilter,
     pub frequency: f64,
     pub velocity: f64,
+    gate_hold: bool,
+    physical_gate: bool,
+    hold: bool,
+    resolved_gate: bool,
     control_values: [f64; 35],
     control_origins: [u64; 32],
     control_phases: [f64; 32],
@@ -16,6 +20,10 @@ pub(super) struct MonoState {
 impl MonoState {
     pub fn new(patch: &CompiledNotePatch) -> Result<Self, SongRenderError> {
         Ok(Self {
+            gate_hold: patch.gate_hold,
+            physical_gate: false,
+            hold: false,
+            resolved_gate: false,
             oscillator: NoteOscillator::new(patch.waveform, patch.plaits),
             envelope: AdsrEnvelope::new(patch.envelope, patch.sample_rate),
             filter: StateVariableFilter::new(),
@@ -42,13 +50,30 @@ impl MonoState {
     }
 
     pub fn gate_on(&mut self, velocity: f64) {
+        self.physical_gate = true;
+        self.resolved_gate = true;
         self.velocity = velocity;
         self.envelope.note_on();
         self.oscillator.note_on(velocity);
     }
     pub fn gate_off(&mut self) {
+        self.physical_gate = false;
+        if self.gate_hold && (self.hold || !self.resolved_gate) {
+            return;
+        }
+        self.resolved_gate = false;
         self.envelope.note_off();
         self.oscillator.note_off();
+    }
+
+    pub fn set_hold(&mut self, high: bool) {
+        if !self.gate_hold {
+            return;
+        }
+        self.hold = high;
+        if !high && !self.physical_gate && self.resolved_gate {
+            self.gate_off();
+        }
     }
 
     pub fn next_sample(
@@ -108,6 +133,8 @@ pub enum LiveVoiceInput {
     /// 14-bit MIDI value, normalized around exact center 8192 at input.bend.
     /// Pitch changes only through an explicit compatible graph adapter.
     Bend(u16),
+    /// Independent external input.sustain Gate; only authored GateHold consumes it.
+    Sustain(bool),
     Gate(bool),
 }
 
@@ -214,6 +241,7 @@ impl LiveMonoRenderer {
                         self.gate = true;
                         gate_rise = true;
                     }
+                    LiveVoiceInput::Sustain(high) => self.state.set_hold(high),
                     LiveVoiceInput::Gate(false) => {
                         if self.gate {
                             self.state.gate_off();

@@ -60,8 +60,13 @@ effect; held-key fallback restores pitch and velocity without retriggering.
 For bend, start with `bend.project.lua` and apply `bend-patch.txt` as well: the
 declared bipolar `input.bend` Control passes through an explicit PitchModulate
 adapter, with authored ±2-semitone depth. Wheel motion changes neither key
-ownership nor articulation; disconnect/overflow centers it. Sustain,
-simultaneous pattern/live routing and timed recording remain queued.
+ownership nor articulation; disconnect/overflow centers it. For pedal hold,
+start with `sustain.project.lua`, apply `velocity-patch.txt`, `bend-patch.txt`
+and `sustain-patch.txt`, then open with `--midi-sustain-cc 64` alongside
+`--midi-keyboard`. Choose the CC your controller actually sends; 64 is the
+example mapping, not an assumed MicroLab setting. The authored GateHold module
+defers gate release while the pedal is down; saving retains its cables, not
+the pedal state. Simultaneous pattern/live routing and timed recording remain queued.
 Port matching is explicit and rejects ambiguity; reconnect retries
 without accepting stale messages. Headless entry/publication/persistence tests
 pass, including shared worker/callback held-key audition. MicroLab port

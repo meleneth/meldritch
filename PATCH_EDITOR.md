@@ -23,6 +23,17 @@ This reuses the same audio-rate/per-instance adapter as LFO vibrato. Adding LFO
 and bend together still requires an explicit supported combiner; implicit sum and
 multiple pitch adapters remain unsupported. Plaits pitch-adapter lowering is open.
 
+`sustain.project.lua` declares `input.sustain` as a separate Gate port.
+Apply `sustain-patch.txt` in Ctrl-G after the velocity/bend drafts: the atomic
+batch inserts `gate_hold` between `input.gate` and the ADSR and connects the
+pedal to `hold.hold`. Raw key Gate and pedal Gate retain independent identities.
+Pedal down delays a raw Gate low; pedal up releases it unless a key remains
+pressed. A new key high retriggers. Fresh/offline instances start pedal-up,
+and saves retain wiring rather than the held pedal state. This bounded lowering
+supports one mono oscillator GateHold feeding ADSR; Plaits and general Gate
+fan-out reject at executable edit validation. The port declaration still requires
+readable Lua import. An unwired pedal cannot change sound.
+
 This is the accepted bounded construction editor. Project transactions, authored
 normalization, patch-owned interfaces and quantized stateful activation extend
 this boundary; see [ARCHITECTURE.md](ARCHITECTURE.md). Continued playback currently
@@ -34,7 +45,7 @@ Press Ctrl-E, then Ctrl-G. Type a command and Enter to stage it:
 
 | Command | Behavior |
 | --- | --- |
-| `add ID TYPE` | Instantiate oscillator, plaits, adsr, vca, low_pass, audio_output, lfo, control_scale, control_multiply, pitch_modulate, control_hertz or control_attenuate with inspectable defaults |
+| `add ID TYPE` | Instantiate oscillator, plaits, adsr, vca, low_pass, audio_output, lfo, control_scale, control_multiply, pitch_modulate, control_hertz, control_attenuate or gate_hold with inspectable defaults |
 | `remove ID reject` | Remove only when no dependent cable remains |
 | `remove ID disconnect` | Explicitly remove the module and all its dependent cables |
 | `connect MODULE.PORT MODULE.PORT` | Connect one compatible output to an unoccupied input |

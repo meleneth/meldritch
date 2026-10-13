@@ -1,0 +1,7 @@
+clear
+add hold gate_hold
+disconnect input.gate env.gate
+connect input.gate hold.gate
+connect input.sustain hold.hold
+connect hold.gate env.gate
+commit

@@ -155,15 +155,20 @@ expression, and negative/capture/save-reopen contracts pass. Unwired velocity an
 legacy gain remain unchanged. Offline pattern velocity at this new input and
 interactive external-port declaration editing remain deferred; Lua declarations
 are supported. Read `PATCH_EDITOR.md` and `keyboard-velocity.toml` before extending
-it. Do not claim sustain or physical acceptance.
+it. Physical acceptance remains open.
 The next bounded keyboard checkpoint also accepts bipolar `input.bend` routed
 through the existing PitchModulate adapter. Raw 14-bit KeyboardBend commands,
 unit/epoch validation, independent phase and partition references, composed
 velocity, capture and atomic store reload are checked. Keys preserve the bound
 wheel value; loss resets center it, with two event slots reserved for cleanup.
 The production worker/callback exercises bend and velocity together. Read
-`bend-patch.txt`/`keyboard-bend.toml`; sustain still requires an explicit gate
-processor, and LFO/bend summation/Plaits pitch adapters remain unsupported.
+`bend-patch.txt`/`keyboard-bend.toml`; LFO/bend summation and Plaits pitch adapters
+remain unsupported. Example 36 now also accepts a bounded explicit GateHold
+processor, with independent `input.sustain` Gate, opt-in CLI MIDI CC mapping,
+typed pedal capture and three-event loss cleanup. Full/split resolved-Gate
+references, negative edits, authored store reload and production worker/callback
+sound pass headlessly. Read `sustain-patch.txt`/`keyboard-sustain.toml`; physical
+pedal gestures/listening, general gate routing and Plaits GateHold remain open.
 Example 35's native pattern-selection checkpoint is implemented: PgUp/PgDn
 selects palette material without rebinding, source/runtime mutation or rerender;
 typed capture and independent-source persistence/render tests pass. Its full

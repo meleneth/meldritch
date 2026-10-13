@@ -407,6 +407,28 @@ Sustain requires an inspectable gate processor, not hidden MIDI note-off suppres
 
 ## Remaining full Slice 3 contract
 
+## Explicit live sustain checkpoint
+
+`sustain.project.lua` declares a Gate input consumed
+only through sustain-patch.txt's explicit gate_hold module. Physical Gate highs
+retrigger; lows defer while hold high. Pedal cannot resurrect released Gate, and
+pedal up releases only when physical Gate is low. Pitch/velocity remain independent
+physical-key-owned signals. Configure the adapter explicitly with --midi-sustain-cc;
+unsupported/malformed CCs and construction-only input stay unmapped. Capture typed
+pedal events; saves retain declarations/wiring, never pedal or DSP state. Reset
+must clear hold even when physical Gate is already low, reserving three cleanup
+slots for Gate low/hold low/bend center. The first lowering supports one mono
+oscillator GateHold to ADSR; Plaits and general gate routing require later contracts.
+`keyboard-sustain.toml` and `invalid/keyboard-sustain.toml` specify the trace and
+negative cases. `keyboard_sustain.rs` executes the typed Ctrl-G draft, compares
+full/split PCM to an independent resolved-Gate reference, checks held sound,
+retrigger and release tails, typed capture/reconstruction, unwired neutrality,
+atomic rejection and authored store reload. The production worker/callback test
+composes hold, velocity and bend across more than one bar and loss cleanup;
+backpressure reserves the three cleanup slots. Physical pedal gestures and
+listening remain unverified. `--midi-sustain-cc 64` is an explicit example mapping,
+not a claim about the MicroLab mk3's configured pedal message.
+
 Broader explicit addition/clamping,
 event/control-rate latching and global/per-voice scopes
 remain requirements. Reset/stop/rewind and composition clocks need their full scope

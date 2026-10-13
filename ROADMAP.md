@@ -178,7 +178,9 @@ combiner wiring, with soft/hard/fallback, capture and persistence acceptance.
 Explicit bipolar bend now reuses PitchModulate with authored depth, independent
 phase/partition references, typed capture and real store reload. Production
 worker/callback continuity and loss centering are checked headlessly.
-Next accept an explicit sustain gate processor and physical interaction; pattern velocity and
+The bounded explicit GateHold route now accepts key/pedal independence,
+held/retrigger/release sound, loss cleanup, typed capture and authored reopen
+headlessly. Physical pedal interaction remains unverified. Pattern velocity and
 interactive external-input declaration editing remain separate gaps.
 Simultaneous arranged/live routing, MIDI/device timestamp mapping, timed replay
 and graph-state preservation remain separate unfinished contracts.

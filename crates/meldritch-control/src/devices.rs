@@ -228,6 +228,34 @@ pub fn keyboard_input_command(
     }
 }
 
+/// Opt-in mapping of one controller CC to the independent Gate input.
+/// A typed capture stores the accepted boolean and channel, not device policy.
+pub fn keyboard_performance_command(
+    bytes: &[u8],
+    epoch: u64,
+    frame: u64,
+    sustain_cc: Option<u8>,
+) -> Option<meldritch_app::AppCommand> {
+    if let (
+        Some(cc),
+        Some(MidiObservation::Control {
+            channel,
+            cc: observed,
+            value,
+        }),
+    ) = (sustain_cc, decode_midi(bytes))
+        && cc == observed
+    {
+        return Some(meldritch_app::AppCommand::KeyboardSustain {
+            epoch,
+            frame,
+            channel,
+            high: value >= 64,
+        });
+    }
+    keyboard_input_command(bytes, epoch, frame)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ApcInput {
     Grid { cell: u8, pressed: bool },

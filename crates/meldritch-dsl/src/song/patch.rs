@@ -129,7 +129,7 @@ impl ModuleDefinition {
         for direction in [PortDirection::Input, PortDirection::Output] {
             for name in [
                 "pitch", "gate", "control", "audio", "level", "aux", "reset", "left", "right",
-                "cutoff", "amount", "rate",
+                "cutoff", "amount", "rate", "hold",
             ] {
                 let endpoint = format!("{}.{}", self.id, name);
                 if let Ok(signal) = resolve_port(
@@ -171,6 +171,7 @@ impl ModuleKind {
             Self::PitchModulate => "pitch_modulate",
             Self::ControlHertz => "control_hertz",
             Self::ControlAttenuate => "control_attenuate",
+            Self::GateHold => "gate_hold",
         }
     }
 }
@@ -181,6 +182,61 @@ fn valid_id(id: &str) -> bool {
         && id
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+}
+impl SynthDefinition {
+    /// Current executable GateHold subset, using ordinary typed cables.
+    pub fn gate_hold_module(&self) -> Result<Option<&ModuleDefinition>, String> {
+        let modules: Vec<_> = self
+            .modules
+            .iter()
+            .filter(|m| m.kind == ModuleKind::GateHold)
+            .collect();
+        let module = match modules.as_slice() {
+            [] => return Ok(None),
+            [module] => *module,
+            _ => return Err("gate lowering supports exactly one GateHold".into()),
+        };
+        if self.polyphony != 1 || self.modules.iter().any(|m| m.kind == ModuleKind::Plaits) {
+            return Err("GateHold currently requires a mono oscillator patch; Plaits gate routing is unsupported".into());
+        }
+        if !self
+            .inputs
+            .iter()
+            .any(|i| i.id == "sustain" && i.signal == SignalType::Gate)
+        {
+            return Err("GateHold requires declared input.sustain Gate".into());
+        }
+        let envelope = self
+            .modules
+            .iter()
+            .find(|m| m.kind == ModuleKind::Adsr)
+            .ok_or("GateHold requires ADSR")?;
+        for (from, to) in [
+            ("input.gate".to_owned(), format!("{}.gate", module.id)),
+            ("input.sustain".to_owned(), format!("{}.hold", module.id)),
+            (
+                format!("{}.gate", module.id),
+                format!("{}.gate", envelope.id),
+            ),
+        ] {
+            let cables: Vec<_> = self.cables.iter().filter(|c| c.to == to).collect();
+            if !matches!(cables.as_slice(), [c] if c.from == from && c.signal == SignalType::Gate) {
+                return Err(format!(
+                    "GateHold requires exactly one explicit Gate cable {from} → {to}"
+                ));
+            }
+        }
+        if self
+            .cables
+            .iter()
+            .filter(|c| c.from == format!("{}.gate", module.id))
+            .count()
+            != 1
+        {
+            return Err("GateHold output currently routes only to ADSR; general gate fan-out is unsupported".into());
+        }
+        Ok(Some(module))
+    }
 }
 fn instantiate(id: &str, kind: ModuleKind) -> Result<ModuleDefinition, String> {
     if !valid_id(id) {
@@ -282,7 +338,9 @@ impl ValidatedSong {
             .ok_or_else(|| format!("unknown synth '{synth}'"))?;
         let with_filter = graph.modules.iter().any(|m| m.kind == ModuleKind::LowPass);
         let control_order = graph.control_order()?;
-        let expected_modules = if with_filter { 5 } else { 4 } + control_order.len();
+        let held_gate = graph.gate_hold_module()?.is_some();
+        let expected_modules =
+            if with_filter { 5 } else { 4 } + control_order.len() + usize::from(held_gate);
         let patched_plaits_gate = graph.modules.iter().any(|m| {
             m.kind == ModuleKind::Plaits
                 && graph
@@ -312,6 +370,7 @@ impl ValidatedSong {
             })
             .sum();
         let expected_cables = if with_filter { 6 } else { 5 }
+            + 2 * usize::from(held_gate)
             + usize::from(patched_plaits_gate)
             + control_cables
             + usize::from(graph.cables.iter().any(|c| c.to.ends_with(".cutoff")));

@@ -86,6 +86,12 @@ pub enum AppCommand {
         channel: u8,
         value: u16,
     },
+    KeyboardSustain {
+        epoch: u64,
+        frame: u64,
+        channel: u8,
+        high: bool,
+    },
     ResetKeyboard {
         epoch: u64,
         frame: u64,
@@ -1570,6 +1576,7 @@ impl AppController {
             AppCommand::BindKeyboard { .. }
             | AppCommand::KeyboardKey { .. }
             | AppCommand::KeyboardBend { .. }
+            | AppCommand::KeyboardSustain { .. }
             | AppCommand::ResetKeyboard { .. } => self.keyboard_command(&command)?,
             AppCommand::CreateComposition(_)
             | AppCommand::SelectComposition(_)

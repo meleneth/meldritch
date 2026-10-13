@@ -114,24 +114,27 @@ impl LiveKeyboardWorker {
         app: &mut AppController,
         bytes: &[u8],
         epoch: u64,
+        sustain_cc: Option<u8>,
     ) -> Result<(), String> {
         let mut state = self.state.lock().map_err(|_| "keyboard worker failed")?;
         let frame = state
             .frontier
             .max(self.control.clock())
             .max(app.keyboard().frame);
-        let Some(command) = meldritch_control::devices::keyboard_input_command(bytes, epoch, frame)
-        else {
+        let Some(command) = meldritch_control::devices::keyboard_performance_command(
+            bytes, epoch, frame, sustain_cc,
+        ) else {
             return Ok(());
         };
-        // Prevalidate capacity before acceptance; reserve Gate low + bend center.
+        // Prevalidate capacity before acceptance; reserve Gate/hold low + bend center.
         let outputs = match &command {
             AppCommand::KeyboardKey { pressed: true, .. } => 3,
             AppCommand::KeyboardKey { pressed: false, .. } => 2,
             AppCommand::KeyboardBend { .. } => 1,
+            AppCommand::KeyboardSustain { .. } => 1,
             _ => unreachable!(),
         };
-        if state.events.len() + outputs > LiveMonoRenderer::MAX_EVENTS - 2 {
+        if state.events.len() + outputs > LiveMonoRenderer::MAX_EVENTS - 3 {
             return Err("keyboard pending event budget exceeded".into());
         }
         let result = app.dispatch(command).map_err(|e| format!("{e:?}"))?;
@@ -297,34 +300,41 @@ mod tests {
         };
         worker.bind(&mut app, Some("bass-instance".into())).unwrap();
         let epoch = app.keyboard().epoch;
-        worker.key(&mut app, &[0xe0, 127, 127], epoch).unwrap();
+        worker
+            .key(&mut app, &[0xe0, 127, 127], epoch, Some(64))
+            .unwrap();
         for note in 0..41 {
-            worker.key(&mut app, &[0x90, note, 127], epoch).unwrap();
+            worker
+                .key(&mut app, &[0x90, note, 127], epoch, Some(64))
+                .unwrap();
         }
-        worker.key(&mut app, &[0xe0, 0, 0], epoch).unwrap();
-        worker.key(&mut app, &[0xe0, 127, 127], epoch).unwrap();
+        worker
+            .key(&mut app, &[0xb0, 64, 127], epoch, Some(64))
+            .unwrap();
         let before = app.keyboard().clone();
         let history = app.history().len();
         assert!(
             worker
-                .key(&mut app, &[0x90, 64, 127], before.epoch)
+                .key(&mut app, &[0x90, 64, 127], before.epoch, Some(64))
                 .is_err()
         );
         assert_eq!(app.keyboard(), &before);
         assert_eq!(app.history().len(), history);
-        assert_eq!(worker.state.lock().unwrap().events.len(), 126);
+        assert_eq!(worker.state.lock().unwrap().events.len(), 125);
         worker
-            .key(&mut app, &[0xb0, 64, 127], before.epoch)
-            .unwrap(); // Unmapped sustain does not reset.
+            .key(&mut app, &[0xb0, 1, 127], before.epoch, Some(64))
+            .unwrap(); // Other CCs cannot change the bound pedal.
+        assert!(app.keyboard().sustain);
         worker
             .reset(&mut app, KeyboardResetReason::Overflow)
             .unwrap();
         assert_eq!(worker.state.lock().unwrap().events.len(), 128);
         assert_eq!(app.keyboard().bend, Some(8192));
+        assert!(!app.keyboard().sustain);
         assert_eq!(app.keyboard().held_keys, 0);
         assert!(
             worker
-                .key(&mut app, &[0x90, 64, 127], before.epoch)
+                .key(&mut app, &[0x90, 64, 127], before.epoch, Some(64))
                 .is_err()
         );
         advance(

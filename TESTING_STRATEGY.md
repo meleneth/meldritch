@@ -18,6 +18,15 @@ The CLI worker/callback test exercises both controls; deterministic backpressure
 reserves Gate low and bend center at the full 128-event boundary. Physical wheel
 gestures/listening, smoothing and timed device replay remain unverified.
 
+`control/tests/keyboard_sustain.rs` executes the readable example-36 pedal trace
+through typed patch drafts and compares the full and partitioned held output with
+an independent resolved-Gate reference. It covers retrigger/release tails,
+capture reconstruction, unwired neutrality, atomic negative cases and authored
+store reload. The CLI production worker/callback test composes sustain, velocity
+and bend over more than a bar; its 128-event pressure test reserves three loss
+cleanup events. The CLI opt-in CC mapping is tested without assuming a controller
+default. Physical pedal gestures/listening and timed device replay remain open.
+
 The engine should be tested like a compiler and like an audio system.
 
 ## Next-architecture acceptance obligations

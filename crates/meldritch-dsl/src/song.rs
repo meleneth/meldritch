@@ -51,6 +51,7 @@ pub enum ModuleKind {
     PitchModulate,
     ControlHertz,
     ControlAttenuate,
+    GateHold,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -3284,6 +3285,7 @@ fn parse_synth(path: &Path, raw: RawSynthFile) -> Result<SynthDefinition, SongLo
             "pitch_modulate" => ModuleKind::PitchModulate,
             "control_hertz" => ModuleKind::ControlHertz,
             "control_attenuate" => ModuleKind::ControlAttenuate,
+            "gate_hold" => ModuleKind::GateHold,
             unknown => {
                 return Err(SongLoadError::one(
                     path,
@@ -3836,6 +3838,8 @@ fn resolve_port(
         )
     })?;
     let signal = match (*kind, direction, port) {
+        (ModuleKind::GateHold, _, "gate")
+        | (ModuleKind::GateHold, PortDirection::Input, "hold") => SignalType::Gate,
         (ModuleKind::Lfo, PortDirection::Input, "rate") => SignalType::Control,
         (ModuleKind::ControlAttenuate, _, "control")
         | (ModuleKind::ControlAttenuate, PortDirection::Input, "amount") => SignalType::Control,

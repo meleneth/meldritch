@@ -103,9 +103,14 @@ adapter, composed with velocity. Independent phase references, partition equalit
 atomic value/unit rejection, typed capture and real store reload pass; the
 production worker/callback exercises wheel motion and loss centering. No implicit
 pitch range, note articulation or LFO/bend sum is introduced.
-Next author the smallest explicit sustain gate-processing example,
-keeping pitch/gate independent and reusing this path. Simultaneous arranged/live
-routing and broader clock/graph activation require separate accepted contracts.
+Example 36 now also accepts a bounded explicit GateHold patch. A declared
+`input.sustain` Gate and typed patch draft route raw key Gate through GateHold to
+ADSR; the optional CLI CC adapter supplies pedal state without changing saved
+patterns. Headless held/retrigger/release references, partition equality, typed
+capture, save/reopen, negatives and worker/callback loss cleanup pass. The
+example's CC64 mapping is explicit, not a MicroLab default claim. Physical pedal
+interaction remains unverified. Simultaneous arranged/live routing and broader
+clock/graph activation require separate accepted contracts.
 Reuse it with the existing voice compiler, scheduler and safe worker/
 publication boundary. Key-held performance must not rewrite saved patterns or
 patch defaults. Prove retrigger/release, zero-velocity release, overflow/disconnect/

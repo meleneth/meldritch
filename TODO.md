@@ -86,8 +86,10 @@ an empty project requires no Git repository or initialization.
 - [x] Keyboard audition: native F9 explicit stopped-transport mono binding,
   bounded shared-DSP worker streaming, ingress epochs/loss cleanup, typed capture
   and callback PCM/allocation acceptance headlessly
-- [ ] Next keyboard slices: explicit velocity/sustain/bend adapters, physical
-  interaction/listening/deadlines; simultaneous arranged/live routing and timed
+- [x] Bounded keyboard adapters: explicit velocity, bend and GateHold pedal routes,
+  headless capture/save/reopen and worker/callback evidence
+- [ ] Next keyboard slices: physical interaction/listening/deadlines and broader
+  Gate routing; simultaneous arranged/live routing and timed
   device capture/replay need their own activation/clock contracts
 - [x] Keyboard renderer foundation: one shared mono kernel for offline/incremental
   worker execution, independent bounded u64 Pitch/Gate blocks, preserved DSP state,
@@ -540,11 +542,21 @@ PCM, invalid value/unit/epoch cases, typed capture and real atomic store reload
 are checked. The production worker/callback exercises wheel motion, held fallback
 and disconnect/overflow centering. Backpressure reserves two cleanup events before
 acceptance. Default/unwired source semantics and old captures remain unchanged.
-Next: explicit sustain gate processor with an authored pedal route; preserve
-bounded event ownership and cleanup rather than hiding hold behavior in MIDI.
+The explicit sustain gate processor checkpoint now passes headless acceptance:
+`sustain.project.lua` plus `sustain-patch.txt` declares `input.sustain` Gate,
+inserts one GateHold before ADSR and accepts an opt-in MIDI CC as typed runtime
+pedal input. Held/retrigger/release and independent resolved-Gate/partition PCM,
+atomic negative edits, typed capture, authored store reload and production
+worker/callback loss release pass. Three pending-event slots are reserved for
+Gate low, hold low and bend center. No pedal state enters authored saves.
+Verification: focused sustain and CLI keyboard tests, offline workspace suite,
+affected all-targets Clippy, formatting/diff checks and docs build pass.
+Historical 09/29 fingerprints remain `41472b38b65b60ed` /
+`54745c74a42665cf`. Physical listening remains unverified.
 Smoothing, LFO/bend summation, Plaits adapters, polyphonic/simultaneous routing,
 pattern control sources, input-declaration editing, timed device replay and
-physical evidence remain open. Full example 36 status remains design.
+physical evidence and general Gate/Plaits routing remain open. Full example 36
+status remains design.
 Verification: focused bend/lifecycle/CLI keyboard tests and final offline
 workspace suite pass; affected all-targets Clippy with established allowances,
 formatting/diff checks and docs build pass. Historical 09/29 fingerprints remain

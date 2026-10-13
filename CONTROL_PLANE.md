@@ -22,7 +22,7 @@ keys and their independent Pitch/Velocity/Gate outputs at one locked worker fron
 then renders the shared MonoState kernel off the audio thread. A fixed timed PCM
 ring feeds the existing output callback. Overflow/disconnect resets clear held keys
 and invalidate buffered audio; accepted pending events remain ordered, with one
-reserved release/centering capacity. Mode/selection never retarget held gestures. Source or
+reserved Gate-low/hold-low/bend-center capacity. Mode/selection never retarget held gestures. Source or
 transport changes release binding; source changes start a fresh voice after F9,
 not migrated DSP state. KeyboardKey captures MIDI velocity (0..127); old v1
 captures missing that field default to 127. Last-pressed key ownership restores
@@ -38,8 +38,12 @@ the existing PitchModulate adapter supplies authored semitone depth. Keys and
 mode/selection preserve bend; reset/disconnect/overflow center it, and source or
 transport invalidation/fresh binding clears ownership. Native capture retains
 raw values/timing and reconstructs shared-worker PCM; saves contain declarations
-and cables only. Sustain
-adapters, polyphonic/simultaneous pattern/live routing and timed device replay
+and cables only. `devices::keyboard_performance_command` optionally maps one
+explicitly selected CC to typed `KeyboardSustain`, independently of keys and bend.
+The shared kernel consumes it only through an authored GateHold cable path; loss
+resets the runtime pedal even when no key remains pressed. This is a bounded mono
+gate processor, not general gate routing or authored controller mapping.
+Polyphonic/simultaneous pattern/live routing and timed device replay
 remain unimplemented. MicroLab mk3 discovery and input connection were observed;
 physical key/pedal gestures and listening have not been accepted.
 

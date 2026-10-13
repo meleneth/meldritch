@@ -25,8 +25,11 @@ The production worker/callback test now uses an explicitly wired velocity
 Control and restores held-key expression; velocity evaluation stays on the DSP
 worker. No implicit gain, callback modulation or new device stream is introduced.
 The same production test now also wires bipolar bend through PitchModulate and
-compares continuous held-key PCM across wheel changes. Loss cleanup reserves two
-event slots for Gate low and bend center before accepting gestures; DSP and
+compares continuous held-key PCM across wheel changes. It also uses an authored
+GateHold processor: pedal down defers envelope release after physical key-up,
+while pedal-up and loss cleanup release through the same continuous worker DSP.
+Loss cleanup reserves three event slots for Gate low, hold low and bend center
+before accepting gestures; DSP and
 normalization remain worker-side. Source/transport invalidation discards that
 instance; it does not preserve or migrate a noncentered wheel into a new graph.
 Capture checkpoint failure releases audition through typed cleanup retained for

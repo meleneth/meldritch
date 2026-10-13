@@ -328,6 +328,9 @@ enum Command {
         /// Native construction pattern entry from one uniquely matching MIDI input.
         #[arg(long, conflicts_with = "check")]
         midi_keyboard: Option<String>,
+        /// Explicit CC for the live sustain Gate source; requires --midi-keyboard.
+        #[arg(long, requires = "midi_keyboard", conflicts_with = "check")]
+        midi_sustain_cc: Option<u8>,
     },
     /// Run a bounded Lua-authored APC Mini MK2 LED animation (no audio).
     ApcLuaColors {
@@ -923,12 +926,14 @@ fn run(cli: Cli) -> Result<(), String> {
         project: PathBuf::from("."),
         check: false,
         midi_keyboard: None,
+        midi_sustain_cc: None,
     }) {
         Command::OpenProject {
             project,
             check,
             midi_keyboard,
-        } => open_project_keyboard(project, check, midi_keyboard),
+            midi_sustain_cc,
+        } => open_project_keyboard(project, check, midi_keyboard, midi_sustain_cc),
         Command::ApcLuaColors {
             source,
             dry_run,
@@ -3136,14 +3141,18 @@ fn connect_apc_feedback(
 
 #[cfg(test)]
 fn open_project(path: PathBuf, check: bool) -> Result<(), String> {
-    open_project_keyboard(path, check, None)
+    open_project_keyboard(path, check, None, None)
 }
 
 fn open_project_keyboard(
     path: PathBuf,
     check: bool,
     midi_keyboard: Option<String>,
+    midi_sustain_cc: Option<u8>,
 ) -> Result<(), String> {
+    if midi_sustain_cc.is_some_and(|cc| cc > 127) {
+        return Err("--midi-sustain-cc must be in 0..127".into());
+    }
     let project = meldritch_dsl::load_project_directory(path).map_err(|error| error.to_string())?;
     let native = meldritch_control::native_project::NativeProjectStore::open(&project)?;
     if check {
@@ -3196,7 +3205,7 @@ fn open_project_keyboard(
         }
         let mut host = project_playback::NativeProjectAudio::with_store(&app, engine, native)?;
         if let Some(port) = midi_keyboard {
-            host.enable_keyboard(port)?;
+            host.enable_keyboard(port, midi_sustain_cc)?;
         }
         meldritch_tui::run_project_with_host(&mut app, &project, &mut host)
             .map_err(|error| format!("failed to open project cockpit: {error}"))
@@ -7364,6 +7373,39 @@ mod tests {
             Some(Command::OpenProject { check: true, .. })
         ));
         assert!(Cli::try_parse_from(["meldritch", "not-a-command"]).is_err());
+        assert!(matches!(
+            Cli::try_parse_from([
+                "meldritch",
+                "open-project",
+                ".",
+                "--midi-keyboard",
+                "MicroLab",
+                "--midi-sustain-cc",
+                "64"
+            ])
+            .unwrap()
+            .command,
+            Some(Command::OpenProject {
+                midi_sustain_cc: Some(64),
+                ..
+            })
+        ));
+        assert!(
+            Cli::try_parse_from(["meldritch", "open-project", ".", "--midi-sustain-cc", "64"])
+                .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "meldritch",
+                "open-project",
+                ".",
+                "--midi-keyboard",
+                "MicroLab",
+                "--midi-sustain-cc",
+                "256"
+            ])
+            .is_err()
+        );
         assert!(Cli::try_parse_from(["meldritch", "validate-song"]).is_err());
         assert!(
             Cli::try_parse_from([

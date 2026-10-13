@@ -1,0 +1,59 @@
+# Copy sustain.project.lua as main.project.lua in an empty project.
+# In Ctrl-G apply velocity-patch.txt, bend-patch.txt and sustain-patch.txt; save.
+# open-project . --midi-keyboard MicroLab --midi-sustain-cc 64
+# CC64 is an example adapter mapping, not a claim about the device's defaults.
+# Values >=64 mean hold high. Without this option CCs stay unmapped.
+# GateHold consumes explicit physical Gate + hold Gate, emits Gate to ADSR.
+# Every high physical Gate retriggers; low defers while hold high. Hold cannot
+# resurrect an already released gate; hold low releases only when physical low.
+# Pitch/velocity fallback stays physical-key-owned; pedal never latches notes.
+origin_frame = 5000000000
+length_frames = 4096
+sustain_cc = 64
+[[events]]
+offset = 0
+bytes = [144, 48, 64]
+[[events]]
+offset = 256
+bytes = [176, 64, 127]
+[[events]]
+offset = 512
+bytes = [128, 48, 0]
+# No physical keys remain; authored GateHold keeps ADSR high.
+[[events]]
+offset = 1024
+bytes = [145, 55, 96]
+[[events]]
+offset = 1280
+bytes = [129, 55, 0]
+[[events]]
+offset = 1536
+bytes = [176, 64, 63]
+# Hold low starts the authored release tail without changing pitch/velocity.
+[[events]]
+offset = 2048
+bytes = [176, 64, 64]
+# Pedal alone cannot rearticulate the released voice.
+[[events]]
+offset = 2304
+bytes = [144, 60, 127]
+[[events]]
+offset = 2560
+bytes = [176, 64, 0]
+# Physical key still held: pedal up cannot release it.
+[[events]]
+offset = 2816
+bytes = [128, 60, 0]
+[[events]]
+offset = 3328
+bytes = [176, 64, 127]
+[[events]]
+offset = 3456
+bytes = [224, 127, 127]
+[[events]]
+offset = 3584
+bytes = [144, 48, 64]
+[[events]]
+offset = 3840
+bytes = [128, 48, 0]
+# A reset at 3968 must emit hold low even though physical Gate is already low.

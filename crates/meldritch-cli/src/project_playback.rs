@@ -22,6 +22,7 @@ pub(crate) struct NativeProjectAudio {
     ready_generation: Option<u64>,
     frames: u32,
     keyboard: Option<crate::keyboard::NativeKeyboard>,
+    sustain_cc: Option<u8>,
     live: Option<crate::live_keyboard::LiveKeyboardWorker>,
     live_producer: Option<meldritch_audio::streaming_audio::StreamingProducer>,
     live_consumer: Option<meldritch_audio::streaming_audio::StreamingConsumer>,
@@ -72,8 +73,16 @@ impl NativeProjectAudio {
         }
         Ok(())
     }
-    pub(crate) fn enable_keyboard(&mut self, port: String) -> Result<(), String> {
+    pub(crate) fn enable_keyboard(
+        &mut self,
+        port: String,
+        sustain_cc: Option<u8>,
+    ) -> Result<(), String> {
+        if sustain_cc.is_some_and(|cc| cc > 127) {
+            return Err("sustain CC must be in 0..127".into());
+        }
         self.keyboard = Some(crate::keyboard::NativeKeyboard::new(port)?);
+        self.sustain_cc = sustain_cc;
         Ok(())
     }
     fn require_prepared_audio(&self, source: &meldritch_app::ValidatedSong) -> Result<(), String> {
@@ -132,6 +141,7 @@ impl NativeProjectAudio {
             ready_generation: None,
             frames,
             keyboard: None,
+            sustain_cc: None,
             live: None,
             live_producer: Some(live_producer),
             live_consumer: Some(live_consumer),
@@ -179,8 +189,9 @@ impl ProjectPlaybackHost for NativeProjectAudio {
             .as_deref()
             .map_or(String::new(), |voice| {
                 format!(
-                    " · Live keys → {voice}: held {} · velocity {} · bend {} · stream gaps {} · F9 release",
+                    " · Live keys → {voice}: held {} · pedal {} · velocity {} · bend {} · stream gaps {} · F9 release",
                     app.keyboard().held_keys,
+                    if app.keyboard().sustain {"down"} else {"up"},
                     app.keyboard()
                         .velocity
                         .map_or_else(|| "—".into(), |v| format!("{v}/127")),
@@ -263,6 +274,7 @@ impl ProjectPlaybackHost for NativeProjectAudio {
                         app,
                         &event.bytes,
                         event.binding_epoch,
+                        self.sustain_cc,
                     ) {
                         self.live
                             .as_ref()
@@ -362,7 +374,7 @@ mod tests {
         let project = project();
         let source = meldritch_control::native_project::load_native_project(
             project.root(),
-            include_str!("../../../songs/examples/36-patch-lfo/bend.project.lua"),
+            include_str!("../../../songs/examples/36-patch-lfo/sustain.project.lua"),
         )
         .unwrap();
         use meldritch_dsl::{ModuleKind, PatchEdit, PatchOperation, PitchModulationSettings};
@@ -416,6 +428,26 @@ mod tests {
                         from: "wheel.pitch".into(),
                         to: "osc.pitch".into(),
                     },
+                    PatchOperation::Instantiate {
+                        id: "hold".into(),
+                        kind: ModuleKind::GateHold,
+                    },
+                    PatchOperation::Disconnect {
+                        from: "input.gate".into(),
+                        to: "env.gate".into(),
+                    },
+                    PatchOperation::Connect {
+                        from: "input.gate".into(),
+                        to: "hold.gate".into(),
+                    },
+                    PatchOperation::Connect {
+                        from: "input.sustain".into(),
+                        to: "hold.hold".into(),
+                    },
+                    PatchOperation::Connect {
+                        from: "hold.gate".into(),
+                        to: "env.gate".into(),
+                    },
                 ],
             })
             .unwrap();
@@ -428,6 +460,7 @@ mod tests {
         assert!(host.toggle_keyboard(&mut app).is_err()); // No keyboard.
         let (keyboard, route) = crate::keyboard::NativeKeyboard::simulated();
         host.keyboard = Some(keyboard);
+        host.sustain_cc = Some(64);
         let mut callback = PublishedAudioRenderer::from_engine(
             host.reader.clone(),
             2,
@@ -468,7 +501,8 @@ mod tests {
                     .filter_map(|record| match (&record.command, &record.result) {
                         (
                             AppCommand::KeyboardKey { frame, .. }
-                            | AppCommand::KeyboardBend { frame, .. },
+                            | AppCommand::KeyboardBend { frame, .. }
+                            | AppCommand::KeyboardSustain { frame, .. },
                             AppCommandResult::KeyboardUpdated { outputs, .. },
                         ) if *frame >= start && *frame < end => Some(
                             outputs
@@ -505,6 +539,9 @@ mod tests {
         }
         assert!(heard);
         assert!(app.keyboard().gate); // Held beyond the authored bar and pattern releases.
+        route.observe(&[0xb0, 64, 127]);
+        host.poll(&mut app).unwrap();
+        assert!(app.keyboard().sustain);
         route.observe(&[0xe0, 127, 127]);
         host.poll(&mut app).unwrap();
         assert_eq!(app.keyboard().bend, Some(16383));
@@ -527,6 +564,14 @@ mod tests {
         route.observe(&[0x80, 48, 0]);
         host.poll(&mut app).unwrap();
         for _ in 0..6 {
+            assert!(pump(&mut host, &mut app, &mut callback, &mut reference));
+        }
+        assert!(!app.keyboard().gate);
+        assert!(app.keyboard().sustain);
+        route.observe(&[0xb0, 64, 0]);
+        host.poll(&mut app).unwrap();
+        assert!(!app.keyboard().sustain);
+        for _ in 0..6 {
             pump(&mut host, &mut app, &mut callback, &mut reference);
         }
         assert!(!pump(&mut host, &mut app, &mut callback, &mut reference));
@@ -543,15 +588,19 @@ mod tests {
         assert_eq!(app.keyboard().bend, Some(8192));
         assert_eq!(app.keyboard().held_keys, 0);
         assert!(!app.keyboard().gate);
+        assert!(!app.keyboard().sustain);
         route.observe(&[0x90, 60, 127]);
         host.poll(&mut app).unwrap();
         assert_eq!(app.keyboard().held_keys, 1);
         route.observe(&[0xe0, 0, 0]);
         host.poll(&mut app).unwrap();
+        route.observe(&[0xb0, 64, 127]);
+        host.poll(&mut app).unwrap();
         host.keyboard.as_mut().unwrap().simulate_disconnect();
         host.poll(&mut app).unwrap();
         assert_eq!(app.keyboard().held_keys, 0);
         assert_eq!(app.keyboard().bend, Some(8192));
+        assert!(!app.keyboard().sustain);
         route.observe(&[0x90, 60, 127]); // Disconnected route is stale.
         host.poll(&mut app).unwrap();
         assert_eq!(app.keyboard().held_keys, 0);

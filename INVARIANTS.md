@@ -308,6 +308,19 @@ the wheel. Captures preserve raw events; authored persistence excludes wheel sta
 No smoothing, simultaneous LFO/bend summation or per-channel bend allocation is
 implied by this bounded checkpoint.
 
+Live sustain is a separate authored Gate input and an explicit GateHold processor,
+not an implicit MIDI note-off rule. The bounded mono lowering requires exactly
+one `input.gate → GateHold.gate`, `input.sustain → GateHold.hold` and
+`GateHold.gate → ADSR.gate` route. A high key Gate retriggers; a low key Gate
+releases only when hold is low. A high hold never resurrects a released gate.
+Fresh DSP starts hold-low; reset/disconnect/overflow clears it even if no key is
+down. Accepted typed pedal events retain epoch, channel and u64 frame, and capture
+records them. Authored saves retain declarations/cables but exclude runtime pedal
+state. The CLI CC mapping is opt-in; unrecognized CC cannot silently latch Gate.
+Backpressure reserves three cleanup events before accepting more input. Current
+support is one mono oscillator and one ADSR route; general Gate processors,
+Plaits routing and physical behavior remain future acceptance obligations.
+
 Acceptance must separately prove source correctness, published/consumed audio,
 state-transition semantics and physical behavior. Conservative full-horizon
 invalidation is the current authoring fallback; it must be reported honestly

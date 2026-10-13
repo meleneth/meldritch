@@ -110,6 +110,7 @@ native_commands! {
         BindKeyboard { voice: Option<String>, frame: u64 },
         KeyboardKey { epoch: u64, frame: u64, channel: u8, note: u8, #[serde(default = "unity_keyboard_velocity")] velocity: u8, pressed: bool },
         KeyboardBend { epoch: u64, frame: u64, channel: u8, value: u16 },
+        KeyboardSustain { epoch: u64, frame: u64, channel: u8, high: bool },
         ResetKeyboard { epoch: u64, frame: u64, reason: KeyboardResetReason },
         SetCompositionMember { composition: String, voice: String, included: bool },
         ExposeOutputLevel { synth: String, control: String },

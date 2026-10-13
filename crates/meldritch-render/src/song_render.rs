@@ -306,6 +306,7 @@ impl CompiledFilteredNotePatch {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompiledNotePatch {
+    gate_hold: bool,
     control: Option<Box<crate::song_control::ControlPlan>>,
     bpm: f64,
     song_fingerprint: u64,
@@ -1288,7 +1289,10 @@ fn compile_note_definition(
     let filter = optional_one_module(synth.modules(), ModuleKind::LowPass)?;
     let control = crate::song_control::ControlPlan::compile(synth)
         .map_err(SongRenderError::InvalidPatternVoice)?;
-    if control.is_some() {
+    let gate_hold = synth
+        .gate_hold_module()
+        .map_err(SongRenderError::InvalidPatternVoice)?;
+    if control.is_some() || gate_hold.is_some() {
         song.validate_executable_patch(synth_id)
             .map_err(SongRenderError::InvalidPatternVoice)?;
     }
@@ -1297,7 +1301,13 @@ fn compile_note_definition(
             "input.pitch".to_owned(),
             format!("{}.pitch", oscillator.id()),
         ),
-        ("input.gate".to_owned(), format!("{}.gate", envelope.id())),
+        (
+            gate_hold.map_or_else(
+                || "input.gate".into(),
+                |module| format!("{}.gate", module.id()),
+            ),
+            format!("{}.gate", envelope.id()),
+        ),
         (
             format!(
                 "{}.{}",
@@ -1369,6 +1379,7 @@ fn compile_note_definition(
     let waveform_name = oscillator.waveform().unwrap_or("sine");
     let waveform = parse_waveform(oscillator.id(), waveform_name)?;
     Ok(CompiledNotePatch {
+        gate_hold: gate_hold.is_some(),
         control: control.map(Box::new),
         bpm: song.performance().bpm(),
         song_fingerprint: song.fingerprint(),

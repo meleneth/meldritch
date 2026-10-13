@@ -1,0 +1,4 @@
+cases = ["unbound", "channel-16", "stale-epoch", "backwards-frame", "undeclared-input", "wrong-signal", "missing-hold", "duplicate-input", "multiple-processors", "cycle", "plaits-processor"]
+# Rejected commands/graphs preserve runtime/source/history/publication.
+# CC mapping omitted, other CC, malformed packets and construction-only pedal
+# must not latch or author notes. Source/transport/loss cleanup clears pedal.

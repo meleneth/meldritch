@@ -17,6 +17,7 @@ pub struct KeyboardView {
     pub pitch: Option<u8>,
     pub velocity: Option<u8>,
     pub bend: Option<u16>,
+    pub sustain: bool,
     pub gate: bool,
     pub held_keys: usize,
 }
@@ -37,6 +38,7 @@ impl KeyboardState {
         self.view.gate = false;
         self.view.held_keys = 0;
         self.view.bend = None;
+        self.view.sustain = false;
         self.view.epoch = self.view.epoch.saturating_add(1);
     }
 }
@@ -62,6 +64,7 @@ impl AppController {
             AppCommand::BindKeyboard { frame, .. }
             | AppCommand::KeyboardKey { frame, .. }
             | AppCommand::KeyboardBend { frame, .. }
+            | AppCommand::KeyboardSustain { frame, .. }
             | AppCommand::ResetKeyboard { frame, .. } => *frame,
             _ => unreachable!(),
         };
@@ -97,6 +100,9 @@ impl AppController {
                     .ok_or_else(|| fail("keyboard epoch exhausted"))?;
                 if previous.gate {
                     outputs.push(LiveVoiceInput::Gate(false));
+                }
+                if previous.sustain {
+                    outputs.push(LiveVoiceInput::Sustain(false));
                 }
                 if previous.voice.is_some() && previous.bend.is_some_and(|value| value != 8192) {
                     outputs.push(LiveVoiceInput::Bend(8192));
@@ -182,6 +188,22 @@ impl AppController {
                 self.keyboard.view.frame = frame;
                 outputs.push(LiveVoiceInput::Bend(*value));
             }
+            AppCommand::KeyboardSustain {
+                epoch,
+                channel,
+                high,
+                ..
+            } => {
+                if *epoch != previous.epoch || previous.voice.is_none() {
+                    return Err(fail("keyboard sustain has no current binding"));
+                }
+                if *channel > 15 {
+                    return Err(fail("invalid keyboard sustain channel"));
+                }
+                self.keyboard.view.sustain = *high;
+                self.keyboard.view.frame = frame;
+                outputs.push(LiveVoiceInput::Sustain(*high));
+            }
             AppCommand::ResetKeyboard { epoch, .. } => {
                 if *epoch != previous.epoch || previous.voice.is_none() {
                     return Err(fail("keyboard reset has no current binding"));
@@ -193,10 +215,14 @@ impl AppController {
                 if previous.gate {
                     outputs.push(LiveVoiceInput::Gate(false));
                 }
+                if previous.sustain {
+                    outputs.push(LiveVoiceInput::Sustain(false));
+                }
                 if previous.bend.is_some_and(|value| value != 8192) {
                     outputs.push(LiveVoiceInput::Bend(8192));
                 }
                 self.keyboard.view.bend = previous.bend.map(|_| 8192);
+                self.keyboard.view.sustain = false;
                 self.keyboard.held.clear();
                 self.keyboard.view.gate = false;
                 self.keyboard.view.held_keys = 0;
