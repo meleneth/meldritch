@@ -29,8 +29,10 @@ captures missing that field default to 127. Last-pressed key ownership restores
 the held key's velocity without a Gate retrigger. A declared `input.velocity`
 Control has unit-interval units, initialized to unity; only explicit compatible
 cables consume it. Offline independent-pattern rendering retains unity at this
-new input; pattern velocity routing is not yet implemented. Legacy note gain is
-unchanged. `devices::keyboard_input_command` now lowers 14-bit wheel packets to
+new input unless an explicit independent velocity pattern is bound. That pattern
+uses authored f64 note-start values in the ordinary mono scheduler; neither its
+note pitch nor duration drives pitch/gate. Legacy note gain is unchanged.
+`devices::keyboard_input_command` now lowers 14-bit wheel packets to
 KeyboardBend with binding epoch, u64 frame and channel. Bend is one shared Control
 input to that bound mono instance, not an implicit per-key/channel retarget. Its
 declared bipolar port normalizes around center 8192, with both endpoints at ±1;

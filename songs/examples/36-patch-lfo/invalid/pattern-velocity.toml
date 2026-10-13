@@ -1,0 +1,2 @@
+cases = ["unknown-pattern", "missing-port", "wrong-port-type", "length-mismatch", "loop-mismatch", "simultaneous-start", "sample-event", "invalid-edit"]
+# Rejection leaves authored source, history and published sound unchanged.

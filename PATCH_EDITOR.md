@@ -8,7 +8,9 @@ level. Example 36's `velocity.project.lua` and atomic `velocity-patch.txt` show
 that wiring. Any compatible unit-interval destination can consume this input;
 bipolar or Hertz destinations require their existing explicit adapters. No cable
 means no velocity effect. Fresh/offline independent-pattern instances initialize
-this input to unity; routing authored pattern velocity is deferred. Ctrl-G can
+this input to unity when no velocity pattern is bound. An explicitly bound
+velocity pattern supplies its note-start values at authored f64 precision,
+independently of pitch and gate. Ctrl-G can
 now add `input.velocity` using `input add velocity control` in the same batch as
 its consumer cables. This bounded editor also accepts `bend control` and
 `sustain gate`; broader external source kinds remain future work.

@@ -183,6 +183,7 @@ pub fn project_binding_command(
             level: 0.8,
             pitch_pattern: None,
             gate_pattern: None,
+            velocity_pattern: None,
         }));
     }
     let pattern = &view.palette_pattern_editor.as_ref()?.pattern;
@@ -191,6 +192,7 @@ pub fn project_binding_command(
     let (signal, binding) = match key.code {
         KeyCode::Char('p') => (PatternSignal::Pitch, &voice.pitch_pattern),
         KeyCode::Char('g') => (PatternSignal::Gate, &voice.gate_pattern),
+        KeyCode::Char('u') => (PatternSignal::Velocity, &voice.velocity_pattern),
         _ => return None,
     };
     Some(AppCommand::BindPatternVoice {
@@ -371,7 +373,7 @@ pub fn draw_project_pattern(
             "Pattern {} · {} ticks · loop {}",
             editor.pattern.id, editor.pattern.length_ticks, editor.pattern.looped
         )),
-        Line::from("Outputs: pitch : Pitch    gate : Gate (independent bindings)"),
+        Line::from("Outputs: pitch : Pitch    gate : Gate    velocity : Control"),
         Line::from(format!(
             "Cursor: tick {} · {}   Selected: {}",
             editor.cursor_tick,
@@ -384,6 +386,7 @@ pub fn draw_project_pattern(
             if editor.source.pattern_voices().values().any(|voice| {
                 voice.pitch_pattern.as_deref() == Some(&editor.pattern.id)
                     || voice.gate_pattern.as_deref() == Some(&editor.pattern.id)
+                    || voice.velocity_pattern.as_deref() == Some(&editor.pattern.id)
             }) {
                 "Bindings/playback at overview · Ctrl-S/F6 save project"
             } else {
@@ -567,7 +570,7 @@ fn draw_project_construction_selected(
     }
     if !source.pattern_voices().is_empty() {
         lines.push(Line::from(
-            "v: new · Up/Down: instance · p/g: bind · x: expose level",
+            "v: new · Up/Down: instance · p/g/u: bind · x: expose level",
         ));
         for voice in source.pattern_voices().values() {
             lines.push(Line::from(format!(
@@ -586,10 +589,22 @@ fn draw_project_construction_selected(
                 voice.pitch_pattern.as_deref().unwrap_or("unbound"),
                 meldritch_app::note_name(voice.initial_pitch)
             )));
-            lines.push(Line::from(format!(
-                "  gate: {}.gate -> input.gate (fallback low)",
-                voice.gate_pattern.as_deref().unwrap_or("unbound")
-            )));
+            if source.synths()[&voice.synth]
+                .inputs()
+                .iter()
+                .any(|input| input.id() == "velocity")
+            {
+                lines.push(Line::from(format!(
+                    "  gate: {} -> input.gate · velocity: {} -> input.velocity",
+                    voice.gate_pattern.as_deref().unwrap_or("low"),
+                    voice.velocity_pattern.as_deref().unwrap_or("unbound")
+                )));
+            } else {
+                lines.push(Line::from(format!(
+                    "  gate: {}.gate -> input.gate (fallback low)",
+                    voice.gate_pattern.as_deref().unwrap_or("unbound")
+                )));
+            }
         }
     } else {
         lines.push(Line::from(
@@ -1323,6 +1338,7 @@ mod tests {
             level: 0.8,
             pitch_pattern: None,
             gate_pattern: None,
+            velocity_pattern: None,
         }))
         .unwrap();
         let key = |code| KeyEvent::new(code, KeyModifiers::NONE);

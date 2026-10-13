@@ -6,11 +6,12 @@ use super::*;
 pub enum PatternSignal {
     Pitch,
     Gate,
+    Velocity,
 }
 
 /// One mono patch instance with independently authored input bindings.
-/// Unbound pitch holds initial_pitch; unbound gate is low. Velocity is not
-/// implicitly carried by either cable: this subset has an explicit output level.
+/// Unbound pitch holds initial_pitch; unbound gate is low; unbound velocity is
+/// unity. No pattern signal is implicitly carried by either of the others.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatternVoiceDefinition {
@@ -22,6 +23,8 @@ pub struct PatternVoiceDefinition {
     pub level: f64,
     pub pitch_pattern: Option<String>,
     pub gate_pattern: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub velocity_pattern: Option<String>,
 }
 
 impl ValidatedSong {
@@ -95,6 +98,14 @@ impl ValidatedSong {
                 return Err(format!("voice requires typed input.{id}"));
             }
         }
+        if voice.velocity_pattern.is_some()
+            && !synth
+                .inputs
+                .iter()
+                .any(|input| input.id == "velocity" && input.signal == SignalType::Control)
+        {
+            return Err("velocity pattern requires typed input.velocity Control".into());
+        }
         let length = self.authoring_frame(voice.length_ticks)?;
         if length == 0
             || voice.initial_pitch > 127
@@ -106,6 +117,7 @@ impl ValidatedSong {
         for (signal, binding) in [
             (PatternSignal::Pitch, &voice.pitch_pattern),
             (PatternSignal::Gate, &voice.gate_pattern),
+            (PatternSignal::Velocity, &voice.velocity_pattern),
         ] {
             let Some(id) = binding else { continue };
             let pattern = self
@@ -125,7 +137,9 @@ impl ValidatedSong {
                     return Err("independent voice bindings do not translate sample events".into());
                 }
                 if prior.is_some_and(|previous| match signal {
-                    PatternSignal::Pitch => previous.start_frame == event.start_frame,
+                    PatternSignal::Pitch | PatternSignal::Velocity => {
+                        previous.start_frame == event.start_frame
+                    }
                     PatternSignal::Gate => {
                         previous.start_frame + previous.duration_frames > event.start_frame
                     }
@@ -177,6 +191,7 @@ impl ValidatedSong {
         match signal {
             PatternSignal::Pitch => definition.pitch_pattern = pattern,
             PatternSignal::Gate => definition.gate_pattern = pattern,
+            PatternSignal::Velocity => definition.velocity_pattern = pattern,
         }
         next.validate_pattern_voice(&next.pattern_voices[voice])?;
         next.refresh_authoring_fingerprint();
@@ -199,6 +214,10 @@ impl ValidatedSong {
             fingerprint.u64(voice.level.to_bits());
             fingerprint.optional_string(voice.pitch_pattern.as_deref());
             fingerprint.optional_string(voice.gate_pattern.as_deref());
+            if let Some(id) = &voice.velocity_pattern {
+                fingerprint.string("independent-velocity-pattern-v1");
+                fingerprint.string(id);
+            }
         }
         self.fingerprint = fingerprint.finish();
     }

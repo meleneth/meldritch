@@ -12,8 +12,9 @@ Step entry remains separate from F9's stopped-transport live mono audition.
 While explicitly bound, MIDI keys never insert notes in the visible editor;
 F9 releases audition, and source/transport edits invalidate it. Timed recording
 and sustain remains future work. Explicit live velocity now uses a
-declared unit-interval Control port; authored pattern velocity routing to that
-port remains deferred (existing note velocity behavior is unchanged).
+declared unit-interval Control port. Native independent voices can now bind a
+pattern's note-start velocity to that port with `u`; pitch/gate remain separate,
+and legacy note velocity behavior is unchanged.
 Live bend now routes through a declared bipolar Control/PitchModulate adapter.
 It never step-authors notes or changes articulation; construction/editor wheel
 motion remains ignored unless an explicit F9 audition binding is active.

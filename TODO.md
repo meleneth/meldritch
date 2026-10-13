@@ -90,6 +90,8 @@ an empty project requires no Git repository or initialization.
   headless capture/save/reopen and worker/callback evidence
 - [x] Bounded native input editing: atomic velocity/bend/sustain declarations,
   dependent removal, typed capture and authored reopen from a pitch/gate patch
+- [x] Independent mono pattern velocity binding: authored note-start Control,
+  native `u` binding, loop/partition PCM, capture and save/reopen acceptance
 - [ ] Next keyboard slices: physical interaction/listening/deadlines and broader
   Gate routing; simultaneous arranged/live routing and timed
   device capture/replay need their own activation/clock contracts
@@ -526,8 +528,9 @@ ControlMultiply combines envelope/LFO shape with velocity. Last-pressed priority
 restores held pitch/velocity without Gate retrigger. Example 36 adds a readable
 velocity project, atomic patch draft, timed trace and negative contract. Typed
 capture reconstruction, soft/hard gain references, save/reopen, atomic input/unit
-failures and real worker/callback PCM pass headlessly. Offline independent-pattern
-velocity stays unity; pattern routing, broader input-declaration editing, sustain/bend,
+failures and real worker/callback PCM pass headlessly. At this earlier checkpoint,
+offline independent-pattern velocity stayed unity; later explicit binding now
+routes it. Broader input-declaration editing, sustain/bend,
 polyphony/simultaneous routing, timed device replay and physical evidence remain
 open. This bounded checkpoint does not complete example 36's broader contract.
 Verification: focused keyboard acceptance and final offline workspace suite pass;
@@ -569,6 +572,16 @@ Verification: focused input/sustain tests, offline workspace suite, affected
 all-targets Clippy, formatting/diff checks and docs build pass. Historical
 09/29 fingerprints remain `41472b38b65b60ed` / `54745c74a42665cf`.
 Physical interaction/listening remains unverified.
+Independent pattern-velocity checkpoint: `pattern-velocity.project.lua` binds
+pitch, gate and dynamics separately. Native `u` selects the velocity relationship;
+note-start f64 values feed declared `input.velocity` through ordinary control
+cables, hold across note ends and never own articulation or pitch. Headless tests
+prove independent amplitude references over two loops, exact split PCM, uncabled
+neutrality, typed capture, edited-note rerender, atomic negatives and authored
+save/reopen. General event processors/cadence and physical listening remain open.
+Verification: focused pattern-velocity tests, offline workspace suite, affected
+all-targets Clippy, formatting/diff checks and docs build pass. Historical
+09/29 fingerprints remain `41472b38b65b60ed` / `54745c74a42665cf`.
 Verification: focused bend/lifecycle/CLI keyboard tests and final offline
 workspace suite pass; affected all-targets Clippy with established allowances,
 formatting/diff checks and docs build pass. Historical 09/29 fingerprints remain

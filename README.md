@@ -76,9 +76,12 @@ without accepting stale messages. Headless entry/publication/persistence tests
 pass, including shared worker/callback held-key audition. MicroLab port
 discovery/connection has been observed; physical gestures/listening have not.
 In construction, **PageUp/PageDown** selects palette patterns at the overview or
-pattern editor. Selection keeps bindings unchanged; **p/g** explicitly binds the
-selected pattern's pitch/gate. This lets melody and rhythm come from different
-patterns. In the construction overview, **b** names a composition containing all
+pattern editor. Selection keeps bindings unchanged; **p/g/u** explicitly binds the
+selected pattern's pitch/gate/velocity. This lets melody, rhythm and dynamics
+come from different patterns. Velocity requires a declared `input.velocity`
+Control and compatible cables; its note-start value holds until the next event
+without articulating Gate. See example 36's `pattern-velocity.project.lua`.
+In the construction overview, **b** names a composition containing all
 declared instances; **F7/F8** selects named compositions after stopping transport.
 Wait for prepared audio before restarting. Named projects save as project-v3 Lua;
 unnamed version-2 projects keep their current meaning. Composition selection saves

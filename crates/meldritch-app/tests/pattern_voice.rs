@@ -24,6 +24,7 @@ fn declared_level_controls_are_instance_owned_runtime_overlays_not_authored_edit
             level: 0.8,
             pitch_pattern: None,
             gate_pattern: None,
+            velocity_pattern: None,
         }))
         .unwrap();
     }
@@ -111,6 +112,7 @@ fn declared_level_controls_are_instance_owned_runtime_overlays_not_authored_edit
             level: 0.8,
             pitch_pattern: None,
             gate_pattern: None,
+            velocity_pattern: None,
         })
         .unwrap();
     // Successful explicit source loading resets runtime values to authored defaults.
@@ -156,6 +158,7 @@ fn accepted_bindings_render_and_invalid_edits_preserve_source_provenance_and_his
         level: 0.8,
         pitch_pattern: None,
         gate_pattern: None,
+        velocity_pattern: None,
     }))
     .unwrap();
     for signal in [PatternSignal::Pitch, PatternSignal::Gate] {

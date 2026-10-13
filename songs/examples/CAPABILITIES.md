@@ -17,8 +17,10 @@ held-key PCM past a bar, ingress epochs/loss cleanup, typed capture reconstructi
 atomic ring negatives and zero callback allocation/deallocation pass headlessly.
 Explicit keyboard velocity now has headless unit-interval port/multiplier wiring,
 soft/hard/fallback gain, capture, negative and save/reopen acceptance. The real
-worker/callback test uses velocity; unconnected patches retain fixed gain. Pattern
-velocity routing and broader external-port declaration editing remain open.
+worker/callback test uses velocity; unconnected patches retain fixed gain.
+An explicitly bound independent pattern now supplies authored f64 note-start
+velocity through that same Control; unbound voices remain at unity. Broader
+external-port declaration editing remains open.
 Explicit bipolar bend now composes with velocity through PitchModulate: independent
 phase/partition references, raw typed capture, atomic store reload, rejection and
 worker/callback loss centering pass. No implicit pitch range or articulation.
@@ -28,13 +30,16 @@ worker/callback cleanup tests with opt-in CC mapping.
 The bounded input-port editor now stages velocity/bend/sustain declarations and
 their consumers in one accepted patch transaction from a pitch/gate-only project;
 negative edits, capture, exact save/reopen PCM and runtime reset pass headlessly.
+The independent pattern-velocity checkpoint adds native `u` binding, held
+Control values across note ends/loops, independent amplitude/partition references,
+typed capture, invalid-case rejection and authored save/reopen.
 Physical listening/deadlines, general gate routing, broader external input types,
 simultaneous arranged/live routing and timed device replay remain open; full
 status stays `design`.
 
 | Example | Capability | Status |
 | --- | --- | --- |
-| `36-patch-lfo` | Bounded mono graph LFO tremolo/vibrato/filter/depth/rate checkpoints: explicit adapters/combination/fan-out/reset, integrated phase/all waveforms, independent references/split PCM, negatives, typed drafts/capture, playing publication and fresh-process persistence pass headlessly. MIDI/MicroLab pattern step entry checks velocity, epochs/loss, capture/save/reopen. Incremental shared mono DSP checks u64 independent signals, FM/harmonic Plaits, partitions and atomic recovery. Native F9 stopped-transport audition checks production worker/callback PCM past a bar, ingress epochs/loss and source/transport cleanup, mode continuity, typed reconstruction, timed PCM ring negatives and zero callback allocation/deallocation. Explicit velocity Control/multiplier and bipolar bend/PitchModulate compose with headless phase/partition, raw capture/store reload, negatives and worker/callback loss centering. Explicit mono GateHold additionally accepts pedal CC mapping, held/retrigger/release references, partition/capture/save/reopen, atomic negatives and worker/callback release after loss. Typed external-input drafts add/remove the three expression ports with atomic graph validation, negative cases, capture and exact authored reload PCM. Host MicroLab discovery/connection observed; physical interaction/listening/deadlines, pattern velocity/broader input types, general Gate routing/Plaits GateHold, simultaneous/polyphonic routes, timed device replay, Plaits control chains and broader event/control scopes remain open | design |
+| `36-patch-lfo` | Bounded mono graph LFO tremolo/vibrato/filter/depth/rate checkpoints: explicit adapters/combination/fan-out/reset, integrated phase/all waveforms, independent references/split PCM, negatives, typed drafts/capture, playing publication and fresh-process persistence pass headlessly. MIDI/MicroLab pattern step entry checks velocity, epochs/loss, capture/save/reopen. Incremental shared mono DSP checks u64 independent signals, FM/harmonic Plaits, partitions and atomic recovery. Native F9 stopped-transport audition checks production worker/callback PCM past a bar, ingress epochs/loss and source/transport cleanup, mode continuity, typed reconstruction, timed PCM ring negatives and zero callback allocation/deallocation. Explicit velocity Control/multiplier and bipolar bend/PitchModulate compose with headless phase/partition, raw capture/store reload, negatives and worker/callback loss centering. Explicit mono GateHold additionally accepts pedal CC mapping, held/retrigger/release references, partition/capture/save/reopen, atomic negatives and worker/callback release after loss. Typed external-input drafts add/remove the three expression ports with atomic graph validation, negative cases, capture and exact authored reload PCM. Independent velocity-pattern binding uses authored f64 note-start Control values, native `u`, loop/partition references, typed capture and save/reopen without owning pitch/gate. Host MicroLab discovery/connection observed; physical interaction/listening/deadlines, broader input types, general Gate routing/Plaits GateHold, simultaneous/polyphonic routes, timed device replay, Plaits control chains and broader event/control scopes remain open | design |
 | `35-project-palette-routing` | Bounded headless empty-root shared-patch/native multi-instance/independent-source workflow; named project-v3 composition membership, stopped selection, worker/callback publication, play/edit/save/fresh-process reopen for both selections; typed capture, inactive identity/gain scope, shared edits and all negative-contract cases checked. Interactive palette deletion, broader clocks, timed replay, physical listening and DSP migration remain deferred | accept |
 | `34-empty-project-patch` | Bounded headless empty-root keyboard construction/pattern/independent pitch-gate/play/modify/save/fresh-process reopen; worker and production callback changes, exact mono-to-stereo publication, runtime/default separation, failures/retry and full/split oscillator PCM/identity equality checked. Embedded capture baselines survive later saves/root removal. Timed replay, physical listening and continuous DSP-state migration remain deferred | accept |
 | `00-minimal-synth` | Explicit oscillator-to-output patch | accept |

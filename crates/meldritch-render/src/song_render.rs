@@ -321,7 +321,7 @@ pub struct CompiledNotePatch {
     pattern_length: u64,
     looped: bool,
     events: Vec<CompiledNoteEvent>,
-    independent_signals: Option<CompiledPatternSignals>,
+    independent_signals: Option<Box<CompiledPatternSignals>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -329,6 +329,7 @@ struct CompiledPatternSignals {
     initial_pitch: u8,
     pitch: Vec<CompiledNoteEvent>,
     gate: Vec<CompiledNoteEvent>,
+    velocity: Vec<CompiledNoteEvent>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -810,6 +811,13 @@ impl CompiledNotePatch {
                     .filter(|event| event.start == pattern_frame)
                 {
                     state.frequency = midi_frequency(event.note);
+                }
+                for event in signals
+                    .velocity
+                    .iter()
+                    .filter(|event| event.start == pattern_frame)
+                {
+                    state.set_pattern_velocity(event.velocity);
                 }
                 for event in signals
                     .gate
@@ -1453,11 +1461,23 @@ pub fn compile_pattern_voice(
             })
             .collect()
     };
-    patch.independent_signals = Some(CompiledPatternSignals {
+    patch.independent_signals = Some(Box::new(CompiledPatternSignals {
         initial_pitch: voice.initial_pitch,
         pitch: events(&voice.pitch_pattern),
         gate: events(&voice.gate_pattern),
-    });
+        velocity: voice
+            .velocity_pattern
+            .as_ref()
+            .into_iter()
+            .flat_map(|id| song.note_patterns()[id].events())
+            .map(|event| CompiledNoteEvent {
+                start: event.start_frame(),
+                end: event.start_frame() + event.duration_frames(),
+                note: event.note(),
+                velocity: event.velocity(),
+            })
+            .collect(),
+    }));
     Ok(patch)
 }
 

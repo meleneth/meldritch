@@ -182,8 +182,10 @@ The bounded explicit GateHold route now accepts key/pedal independence,
 held/retrigger/release sound, loss cleanup, typed capture and authored reopen
 headlessly. The native patch editor now also stages the three supported
 expression-port declarations with their consumers in one transaction, then
-captures/saves/reopens them. Physical pedal interaction and pattern velocity
-routing remain gaps; broader external source types require separate examples.
+captures/saves/reopens them. An independent `u` binding now routes a pattern's
+note-start velocity to the same authored Control without changing pitch/gate;
+headless loop, capture and persistence acceptance pass. Physical pedal interaction
+remains a gap; broader external source types require separate examples.
 Simultaneous arranged/live routing, MIDI/device timestamp mapping, timed replay
 and graph-state preservation remain separate unfinished contracts.
 

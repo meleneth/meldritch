@@ -291,10 +291,14 @@ Repeated presses replace held velocity; winner release restores prior held pitch
 and velocity without Gate retrigger. Final release/reset holds the last value and
 lowers Gate. Accepted values are MIDI-resolution 0..127; normalization occurs once
 at the graph input. Fresh DSP initializes this Control to unity, independently of
-legacy coupled-note velocity. Offline independent patterns currently leave it at
-unity. Runtime values are captured, never saved as patch defaults; old captures
+legacy coupled-note velocity. An explicit independent velocity-pattern binding
+now supplies authored f64 note-start values to that same Control; values hold
+across note ends, and the velocity pattern's pitches/durations cannot articulate
+Gate or change oscillator pitch. At one frame, gate end/reset precedes pitch and
+velocity updates, which precede gate rise. Unbound pattern velocity stays unity.
+Runtime keyboard values are captured, never saved as patch defaults; old captures
 without velocity replay at unity. These are bounded mono guarantees, not general
-pattern-velocity routing or controller smoothing requirements.
+event-transform, cadence or controller-smoothing requirements.
 
 Live wheel motion changes only a declared bipolar Control input: no key selection,
 Gate articulation, amplitude change or implicit pitch range. MIDI-resolution values

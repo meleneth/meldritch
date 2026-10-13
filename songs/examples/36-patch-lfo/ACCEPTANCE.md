@@ -357,11 +357,12 @@ The production worker/callback audition test now uses this wired velocity graph
 with differing velocities and held fallback; allocation-safety contracts persist.
 Old native v1 captures omitting velocity deserialize to 127 and retain fixed gain.
 
-This adds live keyboard velocity only. Offline independent-pattern execution
-leaves this input at unity; its pattern velocity routing is future work. Existing
-legacy coupled-note velocity semantics remain unchanged. Input declaration editing
-requires Lua; the current command pane preserves declarations. Sustain,
-physical gestures/listening and timed device replay still require separate slices.
+This checkpoint adds live keyboard velocity only. The later independent pattern
+velocity checkpoint supplies the same Control from a separately bound pattern;
+older unbound voices still initialize it to unity. Existing legacy coupled-note
+velocity semantics remain unchanged. The later input-port checkpoint allows the
+three supported expression declarations in Ctrl-G. Physical gestures/listening
+and timed device replay still require separate evidence.
 
 ## Explicit live bend checkpoint
 
@@ -451,6 +452,32 @@ velocity/bend/pedal changes and exact authored save/reopen PCM. The paired
 `invalid_input_drafts_and_dependent_removal_preserve_accepted_graph` executes
 all invalid cases, a complete removal/reconnect transaction and typed capture
 reconstruction of an input declaration.
+
+## Independent pattern velocity checkpoint
+
+`pattern-velocity.project.lua` binds three note patterns independently to one
+mono instance: pitch, gate and `input.velocity` Control. The dynamics pattern's
+note-start velocity is a unit-interval value held until its next start, including
+across note ends. Its note pitch and duration do not articulate Gate or change
+oscillator pitch. At the same frame, gate end/loop reset precede pitch and velocity
+updates, which precede Gate rise. A dynamics start while Gate remains high must
+change amplitude through the authored multiplier without retrigger. Unbound
+velocity remains unity; pitch/gate patterns' own velocity values do not enter
+this input implicitly. The pattern's note IDs remain stable; binding is typed,
+captured and saved in native project Lua. Editing its notes must invalidate the
+bound voice. `invalid/pattern-velocity.toml` specifies missing/wrong port,
+unknown/incompatible pattern, simultaneous start, sample-event and invalid
+note-edit rejection.
+Exact full/split PCM, same-frame order, loop behavior, save/reopen, historical
+fingerprints and failed-command source/publication continuity are required.
+This is one per-instance event-to-Control bridge in the existing scheduler;
+general control/event processors and realtime cadence remain future work.
+
+Evidence: `pattern_velocity.rs` compares two loop cycles against an independent
+unity render scaled at each authored velocity start, proves exact split PCM,
+uncabled neutrality, TUI `u` binding, typed capture reconstruction, bound-voice
+dirty range and edited audio, and authored store reload. All `invalid/pattern-velocity.toml`
+cases reject before accepted source/history or render behavior changes.
 
 Broader explicit addition/clamping,
 event/control-rate latching and global/per-voice scopes

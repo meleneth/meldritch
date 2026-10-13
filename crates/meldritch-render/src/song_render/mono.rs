@@ -18,6 +18,9 @@ pub(super) struct MonoState {
 }
 
 impl MonoState {
+    pub(super) fn set_pattern_velocity(&mut self, value: f64) {
+        self.control_values[crate::song_control::VELOCITY_INPUT] = value;
+    }
     pub fn new(patch: &CompiledNotePatch) -> Result<Self, SongRenderError> {
         Ok(Self {
             gate_hold: patch.gate_hold,

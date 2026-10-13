@@ -22,10 +22,13 @@ the same NotePatternDefinition, not a new event engine or filesystem format.
 Legacy AuthoredPattern projections still require one track for existing exports.
 `PatternVoiceDefinition` adds bounded mono instances to the accepted source,
 with separate pitch/gate bindings, explicit clock/initial pitch/output level and
-visible unbound fallbacks. Native v/p/g author these relationships. Their audio
+visible unbound fallbacks. Native v/p/g/u author pitch, gate and explicitly bound
+velocity relationships. Their audio
 uses ordinary voice lowering, rerender worker and immutable callback publication
 in headless tests. Pattern velocity does not implicitly travel through pitch or
-gate; this subset has an explicit instance output level. Native Space playback
+gate. A mono patch declaring `input.velocity` Control can bind a separate
+pattern whose note-start velocities change that input while Gate stays independent.
+The instance still has an explicit output level. Native Space playback
 uses a thin CLI adapter over SongAudioHost; opening stays device-free, and a
 device opens only after prepared audio and an explicit play request. Ctrl-Tab
 uses the existing mode state: the native cockpit starts in construction
@@ -96,8 +99,9 @@ audio/capture and callback allocation safety pass; physical listening is pending
 Example 36 now accepts explicit keyboard velocity through a declared unit-interval
 Control, the existing multiplier and shared worker. Soft/hard strikes, held-key
 expression restoration, rejection, capture reconstruction and save/reopen pass
-headlessly; unconnected velocity cannot change gain. Pattern velocity remains
-unrouted at this input; the three supported expression declarations can now be
+headlessly; unconnected velocity cannot change gain. A separately bound pattern
+can now route authored note-start velocity to this input; unbound voices remain
+at unity. The three supported expression declarations can be
 staged in Ctrl-G, while broader external source types still require later work.
 Example 36 also accepts bipolar bend input through the existing PitchModulate
 adapter, composed with velocity. Independent phase references, partition equality,

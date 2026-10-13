@@ -152,8 +152,9 @@ envelopes/LFO controls through existing modules. KeyboardKey captures MIDI
 velocity; older captures missing the field default to unity. Held fallback
 restores pitch/velocity without retrigger. The worker/callback test exercises
 expression, and negative/capture/save-reopen contracts pass. Unwired velocity and
-legacy gain remain unchanged. Offline pattern velocity at this new input and
-broader external-port declaration editing remain deferred; Lua declarations
+legacy gain remain unchanged. An explicit independent velocity-pattern binding
+now feeds this Control from authored f64 note starts; unbound voices retain unity.
+Broader external-port declaration editing remains deferred; Lua declarations
 remain supported. Read `PATCH_EDITOR.md` and `keyboard-velocity.toml` before extending
 it. Physical acceptance remains open.
 The next bounded keyboard checkpoint also accepts bipolar `input.bend` routed
@@ -174,6 +175,12 @@ three supported expression ports. Example 36's `ports.project.lua` and
 `input-ports.txt` prove construction from a plain pitch/gate patch, atomic
 declarations plus cables, capture, save/reopen and negative diagnostics.
 Broader external input types remain unimplemented.
+Example 36's `pattern-velocity.project.lua` now also accepts independent
+pitch/gate/velocity pattern bindings through the existing mono renderer.
+`u` binds the selected pattern to `input.velocity` Control; note-start values
+hold independently of note end and Gate. Full/split loop PCM, uncabled neutrality,
+negative binding/event cases, typed capture and save/reopen pass headlessly.
+General event transforms and physical listening remain open.
 Example 35's native pattern-selection checkpoint is implemented: PgUp/PgDn
 selects palette material without rebinding, source/runtime mutation or rerender;
 typed capture and independent-source persistence/render tests pass. Its full

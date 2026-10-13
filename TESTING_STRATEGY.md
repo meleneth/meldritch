@@ -32,6 +32,13 @@ exact authored reload PCM, all `invalid/input-ports.toml` cases, dependent-input
 removal/reconnect and typed capture reconstruction. Historical fingerprints
 protect previous authored formats.
 
+`control/tests/pattern_velocity.rs` loads the independent three-pattern project,
+compares two cycles with an independently scaled unity render, proves exact split
+PCM, same-frame gate/velocity order and uncabled neutrality, then exercises TUI
+`u` binding, edited dynamics notes, typed capture, authored save/reopen and all
+invalid pattern/port/event cases. Historical voice fingerprints and old native
+project documents must remain stable when no velocity binding exists.
+
 The engine should be tested like a compiler and like an audio system.
 
 ## Next-architecture acceptance obligations

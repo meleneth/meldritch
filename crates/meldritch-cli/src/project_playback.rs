@@ -2328,6 +2328,7 @@ mod tests {
             level: 0.8,
             pitch_pattern: Some("pattern-1".into()),
             gate_pattern: Some("pattern-1".into()),
+            velocity_pattern: None,
         }))
         .unwrap();
         let wait_ready = |host: &mut NativeProjectAudio, app: &mut AppController| {
@@ -2460,6 +2461,7 @@ mod tests {
             level: 0.8,
             pitch_pattern: None,
             gate_pattern: None,
+            velocity_pattern: None,
         }))
         .unwrap();
         let audio = host.reader.snapshot();
