@@ -8,9 +8,10 @@ level. Example 36's `velocity.project.lua` and atomic `velocity-patch.txt` show
 that wiring. Any compatible unit-interval destination can consume this input;
 bipolar or Hertz destinations require their existing explicit adapters. No cable
 means no velocity effect. Fresh/offline independent-pattern instances initialize
-this input to unity; routing authored pattern velocity is deferred. The current
-editor preserves external declarations, so adding that port requires readable
-Lua authoring/import. General input-declaration editing remains open.
+this input to unity; routing authored pattern velocity is deferred. Ctrl-G can
+now add `input.velocity` using `input add velocity control` in the same batch as
+its consumer cables. This bounded editor also accepts `bend control` and
+`sustain gate`; broader external source kinds remain future work.
 
 Example 36's `bend.project.lua` also declares `{ id = "bend", signal = "control" }`.
 The inspector labels this source bipolar. `bend-patch.txt` explicitly routes
@@ -31,8 +32,15 @@ Pedal down delays a raw Gate low; pedal up releases it unless a key remains
 pressed. A new key high retriggers. Fresh/offline instances start pedal-up,
 and saves retain wiring rather than the held pedal state. This bounded lowering
 supports one mono oscillator GateHold feeding ADSR; Plaits and general Gate
-fan-out reject at executable edit validation. The port declaration still requires
-readable Lua import. An unwired pedal cannot change sound.
+fan-out reject at executable edit validation. The port declaration can be staged
+with `input add sustain gate`; an unwired pedal cannot change sound.
+
+`ports.project.lua` starts with only pitch/gate. `input-ports.txt` shows all
+three expressive ports and their modules/cables accepted in one Ctrl-G commit.
+`input remove ID reject|disconnect` either rejects a dependent cable or removes
+it explicitly; the complete candidate must still compile. Base pitch/gate
+inputs cannot be removed in this mono slice. The save contains only accepted
+declarations and wiring, never an incomplete draft or runtime expression value.
 
 This is the accepted bounded construction editor. Project transactions, authored
 normalization, patch-owned interfaces and quantized stateful activation extend
@@ -46,6 +54,8 @@ Press Ctrl-E, then Ctrl-G. Type a command and Enter to stage it:
 | Command | Behavior |
 | --- | --- |
 | `add ID TYPE` | Instantiate oscillator, plaits, adsr, vca, low_pass, audio_output, lfo, control_scale, control_multiply, pitch_modulate, control_hertz, control_attenuate or gate_hold with inspectable defaults |
+| `input add ID SIGNAL` | Declare `velocity control`, `bend control` or `sustain gate` on a native mono patch |
+| `input remove ID reject` / `input remove ID disconnect` | Remove an expressive input, rejecting dependent cables or explicitly disconnecting them |
 | `remove ID reject` | Remove only when no dependent cable remains |
 | `remove ID disconnect` | Explicitly remove the module and all its dependent cables |
 | `connect MODULE.PORT MODULE.PORT` | Connect one compatible output to an unoccupied input |

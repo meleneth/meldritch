@@ -321,6 +321,15 @@ Backpressure reserves three cleanup events before accepting more input. Current
 support is one mono oscillator and one ADSR route; general Gate processors,
 Plaits routing and physical behavior remain future acceptance obligations.
 
+Native expression-input edits use the existing typed PatchEdit batch. A staged
+declaration remains private until complete importer, topology and executable
+validation succeed. A failed or stale commit retains accepted source, history and
+published audio. The current editor supports only velocity/bend Control and
+sustain Gate; base mono pitch/gate inputs cannot be removed. Input deletion must
+declare whether dependent cables reject or disconnect; the final graph must still
+compile. Authored saves contain only accepted inputs and cables, while runtime
+expression values remain separate.
+
 Acceptance must separately prove source correctness, published/consumed audio,
 state-transition semantics and physical behavior. Conservative full-horizon
 invalidation is the current authoring fallback; it must be reported honestly

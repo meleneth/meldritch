@@ -97,7 +97,8 @@ Example 36 now accepts explicit keyboard velocity through a declared unit-interv
 Control, the existing multiplier and shared worker. Soft/hard strikes, held-key
 expression restoration, rejection, capture reconstruction and save/reopen pass
 headlessly; unconnected velocity cannot change gain. Pattern velocity remains
-unrouted at this input; external declaration editing still requires Lua.
+unrouted at this input; the three supported expression declarations can now be
+staged in Ctrl-G, while broader external source types still require later work.
 Example 36 also accepts bipolar bend input through the existing PitchModulate
 adapter, composed with velocity. Independent phase references, partition equality,
 atomic value/unit rejection, typed capture and real store reload pass; the
@@ -111,6 +112,11 @@ capture, save/reopen, negatives and worker/callback loss cleanup pass. The
 example's CC64 mapping is explicit, not a MicroLab default claim. Physical pedal
 interaction remains unverified. Simultaneous arranged/live routing and broader
 clock/graph activation require separate accepted contracts.
+The bounded native editor now stages velocity/bend/sustain external inputs with
+typed modules/cables from a pitch/gate-only project. One complete candidate is
+validated and published; input removal enforces dependent-cable policy.
+Headless draft isolation, expression sound, negative cases, capture and exact
+authored reopen PCM pass. Broader input signal families remain proposed.
 Reuse it with the existing voice compiler, scheduler and safe worker/
 publication boundary. Key-held performance must not rewrite saved patterns or
 patch defaults. Prove retrigger/release, zero-velocity release, overflow/disconnect/

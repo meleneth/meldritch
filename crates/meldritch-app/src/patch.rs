@@ -169,6 +169,22 @@ impl AppController {
 }
 fn parse_operation(words: &[&str]) -> Result<PatchOperation, String> {
     match words {
+        ["input", "add", id, signal] => Ok(PatchOperation::AddInput {
+            id: (*id).into(),
+            signal: match *signal {
+                "control" => meldritch_dsl::SignalType::Control,
+                "gate" => meldritch_dsl::SignalType::Gate,
+                _ => return Err("native input add requires control or gate".into()),
+            },
+        }),
+        ["input", "remove", id, policy] => Ok(PatchOperation::RemoveInput {
+            id: (*id).into(),
+            cables: match *policy {
+                "reject" => DependentCables::Reject,
+                "disconnect" => DependentCables::Disconnect,
+                _ => return Err("input remove policy must be reject or disconnect".into()),
+            },
+        }),
         ["add", id, kind] => Ok(PatchOperation::Instantiate { id: (*id).into(), kind: match *kind {
             "oscillator" => ModuleKind::Oscillator, "plaits" => ModuleKind::Plaits, "adsr" => ModuleKind::Adsr,
             "vca" => ModuleKind::Vca, "low_pass" => ModuleKind::LowPass, "audio_output" => ModuleKind::AudioOutput,

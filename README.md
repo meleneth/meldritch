@@ -67,6 +67,10 @@ and `sustain-patch.txt`, then open with `--midi-sustain-cc 64` alongside
 example mapping, not an assumed MicroLab setting. The authored GateHold module
 defers gate release while the pedal is down; saving retains its cables, not
 the pedal state. Simultaneous pattern/live routing and timed recording remain queued.
+For a pitch/gate-only starting patch, copy example 36's `ports.project.lua` and
+stage `input-ports.txt` in Ctrl-G. One commit adds the three input declarations
+and their explicit consumers; Ctrl-S saves the accepted graph. The editor also
+supports `input remove ID reject|disconnect` when changing a patch later.
 Port matching is explicit and rejects ambiguity; reconnect retries
 without accepting stale messages. Headless entry/publication/persistence tests
 pass, including shared worker/callback held-key audition. MicroLab port

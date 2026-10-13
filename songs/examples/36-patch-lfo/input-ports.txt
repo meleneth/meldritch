@@ -1,0 +1,23 @@
+# Start from ports.project.lua (pitch/gate only); stage all lines in Ctrl-G.
+# The declarations and their consumers publish in one accepted batch.
+clear
+input add velocity control
+input add bend control
+input add sustain gate
+add shape control_multiply
+disconnect env.control amp.level
+connect env.control shape.left
+connect input.velocity shape.right
+connect shape.control amp.level
+add wheel pitch_modulate
+disconnect input.pitch osc.pitch
+connect input.pitch wheel.pitch
+connect input.bend wheel.control
+connect wheel.pitch osc.pitch
+pitch-depth wheel 2
+add hold gate_hold
+disconnect input.gate env.gate
+connect input.gate hold.gate
+connect input.sustain hold.hold
+connect hold.gate env.gate
+commit

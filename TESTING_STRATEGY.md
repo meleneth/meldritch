@@ -26,6 +26,11 @@ store reload. The CLI production worker/callback test composes sustain, velocity
 and bend over more than a bar; its 128-event pressure test reserves three loss
 cleanup events. The CLI opt-in CC mapping is tested without assuming a controller
 default. Physical pedal gestures/listening and timed device replay remain open.
+`control/tests/keyboard_sustain.rs` also executes `input-ports.txt` from a
+pitch/gate-only fixture, verifies draft-source isolation and audible expression,
+exact authored reload PCM, all `invalid/input-ports.toml` cases, dependent-input
+removal/reconnect and typed capture reconstruction. Historical fingerprints
+protect previous authored formats.
 
 The engine should be tested like a compiler and like an audio system.
 

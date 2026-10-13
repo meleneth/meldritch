@@ -457,3 +457,320 @@ fn invalid_sustain_inputs_and_graphs_preserve_state_and_source() {
         assert!(keyboard_performance_command(packet, 1, 100, Some(64)).is_none());
     }
 }
+
+#[test]
+fn typed_input_draft_builds_expression_from_plain_pitch_gate_patch_and_reopens() {
+    let directory = Directory::new();
+    let bare = load_native_project(
+        &directory.0,
+        include_str!("../../../songs/examples/36-patch-lfo/ports.project.lua"),
+    )
+    .unwrap();
+    let mut app = directory.app(bare.clone());
+    app.dispatch(AppCommand::SelectInstrument("bass".into()))
+        .unwrap();
+    app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+    app.dispatch(AppCommand::TogglePatchEditor).unwrap();
+    let base = app.authored_source().unwrap();
+    for line in include_str!("../../../songs/examples/36-patch-lfo/input-ports.txt")
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+    {
+        for character in line.chars() {
+            app.dispatch(AppCommand::PatchCharacter(character)).unwrap();
+        }
+        app.dispatch(AppCommand::PatchSubmit).unwrap();
+        if line != "commit" {
+            assert!(Arc::ptr_eq(&base, &app.authored_source().unwrap()));
+        }
+    }
+    let source = app.authored_source().unwrap();
+    let inputs: Vec<_> = source.synths()["bass"]
+        .inputs()
+        .iter()
+        .map(|input| (input.id(), input.signal()))
+        .collect();
+    assert_eq!(
+        inputs,
+        vec![
+            ("pitch", meldritch_dsl::SignalType::Pitch),
+            ("gate", meldritch_dsl::SignalType::Gate),
+            ("velocity", meldritch_dsl::SignalType::Control),
+            ("bend", meldritch_dsl::SignalType::Control),
+            ("sustain", meldritch_dsl::SignalType::Gate),
+        ]
+    );
+    let patch = compile_pattern_voice(&source, &source.pattern_voices()["bass-instance"]).unwrap();
+    let origin = 5_000_000_000;
+    let events = [
+        (0, LiveVoiceInput::Pitch(48)),
+        (0, LiveVoiceInput::Velocity(64)),
+        (0, LiveVoiceInput::Gate(true)),
+        (256, LiveVoiceInput::Sustain(true)),
+        (512, LiveVoiceInput::Gate(false)),
+        (768, LiveVoiceInput::Bend(16383)),
+        (1024, LiveVoiceInput::Sustain(false)),
+    ]
+    .map(|(offset, input)| LiveVoiceEvent {
+        frame: origin + offset,
+        input,
+    });
+    let range = FrameRange::new(origin, origin + 1152).unwrap();
+    let pcm = patch
+        .live_renderer(48, origin)
+        .unwrap()
+        .render(range, &events)
+        .unwrap();
+    assert!(
+        pcm.samples()[512..1024]
+            .iter()
+            .any(|value| value.abs() > 0.01)
+    );
+    assert!(
+        pcm.samples()[1024..]
+            .iter()
+            .any(|value| value.abs() > 0.001)
+    );
+    let neutral: Vec<_> = events
+        .iter()
+        .map(|event| LiveVoiceEvent {
+            frame: event.frame,
+            input: match event.input {
+                LiveVoiceInput::Velocity(_) => LiveVoiceInput::Velocity(127),
+                LiveVoiceInput::Bend(_) => LiveVoiceInput::Bend(8192),
+                input => input,
+            },
+        })
+        .collect();
+    let neutral_pcm = patch
+        .live_renderer(48, origin)
+        .unwrap()
+        .render(range, &neutral)
+        .unwrap();
+    assert_ne!(pcm.samples()[0..256], neutral_pcm.samples()[0..256]);
+    assert_ne!(pcm.samples()[768..1024], neutral_pcm.samples()[768..1024]);
+    let mut store =
+        NativeProjectStore::open(&meldritch_dsl::load_project_directory(&directory.0).unwrap())
+            .unwrap();
+    store.save(&source).unwrap();
+    let reopened =
+        NativeProjectStore::open(&meldritch_dsl::load_project_directory(&directory.0).unwrap())
+            .unwrap();
+    let loaded = reopened.source().unwrap();
+    assert_eq!(loaded.fingerprint(), source.fingerprint());
+    let loaded_patch =
+        compile_pattern_voice(loaded, &loaded.pattern_voices()["bass-instance"]).unwrap();
+    assert_eq!(
+        loaded_patch
+            .live_renderer(48, origin)
+            .unwrap()
+            .render(range, &events)
+            .unwrap()
+            .samples(),
+        pcm.samples()
+    );
+    let fresh = directory.app(loaded.clone());
+    assert_eq!(fresh.keyboard().voice, None);
+    assert!(!fresh.keyboard().sustain);
+}
+
+#[test]
+fn invalid_input_drafts_and_dependent_removal_preserve_accepted_graph() {
+    let directory = Directory::new();
+    let bare = load_native_project(
+        &directory.0,
+        include_str!("../../../songs/examples/36-patch-lfo/ports.project.lua"),
+    )
+    .unwrap();
+    let source = bare
+        .edit_patch(&PatchEdit {
+            synth: "bass".into(),
+            operations: vec![PatchOperation::AddInput {
+                id: "velocity".into(),
+                signal: meldritch_dsl::SignalType::Control,
+            }],
+        })
+        .unwrap();
+    let fixture: toml::Value = toml::from_str(include_str!(
+        "../../../songs/examples/36-patch-lfo/invalid/input-ports.toml"
+    ))
+    .unwrap();
+    for case in fixture["cases"].as_array().unwrap() {
+        let case = case.as_str().unwrap();
+        let candidate_source =
+            if matches!(case, "connected-reject" | "connected-disconnect-incomplete") {
+                source
+                    .edit_patch(&PatchEdit {
+                        synth: "bass".into(),
+                        operations: vec![
+                            PatchOperation::Disconnect {
+                                from: "env.control".into(),
+                                to: "amp.level".into(),
+                            },
+                            PatchOperation::Connect {
+                                from: "input.velocity".into(),
+                                to: "amp.level".into(),
+                            },
+                        ],
+                    })
+                    .unwrap()
+            } else {
+                source.clone()
+            };
+        let mut app = directory.app(candidate_source);
+        let before = app.authored_source().unwrap();
+        let history = app.history().len();
+        let operations = match case {
+            "duplicate" => vec![PatchOperation::AddInput {
+                id: "velocity".into(),
+                signal: meldritch_dsl::SignalType::Control,
+            }],
+            "unknown-name" => vec![PatchOperation::AddInput {
+                id: "custom".into(),
+                signal: meldritch_dsl::SignalType::Control,
+            }],
+            "wrong-signal" => vec![PatchOperation::AddInput {
+                id: "sustain".into(),
+                signal: meldritch_dsl::SignalType::Control,
+            }],
+            "reserved-base" => vec![PatchOperation::RemoveInput {
+                id: "pitch".into(),
+                cables: DependentCables::Disconnect,
+            }],
+            "connected-reject" => vec![PatchOperation::RemoveInput {
+                id: "velocity".into(),
+                cables: DependentCables::Reject,
+            }],
+            "connected-disconnect-incomplete" => vec![PatchOperation::RemoveInput {
+                id: "velocity".into(),
+                cables: DependentCables::Disconnect,
+            }],
+            "missing-cable" => vec![PatchOperation::Disconnect {
+                from: "input.velocity".into(),
+                to: "amp.level".into(),
+            }],
+            "unknown-removal" => vec![PatchOperation::RemoveInput {
+                id: "sustain".into(),
+                cables: DependentCables::Disconnect,
+            }],
+            "stale-draft" => {
+                app.dispatch(AppCommand::SelectInstrument("bass".into()))
+                    .unwrap();
+                app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+                app.dispatch(AppCommand::TogglePatchEditor).unwrap();
+                for character in "input add sustain gate".chars() {
+                    app.dispatch(AppCommand::PatchCharacter(character)).unwrap();
+                }
+                app.dispatch(AppCommand::PatchSubmit).unwrap();
+                app.dispatch(AppCommand::EditPatch(PatchEdit {
+                    synth: "bass".into(),
+                    operations: vec![PatchOperation::AddInput {
+                        id: "bend".into(),
+                        signal: meldritch_dsl::SignalType::Control,
+                    }],
+                }))
+                .unwrap();
+                for character in "commit".chars() {
+                    app.dispatch(AppCommand::PatchCharacter(character)).unwrap();
+                }
+                let accepted = app.authored_source().unwrap();
+                assert!(app.dispatch(AppCommand::PatchSubmit).is_err());
+                assert!(Arc::ptr_eq(&accepted, &app.authored_source().unwrap()));
+                continue;
+            }
+            _ => panic!("unknown case {case}"),
+        };
+        assert!(
+            app.dispatch(AppCommand::EditPatch(PatchEdit {
+                synth: "bass".into(),
+                operations,
+            }))
+            .is_err(),
+            "{case}"
+        );
+        assert!(Arc::ptr_eq(&before, &app.authored_source().unwrap()));
+        assert_eq!(history, app.history().len());
+    }
+    let mut app = directory.app(source);
+    app.dispatch(AppCommand::EditPatch(PatchEdit {
+        synth: "bass".into(),
+        operations: vec![PatchOperation::RemoveInput {
+            id: "velocity".into(),
+            cables: DependentCables::Reject,
+        }],
+    }))
+    .unwrap();
+    assert_eq!(
+        app.authored_source().unwrap().synths()["bass"]
+            .inputs()
+            .len(),
+        2
+    );
+
+    // A dependent source can be removed in the same batch that repairs its consumer.
+    let connected = bare
+        .edit_patch(&PatchEdit {
+            synth: "bass".into(),
+            operations: vec![
+                PatchOperation::AddInput {
+                    id: "velocity".into(),
+                    signal: meldritch_dsl::SignalType::Control,
+                },
+                PatchOperation::Disconnect {
+                    from: "env.control".into(),
+                    to: "amp.level".into(),
+                },
+                PatchOperation::Connect {
+                    from: "input.velocity".into(),
+                    to: "amp.level".into(),
+                },
+            ],
+        })
+        .unwrap();
+    let mut app = directory.app(connected);
+    app.dispatch(AppCommand::EditPatch(PatchEdit {
+        synth: "bass".into(),
+        operations: vec![
+            PatchOperation::RemoveInput {
+                id: "velocity".into(),
+                cables: DependentCables::Disconnect,
+            },
+            PatchOperation::Connect {
+                from: "env.control".into(),
+                to: "amp.level".into(),
+            },
+        ],
+    }))
+    .unwrap();
+    assert_eq!(
+        app.authored_source().unwrap().synths()["bass"]
+            .inputs()
+            .len(),
+        2
+    );
+
+    // The additive typed operation survives the existing native capture vocabulary.
+    let mut app = directory.app(bare.clone());
+    let mut capture = NativeProjectCapture::new(Arc::new(bare.clone()), 96000);
+    app.dispatch(AppCommand::EditPatch(PatchEdit {
+        synth: "bass".into(),
+        operations: vec![PatchOperation::AddInput {
+            id: "velocity".into(),
+            signal: meldritch_dsl::SignalType::Control,
+        }],
+    }))
+    .unwrap();
+    capture.finish(&app).unwrap();
+    let text = fs::read_to_string(capture.session.as_ref().unwrap().path()).unwrap();
+    let mut replay = directory.app(load_native_capture_baseline(&directory.0, &text).unwrap());
+    let document: toml::Value = toml::from_str(&text).unwrap();
+    for event in document["events"].as_array().unwrap() {
+        let envelope =
+            NativeCommandEnvelope::decode(&toml::to_string(&event["native"]).unwrap()).unwrap();
+        replay.dispatch(envelope.command.into()).unwrap();
+    }
+    assert_eq!(
+        replay.authored_source().unwrap().fingerprint(),
+        app.authored_source().unwrap().fingerprint()
+    );
+}

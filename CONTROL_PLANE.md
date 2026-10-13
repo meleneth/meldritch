@@ -43,6 +43,9 @@ explicitly selected CC to typed `KeyboardSustain`, independently of keys and ben
 The shared kernel consumes it only through an authored GateHold cable path; loss
 resets the runtime pedal even when no key remains pressed. This is a bounded mono
 gate processor, not general gate routing or authored controller mapping.
+The typed patch draft can add/remove the three supported external expression
+inputs in the same atomic batch as modules and cables; accepted declarations
+flow through the ordinary source fingerprint, native capture and project export.
 Polyphonic/simultaneous pattern/live routing and timed device replay
 remain unimplemented. MicroLab mk3 discovery and input connection were observed;
 physical key/pedal gestures and listening have not been accepted.

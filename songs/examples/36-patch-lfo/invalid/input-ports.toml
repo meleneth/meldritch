@@ -1,0 +1,3 @@
+cases = ["duplicate", "unknown-name", "wrong-signal", "reserved-base", "connected-reject", "connected-disconnect-incomplete", "missing-cable", "unknown-removal", "stale-draft"]
+# Invalid commands/candidates preserve accepted source, history and publication.
+# Input removal with disconnect must still compile as a complete graph.

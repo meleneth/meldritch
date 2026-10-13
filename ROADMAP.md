@@ -180,8 +180,10 @@ phase/partition references, typed capture and real store reload. Production
 worker/callback continuity and loss centering are checked headlessly.
 The bounded explicit GateHold route now accepts key/pedal independence,
 held/retrigger/release sound, loss cleanup, typed capture and authored reopen
-headlessly. Physical pedal interaction remains unverified. Pattern velocity and
-interactive external-input declaration editing remain separate gaps.
+headlessly. The native patch editor now also stages the three supported
+expression-port declarations with their consumers in one transaction, then
+captures/saves/reopens them. Physical pedal interaction and pattern velocity
+routing remain gaps; broader external source types require separate examples.
 Simultaneous arranged/live routing, MIDI/device timestamp mapping, timed replay
 and graph-state preservation remain separate unfinished contracts.
 

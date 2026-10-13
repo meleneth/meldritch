@@ -88,6 +88,8 @@ an empty project requires no Git repository or initialization.
   and callback PCM/allocation acceptance headlessly
 - [x] Bounded keyboard adapters: explicit velocity, bend and GateHold pedal routes,
   headless capture/save/reopen and worker/callback evidence
+- [x] Bounded native input editing: atomic velocity/bend/sustain declarations,
+  dependent removal, typed capture and authored reopen from a pitch/gate patch
 - [ ] Next keyboard slices: physical interaction/listening/deadlines and broader
   Gate routing; simultaneous arranged/live routing and timed
   device capture/replay need their own activation/clock contracts
@@ -525,7 +527,7 @@ restores held pitch/velocity without Gate retrigger. Example 36 adds a readable
 velocity project, atomic patch draft, timed trace and negative contract. Typed
 capture reconstruction, soft/hard gain references, save/reopen, atomic input/unit
 failures and real worker/callback PCM pass headlessly. Offline independent-pattern
-velocity stays unity; pattern routing, input-declaration editing, sustain/bend,
+velocity stays unity; pattern routing, broader input-declaration editing, sustain/bend,
 polyphony/simultaneous routing, timed device replay and physical evidence remain
 open. This bounded checkpoint does not complete example 36's broader contract.
 Verification: focused keyboard acceptance and final offline workspace suite pass;
@@ -554,9 +556,19 @@ affected all-targets Clippy, formatting/diff checks and docs build pass.
 Historical 09/29 fingerprints remain `41472b38b65b60ed` /
 `54745c74a42665cf`. Physical listening remains unverified.
 Smoothing, LFO/bend summation, Plaits adapters, polyphonic/simultaneous routing,
-pattern control sources, input-declaration editing, timed device replay and
+pattern control sources, broader input-declaration editing, timed device replay and
 physical evidence and general Gate/Plaits routing remain open. Full example 36
 status remains design.
+Bounded external-input editing checkpoint: `ports.project.lua` begins with only
+pitch/gate. `input-ports.txt` uses typed Ctrl-G input add operations to declare
+velocity/bend/sustain and wire their consumers in one accepted batch. Headless
+tests prove draft isolation, expression PCM, negative/stale edits, dependent
+input removal/reconnect, typed capture and exact authored save/reopen PCM.
+General external input families and controller mappings remain future work.
+Verification: focused input/sustain tests, offline workspace suite, affected
+all-targets Clippy, formatting/diff checks and docs build pass. Historical
+09/29 fingerprints remain `41472b38b65b60ed` / `54745c74a42665cf`.
+Physical interaction/listening remains unverified.
 Verification: focused bend/lifecycle/CLI keyboard tests and final offline
 workspace suite pass; affected all-targets Clippy with established allowances,
 formatting/diff checks and docs build pass. Historical 09/29 fingerprints remain

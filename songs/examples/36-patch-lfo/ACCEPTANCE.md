@@ -429,6 +429,29 @@ backpressure reserves the three cleanup slots. Physical pedal gestures and
 listening remain unverified. `--midi-sustain-cc 64` is an explicit example mapping,
 not a claim about the MicroLab mk3's configured pedal message.
 
+## Editable external-input checkpoint
+
+`ports.project.lua` starts with only independent pitch/gate inputs. In Ctrl-G,
+`input-ports.txt` stages typed declarations of velocity/bend Control and sustain
+Gate, their explicit modules/cables, and one complete commit. The accepted patch
+must render live strike gain, wheel pitch and pedal hold through the same mono
+kernel as the earlier checkpoints. Save/reopen must retain declarations/cables
+and reset runtime expression. A declaration alone does not create a controller
+mapping or change sound. `input remove ID reject|disconnect` must respect cable
+dependencies; removing a consumed input without a complete replacement graph
+rejects atomically. `invalid/input-ports.toml` enumerates duplicate, name/type,
+protected pitch/gate, dependency, missing and stale-draft cases. Legacy authored
+patches and historical fingerprints must remain unchanged. This is a bounded
+editor contract for the three currently executable expression inputs, not
+arbitrary event/audio external-input lowering.
+
+Evidence: `typed_input_draft_builds_expression_from_plain_pitch_gate_patch_and_reopens`
+executes the command draft, checks staged-source isolation, audible
+velocity/bend/pedal changes and exact authored save/reopen PCM. The paired
+`invalid_input_drafts_and_dependent_removal_preserve_accepted_graph` executes
+all invalid cases, a complete removal/reconnect transaction and typed capture
+reconstruction of an input declaration.
+
 Broader explicit addition/clamping,
 event/control-rate latching and global/per-voice scopes
 remain requirements. Reset/stop/rewind and composition clocks need their full scope

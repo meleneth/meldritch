@@ -10,6 +10,14 @@ pub enum DependentCables {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PatchOperation {
+    AddInput {
+        id: String,
+        signal: SignalType,
+    },
+    RemoveInput {
+        id: String,
+        cables: DependentCables,
+    },
     ConfigureControlHertz {
         module: String,
         settings: ControlHertzSettings,
@@ -408,6 +416,47 @@ impl ValidatedSong {
             }
             let graph = next.synths.get_mut(&edit.synth).unwrap();
             match operation {
+                PatchOperation::AddInput { id, signal } => {
+                    if graph.inputs.len() >= 32 {
+                        return Err("patch exceeds 32 external inputs".into());
+                    }
+                    if !valid_id(id) || id == "input" {
+                        return Err(format!("invalid external input id '{id}'"));
+                    }
+                    if graph.inputs.iter().any(|input| &input.id == id) {
+                        return Err(format!("duplicate external input id '{id}'"));
+                    }
+                    if !matches!(
+                        (id.as_str(), signal),
+                        ("velocity" | "bend", SignalType::Control) | ("sustain", SignalType::Gate)
+                    ) {
+                        return Err("native mono input editing currently supports velocity/bend Control and sustain Gate".into());
+                    }
+                    graph.inputs.push(PatchInput {
+                        id: id.clone(),
+                        signal: *signal,
+                    });
+                }
+                PatchOperation::RemoveInput { id, cables } => {
+                    if !matches!(id.as_str(), "velocity" | "bend" | "sustain") {
+                        return Err("native mono input removal supports velocity/bend/sustain only; pitch/gate are required".into());
+                    }
+                    let index = graph
+                        .inputs
+                        .iter()
+                        .position(|input| &input.id == id)
+                        .ok_or_else(|| format!("unknown external input '{id}'"))?;
+                    let endpoint = format!("input.{id}");
+                    if graph.cables.iter().any(|c| c.from == endpoint)
+                        && *cables == DependentCables::Reject
+                    {
+                        return Err(format!("external input '{id}' has dependent cables"));
+                    }
+                    if *cables == DependentCables::Disconnect {
+                        graph.cables.retain(|c| c.from != endpoint);
+                    }
+                    graph.inputs.remove(index);
+                }
                 PatchOperation::ConfigureControlHertz { module, settings } => {
                     control_graph::validate_hertz_settings(
                         ModuleKind::ControlHertz,
@@ -549,6 +598,13 @@ impl ValidatedSong {
     }
     /// Re-run the ordinary synth importer and typed-port boundary on a graph.
     pub fn replace_patch(&self, graph: SynthDefinition) -> Result<Self, String> {
+        self.replace_patch_candidate(graph, false)
+    }
+    fn replace_patch_candidate(
+        &self,
+        graph: SynthDefinition,
+        allow_input_edits: bool,
+    ) -> Result<Self, String> {
         if graph.output_level_control.as_ref().is_some_and(|id| {
             id.is_empty()
                 || id.len() > 64
@@ -562,9 +618,11 @@ impl ValidatedSong {
             .synths
             .get(&graph.id)
             .ok_or_else(|| format!("unknown synth '{}'", graph.id))?;
-        if graph.inputs != previous.inputs || graph.polyphony != previous.polyphony {
+        if (!allow_input_edits && graph.inputs != previous.inputs)
+            || graph.polyphony != previous.polyphony
+        {
             return Err(
-                "patch subset preserves synth identity, polyphony and declared external inputs"
+                "patch replacement preserves synth identity, polyphony and external inputs unless an explicit typed input edit is staged"
                     .into(),
             );
         }
@@ -793,6 +851,12 @@ impl ValidatedSong {
     }
     pub fn edit_patch(&self, edit: &PatchEdit) -> Result<Self, String> {
         let draft = self.preview_patch(edit)?;
-        self.replace_patch(draft.synths[&edit.synth].clone())
+        let allow_input_edits = edit.operations.iter().any(|operation| {
+            matches!(
+                operation,
+                PatchOperation::AddInput { .. } | PatchOperation::RemoveInput { .. }
+            )
+        });
+        self.replace_patch_candidate(draft.synths[&edit.synth].clone(), allow_input_edits)
     }
 }
