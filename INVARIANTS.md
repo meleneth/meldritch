@@ -296,6 +296,18 @@ unity. Runtime values are captured, never saved as patch defaults; old captures
 without velocity replay at unity. These are bounded mono guarantees, not general
 pattern-velocity routing or controller smoothing requirements.
 
+Live wheel motion changes only a declared bipolar Control input: no key selection,
+Gate articulation, amplitude change or implicit pitch range. MIDI-resolution values
+are 0..16383 with center 8192, normalized to exact -1/0/+1 endpoints. Typed events
+retain channel/epoch/u64 frame, but the current mono binding owns one shared bend
+value across key channels. Explicit adapter settings own musical units/depth.
+Reset centers a noncentered wheel even with no active gate; cleanup reserves two
+event slots before acceptance. Source/transport invalidation clears bend ownership;
+fresh DSP starts centered. Key fallback and mode/selection cannot reset or retarget
+the wheel. Captures preserve raw events; authored persistence excludes wheel state.
+No smoothing, simultaneous LFO/bend summation or per-channel bend allocation is
+implied by this bounded checkpoint.
+
 Acceptance must separately prove source correctness, published/consumed audio,
 state-transition semantics and physical behavior. Conservative full-horizon
 invalidation is the current authoring fallback; it must be reported honestly

@@ -184,7 +184,8 @@ pub fn decode_midi(bytes: &[u8]) -> Option<MidiObservation> {
 /// Runtime lowering for an explicitly tagged binding and absolute worker frame.
 /// Caller must discard stale connection observations and retain the binding epoch
 /// attached when accepting input; never resolve a new target from UI selection.
-/// Velocity is an independent Control source; sustain and bend remain unmapped.
+/// Note-only lowering retains independent velocity. The live input lowering
+/// below also accepts wheel packets; sustain remains unmapped.
 pub fn keyboard_key_command(
     bytes: &[u8],
     epoch: u64,
@@ -207,6 +208,24 @@ pub fn keyboard_key_command(
         velocity,
         pressed,
     })
+}
+
+/// Live input lowering; wheel remains a separate typed input, never a note edit.
+pub fn keyboard_input_command(
+    bytes: &[u8],
+    epoch: u64,
+    frame: u64,
+) -> Option<meldritch_app::AppCommand> {
+    if let MidiObservation::Pitch { channel, value } = decode_midi(bytes)? {
+        Some(meldritch_app::AppCommand::KeyboardBend {
+            epoch,
+            frame,
+            channel,
+            value,
+        })
+    } else {
+        keyboard_key_command(bytes, epoch, frame)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -175,7 +175,10 @@ to the existing callback through a bounded timed PCM ring and shared-DSP worker.
 Headless held-key PCM, source/runtime capture and callback allocation safety pass.
 Explicit keyboard velocity now has a unit-interval Control port and existing
 combiner wiring, with soft/hard/fallback, capture and persistence acceptance.
-Next accept sustain/bend adapters and physical interaction; pattern velocity and
+Explicit bipolar bend now reuses PitchModulate with authored depth, independent
+phase/partition references, typed capture and real store reload. Production
+worker/callback continuity and loss centering are checked headlessly.
+Next accept an explicit sustain gate processor and physical interaction; pattern velocity and
 interactive external-input declaration editing remain separate gaps.
 Simultaneous arranged/live routing, MIDI/device timestamp mapping, timed replay
 and graph-state preservation remain separate unfinished contracts.

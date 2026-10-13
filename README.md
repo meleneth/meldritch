@@ -57,7 +57,10 @@ Copy example 36's `velocity.project.lua` as `main.project.lua`, then apply
 `velocity-patch.txt` in Ctrl-G to multiply the envelope by strike velocity and
 Ctrl-S to save. The inspector shows unit-interval units. Unwired velocity has no
 effect; held-key fallback restores pitch and velocity without retriggering.
-Sustain/bend,
+For bend, start with `bend.project.lua` and apply `bend-patch.txt` as well: the
+declared bipolar `input.bend` Control passes through an explicit PitchModulate
+adapter, with authored ±2-semitone depth. Wheel motion changes neither key
+ownership nor articulation; disconnect/overflow centers it. Sustain,
 simultaneous pattern/live routing and timed recording remain queued.
 Port matching is explicit and rejects ambiguity; reconnect retries
 without accepting stale messages. Headless entry/publication/persistence tests

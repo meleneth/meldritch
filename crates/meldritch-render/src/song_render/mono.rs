@@ -7,7 +7,7 @@ pub(super) struct MonoState {
     filter: StateVariableFilter,
     pub frequency: f64,
     pub velocity: f64,
-    control_values: [f64; 34],
+    control_values: [f64; 35],
     control_origins: [u64; 32],
     control_phases: [f64; 32],
     tempo: meldritch_core::Tempo,
@@ -29,7 +29,7 @@ impl MonoState {
                 0.0
             },
             control_values: {
-                let mut values = [0.0; 34];
+                let mut values = [0.0; 35];
                 // Independent external Control, separate from legacy note gain.
                 values[crate::song_control::VELOCITY_INPUT] = 1.0;
                 values
@@ -105,6 +105,9 @@ pub enum LiveVoiceInput {
     /// MIDI resolution, explicitly normalized to unit interval at input.velocity.
     /// Never changes articulation or implicit note gain.
     Velocity(u8),
+    /// 14-bit MIDI value, normalized around exact center 8192 at input.bend.
+    /// Pitch changes only through an explicit compatible graph adapter.
+    Bend(u16),
     Gate(bool),
 }
 
@@ -183,6 +186,9 @@ impl LiveMonoRenderer {
             if matches!(event.input, LiveVoiceInput::Velocity(value) if value > 127) {
                 return Err(invalid("live velocity must be in 0..127"));
             }
+            if matches!(event.input, LiveVoiceInput::Bend(value) if value > 16383) {
+                return Err(invalid("live bend must be in 0..16383"));
+            }
             previous = event.frame;
         }
         // All validation completes before any state advance or event application.
@@ -196,6 +202,12 @@ impl LiveMonoRenderer {
                     LiveVoiceInput::Velocity(value) => {
                         self.state.control_values[crate::song_control::VELOCITY_INPUT] =
                             f64::from(value) / 127.0
+                    }
+                    LiveVoiceInput::Bend(value) => {
+                        // Both physical endpoints reach exactly +/-1; center is 0.
+                        let offset = f64::from(value) - 8192.0;
+                        self.state.control_values[crate::song_control::BEND_INPUT] =
+                            offset / if value < 8192 { 8192.0 } else { 8191.0 };
                     }
                     LiveVoiceInput::Gate(true) => {
                         self.state.gate_on(1.0);

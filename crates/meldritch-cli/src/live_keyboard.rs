@@ -120,12 +120,18 @@ impl LiveKeyboardWorker {
             .frontier
             .max(self.control.clock())
             .max(app.keyboard().frame);
-        let Some(command) = meldritch_control::devices::keyboard_key_command(bytes, epoch, frame)
+        let Some(command) = meldritch_control::devices::keyboard_input_command(bytes, epoch, frame)
         else {
             return Ok(());
         };
-        // Three outputs per press, with one slot reserved for loss cleanup.
-        if state.events.len() > 124 {
+        // Prevalidate capacity before acceptance; reserve Gate low + bend center.
+        let outputs = match &command {
+            AppCommand::KeyboardKey { pressed: true, .. } => 3,
+            AppCommand::KeyboardKey { pressed: false, .. } => 2,
+            AppCommand::KeyboardBend { .. } => 1,
+            _ => unreachable!(),
+        };
+        if state.events.len() + outputs > LiveMonoRenderer::MAX_EVENTS - 2 {
             return Err("keyboard pending event budget exceeded".into());
         }
         let result = app.dispatch(command).map_err(|e| format!("{e:?}"))?;
@@ -291,9 +297,12 @@ mod tests {
         };
         worker.bind(&mut app, Some("bass-instance".into())).unwrap();
         let epoch = app.keyboard().epoch;
-        for note in 0..42 {
+        worker.key(&mut app, &[0xe0, 127, 127], epoch).unwrap();
+        for note in 0..41 {
             worker.key(&mut app, &[0x90, note, 127], epoch).unwrap();
         }
+        worker.key(&mut app, &[0xe0, 0, 0], epoch).unwrap();
+        worker.key(&mut app, &[0xe0, 127, 127], epoch).unwrap();
         let before = app.keyboard().clone();
         let history = app.history().len();
         assert!(
@@ -310,7 +319,8 @@ mod tests {
         worker
             .reset(&mut app, KeyboardResetReason::Overflow)
             .unwrap();
-        assert_eq!(worker.state.lock().unwrap().events.len(), 127);
+        assert_eq!(worker.state.lock().unwrap().events.len(), 128);
+        assert_eq!(app.keyboard().bend, Some(8192));
         assert_eq!(app.keyboard().held_keys, 0);
         assert!(
             worker

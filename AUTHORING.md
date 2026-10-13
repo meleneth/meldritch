@@ -98,14 +98,19 @@ Control, the existing multiplier and shared worker. Soft/hard strikes, held-key
 expression restoration, rejection, capture reconstruction and save/reopen pass
 headlessly; unconnected velocity cannot change gain. Pattern velocity remains
 unrouted at this input; external declaration editing still requires Lua.
-Next author the smallest explicit sustain/bend adapter example,
+Example 36 also accepts bipolar bend input through the existing PitchModulate
+adapter, composed with velocity. Independent phase references, partition equality,
+atomic value/unit rejection, typed capture and real store reload pass; the
+production worker/callback exercises wheel motion and loss centering. No implicit
+pitch range, note articulation or LFO/bend sum is introduced.
+Next author the smallest explicit sustain gate-processing example,
 keeping pitch/gate independent and reusing this path. Simultaneous arranged/live
 routing and broader clock/graph activation require separate accepted contracts.
 Reuse it with the existing voice compiler, scheduler and safe worker/
 publication boundary. Key-held performance must not rewrite saved patterns or
 patch defaults. Prove retrigger/release, zero-velocity release, overflow/disconnect/
 target cleanup, source/runtime separation and deterministic capture; report
-physical latency/listening separately. Sustain/bend need explicit authored routing.
+physical latency/listening separately. Sustain needs explicit authored routing.
 Keep this user-facing keyboard work alongside the remaining modulation queue.
 
 Continue Slice 3's example 36 from its working tremolo/vibrato/filter/depth/rate

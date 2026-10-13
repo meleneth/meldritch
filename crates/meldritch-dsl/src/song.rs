@@ -74,8 +74,11 @@ impl PatchInput {
     /// Fixed external-source contract; arbitrary Control units are not inferred.
     #[must_use]
     pub fn control_unit(&self) -> Option<ControlUnit> {
-        (self.id == "velocity" && self.signal == SignalType::Control)
-            .then_some(ControlUnit::UnitInterval)
+        match (self.id.as_str(), self.signal) {
+            ("velocity", SignalType::Control) => Some(ControlUnit::UnitInterval),
+            ("bend", SignalType::Control) => Some(ControlUnit::Bipolar),
+            _ => None,
+        }
     }
 }
 

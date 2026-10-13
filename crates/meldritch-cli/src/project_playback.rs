@@ -179,11 +179,12 @@ impl ProjectPlaybackHost for NativeProjectAudio {
             .as_deref()
             .map_or(String::new(), |voice| {
                 format!(
-                    " · Live keys → {voice}: held {} · velocity {} · stream gaps {} · F9 release",
+                    " · Live keys → {voice}: held {} · velocity {} · bend {} · stream gaps {} · F9 release",
                     app.keyboard().held_keys,
                     app.keyboard()
                         .velocity
                         .map_or_else(|| "—".into(), |v| format!("{v}/127")),
+                    app.keyboard().bend.map_or_else(|| "center".into(), |v| format!("{v}/16383")),
                     self.live_control.underruns()
                 )
             });
@@ -361,10 +362,10 @@ mod tests {
         let project = project();
         let source = meldritch_control::native_project::load_native_project(
             project.root(),
-            include_str!("../../../songs/examples/36-patch-lfo/velocity.project.lua"),
+            include_str!("../../../songs/examples/36-patch-lfo/bend.project.lua"),
         )
         .unwrap();
-        use meldritch_dsl::{ModuleKind, PatchEdit, PatchOperation};
+        use meldritch_dsl::{ModuleKind, PatchEdit, PatchOperation, PitchModulationSettings};
         let source = source
             .edit_patch(&PatchEdit {
                 synth: "bass".into(),
@@ -388,6 +389,32 @@ mod tests {
                     PatchOperation::Connect {
                         from: "touch.control".into(),
                         to: "amp.level".into(),
+                    },
+                    PatchOperation::Instantiate {
+                        id: "wheel".into(),
+                        kind: ModuleKind::PitchModulate,
+                    },
+                    PatchOperation::ConfigurePitchModulation {
+                        module: "wheel".into(),
+                        settings: PitchModulationSettings {
+                            depth_semitones: 2.0,
+                        },
+                    },
+                    PatchOperation::Disconnect {
+                        from: "input.pitch".into(),
+                        to: "osc.pitch".into(),
+                    },
+                    PatchOperation::Connect {
+                        from: "input.pitch".into(),
+                        to: "wheel.pitch".into(),
+                    },
+                    PatchOperation::Connect {
+                        from: "input.bend".into(),
+                        to: "wheel.control".into(),
+                    },
+                    PatchOperation::Connect {
+                        from: "wheel.pitch".into(),
+                        to: "osc.pitch".into(),
                     },
                 ],
             })
@@ -440,7 +467,8 @@ mod tests {
                     .iter()
                     .filter_map(|record| match (&record.command, &record.result) {
                         (
-                            AppCommand::KeyboardKey { frame, .. },
+                            AppCommand::KeyboardKey { frame, .. }
+                            | AppCommand::KeyboardBend { frame, .. },
                             AppCommandResult::KeyboardUpdated { outputs, .. },
                         ) if *frame >= start && *frame < end => Some(
                             outputs
@@ -477,6 +505,12 @@ mod tests {
         }
         assert!(heard);
         assert!(app.keyboard().gate); // Held beyond the authored bar and pattern releases.
+        route.observe(&[0xe0, 127, 127]);
+        host.poll(&mut app).unwrap();
+        assert_eq!(app.keyboard().bend, Some(16383));
+        for _ in 0..6 {
+            pump(&mut host, &mut app, &mut callback, &mut reference);
+        }
         route.observe(&[0x91, 55, 96]);
         host.poll(&mut app).unwrap();
         for _ in 0..6 {
@@ -486,6 +520,7 @@ mod tests {
         host.poll(&mut app).unwrap();
         assert_eq!(app.keyboard().pitch, Some(48));
         assert_eq!(app.keyboard().velocity, Some(32));
+        assert_eq!(app.keyboard().bend, Some(16383)); // No implicit key centering.
         for _ in 0..6 {
             pump(&mut host, &mut app, &mut callback, &mut reference);
         }
@@ -505,14 +540,18 @@ mod tests {
         }
         host.poll(&mut app).unwrap();
         assert!(app.keyboard().epoch > epoch);
+        assert_eq!(app.keyboard().bend, Some(8192));
         assert_eq!(app.keyboard().held_keys, 0);
         assert!(!app.keyboard().gate);
         route.observe(&[0x90, 60, 127]);
         host.poll(&mut app).unwrap();
         assert_eq!(app.keyboard().held_keys, 1);
+        route.observe(&[0xe0, 0, 0]);
+        host.poll(&mut app).unwrap();
         host.keyboard.as_mut().unwrap().simulate_disconnect();
         host.poll(&mut app).unwrap();
         assert_eq!(app.keyboard().held_keys, 0);
+        assert_eq!(app.keyboard().bend, Some(8192));
         route.observe(&[0x90, 60, 127]); // Disconnected route is stale.
         host.poll(&mut app).unwrap();
         assert_eq!(app.keyboard().held_keys, 0);

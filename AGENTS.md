@@ -144,7 +144,7 @@ One worker streams 256-frame shared-kernel blocks into a fixed timed PCM ring
 consumed by the existing callback. Ingress epochs, overflow/disconnect cleanup,
 source/transport release, mode continuity and exact held-key PCM beyond a bar are
 checked headlessly. Callback allocation/deallocation tests pass. Physical
-gestures/listening/deadlines, sustain/bend adapters, polyphonic and
+gestures/listening/deadlines, sustain adapters, polyphonic and
 simultaneous arranged/live routing, and timed device replay remain open.
 Example 36 also accepts bounded live velocity routing headlessly: patches declare
 `input.velocity` Control (unit interval), then explicitly combine it with
@@ -155,7 +155,15 @@ expression, and negative/capture/save-reopen contracts pass. Unwired velocity an
 legacy gain remain unchanged. Offline pattern velocity at this new input and
 interactive external-port declaration editing remain deferred; Lua declarations
 are supported. Read `PATCH_EDITOR.md` and `keyboard-velocity.toml` before extending
-it. Do not claim sustain/bend or physical acceptance.
+it. Do not claim sustain or physical acceptance.
+The next bounded keyboard checkpoint also accepts bipolar `input.bend` routed
+through the existing PitchModulate adapter. Raw 14-bit KeyboardBend commands,
+unit/epoch validation, independent phase and partition references, composed
+velocity, capture and atomic store reload are checked. Keys preserve the bound
+wheel value; loss resets center it, with two event slots reserved for cleanup.
+The production worker/callback exercises bend and velocity together. Read
+`bend-patch.txt`/`keyboard-bend.toml`; sustain still requires an explicit gate
+processor, and LFO/bend summation/Plaits pitch adapters remain unsupported.
 Example 35's native pattern-selection checkpoint is implemented: PgUp/PgDn
 selects palette material without rebinding, source/runtime mutation or rerender;
 typed capture and independent-source persistence/render tests pass. Its full

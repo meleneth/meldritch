@@ -531,6 +531,25 @@ affected all-targets Clippy with established allowances, formatting/diff checks
 and docs build pass. Historical 09/29 fingerprints remain
 `41472b38b65b60ed` / `54745c74a42665cf`. Physical listening remains unverified.
 
+Keyboard bend checkpoint: a declared bipolar `input.bend` Control feeds the
+existing PitchModulate adapter with authored semitone depth. Typed KeyboardBend
+retains raw 14-bit value, channel, binding epoch and u64 frame. Its fixed mono
+owner is independent of keys; fallback/mode changes do not center or retarget it.
+Exact center and ±1 endpoints, composed velocity/phase references, partitioned
+PCM, invalid value/unit/epoch cases, typed capture and real atomic store reload
+are checked. The production worker/callback exercises wheel motion, held fallback
+and disconnect/overflow centering. Backpressure reserves two cleanup events before
+acceptance. Default/unwired source semantics and old captures remain unchanged.
+Next: explicit sustain gate processor with an authored pedal route; preserve
+bounded event ownership and cleanup rather than hiding hold behavior in MIDI.
+Smoothing, LFO/bend summation, Plaits adapters, polyphonic/simultaneous routing,
+pattern control sources, input-declaration editing, timed device replay and
+physical evidence remain open. Full example 36 status remains design.
+Verification: focused bend/lifecycle/CLI keyboard tests and final offline
+workspace suite pass; affected all-targets Clippy with established allowances,
+formatting/diff checks and docs build pass. Historical 09/29 fingerprints remain
+`41472b38b65b60ed` / `54745c74a42665cf`. Physical listening remains unverified.
+
 Investigation and ownership decisions: [AUTHORING.md](AUTHORING.md). The first
 implemented slice is [the instrument editor](INSTRUMENT_EDITOR.md): example 25
 has automated headless acceptance; example 29 now accepts bounded

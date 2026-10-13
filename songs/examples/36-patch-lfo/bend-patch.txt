@@ -1,0 +1,8 @@
+clear
+disconnect input.pitch osc.pitch
+add wheel pitch_modulate
+pitch-depth wheel 2
+connect input.pitch wheel.pitch
+connect input.bend wheel.control
+connect wheel.pitch osc.pitch
+commit

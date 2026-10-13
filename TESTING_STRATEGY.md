@@ -9,6 +9,15 @@ audition acceptance now exercises differing velocities and fallback. Continue
 checking legacy fingerprints and callback allocation safety; physical listening
 and timed device replay require separate evidence.
 
+`control/tests/keyboard_bend.rs` executes the readable example-36 wheel trace
+against independent endpoint/midpoint frequency/phase references, composes it
+with velocity, and checks exact partition/capture reconstruction plus atomic
+authored-store reload. It covers all invalid/keyboard-bend.toml cases, unwired
+neutrality, no wheel articulation, held-key ownership and centering after loss.
+The CLI worker/callback test exercises both controls; deterministic backpressure
+reserves Gate low and bend center at the full 128-event boundary. Physical wheel
+gestures/listening, smoothing and timed device replay remain unverified.
+
 The engine should be tested like a compiler and like an audio system.
 
 ## Next-architecture acceptance obligations

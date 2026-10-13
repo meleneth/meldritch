@@ -6,9 +6,10 @@ use meldritch_dsl::{
     LfoReset, ModuleKind, SynthDefinition,
 };
 
-// Slot 0 is envelope, 1..=32 are bounded graph nodes; this independent input
-// does not participate in node ordering or consume a module slot.
+// Slot 0 is envelope, 1..=32 are bounded graph nodes; independent inputs
+// do not participate in node ordering or consume module slots.
 pub(crate) const VELOCITY_INPUT: usize = 33;
+pub(crate) const BEND_INPUT: usize = 34;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ControlNode {
@@ -43,7 +44,12 @@ pub(crate) struct ControlPlan {
 impl ControlPlan {
     pub fn compile(graph: &SynthDefinition) -> Result<Option<Self>, String> {
         let order = graph.control_order()?;
-        if order.is_empty() && !graph.cables().iter().any(|c| c.from() == "input.velocity") {
+        if order.is_empty()
+            && !graph
+                .cables()
+                .iter()
+                .any(|c| matches!(c.from(), "input.velocity" | "input.bend"))
+        {
             return Ok(None);
         }
         let envelope = graph
@@ -60,6 +66,9 @@ impl ControlPlan {
                 .from();
             if source == "input.velocity" {
                 return Ok(VELOCITY_INPUT);
+            }
+            if source == "input.bend" {
+                return Ok(BEND_INPUT);
             }
             let (id, _) = source.split_once('.').ok_or("invalid control source")?;
             if id == envelope.id() {
@@ -144,7 +153,7 @@ impl ControlPlan {
         gate_rise: bool,
         envelope: f64,
         tempo: Tempo,
-        values: &mut [f64; 34],
+        values: &mut [f64; 35],
         origins: &mut [u64; 32],
         phases: &mut [f64; 32],
     ) -> f64 {

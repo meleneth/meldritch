@@ -298,7 +298,7 @@ normal blocks and modes; never loop a held-note PCM clip. Existing device startu
 mute/fade and safety conversion apply. Display held target/count and gap telemetry.
 
 At most 128 events enter a live block; ordinary dispatch stops at 126 pending
-events, preserving room for a low Gate reset. Overflow/disconnect reset typed
+events, preserving two slots for Gate low and bend center. Overflow/disconnect reset typed
 app state, retain already accepted ordered events, invalidate buffered PCM and
 drop pre-reset ingress. Unsupported CC/bend input must not trigger a reset or
 implicit parameter change. Reset may briefly silence output; this contract does
@@ -324,7 +324,7 @@ dependent on filesystem recovery. native_keyboard_capture_failure_releases_audit
 proves repair records the accepted key and cleanup exactly once. Ordinary
 arrangement playback is unaffected by disabling this audition lane.
 It does not yet record exact device-consumption gaps/activation or implement timed
-replay. MIDI timestamp mapping, sustain/bend adapters, polyphonic input,
+replay. MIDI timestamp mapping, sustain adapters, polyphonic input,
 simultaneous arranged/live routes and deadline measurements remain deferred.
 
 ## Explicit live velocity checkpoint
@@ -360,8 +360,50 @@ Old native v1 captures omitting velocity deserialize to 127 and retain fixed gai
 This adds live keyboard velocity only. Offline independent-pattern execution
 leaves this input at unity; its pattern velocity routing is future work. Existing
 legacy coupled-note velocity semantics remain unchanged. Input declaration editing
-requires Lua; the current command pane preserves declarations. Sustain/bend,
+requires Lua; the current command pane preserves declarations. Sustain,
 physical gestures/listening and timed device replay still require separate slices.
+
+## Explicit live bend checkpoint
+
+Copy `bend.project.lua` to `main.project.lua`; its bend/velocity ports are explicit
+Control declarations. In Ctrl-G, apply velocity-patch.txt and bend-patch.txt and
+save. Stop arrangement, F9-bind bass-instance, hold a key and move the wheel/strip.
+`wheel` PitchModulate applies authored ±2 semitones through its explicit cables.
+Changing pitch-depth changes range; unplugging/removing the adapter and restoring
+input.pitch → osc.pitch removes bend's pitch effect. There is no default range.
+
+MIDI values 0..16383 normalize to bipolar Control around exact 8192 center.
+Lower-half offset divides by 8192, upper-half by 8191; endpoints are exactly ±1.
+PitchModulate evaluates this held Control at audio rate on the existing worker;
+wheel changes preserve oscillator phase. Fresh/offline independent-pattern input
+is zero. Motion alone cannot articulate Gate or create notes. Unwired bend has
+no frequency effect. The current bound mono instance owns one shared bend value
+across MIDI key channels; channel remains captured, and key/fallback/mode/selection
+never retarget or implicitly center it. This does not claim per-channel allocation.
+
+Reset emits Gate low if needed and centers a noncentered bend even when Gate is
+already low. Bind/unbind cleans the previous owner; new DSP starts centered.
+Source/transport invalidation releases the instance and clears wheel ownership.
+Ingress epochs prevent old wheel motion reviving it. Worker acceptance reserves
+two of 128 event slots for cleanup; rejected capacity does not mutate app/history.
+Sustain/other CCs and malformed wheel packets remain unmapped.
+
+`keyboard-bend.toml` is the executable u64 gesture contract. Evidence:
+`explicit_bend_composes_with_velocity_and_matches_independent_phase_reference`
+checks both typed drafts, endpoint/midpoint frequency references with continuous
+oscillator phase, exact partition PCM, unwired neutrality, native capture and
+real atomic store reload with no saved wheel/key state.
+`invalid_bend_commands_blocks_and_cables_preserve_accepted_state` covers every
+invalid/keyboard-bend.toml case and state/cursor/source/history atomicity.
+`wheel_ownership_survives_keys_and_resets_center_without_implicit_articulation`
+checks keys/fallback, all reset reasons, no-gate centering, stale events, unbind
+and source cleanup. Production worker/callback audition now composes bend/velocity
+and checks loss centering; paused-worker backpressure checks exact reserved bounds.
+
+Smoothing, combined LFO/bend pitch, Plaits pitch-adapter lowering, per-channel or
+polyphonic allocation, simultaneous arrangement and timed device replay are open.
+Physical wheel/pedal gestures, listening and deadline measurements are unverified.
+Sustain requires an inspectable gate processor, not hidden MIDI note-off suppression.
 
 ## Remaining full Slice 3 contract
 

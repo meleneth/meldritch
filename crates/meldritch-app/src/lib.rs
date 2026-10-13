@@ -80,6 +80,12 @@ pub enum AppCommand {
         velocity: u8,
         pressed: bool,
     },
+    KeyboardBend {
+        epoch: u64,
+        frame: u64,
+        channel: u8,
+        value: u16,
+    },
     ResetKeyboard {
         epoch: u64,
         frame: u64,
@@ -1563,6 +1569,7 @@ impl AppController {
         let result = match &command {
             AppCommand::BindKeyboard { .. }
             | AppCommand::KeyboardKey { .. }
+            | AppCommand::KeyboardBend { .. }
             | AppCommand::ResetKeyboard { .. } => self.keyboard_command(&command)?,
             AppCommand::CreateComposition(_)
             | AppCommand::SelectComposition(_)

@@ -1,0 +1,36 @@
+# Copy bend.project.lua as main.project.lua in an empty directory.
+# In construction Ctrl-G apply velocity-patch.txt and bend-patch.txt, then save.
+# Stop arrangement, F9-bind bass-instance, hold a key and move the pitch strip.
+# MIDI bend becomes a bipolar Control only through the declared input.bend port.
+# wheel explicitly scales that Control by +/-2 semitones. No cable = no effect.
+# Channel is captured, but bend is one shared input to the explicitly bound mono
+# instance; held keys on other channels do not implicitly retarget or reset it.
+origin_frame = 5000000000
+length_frames = 2048
+depth_semitones = 2.0
+note = 48
+velocity = 96
+[[bends]]
+offset = 0
+value = 8192
+[[bends]]
+offset = 256
+value = 0
+[[bends]]
+offset = 512
+value = 16383
+[[bends]]
+offset = 768
+value = 8191
+[[bends]]
+offset = 1024
+value = 12288
+[[bends]]
+offset = 1280
+value = 8192
+[[bends]]
+offset = 1536
+value = 16383
+# Offset 1792: panic reset releases Gate and centers bend. Fresh binding centers;
+# disconnect/overflow and source/transport invalidation clear wheel ownership.
+# Keys never implicitly center bend. Construction-mode bend never authors notes.

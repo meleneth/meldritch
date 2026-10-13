@@ -12,6 +12,17 @@ this input to unity; routing authored pattern velocity is deferred. The current
 editor preserves external declarations, so adding that port requires readable
 Lua authoring/import. General input-declaration editing remains open.
 
+Example 36's `bend.project.lua` also declares `{ id = "bend", signal = "control" }`.
+The inspector labels this source bipolar. `bend-patch.txt` explicitly routes
+input.pitch through PitchModulate and input.bend to its control port; pitch-depth
+sets ±2 semitones. MIDI 8192 maps exactly to zero, 0 to -1 and 16383 to +1; lower
+values divide the centered offset by 8192, upper values by 8191. Fresh/offline
+independent-pattern instances initialize bend to zero. Keyboard motion changes
+only this Control, so an unwired port cannot affect frequency or articulation.
+This reuses the same audio-rate/per-instance adapter as LFO vibrato. Adding LFO
+and bend together still requires an explicit supported combiner; implicit sum and
+multiple pitch adapters remain unsupported. Plaits pitch-adapter lowering is open.
+
 This is the accepted bounded construction editor. Project transactions, authored
 normalization, patch-owned interfaces and quantized stateful activation extend
 this boundary; see [ARCHITECTURE.md](ARCHITECTURE.md). Continued playback currently

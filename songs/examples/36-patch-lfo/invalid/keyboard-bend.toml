@@ -1,0 +1,4 @@
+cases = ["value-16384", "value-65535", "channel-16", "stale-epoch", "backwards-frame", "unbound", "undeclared-input", "wrong-signal", "unit-mismatch", "duplicate-cable"]
+# Key/bend/block rejection preserves app state, source, history and DSP cursor.
+# Graph rejection preserves accepted source/publication. Unsupported sustain,
+# modulation and malformed bend packets never alter this input or key ownership.
