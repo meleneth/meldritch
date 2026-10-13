@@ -1,0 +1,2 @@
+cases = ["missing-adapter", "wrong-unit", "missing-input", "rate-out-of-bounds", "unknown-pattern", "simultaneous-step", "invalid-edit"]
+# Complete candidate validation rejects before source, history, or audio publication changes.

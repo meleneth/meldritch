@@ -589,6 +589,20 @@ Verification: focused sustain tests, offline workspace suite, all-targets Clippy
 with existing compatibility allowances, formatting/diff checks and docs build
 pass. Historical 09/29 fingerprints remain `41472b38b65b60ed` /
 `54745c74a42665cf`.
+Pattern-controlled LFO-rate checkpoint: `pattern-rate.project.lua` now composes
+the independently bound dynamics pattern with an explicit Control → Hertz
+adapter → LFO rate cable. An independent oscillator/phase integrator matches
+every sample over two loops, including step/loop boundaries without phase reset;
+native `u` unbind/rebind changes the sound, edited steps dirty the instance, and
+the authored graph/PCM survive save/reopen. Headless live-keyboard velocity
+0/64/127 feeds the same rate cable at scheduled frames with an independent
+phase reference. Invalid units, missing adapters or
+inputs, invalid rate clamps and ambiguous events reject. This reuses the current
+event scheduler and control graph; it adds no second modulation/event engine.
+Broader event-rate evaluation, dynamic routing, and physical listening remain
+open.
+Verification: focused pattern-rate tests, offline workspace suite, all-targets
+Clippy with existing allowances, formatting/diff checks and docs build pass.
 Verification: focused pattern-velocity tests, offline workspace suite, affected
 all-targets Clippy, formatting/diff checks and docs build pass. Historical
 09/29 fingerprints remain `41472b38b65b60ed` / `54745c74a42665cf`.

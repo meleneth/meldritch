@@ -1,0 +1,50 @@
+-- A timed dynamics pattern controls LFO speed through an explicit Hertz adapter.
+return {
+  kind = "project", version = 2,
+  project = { id = "pattern-rate", title = "Pattern-controlled modulation speed", bpm = 120, sample_rate = 48000 },
+  patches = {
+    { id = "bass", polyphony = 1,
+      inputs = { { id = "pitch", signal = "pitch" }, { id = "gate", signal = "gate" }, { id = "velocity", signal = "control" } },
+      modules = {
+        { id = "osc", kind = "oscillator", waveform = "sine" },
+        { id = "env", kind = "adsr", attack = 0, decay = 0, sustain = 1, release = 0 },
+        { id = "amp", kind = "vca" },
+        { id = "out", kind = "audio_output", channels = 1 },
+        { id = "slow", kind = "lfo", lfo = { shape = "sine", rate = { kind = "hertz", value = 1 }, phase = 0,
+          evaluation = "audio", scope = "per_instance", reset = "none" } },
+        { id = "speed", kind = "control_hertz", hertz = { gain_hz = 3, offset_hz = 1, clamp_min_hz = 1, clamp_max_hz = 4 } },
+        { id = "unipolar", kind = "control_scale", scale = { gain = 0.5, offset = 0.5, clamp_min = 0, clamp_max = 1 } },
+        { id = "shape", kind = "control_multiply" },
+      },
+      cables = {
+        { from = "input.pitch", to = "osc.pitch", signal = "pitch" },
+        { from = "input.gate", to = "env.gate", signal = "gate" },
+        { from = "osc.audio", to = "amp.audio", signal = "audio" },
+        { from = "env.control", to = "shape.left", signal = "control" },
+        { from = "input.velocity", to = "speed.control", signal = "control" },
+        { from = "speed.control", to = "slow.rate", signal = "control" },
+        { from = "slow.control", to = "unipolar.control", signal = "control" },
+        { from = "unipolar.control", to = "shape.right", signal = "control" },
+        { from = "shape.control", to = "amp.level", signal = "control" },
+        { from = "amp.audio", to = "out.audio", signal = "audio" },
+      },
+    },
+  },
+  patterns = {
+    { id = "pitch", length_ticks = 1920, looped = true, next_note_id = 2,
+      notes = { { id = "note-1", note = "C3", start_tick = 0, duration_ticks = 1920, velocity = 0.5 } } },
+    { id = "rhythm", length_ticks = 1920, looped = true, next_note_id = 2,
+      notes = { { id = "note-1", note = "C6", start_tick = 0, duration_ticks = 1920, velocity = 0.5 } } },
+    { id = "speed-steps", length_ticks = 1920, looped = true, next_note_id = 4,
+      notes = {
+        { id = "note-1", note = "C4", start_tick = 0, duration_ticks = 240, velocity = 0 },
+        { id = "note-2", note = "G4", start_tick = 480, duration_ticks = 240, velocity = 0.5 },
+        { id = "note-3", note = "C5", start_tick = 960, duration_ticks = 240, velocity = 1 },
+      } },
+  },
+  voices = {
+    { id = "bass-instance", synth = "bass", length_ticks = 1920, looped = true,
+      initial_pitch = 48, level = 0.8, pitch_pattern = "pitch", gate_pattern = "rhythm",
+      velocity_pattern = "speed-steps" },
+  },
+}

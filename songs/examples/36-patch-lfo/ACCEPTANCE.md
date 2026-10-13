@@ -506,6 +506,29 @@ This is a bounded mono event-to-Gate bridge in the existing scheduler. General
 gate routing, quantized event processors, Plaits lowering and simultaneous
 arrangement/live input are future work.
 
+## Pattern-controlled LFO rate checkpoint
+
+`pattern-rate.project.lua` binds a third pattern to `input.velocity` Control,
+then explicitly cables it through a Hertz adapter to `slow.rate`. Its note-start
+velocity holds across note ends and loop boundaries until the next start. The
+note pitch/duration never alters oscillator pitch or Gate. The LFO samples the
+current Hertz value at audio rate: the value at frame N advances phase N+1,
+without resetting phase on pattern steps or loops. The static LFO rate is an
+inactive fallback while the cable is present. The same typed `u` binding,
+note editor, source fingerprint and native project save/reopen are reused.
+
+`pattern_rate.rs` must compare two-loop PCM sample-by-sample against an
+independent oscillator and phase integrator, including exact step boundaries,
+held values and split renders. Editing the bound pattern must dirty the voice
+and change sound. The invalid fixture rejects an omitted adapter, wrong units,
+missing input, invalid Hertz bounds, unknown pattern, simultaneous starts and
+invalid edits without changing accepted source/history. Fresh reopen must
+retain the graph and audio. No event-rate LFO sampling, arbitrary source sum,
+general event processors or runtime DSP-state migration is claimed.
+The headless live-keyboard path uses the same declared input and cables: MIDI
+velocity 0/64/127 changes LFO speed at exact scheduled frames without an
+implicit gate or phase reset. Device listening remains a separate check.
+
 Broader explicit addition/clamping,
 event/control-rate latching and global/per-voice scopes
 remain requirements. Reset/stop/rewind and composition clocks need their full scope
