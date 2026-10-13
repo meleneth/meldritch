@@ -1,0 +1,7 @@
+clear
+add touch control_multiply
+disconnect shape.control amp.level
+connect shape.control touch.left
+connect input.velocity touch.right
+connect touch.control amp.level
+commit

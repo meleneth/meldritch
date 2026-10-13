@@ -77,6 +77,7 @@ pub enum AppCommand {
         frame: u64,
         channel: u8,
         note: u8,
+        velocity: u8,
         pressed: bool,
     },
     ResetKeyboard {

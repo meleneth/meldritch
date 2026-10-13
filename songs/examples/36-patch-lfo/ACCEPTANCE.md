@@ -324,8 +324,44 @@ dependent on filesystem recovery. native_keyboard_capture_failure_releases_audit
 proves repair records the accepted key and cleanup exactly once. Ordinary
 arrangement playback is unaffected by disabling this audition lane.
 It does not yet record exact device-consumption gaps/activation or implement timed
-replay. MIDI timestamp mapping, velocity/sustain/bend adapters, polyphonic input,
+replay. MIDI timestamp mapping, sustain/bend adapters, polyphonic input,
 simultaneous arranged/live routes and deadline measurements remain deferred.
+
+## Explicit live velocity checkpoint
+
+Copy `velocity.project.lua` to an empty project's `main.project.lua`. Open with
+`--midi-keyboard MicroLab`, select bass in construction and enter Ctrl-G; execute
+`velocity-patch.txt` line by line, committing the complete graph. Ctrl-S persists
+the declared external input and explicit multiplier/cables. Stop arrangement and
+F9-bind bass-instance: soft/hard strikes now scale amplitude. An atomic draft that
+removes touch and reconnects shape.control to amp.level restores original gain.
+Do not rewrite defaults implicitly during performance.
+
+`input.velocity` is a declared Control port with fixed unit-interval units.
+KeyboardKey carries MIDI-resolution 0..127, normalized by /127 once at this
+input. Pitch, Velocity, Gate are ordered independent same-frame outputs. Repeated
+press replaces a held key's velocity; releasing the winner restores prior pitch
+and velocity without retrigger. Final release/reset lowers Gate and holds velocity
+for explicit release-tail modulation. Fresh DSP initializes velocity to unity.
+An unwired velocity has no effect. Unit mismatches and undeclared inputs reject
+before source/audio replacement; arbitrary cable addition remains unsupported.
+
+`keyboard-velocity.toml` specifies soft/hard/repeated/fallback gestures at a u64
+origin above u32. `invalid/keyboard-velocity.toml` enumerates atomic input and graph
+negatives. Evidence: `explicit_velocity_patch_restores_held_expression_captures_and_reopens`
+checks the typed command-pane draft, gain against unscaled PCM, zero unwired
+velocity, typed capture/identical reconstruction and authored fresh reload.
+`invalid_velocity_inputs_and_graphs_are_atomic` proves all listed negatives,
+including DSP cursor/state and source/history preservation after rejection.
+The production worker/callback audition test now uses this wired velocity graph
+with differing velocities and held fallback; allocation-safety contracts persist.
+Old native v1 captures omitting velocity deserialize to 127 and retain fixed gain.
+
+This adds live keyboard velocity only. Offline independent-pattern execution
+leaves this input at unity; its pattern velocity routing is future work. Existing
+legacy coupled-note velocity semantics remain unchanged. Input declaration editing
+requires Lua; the current command pane preserves declarations. Sustain/bend,
+physical gestures/listening and timed device replay still require separate slices.
 
 ## Remaining full Slice 3 contract
 

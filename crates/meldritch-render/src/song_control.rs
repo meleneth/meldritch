@@ -6,6 +6,10 @@ use meldritch_dsl::{
     LfoReset, ModuleKind, SynthDefinition,
 };
 
+// Slot 0 is envelope, 1..=32 are bounded graph nodes; this independent input
+// does not participate in node ordering or consume a module slot.
+pub(crate) const VELOCITY_INPUT: usize = 33;
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ControlNode {
     Lfo {
@@ -39,7 +43,7 @@ pub(crate) struct ControlPlan {
 impl ControlPlan {
     pub fn compile(graph: &SynthDefinition) -> Result<Option<Self>, String> {
         let order = graph.control_order()?;
-        if order.is_empty() {
+        if order.is_empty() && !graph.cables().iter().any(|c| c.from() == "input.velocity") {
             return Ok(None);
         }
         let envelope = graph
@@ -54,6 +58,9 @@ impl ControlPlan {
                 .find(|c| c.to() == endpoint)
                 .ok_or("missing control input")?
                 .from();
+            if source == "input.velocity" {
+                return Ok(VELOCITY_INPUT);
+            }
             let (id, _) = source.split_once('.').ok_or("invalid control source")?;
             if id == envelope.id() {
                 return Ok(0);
@@ -137,7 +144,7 @@ impl ControlPlan {
         gate_rise: bool,
         envelope: f64,
         tempo: Tempo,
-        values: &mut [f64; 33],
+        values: &mut [f64; 34],
         origins: &mut [u64; 32],
         phases: &mut [f64; 32],
     ) -> f64 {

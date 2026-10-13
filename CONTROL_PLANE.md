@@ -18,13 +18,19 @@ Dropped observations are reported and old connection epochs invalidate queued
 events. F9 now binds an explicit active native mono instance while transport is
 stopped. Callback observations carry a binding epoch captured at ingress; new
 bindings/resets discard old queued input. LiveKeyboardWorker accepts timed typed
-keys and their independent Pitch/Gate outputs at one locked worker frontier,
+keys and their independent Pitch/Velocity/Gate outputs at one locked worker frontier,
 then renders the shared MonoState kernel off the audio thread. A fixed timed PCM
 ring feeds the existing output callback. Overflow/disconnect resets clear held keys
 and invalidate buffered audio; accepted pending events remain ordered, with one
 reserved release slot. Mode/selection never retarget held gestures. Source or
 transport changes release binding; source changes start a fresh voice after F9,
-not migrated DSP state. Unsupported controls stay unmapped. Sustain/bend/velocity
+not migrated DSP state. KeyboardKey captures MIDI velocity (0..127); old v1
+captures missing that field default to 127. Last-pressed key ownership restores
+the held key's velocity without a Gate retrigger. A declared `input.velocity`
+Control has unit-interval units, initialized to unity; only explicit compatible
+cables consume it. Offline independent-pattern rendering retains unity at this
+new input; pattern velocity routing is not yet implemented. Legacy note gain is
+unchanged. Unsupported controls stay unmapped. Sustain/bend
 adapters, polyphonic/simultaneous pattern/live routing and timed device replay
 remain unimplemented. MicroLab mk3 discovery and input connection were observed;
 physical key/pedal gestures and listening have not been accepted.

@@ -70,6 +70,13 @@ impl PatchInput {
     pub const fn signal(&self) -> SignalType {
         self.signal
     }
+
+    /// Fixed external-source contract; arbitrary Control units are not inferred.
+    #[must_use]
+    pub fn control_unit(&self) -> Option<ControlUnit> {
+        (self.id == "velocity" && self.signal == SignalType::Control)
+            .then_some(ControlUnit::UnitInterval)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

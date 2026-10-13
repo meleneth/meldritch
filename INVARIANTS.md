@@ -284,6 +284,18 @@ headless worker/callback PCM continuity and zero callback allocation/deallocatio
 not physical deadlines, graph migration or simultaneous arranged/live routing.
 Runtime keys/bindings are not persisted as authored defaults.
 
+Live velocity is a separate unit-interval Control source, never implicit note
+gain or articulation. Its declared `input.velocity` port and explicit cables
+determine consumption; incompatible units and undeclared ports reject atomically.
+Repeated presses replace held velocity; winner release restores prior held pitch
+and velocity without Gate retrigger. Final release/reset holds the last value and
+lowers Gate. Accepted values are MIDI-resolution 0..127; normalization occurs once
+at the graph input. Fresh DSP initializes this Control to unity, independently of
+legacy coupled-note velocity. Offline independent patterns currently leave it at
+unity. Runtime values are captured, never saved as patch defaults; old captures
+without velocity replay at unity. These are bounded mono guarantees, not general
+pattern-velocity routing or controller smoothing requirements.
+
 Acceptance must separately prove source correctness, published/consumed audio,
 state-transition semantics and physical behavior. Conservative full-horizon
 invalidation is the current authoring fallback; it must be reported honestly

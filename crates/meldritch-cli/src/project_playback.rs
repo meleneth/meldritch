@@ -179,8 +179,11 @@ impl ProjectPlaybackHost for NativeProjectAudio {
             .as_deref()
             .map_or(String::new(), |voice| {
                 format!(
-                    " · Live keys → {voice}: held {} · stream gaps {} · F9 release",
+                    " · Live keys → {voice}: held {} · velocity {} · stream gaps {} · F9 release",
                     app.keyboard().held_keys,
+                    app.keyboard()
+                        .velocity
+                        .map_or_else(|| "—".into(), |v| format!("{v}/127")),
                     self.live_control.underruns()
                 )
             });
@@ -358,9 +361,37 @@ mod tests {
         let project = project();
         let source = meldritch_control::native_project::load_native_project(
             project.root(),
-            include_str!("../../../songs/examples/36-patch-lfo/main.project.lua"),
+            include_str!("../../../songs/examples/36-patch-lfo/velocity.project.lua"),
         )
         .unwrap();
+        use meldritch_dsl::{ModuleKind, PatchEdit, PatchOperation};
+        let source = source
+            .edit_patch(&PatchEdit {
+                synth: "bass".into(),
+                operations: vec![
+                    PatchOperation::Instantiate {
+                        id: "touch".into(),
+                        kind: ModuleKind::ControlMultiply,
+                    },
+                    PatchOperation::Disconnect {
+                        from: "shape.control".into(),
+                        to: "amp.level".into(),
+                    },
+                    PatchOperation::Connect {
+                        from: "shape.control".into(),
+                        to: "touch.left".into(),
+                    },
+                    PatchOperation::Connect {
+                        from: "input.velocity".into(),
+                        to: "touch.right".into(),
+                    },
+                    PatchOperation::Connect {
+                        from: "touch.control".into(),
+                        to: "amp.level".into(),
+                    },
+                ],
+            })
+            .unwrap();
         let fingerprint = source.fingerprint();
         let patch =
             compile_pattern_voice(&source, &source.pattern_voices()["bass-instance"]).unwrap();
@@ -384,7 +415,7 @@ mod tests {
         route.observe(&[0x90, 70, 127]); // Old ingress cannot be retargeted by F9.
         host.toggle_keyboard(&mut app).unwrap();
         assert_eq!(app.keyboard().voice.as_deref(), Some("bass-instance"));
-        route.observe(&[0x90, 48, 127]);
+        route.observe(&[0x90, 48, 32]);
         host.poll(&mut app).unwrap();
         app.dispatch(AppCommand::SetCockpitMode(CockpitMode::Performance))
             .unwrap();
@@ -446,7 +477,7 @@ mod tests {
         }
         assert!(heard);
         assert!(app.keyboard().gate); // Held beyond the authored bar and pattern releases.
-        route.observe(&[0x91, 55, 127]);
+        route.observe(&[0x91, 55, 96]);
         host.poll(&mut app).unwrap();
         for _ in 0..6 {
             pump(&mut host, &mut app, &mut callback, &mut reference);
@@ -454,6 +485,7 @@ mod tests {
         route.observe(&[0x91, 55, 0]);
         host.poll(&mut app).unwrap();
         assert_eq!(app.keyboard().pitch, Some(48));
+        assert_eq!(app.keyboard().velocity, Some(32));
         for _ in 0..6 {
             pump(&mut host, &mut app, &mut callback, &mut reference);
         }

@@ -11,7 +11,9 @@ ports and `--port MicroLab --seconds 20` to monitor input without audio or files
 Step entry remains separate from F9's stopped-transport live mono audition.
 While explicitly bound, MIDI keys never insert notes in the visible editor;
 F9 releases audition, and source/transport edits invalidate it. Timed recording
-and explicit velocity/sustain/bend adapters remain future work.
+and sustain/bend adapters remain future work. Explicit live velocity now uses a
+declared unit-interval Control port; authored pattern velocity routing to that
+port remains deferred (existing note velocity behavior is unchanged).
 
 The first piano-roll slice creates and edits a synth-backed note pattern using
 the existing note compiler, background worker and audio publication. Rust owns

@@ -144,8 +144,18 @@ One worker streams 256-frame shared-kernel blocks into a fixed timed PCM ring
 consumed by the existing callback. Ingress epochs, overflow/disconnect cleanup,
 source/transport release, mode continuity and exact held-key PCM beyond a bar are
 checked headlessly. Callback allocation/deallocation tests pass. Physical
-gestures/listening/deadlines, velocity/sustain/bend adapters, polyphonic and
+gestures/listening/deadlines, sustain/bend adapters, polyphonic and
 simultaneous arranged/live routing, and timed device replay remain open.
+Example 36 also accepts bounded live velocity routing headlessly: patches declare
+`input.velocity` Control (unit interval), then explicitly combine it with
+envelopes/LFO controls through existing modules. KeyboardKey captures MIDI
+velocity; older captures missing the field default to unity. Held fallback
+restores pitch/velocity without retrigger. The worker/callback test exercises
+expression, and negative/capture/save-reopen contracts pass. Unwired velocity and
+legacy gain remain unchanged. Offline pattern velocity at this new input and
+interactive external-port declaration editing remain deferred; Lua declarations
+are supported. Read `PATCH_EDITOR.md` and `keyboard-velocity.toml` before extending
+it. Do not claim sustain/bend or physical acceptance.
 Example 35's native pattern-selection checkpoint is implemented: PgUp/PgDn
 selects palette material without rebinding, source/runtime mutation or rerender;
 typed capture and independent-source persistence/render tests pass. Its full

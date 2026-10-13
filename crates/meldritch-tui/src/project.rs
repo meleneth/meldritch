@@ -624,9 +624,12 @@ fn draw_project_construction_selected(
     )));
     for input in graph.inputs() {
         lines.push(Line::from(format!(
-            "input.{} : {:?}",
+            "input.{} : {:?}{}",
             input.id(),
-            input.signal()
+            input.signal(),
+            input
+                .control_unit()
+                .map_or_else(String::new, |unit| format!(" · {unit:?}"))
         )));
     }
     for module in graph.modules() {

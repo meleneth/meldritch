@@ -1,0 +1,36 @@
+# Copy velocity.project.lua to main.project.lua in an empty project.
+# Open with --midi-keyboard MicroLab; apply velocity-patch.txt in Ctrl-G, save,
+# select bass-instance, stop arrangement and press F9. Soft/hard strikes scale
+# the envelope through touch; removing the velocity cable restores fixed gain.
+# This named external input has unit-interval units, initialized to unity.
+# Ordered same-frame outputs: Pitch, Velocity (MIDI value / 127), Gate.
+origin_frame = 5000000000
+initial_velocity = 127
+
+[[keys]]
+offset = 0
+note = 48
+velocity = 32
+pressed = true
+[[keys]]
+offset = 256
+note = 55
+velocity = 96
+pressed = true
+[[keys]]
+offset = 512
+note = 55
+velocity = 0
+pressed = false
+# Restore held C's velocity 32 with pitch, without retriggering its envelope.
+[[keys]]
+offset = 768
+note = 48
+velocity = 64
+pressed = true
+[[keys]]
+offset = 1024
+note = 48
+velocity = 0
+pressed = false
+# Release holds pitch/velocity; only Gate goes low.

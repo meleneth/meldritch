@@ -7,7 +7,7 @@ pub(super) struct MonoState {
     filter: StateVariableFilter,
     pub frequency: f64,
     pub velocity: f64,
-    control_values: [f64; 33],
+    control_values: [f64; 34],
     control_origins: [u64; 32],
     control_phases: [f64; 32],
     tempo: meldritch_core::Tempo,
@@ -28,7 +28,12 @@ impl MonoState {
             } else {
                 0.0
             },
-            control_values: [0.0; 33],
+            control_values: {
+                let mut values = [0.0; 34];
+                // Independent external Control, separate from legacy note gain.
+                values[crate::song_control::VELOCITY_INPUT] = 1.0;
+                values
+            },
             control_origins: [0; 32],
             control_phases: [0.0; 32],
             tempo: meldritch_core::Tempo::new(patch.bpm, patch.sample_rate)
@@ -97,6 +102,9 @@ impl MonoState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LiveVoiceInput {
     Pitch(u8),
+    /// MIDI resolution, explicitly normalized to unit interval at input.velocity.
+    /// Never changes articulation or implicit note gain.
+    Velocity(u8),
     Gate(bool),
 }
 
@@ -172,6 +180,9 @@ impl LiveMonoRenderer {
             if matches!(event.input, LiveVoiceInput::Pitch(pitch) if pitch > 127) {
                 return Err(invalid("live pitch must be in 0..127"));
             }
+            if matches!(event.input, LiveVoiceInput::Velocity(value) if value > 127) {
+                return Err(invalid("live velocity must be in 0..127"));
+            }
             previous = event.frame;
         }
         // All validation completes before any state advance or event application.
@@ -182,6 +193,10 @@ impl LiveMonoRenderer {
             while events.peek().is_some_and(|event| event.frame == frame) {
                 match events.next().unwrap().input {
                     LiveVoiceInput::Pitch(pitch) => self.state.frequency = midi_frequency(pitch),
+                    LiveVoiceInput::Velocity(value) => {
+                        self.state.control_values[crate::song_control::VELOCITY_INPUT] =
+                            f64::from(value) / 127.0
+                    }
                     LiveVoiceInput::Gate(true) => {
                         self.state.gate_on(1.0);
                         self.gate = true;

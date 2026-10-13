@@ -15,6 +15,7 @@ pub struct KeyboardView {
     pub epoch: u64,
     pub frame: u64,
     pub pitch: Option<u8>,
+    pub velocity: Option<u8>,
     pub gate: bool,
     pub held_keys: usize,
 }
@@ -23,7 +24,7 @@ pub struct KeyboardView {
 pub(crate) struct KeyboardState {
     pub view: KeyboardView,
     // Ordered oldest to newest; channel is part of identity. Never above 128.
-    held: Vec<(u8, u8)>,
+    held: Vec<(u8, u8, u8)>,
 }
 
 impl KeyboardState {
@@ -106,17 +107,21 @@ impl AppController {
                 epoch,
                 channel,
                 note,
+                velocity,
                 pressed,
                 ..
             } => {
                 if *epoch != previous.epoch || previous.voice.is_none() {
                     return Err(fail("keyboard event has no current binding"));
                 }
-                if *channel > 15 || *note > 127 {
-                    return Err(fail("invalid keyboard channel or pitch"));
+                if *channel > 15 || *note > 127 || *velocity > 127 {
+                    return Err(fail("invalid keyboard channel, pitch or velocity"));
                 }
-                let key = (*channel, *note);
-                let index = self.keyboard.held.iter().position(|held| *held == key);
+                let index = self
+                    .keyboard
+                    .held
+                    .iter()
+                    .position(|held| held.0 == *channel && held.1 == *note);
                 if *pressed {
                     if index.is_none() && self.keyboard.held.len() == KeyboardState::MAX_HELD {
                         return Err(fail(
@@ -126,17 +131,26 @@ impl AppController {
                     if let Some(index) = index {
                         self.keyboard.held.remove(index);
                     }
-                    self.keyboard.held.push(key);
+                    self.keyboard.held.push((*channel, *note, *velocity));
                     self.keyboard.view.pitch = Some(*note);
+                    self.keyboard.view.velocity = Some(*velocity);
                     self.keyboard.view.gate = true;
-                    outputs.extend([LiveVoiceInput::Pitch(*note), LiveVoiceInput::Gate(true)]);
+                    outputs.extend([
+                        LiveVoiceInput::Pitch(*note),
+                        LiveVoiceInput::Velocity(*velocity),
+                        LiveVoiceInput::Gate(true),
+                    ]);
                 } else if let Some(index) = index {
                     let was_winner = index + 1 == self.keyboard.held.len();
                     self.keyboard.held.remove(index);
                     if was_winner {
-                        if let Some((_, pitch)) = self.keyboard.held.last() {
+                        if let Some((_, pitch, velocity)) = self.keyboard.held.last() {
                             self.keyboard.view.pitch = Some(*pitch);
-                            outputs.push(LiveVoiceInput::Pitch(*pitch));
+                            self.keyboard.view.velocity = Some(*velocity);
+                            outputs.extend([
+                                LiveVoiceInput::Pitch(*pitch),
+                                LiveVoiceInput::Velocity(*velocity),
+                            ]);
                         } else {
                             self.keyboard.view.gate = false;
                             outputs.push(LiveVoiceInput::Gate(false));

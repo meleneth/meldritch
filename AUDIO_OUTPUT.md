@@ -21,6 +21,9 @@ stale/late/backpressure negatives and zero callback allocation/deallocation.
 CLI keyboard audition tests compare production worker/callback PCM with the
 shared renderer past a full authored bar and cover input loss and capture facts.
 Physical listening/deadlines and timed replay remain unverified.
+The production worker/callback test now uses an explicitly wired velocity
+Control and restores held-key expression; velocity evaluation stays on the DSP
+worker. No implicit gain, callback modulation or new device stream is introduced.
 Capture checkpoint failure releases audition through typed cleanup retained for
 retry, so filesystem failure cannot indefinitely sustain a keyboard gate.
 

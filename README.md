@@ -51,7 +51,13 @@ active mono instance for held-key audition; F9 again releases it. Wait through t
 device's four-second startup mute and 100 ms fade. Mode/selection changes preserve
 the binding; starting transport or editing authored source releases it. Held keys
 do not create pattern notes, even with the pattern editor open. The same worker
-DSP continues across short streaming blocks. Sustain/bend, live velocity routing,
+DSP continues across short streaming blocks. A declared `input.velocity` Control
+input now carries strike velocity / 127; its cables decide what velocity changes.
+Copy example 36's `velocity.project.lua` as `main.project.lua`, then apply
+`velocity-patch.txt` in Ctrl-G to multiply the envelope by strike velocity and
+Ctrl-S to save. The inspector shows unit-interval units. Unwired velocity has no
+effect; held-key fallback restores pitch and velocity without retriggering.
+Sustain/bend,
 simultaneous pattern/live routing and timed recording remain queued.
 Port matching is explicit and rejects ambiguity; reconnect retries
 without accepting stale messages. Headless entry/publication/persistence tests

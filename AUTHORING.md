@@ -93,7 +93,12 @@ audition, ingress binding epochs and overflow/disconnect resets to a shared-kern
 worker and bounded timed PCM callback lane. Arrangement must be stopped; source
 or transport edits release it, and mode/selection preserve it. Headless held-key
 audio/capture and callback allocation safety pass; physical listening is pending.
-Next author the smallest explicit velocity/sustain/bend signal adapter example,
+Example 36 now accepts explicit keyboard velocity through a declared unit-interval
+Control, the existing multiplier and shared worker. Soft/hard strikes, held-key
+expression restoration, rejection, capture reconstruction and save/reopen pass
+headlessly; unconnected velocity cannot change gain. Pattern velocity remains
+unrouted at this input; external declaration editing still requires Lua.
+Next author the smallest explicit sustain/bend adapter example,
 keeping pitch/gate independent and reusing this path. Simultaneous arranged/live
 routing and broader clock/graph activation require separate accepted contracts.
 Reuse it with the existing voice compiler, scheduler and safe worker/

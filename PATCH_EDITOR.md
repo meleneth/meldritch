@@ -1,5 +1,17 @@
 # Compose a typed patch
 
+Native mono patches may declare `{ id = "velocity", signal = "control" }`.
+The inspector identifies `input.velocity` as unit interval; keyboard F9 audition
+supplies strike velocity / 127 independently of pitch and gate. To make amplitude
+respond, explicitly multiply envelope/control output by velocity before VCA
+level. Example 36's `velocity.project.lua` and atomic `velocity-patch.txt` show
+that wiring. Any compatible unit-interval destination can consume this input;
+bipolar or Hertz destinations require their existing explicit adapters. No cable
+means no velocity effect. Fresh/offline independent-pattern instances initialize
+this input to unity; routing authored pattern velocity is deferred. The current
+editor preserves external declarations, so adding that port requires readable
+Lua authoring/import. General input-declaration editing remains open.
+
 This is the accepted bounded construction editor. Project transactions, authored
 normalization, patch-owned interfaces and quantized stateful activation extend
 this boundary; see [ARCHITECTURE.md](ARCHITECTURE.md). Continued playback currently

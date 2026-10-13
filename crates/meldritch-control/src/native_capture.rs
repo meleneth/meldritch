@@ -70,13 +70,13 @@ pub fn load_native_capture_baseline(
 // One bounded serialization boundary. The two conversions are generated from
 // the same vocabulary so capture cannot silently discard command arguments.
 macro_rules! native_commands {
-    (units { $($unit:ident),* } tuples { $($tuple:ident($argument:ident: $ty:ty)),* } structs { $($name:ident { $($field:ident: $field_ty:ty),* }),* }) => {
+    (units { $($unit:ident),* } tuples { $($tuple:ident($argument:ident: $ty:ty)),* } structs { $($name:ident { $($(#[$attribute:meta])* $field:ident: $field_ty:ty),* }),* }) => {
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         #[serde(tag = "kind", content = "value", rename_all = "snake_case", deny_unknown_fields)]
         pub enum NativeProjectCommand {
             $($unit,)*
             $($tuple($ty),)*
-            $($name { $($field: $field_ty),* },)*
+            $($name { $($(#[$attribute])* $field: $field_ty),* },)*
         }
         impl TryFrom<&AppCommand> for NativeProjectCommand {
             type Error = String;
@@ -100,12 +100,15 @@ macro_rules! native_commands {
         }
     }
 }
+fn unity_keyboard_velocity() -> u8 {
+    127
+}
 native_commands! {
     units { Play, Stop, Rewind, TogglePatternEditor, ToggleInstrumentEditor, TogglePatchEditor, PatchBackspace, PatchSubmit, SavePattern, SaveInstrument, SaveProject }
     tuples { CreateComposition(definition: CompositionDefinition), SelectComposition(id: String), SelectPatternVoice(id: String), CreatePatch(creation: PatchCreation), EditPatch(edit: PatchEdit), CreatePatternVoice(voice: PatternVoiceDefinition), EditInstrument(edit: InstrumentEdit), SelectInstrument(id: String), SelectPalettePattern(id: String), PatchCharacter(character: char), PatchScroll(delta: i32), SetCockpitMode(mode: CockpitMode) }
     structs {
         BindKeyboard { voice: Option<String>, frame: u64 },
-        KeyboardKey { epoch: u64, frame: u64, channel: u8, note: u8, pressed: bool },
+        KeyboardKey { epoch: u64, frame: u64, channel: u8, note: u8, #[serde(default = "unity_keyboard_velocity")] velocity: u8, pressed: bool },
         ResetKeyboard { epoch: u64, frame: u64, reason: KeyboardResetReason },
         SetCompositionMember { composition: String, voice: String, included: bool },
         ExposeOutputLevel { synth: String, control: String },

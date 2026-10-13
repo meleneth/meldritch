@@ -124,7 +124,8 @@ impl LiveKeyboardWorker {
         else {
             return Ok(());
         };
-        if state.events.len() > 125 {
+        // Three outputs per press, with one slot reserved for loss cleanup.
+        if state.events.len() > 124 {
             return Err("keyboard pending event budget exceeded".into());
         }
         let result = app.dispatch(command).map_err(|e| format!("{e:?}"))?;
@@ -290,7 +291,7 @@ mod tests {
         };
         worker.bind(&mut app, Some("bass-instance".into())).unwrap();
         let epoch = app.keyboard().epoch;
-        for note in 0..63 {
+        for note in 0..42 {
             worker.key(&mut app, &[0x90, note, 127], epoch).unwrap();
         }
         let before = app.keyboard().clone();

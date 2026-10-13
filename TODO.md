@@ -514,6 +514,23 @@ affected all-targets Clippy with the existing allowances, formatting/diff checks
 and documentation build pass. Historical 09/29 fingerprints remain
 `41472b38b65b60ed` / `54745c74a42665cf`.
 
+Keyboard velocity checkpoint: native patches may explicitly declare unit-interval
+`input.velocity`. KeyboardKey captures MIDI-resolution velocity; older captures
+missing the field default to unity. The shared mono kernel feeds only explicit
+Control cables; legacy gain and unconnected patches stay unchanged. Existing
+ControlMultiply combines envelope/LFO shape with velocity. Last-pressed priority
+restores held pitch/velocity without Gate retrigger. Example 36 adds a readable
+velocity project, atomic patch draft, timed trace and negative contract. Typed
+capture reconstruction, soft/hard gain references, save/reopen, atomic input/unit
+failures and real worker/callback PCM pass headlessly. Offline independent-pattern
+velocity stays unity; pattern routing, input-declaration editing, sustain/bend,
+polyphony/simultaneous routing, timed device replay and physical evidence remain
+open. This bounded checkpoint does not complete example 36's broader contract.
+Verification: focused keyboard acceptance and final offline workspace suite pass;
+affected all-targets Clippy with established allowances, formatting/diff checks
+and docs build pass. Historical 09/29 fingerprints remain
+`41472b38b65b60ed` / `54745c74a42665cf`. Physical listening remains unverified.
+
 Investigation and ownership decisions: [AUTHORING.md](AUTHORING.md). The first
 implemented slice is [the instrument editor](INSTRUMENT_EDITOR.md): example 25
 has automated headless acceptance; example 29 now accepts bounded

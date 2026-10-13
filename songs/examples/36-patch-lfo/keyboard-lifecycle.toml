@@ -8,13 +8,13 @@ offset = 0
 channel = 0
 note = 48
 pressed = true
-outputs = ["pitch:48", "gate:true"]
+outputs = ["pitch:48", "velocity:127", "gate:true"]
 [[keys]]
 offset = 100
 channel = 1
 note = 55
 pressed = true
-outputs = ["pitch:55", "gate:true"]
+outputs = ["pitch:55", "velocity:127", "gate:true"]
 [[keys]]
 offset = 200
 channel = 0
@@ -26,19 +26,19 @@ offset = 300
 channel = 0
 note = 60
 pressed = true
-outputs = ["pitch:60", "gate:true"]
+outputs = ["pitch:60", "velocity:127", "gate:true"]
 [[keys]]
 offset = 400
 channel = 0
 note = 60
 pressed = true
-outputs = ["pitch:60", "gate:true"]
+outputs = ["pitch:60", "velocity:127", "gate:true"]
 [[keys]]
 offset = 500
 channel = 0
 note = 60
 pressed = false
-outputs = ["pitch:55"]
+outputs = ["pitch:55", "velocity:127"]
 [[keys]]
 offset = 600
 channel = 1

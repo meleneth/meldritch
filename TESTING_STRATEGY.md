@@ -1,5 +1,14 @@
 # Testing Strategy
 
+Example 36's explicit keyboard velocity tests compare wired gain against an
+unscaled reference, verify unity/zero bounds and held-expression restoration,
+then persist/reconstruct the typed capture and reload the authored graph.
+Undeclared/wrong-type/unit/duplicate cables and out-of-range velocity reject
+atomically, including worker DSP state/cursor. Existing production worker/callback
+audition acceptance now exercises differing velocities and fallback. Continue
+checking legacy fingerprints and callback allocation safety; physical listening
+and timed device replay require separate evidence.
+
 The engine should be tested like a compiler and like an audio system.
 
 ## Next-architecture acceptance obligations

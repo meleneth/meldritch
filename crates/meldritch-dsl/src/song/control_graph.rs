@@ -250,7 +250,7 @@ impl SynthDefinition {
             })
             .map(|m| m.id.as_str())
             .collect();
-        if controls.is_empty() {
+        if controls.is_empty() && !self.cables.iter().any(|c| c.from == "input.velocity") {
             if self.cables.iter().any(|c| c.to.ends_with(".cutoff")) {
                 return Err("filter cutoff requires an explicit Hertz adapter".into());
             }
@@ -286,6 +286,18 @@ impl SynthDefinition {
                 .from
                 .split_once('.')
                 .ok_or("invalid control endpoint")?;
+            if id == "input" && port == "velocity" {
+                if cable.signal != SignalType::Control
+                    || !graph
+                        .inputs
+                        .iter()
+                        .any(|i| i.id == "velocity" && i.signal == SignalType::Control)
+                    || expected != ControlUnit::UnitInterval
+                {
+                    return Err("input.velocity requires a declared unit-interval Control source and compatible destination".into());
+                }
+                return Ok(());
+            }
             let module = graph
                 .modules
                 .iter()

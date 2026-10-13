@@ -173,7 +173,10 @@ identical worker events/PCM without changing authored source. Native F9 now
 connects stopped-transport mono audition, epoch-tagged ingress and loss cleanup
 to the existing callback through a bounded timed PCM ring and shared-DSP worker.
 Headless held-key PCM, source/runtime capture and callback allocation safety pass.
-Next accept explicit velocity/sustain/bend adapters and physical interaction.
+Explicit keyboard velocity now has a unit-interval Control port and existing
+combiner wiring, with soft/hard/fallback, capture and persistence acceptance.
+Next accept sustain/bend adapters and physical interaction; pattern velocity and
+interactive external-input declaration editing remain separate gaps.
 Simultaneous arranged/live routing, MIDI/device timestamp mapping, timed replay
 and graph-state preservation remain separate unfinished contracts.
 

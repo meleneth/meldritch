@@ -1,0 +1,3 @@
+cases = ["velocity-128", "velocity-255", "undeclared-input", "wrong-signal", "bipolar-destination", "duplicate-cable"]
+# Rejected keys/blocks preserve runtime state, DSP cursor and accepted journal.
+# Rejected graph edits preserve authored source and published audio.
