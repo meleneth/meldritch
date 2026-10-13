@@ -85,6 +85,7 @@ fn lazy_typed_capture_reconstructs_source_runtime_and_pcm_after_history_eviction
             pitch_pattern: None,
             gate_pattern: None,
             velocity_pattern: None,
+            sustain_pattern: None,
         }),
         AppCommand::BindPatternVoice {
             voice: "voice-1-instance".into(),

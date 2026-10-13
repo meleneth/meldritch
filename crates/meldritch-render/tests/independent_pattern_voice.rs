@@ -48,6 +48,7 @@ fn source() -> ValidatedSong {
         pitch_pattern: Some("pitch".into()),
         gate_pattern: Some("gate".into()),
         velocity_pattern: None,
+        sustain_pattern: None,
     })
     .unwrap()
 }

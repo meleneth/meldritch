@@ -579,6 +579,16 @@ cables, hold across note ends and never own articulation or pitch. Headless test
 prove independent amplitude references over two loops, exact split PCM, uncabled
 neutrality, typed capture, edited-note rerender, atomic negatives and authored
 save/reopen. General event processors/cadence and physical listening remain open.
+Independent pattern-sustain checkpoint: `pattern-sustain.project.lua` binds a
+third timed pattern to explicit input.sustain Gate and GateHold. Typed native `h`
+binding, same-frame hold-before-gate ordering, independent pitch, exact resolved
+gate/two-loop/partition PCM, invalid relationships, and authored save/reopen are
+covered headlessly. General gate processors/Plaits and physical listening remain
+open.
+Verification: focused sustain tests, offline workspace suite, all-targets Clippy
+with existing compatibility allowances, formatting/diff checks and docs build
+pass. Historical 09/29 fingerprints remain `41472b38b65b60ed` /
+`54745c74a42665cf`.
 Verification: focused pattern-velocity tests, offline workspace suite, affected
 all-targets Clippy, formatting/diff checks and docs build pass. Historical
 09/29 fingerprints remain `41472b38b65b60ed` / `54745c74a42665cf`.

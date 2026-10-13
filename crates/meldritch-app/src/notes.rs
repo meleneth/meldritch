@@ -53,6 +53,7 @@ impl AppController {
             if voice.pitch_pattern.as_deref() == Some(pattern)
                 || voice.gate_pattern.as_deref() == Some(pattern)
                 || voice.velocity_pattern.as_deref() == Some(pattern)
+                || voice.sustain_pattern.as_deref() == Some(pattern)
             {
                 dirty.extend(ranges.iter().map(|range| {
                     DirtyRange::new(

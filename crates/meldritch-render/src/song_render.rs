@@ -330,6 +330,7 @@ struct CompiledPatternSignals {
     pitch: Vec<CompiledNoteEvent>,
     gate: Vec<CompiledNoteEvent>,
     velocity: Vec<CompiledNoteEvent>,
+    sustain: Vec<CompiledNoteEvent>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -787,17 +788,34 @@ impl CompiledNotePatch {
         let mut block = AudioBlock::silent(self.channels, frames);
         let mut state = mono::MonoState::new(self)?;
         let mut active_end = None;
+        let mut sustain_end = None;
         for absolute_frame in 0..range.end() {
             let mut gate_rise = false;
-            if active_end == Some(absolute_frame) {
-                state.gate_off();
-                active_end = None;
-            }
             let pattern_frame = if self.looped {
                 absolute_frame % self.pattern_length
             } else {
                 absolute_frame
             };
+            if let Some(signals) = &self.independent_signals {
+                if sustain_end == Some(absolute_frame)
+                    || (self.looped && absolute_frame > 0 && pattern_frame == 0)
+                {
+                    state.set_hold(false);
+                    sustain_end = None;
+                }
+                for event in signals
+                    .sustain
+                    .iter()
+                    .filter(|event| event.start == pattern_frame)
+                {
+                    state.set_hold(true);
+                    sustain_end = Some(absolute_frame + (event.end - event.start));
+                }
+            }
+            if active_end == Some(absolute_frame) {
+                state.gate_off();
+                active_end = None;
+            }
             if self.looped && absolute_frame > 0 && pattern_frame == 0 {
                 state.gate_off();
                 active_end = None;
@@ -1477,6 +1495,7 @@ pub fn compile_pattern_voice(
                 velocity: event.velocity(),
             })
             .collect(),
+        sustain: events(&voice.sustain_pattern),
     }));
     Ok(patch)
 }

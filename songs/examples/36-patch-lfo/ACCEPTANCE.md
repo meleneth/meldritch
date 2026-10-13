@@ -479,6 +479,33 @@ uncabled neutrality, TUI `u` binding, typed capture reconstruction, bound-voice
 dirty range and edited audio, and authored store reload. All `invalid/pattern-velocity.toml`
 cases reject before accepted source/history or render behavior changes.
 
+## Independent pattern sustain checkpoint
+
+`pattern-sustain.project.lua` binds a third note pattern to declared
+`input.sustain` Gate. The pattern's timed intervals set hold high/low; note pitch
+and velocity do not affect it. Its output changes sound only through the
+inspectable `gate_hold` processor and cables. An unbound hold is low. Pattern
+length and loop policy match the voice; overlapping hold intervals reject.
+
+At a shared frame, an expiring hold falls before a new hold rises; hold rise
+precedes physical gate fall, then pitch/velocity updates precede physical gate
+rise. A hold rise coinciding with a key-gate fall defers release; a hold fall
+after the key gate is low releases the envelope. At loop boundaries old hold
+falls, the new hold start is applied, then the old physical gate falls before
+new pitch/velocity and gate starts. No pedal state or authored defaults
+are changed by this pattern relationship. Editing the bound hold pattern dirties
+the voice. The native `h` key toggles its typed binding; project save/reopen
+retains the relation without saving runtime envelope state.
+
+`pattern_sustain.rs` must prove exact PCM against an independently extended
+physical gate, full/split two-loop rendering, audible hold/release, typed
+binding, source fingerprint and save/reopen. `invalid/pattern-sustain.toml`
+must reject undeclared/wrong ports, bad pattern references/clocks, overlapping
+events, sample events and invalid note edits without changing accepted source.
+This is a bounded mono event-to-Gate bridge in the existing scheduler. General
+gate routing, quantized event processors, Plaits lowering and simultaneous
+arrangement/live input are future work.
+
 Broader explicit addition/clamping,
 event/control-rate latching and global/per-voice scopes
 remain requirements. Reset/stop/rewind and composition clocks need their full scope

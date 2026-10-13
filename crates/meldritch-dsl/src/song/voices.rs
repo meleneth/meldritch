@@ -7,11 +7,12 @@ pub enum PatternSignal {
     Pitch,
     Gate,
     Velocity,
+    Sustain,
 }
 
 /// One mono patch instance with independently authored input bindings.
 /// Unbound pitch holds initial_pitch; unbound gate is low; unbound velocity is
-/// unity. No pattern signal is implicitly carried by either of the others.
+/// unity; unbound sustain is low. No pattern signal is implicitly carried by another.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatternVoiceDefinition {
@@ -25,6 +26,8 @@ pub struct PatternVoiceDefinition {
     pub gate_pattern: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub velocity_pattern: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sustain_pattern: Option<String>,
 }
 
 impl ValidatedSong {
@@ -106,6 +109,14 @@ impl ValidatedSong {
         {
             return Err("velocity pattern requires typed input.velocity Control".into());
         }
+        if voice.sustain_pattern.is_some()
+            && !synth
+                .inputs
+                .iter()
+                .any(|input| input.id == "sustain" && input.signal == SignalType::Gate)
+        {
+            return Err("sustain pattern requires typed input.sustain Gate".into());
+        }
         let length = self.authoring_frame(voice.length_ticks)?;
         if length == 0
             || voice.initial_pitch > 127
@@ -118,6 +129,7 @@ impl ValidatedSong {
             (PatternSignal::Pitch, &voice.pitch_pattern),
             (PatternSignal::Gate, &voice.gate_pattern),
             (PatternSignal::Velocity, &voice.velocity_pattern),
+            (PatternSignal::Sustain, &voice.sustain_pattern),
         ] {
             let Some(id) = binding else { continue };
             let pattern = self
@@ -140,7 +152,7 @@ impl ValidatedSong {
                     PatternSignal::Pitch | PatternSignal::Velocity => {
                         previous.start_frame == event.start_frame
                     }
-                    PatternSignal::Gate => {
+                    PatternSignal::Gate | PatternSignal::Sustain => {
                         previous.start_frame + previous.duration_frames > event.start_frame
                     }
                 }) {
@@ -192,6 +204,7 @@ impl ValidatedSong {
             PatternSignal::Pitch => definition.pitch_pattern = pattern,
             PatternSignal::Gate => definition.gate_pattern = pattern,
             PatternSignal::Velocity => definition.velocity_pattern = pattern,
+            PatternSignal::Sustain => definition.sustain_pattern = pattern,
         }
         next.validate_pattern_voice(&next.pattern_voices[voice])?;
         next.refresh_authoring_fingerprint();
@@ -216,6 +229,10 @@ impl ValidatedSong {
             fingerprint.optional_string(voice.gate_pattern.as_deref());
             if let Some(id) = &voice.velocity_pattern {
                 fingerprint.string("independent-velocity-pattern-v1");
+                fingerprint.string(id);
+            }
+            if let Some(id) = &voice.sustain_pattern {
+                fingerprint.string("independent-sustain-pattern-v1");
                 fingerprint.string(id);
             }
         }

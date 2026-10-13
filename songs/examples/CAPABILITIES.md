@@ -33,6 +33,10 @@ negative edits, capture, exact save/reopen PCM and runtime reset pass headlessly
 The independent pattern-velocity checkpoint adds native `u` binding, held
 Control values across note ends/loops, independent amplitude/partition references,
 typed capture, invalid-case rejection and authored save/reopen.
+The independent pattern-sustain checkpoint adds native `h` binding from timed
+pattern intervals to explicit GateHold input. Exact two-loop/partition PCM,
+same-frame hold/gate order, invalid relationships and authored save/reopen pass
+headlessly; general gate/event routing and physical listening remain open.
 Physical listening/deadlines, general gate routing, broader external input types,
 simultaneous arranged/live routing and timed device replay remain open; full
 status stays `design`.
