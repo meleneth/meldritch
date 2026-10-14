@@ -202,6 +202,20 @@ authored save/reopen. A cabled Hertz rate still integrates every sample.
 General event transforms, variable event cadence and shared/global scopes
 remain open.
 
+## Independent sustain Gate sampling checkpoint
+
+Apply `sustain-event-patch.txt` to `pattern-sustain.project.lua`. The declared
+`input.sustain` Gate fans out to GateHold and `slow.sample`; `input.gate` still
+feeds GateHold and owns ADSR articulation. A low-to-high sustain transition
+samples the free-running LFO once. Repeated high messages and note retriggers
+do not resample. An optional explicit `input.sustain → slow.reset` cable resets
+phase before a same-frame sample. This route requires the supported mono
+GateHold topology; a plain patch cannot use sustain as a hidden control source.
+Independent note/sustain pattern timing, exact sample PCM, split/offline and
+partitioned live rendering, duplicate-driver rejection, typed capture and
+authored save/reopen must pass headlessly. This does not add general Gate or
+Event processing.
+
 ## Rate checkpoint: one modulator changes another's speed
 
 Apply rate-patch.txt to the base patch or its pitch/filter/depth extensions.

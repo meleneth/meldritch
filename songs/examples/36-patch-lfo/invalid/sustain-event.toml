@@ -1,0 +1,6 @@
+# These edits must reject atomically against sustain-event-patch.txt.
+[[case]]
+kind = "duplicate_sample_driver"
+
+[[case]]
+kind = "sustain_sample_without_gate_hold"

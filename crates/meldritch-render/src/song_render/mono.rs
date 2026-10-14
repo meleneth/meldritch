@@ -10,6 +10,7 @@ pub(super) struct MonoState {
     gate_hold: bool,
     physical_gate: bool,
     hold: bool,
+    pending_hold_rise: bool,
     resolved_gate: bool,
     control_values: [f64; 35],
     control_origins: [u64; 32],
@@ -27,6 +28,7 @@ impl MonoState {
             gate_hold: patch.gate_hold,
             physical_gate: false,
             hold: false,
+            pending_hold_rise: false,
             resolved_gate: false,
             oscillator: NoteOscillator::new(patch.waveform, patch.plaits),
             envelope: AdsrEnvelope::new(patch.envelope, patch.sample_rate),
@@ -75,6 +77,7 @@ impl MonoState {
         if !self.gate_hold {
             return;
         }
+        self.pending_hold_rise |= high && !self.hold;
         self.hold = high;
         if !high && !self.physical_gate && self.resolved_gate {
             self.gate_off();
@@ -90,10 +93,12 @@ impl MonoState {
         resonance_override: Option<f64>,
     ) -> f64 {
         let envelope_value = self.envelope.next_value();
+        let sustain_rise = std::mem::take(&mut self.pending_hold_rise);
         let level = patch.control.as_ref().map_or(envelope_value, |plan| {
             plan.value_at(
                 age,
                 gate_rise,
+                sustain_rise,
                 envelope_value,
                 self.tempo,
                 &mut self.control_values,

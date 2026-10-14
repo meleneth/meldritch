@@ -16,6 +16,8 @@ pub(crate) enum ControlNode {
     Lfo {
         settings: GraphLfoSettings,
         rate: Option<usize>,
+        reset_sustain: bool,
+        sample_sustain: bool,
     },
     Scale {
         input: usize,
@@ -91,18 +93,26 @@ impl ControlPlan {
         for id in &order {
             let module = graph.modules().iter().find(|m| m.id() == id).unwrap();
             nodes.push(match module.kind() {
-                ModuleKind::Lfo => ControlNode::Lfo {
-                    settings: module.lfo().unwrap(),
-                    rate: if graph
-                        .cables()
-                        .iter()
-                        .any(|c| c.to() == format!("{id}.rate"))
-                    {
-                        Some(resolve(&format!("{id}.rate"))?)
-                    } else {
-                        None
-                    },
-                },
+                ModuleKind::Lfo => {
+                    ControlNode::Lfo {
+                        settings: module.lfo().unwrap(),
+                        reset_sustain: graph.cables().iter().any(|c| {
+                            c.from() == "input.sustain" && c.to() == format!("{id}.reset")
+                        }),
+                        sample_sustain: graph.cables().iter().any(|c| {
+                            c.from() == "input.sustain" && c.to() == format!("{id}.sample")
+                        }),
+                        rate: if graph
+                            .cables()
+                            .iter()
+                            .any(|c| c.to() == format!("{id}.rate"))
+                        {
+                            Some(resolve(&format!("{id}.rate"))?)
+                        } else {
+                            None
+                        },
+                    }
+                }
                 ModuleKind::ControlScale => ControlNode::Scale {
                     input: resolve(&format!("{id}.control"))?,
                     settings: module.scale().unwrap(),
@@ -165,6 +175,7 @@ impl ControlPlan {
         &self,
         frame: u64,
         gate_rise: bool,
+        sustain_rise: bool,
         envelope: f64,
         tempo: Tempo,
         values: &mut [f64; 35],
@@ -175,8 +186,23 @@ impl ControlPlan {
         values[0] = envelope;
         for (index, node) in self.nodes.iter().enumerate() {
             values[index + 1] = match node {
-                ControlNode::Lfo { settings, rate } => {
-                    if gate_rise && settings.reset == LfoReset::GateRise {
+                ControlNode::Lfo {
+                    settings,
+                    rate,
+                    reset_sustain,
+                    sample_sustain,
+                } => {
+                    let reset_rise = if *reset_sustain {
+                        sustain_rise
+                    } else {
+                        gate_rise
+                    };
+                    let sample_rise = if *sample_sustain {
+                        sustain_rise
+                    } else {
+                        gate_rise
+                    };
+                    if reset_rise && settings.reset == LfoReset::GateRise {
                         origins[index] = frame;
                     }
                     let mut source = Lfo {
@@ -194,7 +220,7 @@ impl ControlPlan {
                         seed: 0,
                     };
                     let instantaneous = if let Some(rate) = rate {
-                        if frame == 0 || (gate_rise && settings.reset == LfoReset::GateRise) {
+                        if frame == 0 || (reset_rise && settings.reset == LfoReset::GateRise) {
                             phases[index] = settings.phase;
                         }
                         source.phase = phases[index];
@@ -210,14 +236,14 @@ impl ControlPlan {
                         ControlEvaluation::Audio => instantaneous,
                         ControlEvaluation::Control { period_frames } => {
                             if frame % u64::from(period_frames) == 0
-                                || (gate_rise && settings.reset == LfoReset::GateRise)
+                                || (reset_rise && settings.reset == LfoReset::GateRise)
                             {
                                 latches[index] = instantaneous;
                             }
                             latches[index]
                         }
                         ControlEvaluation::Event => {
-                            if gate_rise {
+                            if sample_rise {
                                 latches[index] = instantaneous;
                             }
                             latches[index]

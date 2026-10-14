@@ -91,6 +91,9 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 3 Gate-event sample: explicit LFO sample cable, zero-before-first
   latch, independent reset/sample ordering, GateHold source fan-out, variable-rate
   phase continuity, capture/save/reopen and semantic cadence fingerprints
+- [x] Slice 3 sustain Gate sampling: declared pedal Gate fans out to GateHold
+  and LFO sample/reset; transition-only timing, independent note retrigger,
+  pattern/live sample references, capture and authored reopen pass headlessly
 - [ ] Slice 3 next: broader instantiation scopes and general Event consumers
 - [x] User-prioritized MIDI keyboard checkpoint: MicroLab/generic input selection,
   diagnostic, bounded reconnect queue, construction pattern entry with velocity,

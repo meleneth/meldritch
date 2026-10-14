@@ -1,0 +1,15 @@
+# Apply to pattern-sustain.project.lua. The pedal Gate feeds hold and samples
+# a free-running LFO; note Gate still owns envelope articulation.
+clear
+add slow lfo
+lfo slow sine beats 1.3 phase 0 reset none sample gate_rise
+add unipolar control_scale
+add shape control_multiply
+scale unipolar 0.5 0.5 0 1
+disconnect env.control amp.level
+connect input.sustain slow.sample
+connect slow.control unipolar.control
+connect env.control shape.left
+connect unipolar.control shape.right
+connect shape.control amp.level
+commit
