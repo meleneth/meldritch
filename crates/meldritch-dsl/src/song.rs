@@ -3848,6 +3848,7 @@ fn resolve_port(
         (ModuleKind::PitchModulate, _, "pitch") => SignalType::Pitch,
         (ModuleKind::PitchModulate, PortDirection::Input, "control") => SignalType::Control,
         (ModuleKind::Lfo, PortDirection::Input, "reset") => SignalType::Gate,
+        (ModuleKind::Lfo, PortDirection::Input, "sample") => SignalType::Gate,
         (
             ModuleKind::Lfo | ModuleKind::ControlScale | ModuleKind::ControlMultiply,
             PortDirection::Output,
@@ -4825,6 +4826,18 @@ fn fingerprint_song(
                 }
                 fingerprint.u64(settings.phase.to_bits());
                 fingerprint.u64(settings.reset as u64);
+                // Preserve historical audio-rate fingerprints while making
+                // the authored latch contract a distinct semantic input.
+                match settings.evaluation {
+                    ControlEvaluation::Audio => {}
+                    ControlEvaluation::Control { period_frames } => {
+                        fingerprint.string("graph-lfo-control-cadence-v1");
+                        fingerprint.u64(u64::from(period_frames));
+                    }
+                    ControlEvaluation::Event => {
+                        fingerprint.string("graph-lfo-gate-event-sample-v1");
+                    }
+                }
             }
             if let Some(settings) = module.pitch_modulation {
                 fingerprint.string("pitch-modulate-v1-semitones-audio-per-instance");

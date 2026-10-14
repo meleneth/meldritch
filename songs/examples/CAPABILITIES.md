@@ -49,7 +49,9 @@ status stays `design`.
 Example 36 also proves a bounded 1..1024-frame LFO control-output latch:
 off-grid Gate reset, continuous phase under pattern-controlled Hertz steps,
 native drafts/capture, split/live rendering and authored reopen pass headlessly.
-Event-sampled control and broader scopes remain design work.
+Explicit Gate-event LFO sampling, separate reset/sample cables, variable-rate
+phase continuity, GateHold source fan-out and cadence fingerprints now pass
+headlessly. General Event consumers and broader scopes remain design work.
 
 | Example | Capability | Status |
 | --- | --- | --- |

@@ -1,0 +1,12 @@
+# Complete candidates that must reject without changing accepted source.
+[[case]]
+kind = "missing_sample_cable"
+
+[[case]]
+kind = "sample_cable_with_audio_cadence"
+
+[[case]]
+kind = "duplicate_sample_driver"
+
+[[case]]
+kind = "non_gate_sample_source"

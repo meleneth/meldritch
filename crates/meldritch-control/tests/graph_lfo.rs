@@ -476,6 +476,18 @@ fn lfo_control_cadence_latches_on_grid_and_off_grid_gate_reset() {
         lfo.lfo().unwrap().evaluation,
         ControlEvaluation::Control { period_frames: 64 }
     );
+    let mut other_cadence = lfo.lfo().unwrap();
+    other_cadence.evaluation = ControlEvaluation::Control { period_frames: 65 };
+    let changed_cadence = source
+        .edit_patch(&PatchEdit {
+            synth: "bass".into(),
+            operations: vec![PatchOperation::ConfigureLfo {
+                module: "slow".into(),
+                settings: other_cadence,
+            }],
+        })
+        .unwrap();
+    assert_ne!(source.fingerprint(), changed_cadence.fingerprint());
     assert!(
         lfo.ports()
             .iter()
@@ -575,6 +587,273 @@ fn lfo_control_cadence_latches_on_grid_and_off_grid_gate_reset() {
             .is_err()
         );
         assert_eq!(app.authored_source().unwrap().fingerprint(), before);
+        assert_eq!(app.history().len(), history);
+    }
+    capture.finish(&app).unwrap();
+    let session = fs::read_to_string(capture.session.as_ref().unwrap().path()).unwrap();
+    let mut replay = directory.app();
+    replay
+        .enable_native_project_source(load_native_capture_baseline(&directory.0, &session).unwrap())
+        .unwrap();
+    let events: toml::Value = toml::from_str(&session).unwrap();
+    for event in events["events"].as_array().unwrap() {
+        let envelope =
+            NativeCommandEnvelope::decode(&toml::to_string(&event["native"]).unwrap()).unwrap();
+        replay.dispatch(envelope.command.into()).unwrap();
+    }
+    assert_eq!(
+        replay.authored_source().unwrap().fingerprint(),
+        source.fingerprint()
+    );
+    assert_fresh_process(&directory, &source);
+}
+
+#[test]
+fn gate_event_samples_free_running_lfo_and_rejects_invalid_sample_routes() {
+    use meldritch_control::native_capture::{
+        NativeCommandEnvelope, NativeProjectCapture, load_native_capture_baseline,
+    };
+    use meldritch_dsl::{ControlEvaluation, LfoReset, PatchEdit, PatchOperation};
+    use meldritch_render::song_render::{LiveVoiceEvent, LiveVoiceInput, compile_pattern_voice};
+    let directory = Directory::new();
+    let mut app = directory.app();
+    app.enable_native_project_source(load_native_project(&directory.0, FIXTURE).unwrap())
+        .unwrap();
+    let mut capture = NativeProjectCapture::new(app.authored_source().unwrap(), 96_000);
+    app.dispatch(AppCommand::SelectInstrument("bass".into()))
+        .unwrap();
+    app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+    app.dispatch(AppCommand::TogglePatchEditor).unwrap();
+    for line in include_str!("../../../songs/examples/36-patch-lfo/event-sample-patch.txt").lines()
+    {
+        if line.starts_with('#') {
+            continue;
+        }
+        for character in line.chars() {
+            app.dispatch(AppCommand::PatchCharacter(character)).unwrap();
+        }
+        app.dispatch(AppCommand::PatchSubmit).unwrap();
+    }
+    capture.checkpoint(&app).unwrap();
+    let source = app.authored_source().unwrap();
+    let module = source.synths()["bass"]
+        .modules()
+        .iter()
+        .find(|m| m.id() == "slow")
+        .unwrap();
+    assert_eq!(module.lfo().unwrap().evaluation, ControlEvaluation::Event);
+    assert!(
+        module
+            .ports()
+            .iter()
+            .any(|port| port.endpoint == "slow.sample")
+    );
+    let patch = CompiledSongPatch::compile_initial(&source).unwrap();
+    let audio = patch
+        .render_default(FrameRange::new(0, 96_000).unwrap())
+        .unwrap();
+    let mut oscillator = Oscillator::new(Waveform::Sine);
+    let mut held = 0.0;
+    for (frame, actual) in audio.samples().iter().enumerate() {
+        let position = frame % 96_000;
+        if position == 0 || position == 36_000 {
+            held = (std::f64::consts::TAU * (frame as f64 / 31_200.0).fract())
+                .sin()
+                .mul_add(0.5, 0.5);
+        }
+        let wave = oscillator.next(440.0 * 2_f64.powf((48.0 - 69.0) / 12.0), 48_000);
+        let expected = wave * if position < 84_000 { held } else { 0.0 } * 0.8;
+        assert!(
+            (actual - expected).abs() < 1e-12,
+            "frame {frame}: {actual} != {expected}"
+        );
+    }
+    let mut split = patch
+        .render_default(FrameRange::new(0, 36_001).unwrap())
+        .unwrap()
+        .samples()
+        .to_vec();
+    split.extend_from_slice(
+        patch
+            .render_default(FrameRange::new(36_001, 96_000).unwrap())
+            .unwrap()
+            .samples(),
+    );
+    assert_eq!(split, audio.samples());
+
+    let voice = compile_pattern_voice(&source, &source.pattern_voices()["bass-instance"]).unwrap();
+    let events = [
+        LiveVoiceEvent {
+            frame: 0,
+            input: LiveVoiceInput::Gate(true),
+        },
+        LiveVoiceEvent {
+            frame: 1031,
+            input: LiveVoiceInput::Gate(true),
+        },
+    ];
+    let full = voice
+        .live_renderer(48, 0)
+        .unwrap()
+        .render(FrameRange::new(0, 4096).unwrap(), &events)
+        .unwrap();
+    let mut live = voice.live_renderer(48, 0).unwrap();
+    let mut partitioned = live
+        .render(FrameRange::new(0, 1000).unwrap(), &events[..1])
+        .unwrap()
+        .samples()
+        .to_vec();
+    partitioned.extend_from_slice(
+        live.render(FrameRange::new(1000, 4096).unwrap(), &events[1..])
+            .unwrap()
+            .samples(),
+    );
+    assert_eq!(partitioned, full.samples());
+    // Adjacent starts are distinct sample events even while Gate stays high.
+    let no_second = voice
+        .live_renderer(48, 0)
+        .unwrap()
+        .render(FrameRange::new(0, 4096).unwrap(), &events[..1])
+        .unwrap();
+    assert!(
+        full.samples()[1031..]
+            .iter()
+            .zip(&no_second.samples()[1031..])
+            .any(|(a, b)| (a - b).abs() > 1e-6)
+    );
+    // With envelope articulation explicitly disconnected, the event latch starts
+    // at bipolar zero even when authored LFO phase is a positive peak.
+    let mut initial_settings = module.lfo().unwrap();
+    initial_settings.phase = 0.25;
+    let initial_source = source
+        .edit_patch(&PatchEdit {
+            synth: "bass".into(),
+            operations: vec![
+                PatchOperation::Remove {
+                    id: "shape".into(),
+                    cables: meldritch_dsl::DependentCables::Disconnect,
+                },
+                PatchOperation::Connect {
+                    from: "unipolar.control".into(),
+                    to: "amp.level".into(),
+                },
+                PatchOperation::ConfigureLfo {
+                    module: "slow".into(),
+                    settings: initial_settings,
+                },
+            ],
+        })
+        .unwrap();
+    let initial_voice = compile_pattern_voice(
+        &initial_source,
+        &initial_source.pattern_voices()["bass-instance"],
+    )
+    .unwrap();
+    let mut initial_live = initial_voice.live_renderer(48, 0).unwrap();
+    let initial_block = initial_live
+        .render(FrameRange::new(0, 512).unwrap(), &[])
+        .unwrap();
+    let sampled_block = initial_live
+        .render(
+            FrameRange::new(512, 1024).unwrap(),
+            &[LiveVoiceEvent {
+                frame: 512,
+                input: LiveVoiceInput::Gate(true),
+            }],
+        )
+        .unwrap();
+    let mut expected_oscillator = Oscillator::new(Waveform::Sine);
+    let sampled_level = (std::f64::consts::TAU * (0.25 + 512.0 / 31_200.0))
+        .sin()
+        .mul_add(0.5, 0.5);
+    for frame in 0..1024 {
+        let expected = expected_oscillator.next(440.0 * 2_f64.powf((48.0 - 69.0) / 12.0), 48_000)
+            * if frame < 512 { 0.5 } else { sampled_level };
+        let actual = if frame < 512 {
+            initial_block.samples()[frame]
+        } else {
+            sampled_block.samples()[frame - 512]
+        };
+        assert!(
+            (actual - expected).abs() < 1e-12,
+            "first sample at frame {frame}"
+        );
+    }
+
+    let mut reset = module.lfo().unwrap();
+    reset.reset = LfoReset::GateRise;
+    let reset_source = source
+        .edit_patch(&PatchEdit {
+            synth: "bass".into(),
+            operations: vec![
+                PatchOperation::ConfigureLfo {
+                    module: "slow".into(),
+                    settings: reset,
+                },
+                PatchOperation::Connect {
+                    from: "input.gate".into(),
+                    to: "slow.reset".into(),
+                },
+            ],
+        })
+        .unwrap();
+    let reset_audio = CompiledSongPatch::compile_initial(&reset_source)
+        .unwrap()
+        .render_default(FrameRange::new(0, 96_000).unwrap())
+        .unwrap();
+    let mut reset_oscillator = Oscillator::new(Waveform::Sine);
+    for (frame, &sample) in reset_audio.samples().iter().enumerate() {
+        let wave = reset_oscillator.next(440.0 * 2_f64.powf((48.0 - 69.0) / 12.0), 48_000);
+        let expected = wave * if frame < 84_000 { 0.5 } else { 0.0 } * 0.8;
+        assert!((sample - expected).abs() < 1e-12, "frame {frame}");
+    }
+
+    let invalid: toml::Value = toml::from_str(include_str!(
+        "../../../songs/examples/36-patch-lfo/invalid/event-sample.toml"
+    ))
+    .unwrap();
+    let history = app.history().len();
+    for case in invalid["case"].as_array().unwrap() {
+        let operations = match case["kind"].as_str().unwrap() {
+            "missing_sample_cable" => vec![PatchOperation::Disconnect {
+                from: "input.gate".into(),
+                to: "slow.sample".into(),
+            }],
+            "sample_cable_with_audio_cadence" => {
+                let mut settings = module.lfo().unwrap();
+                settings.evaluation = ControlEvaluation::Audio;
+                vec![PatchOperation::ConfigureLfo {
+                    module: "slow".into(),
+                    settings,
+                }]
+            }
+            "duplicate_sample_driver" => vec![PatchOperation::Connect {
+                from: "input.gate".into(),
+                to: "slow.sample".into(),
+            }],
+            "non_gate_sample_source" => vec![
+                PatchOperation::Disconnect {
+                    from: "input.gate".into(),
+                    to: "slow.sample".into(),
+                },
+                PatchOperation::Connect {
+                    from: "slow.control".into(),
+                    to: "slow.sample".into(),
+                },
+            ],
+            other => panic!("unknown invalid case {other}"),
+        };
+        assert!(
+            app.dispatch(AppCommand::EditPatch(PatchEdit {
+                synth: "bass".into(),
+                operations
+            }))
+            .is_err()
+        );
+        assert_eq!(
+            app.authored_source().unwrap().fingerprint(),
+            source.fingerprint()
+        );
         assert_eq!(app.history().len(), history);
     }
     capture.finish(&app).unwrap();

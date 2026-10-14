@@ -122,7 +122,11 @@ envelope-shaped shared modulation depth without destination knowledge. Typed
 drafts, independent signal references, amplitude separation, capture reconstruction,
 playing publication and fresh reopen are checked. An explicit Hertz rate cable now
 integrates LFO phase per sample, with reset ordering, all four waveforms, tempo,
-capture, fresh reopen and playing rejection tests. Broader scope/cadence remain open.
+capture, fresh reopen and playing rejection tests. Fixed 1..1024-frame LFO
+output cadence and explicit Gate-event sampling now share the mono kernel;
+off-grid reset/sample ordering, continuous phase under held output, typed drafts,
+capture, split/live references, save/reopen and distinct semantic fingerprints
+pass headlessly. Broader instantiation scopes and general Event consumers remain open.
 User-prioritized MicroLab mk3 support now adds generic explicit native MIDI input
 selection, a standalone keyboard diagnostic and construction pattern step entry.
 Velocity, release/mode gating, queue overflow/epoch invalidation, typed capture,

@@ -137,7 +137,7 @@ impl ModuleDefinition {
         for direction in [PortDirection::Input, PortDirection::Output] {
             for name in [
                 "pitch", "gate", "control", "audio", "level", "aux", "reset", "left", "right",
-                "cutoff", "amount", "rate", "hold",
+                "cutoff", "amount", "rate", "hold", "sample",
             ] {
                 let endpoint = format!("{}.{}", self.id, name);
                 if let Ok(signal) = resolve_port(
@@ -248,7 +248,9 @@ impl SynthDefinition {
         {
             if cable.to != format!("{}.gate", envelope.id)
                 && !self.modules.iter().any(|target| {
-                    target.kind == ModuleKind::Lfo && cable.to == format!("{}.reset", target.id)
+                    target.kind == ModuleKind::Lfo
+                        && (cable.to == format!("{}.reset", target.id)
+                            || cable.to == format!("{}.sample", target.id))
                 })
             {
                 return Err(
@@ -376,6 +378,7 @@ impl ValidatedSong {
             .map(|m| match m.kind {
                 ModuleKind::Lfo => {
                     usize::from(m.lfo.unwrap().reset == LfoReset::GateRise)
+                        + usize::from(m.lfo.unwrap().evaluation == ControlEvaluation::Event)
                         + usize::from(
                             graph
                                 .cables

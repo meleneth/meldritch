@@ -8,7 +8,8 @@ use meldritch_control::{
 };
 use meldritch_core::FrameRange;
 use meldritch_dsl::{
-    DependentCables, LfoReset, ModuleKind, PatchEdit, PatchOperation, ValidatedSong,
+    ControlEvaluation, DependentCables, LfoReset, ModuleKind, PatchEdit, PatchOperation,
+    ValidatedSong,
 };
 use meldritch_render::song_render::{
     CompiledNotePatch, LiveVoiceEvent, LiveVoiceInput, compile_pattern_voice,
@@ -232,6 +233,52 @@ fn resolved_gate_fans_out_to_envelope_and_lfo_reset_and_reopens() {
             .iter()
             .zip(&live(&unreset_patch).samples()[2048..2500])
             .any(|(a, b)| (a - b).abs() > 1e-6)
+    );
+    settings.evaluation = ControlEvaluation::Event;
+    let sampled = source
+        .edit_patch(&PatchEdit {
+            synth: "bass".into(),
+            operations: vec![
+                PatchOperation::Disconnect {
+                    from: "hold.gate".into(),
+                    to: "slow.reset".into(),
+                },
+                PatchOperation::ConfigureLfo {
+                    module: "slow".into(),
+                    settings,
+                },
+                PatchOperation::Connect {
+                    from: "hold.gate".into(),
+                    to: "slow.sample".into(),
+                },
+            ],
+        })
+        .unwrap();
+    let sampled_direct = sampled
+        .edit_patch(&PatchEdit {
+            synth: "bass".into(),
+            operations: vec![
+                PatchOperation::Disconnect {
+                    from: "hold.gate".into(),
+                    to: "slow.sample".into(),
+                },
+                PatchOperation::Connect {
+                    from: "input.gate".into(),
+                    to: "slow.sample".into(),
+                },
+            ],
+        })
+        .unwrap();
+    let sampled_patch =
+        compile_pattern_voice(&sampled, &sampled.pattern_voices()["bass-instance"]).unwrap();
+    let sampled_direct_patch = compile_pattern_voice(
+        &sampled_direct,
+        &sampled_direct.pattern_voices()["bass-instance"],
+    )
+    .unwrap();
+    assert_eq!(
+        live(&sampled_patch).samples(),
+        live(&sampled_direct_patch).samples()
     );
 
     for operations in [

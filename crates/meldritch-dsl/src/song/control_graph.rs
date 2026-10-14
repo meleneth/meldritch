@@ -134,6 +134,7 @@ pub enum GraphLfoShape {
 pub enum ControlEvaluation {
     Audio,
     Control { period_frames: u16 },
+    Event,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -359,6 +360,18 @@ impl SynthDefinition {
                             (c.from == "input.gate" || graph.modules.iter().any(|source|
                                 source.kind == ModuleKind::GateHold && c.from == format!("{}.gate", source.id))) => {},
                         _ => return Err("LFO reset policy requires exactly one explicit input.gate or GateHold.gate cable, or none".into()),
+                    }
+                    let sample = graph
+                        .cables
+                        .iter()
+                        .filter(|c| c.to == format!("{id}.sample"))
+                        .collect::<Vec<_>>();
+                    match (module.lfo.unwrap().evaluation, sample.as_slice()) {
+                        (ControlEvaluation::Event, [c]) if c.signal == SignalType::Gate &&
+                            (c.from == "input.gate" || graph.modules.iter().any(|source|
+                                source.kind == ModuleKind::GateHold && c.from == format!("{}.gate", source.id))) => {},
+                        (ControlEvaluation::Audio | ControlEvaluation::Control { .. }, []) => {},
+                        _ => return Err("event LFO evaluation requires exactly one explicit input.gate or GateHold.gate sample cable; other cadence has none".into()),
                     }
                     let endpoint = format!("{id}.rate");
                     if let Some(cable) = graph.cables.iter().find(|c| c.to == endpoint) {

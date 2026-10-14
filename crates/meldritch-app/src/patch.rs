@@ -209,9 +209,11 @@ fn parse_operation(words: &[&str]) -> Result<PatchOperation, String> {
             depth_semitones: depth.parse().map_err(|_| "pitch depth requires semitones")?,
         } }),
         ["lfo", module, shape, rate_kind, value, "phase", phase, "reset", reset] =>
-            parse_lfo(module, shape, rate_kind, value, phase, reset, None),
+            parse_lfo(module, shape, rate_kind, value, phase, reset, None, false),
         ["lfo", module, shape, rate_kind, value, "phase", phase, "reset", reset, "cadence", period] =>
-            parse_lfo(module, shape, rate_kind, value, phase, reset, Some(*period)),
+            parse_lfo(module, shape, rate_kind, value, phase, reset, Some(*period), false),
+        ["lfo", module, shape, rate_kind, value, "phase", phase, "reset", reset, "sample", "gate_rise"] =>
+            parse_lfo(module, shape, rate_kind, value, phase, reset, None, true),
         ["scale", module, gain, offset, min, max] => Ok(PatchOperation::ConfigureControlScale { module: (*module).into(), settings: meldritch_dsl::ControlScaleSettings {
             gain: gain.parse().map_err(|_| "scale gain requires a number")?, offset: offset.parse().map_err(|_| "scale offset requires a number")?,
             clamp_min: min.parse().map_err(|_| "scale minimum requires a number")?, clamp_max: max.parse().map_err(|_| "scale maximum requires a number")?,
@@ -249,18 +251,21 @@ fn parse_lfo(
     phase: &str,
     reset: &str,
     period: Option<&str>,
+    sample_gate: bool,
 ) -> Result<PatchOperation, String> {
     use meldritch_dsl::{
         ControlEvaluation, GraphLfoRate, GraphLfoSettings, GraphLfoShape, LfoReset,
     };
     let value = value.parse().map_err(|_| "LFO rate requires a number")?;
-    let evaluation = match period {
-        None => ControlEvaluation::Audio,
-        Some(period) => ControlEvaluation::Control {
+    let evaluation = match (period, sample_gate) {
+        (None, false) => ControlEvaluation::Audio,
+        (None, true) => ControlEvaluation::Event,
+        (Some(period), false) => ControlEvaluation::Control {
             period_frames: period
                 .parse()
                 .map_err(|_| "control cadence requires frames in 1..1024")?,
         },
+        (Some(_), true) => unreachable!("native syntax chooses one cadence"),
     };
     Ok(PatchOperation::ConfigureLfo {
         module: module.into(),

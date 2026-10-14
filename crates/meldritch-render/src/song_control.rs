@@ -202,6 +202,12 @@ impl ControlPlan {
                             }
                             latches[index]
                         }
+                        ControlEvaluation::Event => {
+                            if gate_rise {
+                                latches[index] = instantaneous;
+                            }
+                            latches[index]
+                        }
                     }
                 }
                 ControlNode::Scale { input, settings } => values[*input]

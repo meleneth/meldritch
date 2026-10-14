@@ -1,0 +1,5 @@
+# Apply to main.project.lua. Gate samples the free-running LFO without resetting it.
+clear
+lfo slow sine beats 1.3 phase 0 reset none sample gate_rise
+connect input.gate slow.sample
+commit

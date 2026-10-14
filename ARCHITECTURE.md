@@ -282,6 +282,12 @@ LFO control outputs may now declare a 1..1024-frame per-instance latch cadence.
 The latch grid starts at instance frame zero; an explicitly cabled Gate rise
 samples immediately after reset without moving later grid ticks. Cabled phase
 still integrates its Hertz input every audio sample while the output is held.
+An LFO can instead sample its bipolar output on explicitly cabled Gate rises.
+The per-instance latch starts at zero; phase continues every sample, and an
+independent reset cable acts before a same-frame sample. Bounded GateHold output
+may feed ADSR, LFO reset and LFO sample simultaneously. Evaluation mode and
+frame period enter semantic fingerprints; audio-rate historical hashes remain
+unchanged. This is Gate-event sampling, not general Event-family processing.
 `song_render::mono::MonoState` now holds the shared mono DSP execution kernel.
 Offline rendering retains its pre-roll/scheduling behavior; LiveMonoRenderer
 advances that same state through 1..4096-frame worker blocks with at most 128

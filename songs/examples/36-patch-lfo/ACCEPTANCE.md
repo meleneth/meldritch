@@ -154,6 +154,27 @@ full/split rendering and fresh-process save/reopen. Native edits and typed
 capture retain the cadence setting. This checkpoint does not introduce Event
 sampling, control-rate downstream nodes, smoothing or shared/global scope.
 
+## Gate-event sampled LFO checkpoint
+
+Apply `event-sample-patch.txt` to the base graph. `input.gate` fans out to the
+ADSR and `slow.sample`. The LFO runs its phase at audio rate, but its bipolar
+output remains zero until the first Gate rise, then holds the value sampled at
+each Gate rise. Adjacent starts each count as an event, even without a low audio
+sample between them. Gate ends, pattern loops without a start, and MIDI loss
+cleanup do not sample. A separate `slow.reset` cable may reset phase before a
+same-frame sample; without it, sampling observes free-running phase. The sample
+source may be the bounded resolved GateHold output, which can also feed ADSR
+and reset. This does not make Gate and Event the same signal family.
+
+No sample cable may be present for audio or fixed-frame cadence, and event
+cadence requires exactly one explicit Gate sample cable. Unsupported sources,
+duplicate drivers and unused control nodes reject atomically. Tests compare
+each frame to an independent free-running phase/event latch reference, including
+off-grid adjacent starts, full/split and live partitions, typed capture and
+authored save/reopen. A cabled Hertz rate still integrates every sample.
+General event transforms, variable event cadence and shared/global scopes
+remain open.
+
 ## Rate checkpoint: one modulator changes another's speed
 
 Apply rate-patch.txt to the base patch or its pitch/filter/depth extensions.
