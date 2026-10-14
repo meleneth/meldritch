@@ -52,6 +52,9 @@ native drafts/capture, split/live rendering and authored reopen pass headlessly.
 Explicit Gate-event LFO sampling, separate reset/sample cables, variable-rate
 phase continuity, GateHold source fan-out and cadence fingerprints now pass
 headlessly. General Event consumers and broader scopes remain design work.
+Two bipolar LFOs can now combine through an explicit wide-unit ControlAdd and
+separate ControlClamp, with independent saturated PCM, typed draft/capture,
+negative and fresh-process checks. General sum chains remain open.
 
 | Example | Capability | Status |
 | --- | --- | --- |

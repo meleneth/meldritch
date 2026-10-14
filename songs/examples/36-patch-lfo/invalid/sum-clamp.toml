@@ -1,0 +1,18 @@
+# Complete patch candidates that must reject without changing accepted source.
+[[case]]
+kind = "unclamped_destination"
+
+[[case]]
+kind = "missing_add_input"
+
+[[case]]
+kind = "duplicate_add_input"
+
+[[case]]
+kind = "wrong_add_unit"
+
+[[case]]
+kind = "unused_clamp"
+
+[[case]]
+kind = "cycle"

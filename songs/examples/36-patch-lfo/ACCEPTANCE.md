@@ -134,6 +134,26 @@ reconstruction. invalid_depth_connections_reject_without_source_or_history_chang
 executes every negative fixture. native_graph_lfo checks the combined depth/pitch/
 filter worker publication and failed-amount-unit continuity while playing.
 
+## Explicit bipolar sum and clamp checkpoint
+
+Apply `sum-clamp-patch.txt` to the base tremolo graph. Two independent bipolar
+LFO outputs enter `control_add.left/right`. Its output is dimensionless bipolar
+wide Control in -2..2: addition does not clamp, scale or reset either source.
+`control_clamp.control` accepts only that wide unit and emits bipolar Control
+clamped to -1..1, which the existing scale maps to unit interval. Sum and clamp
+are separate named modules and cables; neither has a destination policy.
+Each input accepts one cable, while either source may fan out to other compatible
+consumers. No implicit direct wide-to-bipolar or wide-to-unit-interval conversion
+is allowed. The first lowering supports exactly two bipolar inputs and one
+explicit clamp before existing consumers; chained wide sums remain future work.
+
+Tests compare every sample against two independent LFO phases, arithmetic,
+clamp, envelope and oscillator, including saturation, full/split PCM, typed
+native draft/capture and fresh-process save/reopen. Invalid neighbors reject
+unclamped destinations, missing/duplicate/wrong-unit inputs, unused clamps and
+cycles without accepted-source or publication changes. Historical graphs and
+fingerprints remain unchanged.
+
 ## Fixed control cadence checkpoint
 
 Apply `cadence-patch.txt` to the base graph. `slow` still advances phase at the

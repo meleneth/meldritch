@@ -127,9 +127,15 @@ adapter, authored clamping, cable/default precedence, independent filter-tail
 references, fresh reopen and playing publication.
 ControlAttenuate now also enables envelope-controlled shared depth with explicit
 units, independent amplitude wiring, capture reconstruction and signal references.
+An explicit ControlAdd now sums two bipolar inputs into a wide -2..2 unit;
+ControlClamp separately returns a -1..1 bipolar signal before existing adapters.
+Two-LFO saturation, wrong-unit rejection, typed drafts/capture and fresh reopen
+pass headlessly. General sum chains and configurable bipolar clamp bounds remain open.
 An explicit Hertz rate input now integrates phase samplewise, with all-waveform,
 reset, tempo, capture, isolated reopen and playing feedback-rejection checks.
-Full example remains design: event/control cadence and broader scopes are required.
+Fixed-frame and Gate-event LFO cadence now pass bounded headless checks. Full
+example remains design: broader scopes, general Event consumers and transport
+reset/rewind contracts are required.
 
 **Sound/control:** shared phase sweeps both destinations; depth/rate/reset are
 inspectable. Demonstrate explicit sum/scale/clamp, event versus audio/control

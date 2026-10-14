@@ -52,6 +52,8 @@ pub enum ModuleKind {
     ControlHertz,
     ControlAttenuate,
     GateHold,
+    ControlAdd,
+    ControlClamp,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -3286,6 +3288,8 @@ fn parse_synth(path: &Path, raw: RawSynthFile) -> Result<SynthDefinition, SongLo
             "control_hertz" => ModuleKind::ControlHertz,
             "control_attenuate" => ModuleKind::ControlAttenuate,
             "gate_hold" => ModuleKind::GateHold,
+            "control_add" => ModuleKind::ControlAdd,
+            "control_clamp" => ModuleKind::ControlClamp,
             unknown => {
                 return Err(SongLoadError::one(
                     path,
@@ -3843,6 +3847,9 @@ fn resolve_port(
         (ModuleKind::Lfo, PortDirection::Input, "rate") => SignalType::Control,
         (ModuleKind::ControlAttenuate, _, "control")
         | (ModuleKind::ControlAttenuate, PortDirection::Input, "amount") => SignalType::Control,
+        (ModuleKind::ControlAdd, PortDirection::Input, "left" | "right")
+        | (ModuleKind::ControlAdd, PortDirection::Output, "control")
+        | (ModuleKind::ControlClamp, _, "control") => SignalType::Control,
         (ModuleKind::ControlHertz, _, "control")
         | (ModuleKind::LowPass, PortDirection::Input, "cutoff") => SignalType::Control,
         (ModuleKind::PitchModulate, _, "pitch") => SignalType::Pitch,

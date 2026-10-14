@@ -876,6 +876,176 @@ fn gate_event_samples_free_running_lfo_and_rejects_invalid_sample_routes() {
 }
 
 #[test]
+fn bipolar_add_and_clamp_render_explicit_two_lfo_sum_and_reopen() {
+    use meldritch_control::native_capture::{
+        NativeCommandEnvelope, NativeProjectCapture, load_native_capture_baseline,
+    };
+    use meldritch_dsl::{ControlUnit, DependentCables, PatchEdit, PatchOperation};
+    let directory = Directory::new();
+    let mut app = directory.app();
+    app.enable_native_project_source(load_native_project(&directory.0, FIXTURE).unwrap())
+        .unwrap();
+    let mut capture = NativeProjectCapture::new(app.authored_source().unwrap(), 96_000);
+    app.dispatch(AppCommand::SelectInstrument("bass".into()))
+        .unwrap();
+    app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+    app.dispatch(AppCommand::TogglePatchEditor).unwrap();
+    for line in include_str!("../../../songs/examples/36-patch-lfo/sum-clamp-patch.txt").lines() {
+        if line.starts_with('#') {
+            continue;
+        }
+        for character in line.chars() {
+            app.dispatch(AppCommand::PatchCharacter(character)).unwrap();
+        }
+        app.dispatch(AppCommand::PatchSubmit).unwrap();
+        capture.checkpoint(&app).unwrap();
+    }
+    let source = app.authored_source().unwrap();
+    let ports = source.synths()["bass"]
+        .modules()
+        .iter()
+        .flat_map(|m| m.ports())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ports
+            .iter()
+            .find(|p| p.endpoint == "mix.control")
+            .unwrap()
+            .unit,
+        Some(ControlUnit::BipolarWide)
+    );
+    assert_eq!(
+        ports
+            .iter()
+            .find(|p| p.endpoint == "bound.control"
+                && p.direction == meldritch_dsl::PortDirection::Output)
+            .unwrap()
+            .unit,
+        Some(ControlUnit::Bipolar)
+    );
+    let patch = CompiledSongPatch::compile_initial(&source).unwrap();
+    let audio = patch
+        .render_default(FrameRange::new(0, 96_000).unwrap())
+        .unwrap();
+    let mut oscillator = Oscillator::new(Waveform::Sine);
+    let mut saturated = 0;
+    for (frame, &sample) in audio.samples().iter().enumerate() {
+        let phase = (frame as f64 / 24_000.0).fract();
+        let sum =
+            (std::f64::consts::TAU * phase).sin() + (std::f64::consts::TAU * (phase + 0.25)).sin();
+        saturated += usize::from(sum.abs() > 1.0);
+        let level = sum.clamp(-1.0, 1.0).mul_add(0.5, 0.5);
+        let wave = oscillator.next(440.0 * 2_f64.powf((48.0 - 69.0) / 12.0), 48_000);
+        let expected = wave * if frame < 84_000 { level } else { 0.0 } * 0.8;
+        assert!(
+            (sample - expected).abs() < 1e-12,
+            "frame {frame}: {sample} != {expected}"
+        );
+    }
+    assert!(saturated > 10_000);
+    let mut split = patch
+        .render_default(FrameRange::new(0, 37_001).unwrap())
+        .unwrap()
+        .samples()
+        .to_vec();
+    split.extend_from_slice(
+        patch
+            .render_default(FrameRange::new(37_001, 96_000).unwrap())
+            .unwrap()
+            .samples(),
+    );
+    assert_eq!(split, audio.samples());
+
+    let invalid: toml::Value = toml::from_str(include_str!(
+        "../../../songs/examples/36-patch-lfo/invalid/sum-clamp.toml"
+    ))
+    .unwrap();
+    let history = app.history().len();
+    for case in invalid["case"].as_array().unwrap() {
+        let operations = match case["kind"].as_str().unwrap() {
+            "unclamped_destination" => vec![
+                PatchOperation::Disconnect {
+                    from: "bound.control".into(),
+                    to: "unipolar.control".into(),
+                },
+                PatchOperation::Connect {
+                    from: "mix.control".into(),
+                    to: "unipolar.control".into(),
+                },
+            ],
+            "missing_add_input" => vec![PatchOperation::Disconnect {
+                from: "second.control".into(),
+                to: "mix.right".into(),
+            }],
+            "duplicate_add_input" => vec![PatchOperation::Connect {
+                from: "slow.control".into(),
+                to: "mix.right".into(),
+            }],
+            "wrong_add_unit" => vec![
+                PatchOperation::Disconnect {
+                    from: "second.control".into(),
+                    to: "mix.right".into(),
+                },
+                PatchOperation::Connect {
+                    from: "env.control".into(),
+                    to: "mix.right".into(),
+                },
+            ],
+            "unused_clamp" => vec![
+                PatchOperation::Remove {
+                    id: "bound".into(),
+                    cables: DependentCables::Disconnect,
+                },
+                PatchOperation::Connect {
+                    from: "slow.control".into(),
+                    to: "unipolar.control".into(),
+                },
+            ],
+            "cycle" => vec![
+                PatchOperation::Disconnect {
+                    from: "slow.control".into(),
+                    to: "mix.left".into(),
+                },
+                PatchOperation::Connect {
+                    from: "bound.control".into(),
+                    to: "mix.left".into(),
+                },
+            ],
+            other => panic!("unknown invalid case {other}"),
+        };
+        assert!(
+            app.dispatch(AppCommand::EditPatch(PatchEdit {
+                synth: "bass".into(),
+                operations
+            }))
+            .is_err()
+        );
+        assert_eq!(
+            app.authored_source().unwrap().fingerprint(),
+            source.fingerprint()
+        );
+        assert_eq!(app.history().len(), history);
+    }
+    capture.finish(&app).unwrap();
+    let session = fs::read_to_string(capture.session.as_ref().unwrap().path()).unwrap();
+    let mut replay = directory.app();
+    replay
+        .enable_native_project_source(load_native_capture_baseline(&directory.0, &session).unwrap())
+        .unwrap();
+    let events: toml::Value = toml::from_str(&session).unwrap();
+    for event in events["events"].as_array().unwrap() {
+        let envelope =
+            NativeCommandEnvelope::decode(&toml::to_string(&event["native"]).unwrap()).unwrap();
+        replay.dispatch(envelope.command.into()).unwrap();
+    }
+    assert_eq!(
+        replay.authored_source().unwrap().fingerprint(),
+        source.fingerprint()
+    );
+    assert_fresh_process(&directory, &source);
+}
+
+#[test]
 fn invalid_control_contracts_reject_without_accepted_source_or_history_changes() {
     let directory = Directory::new();
     let source = load_native_project(&directory.0, FIXTURE).unwrap();

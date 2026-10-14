@@ -1,0 +1,12 @@
+# Apply to main.project.lua. Both bipolar sources remain inspectable.
+clear
+add second lfo
+lfo second sine beats 1 phase 0.25 reset none
+add mix control_add
+add bound control_clamp
+disconnect slow.control unipolar.control
+connect slow.control mix.left
+connect second.control mix.right
+connect mix.control bound.control
+connect bound.control unipolar.control
+commit

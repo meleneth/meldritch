@@ -193,6 +193,8 @@ fn parse_operation(words: &[&str]) -> Result<PatchOperation, String> {
             "control_hertz" => ModuleKind::ControlHertz,
             "control_attenuate" => ModuleKind::ControlAttenuate,
             "gate_hold" => ModuleKind::GateHold,
+            "control_add" => ModuleKind::ControlAdd,
+            "control_clamp" => ModuleKind::ControlClamp,
             _ => return Err(format!("unsupported synth module '{kind}'")),
         } }),
         ["remove", id, policy] => Ok(PatchOperation::Remove { id: (*id).into(), cables: match *policy {

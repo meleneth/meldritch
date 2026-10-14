@@ -7,6 +7,7 @@ pub enum ControlUnit {
     Bipolar,
     UnitInterval,
     Hertz,
+    BipolarWide,
 }
 impl ModuleDefinition {
     pub fn control_unit(&self, port: &str, direction: PortDirection) -> Option<ControlUnit> {
@@ -23,8 +24,14 @@ impl ModuleDefinition {
             | (ModuleKind::LowPass, PortDirection::Input, "cutoff") => Some(ControlUnit::Hertz),
             (ModuleKind::Lfo, PortDirection::Output, "control")
             | (ModuleKind::PitchModulate, PortDirection::Input, "control")
-            | (ModuleKind::ControlScale, PortDirection::Input, "control") => {
+            | (ModuleKind::ControlScale, PortDirection::Input, "control")
+            | (ModuleKind::ControlAdd, PortDirection::Input, "left" | "right")
+            | (ModuleKind::ControlClamp, PortDirection::Output, "control") => {
                 Some(ControlUnit::Bipolar)
+            }
+            (ModuleKind::ControlAdd, PortDirection::Output, "control")
+            | (ModuleKind::ControlClamp, PortDirection::Input, "control") => {
+                Some(ControlUnit::BipolarWide)
             }
             (
                 ModuleKind::Adsr | ModuleKind::ControlScale | ModuleKind::ControlMultiply,
@@ -256,6 +263,8 @@ impl SynthDefinition {
                         | ModuleKind::PitchModulate
                         | ModuleKind::ControlHertz
                         | ModuleKind::ControlAttenuate
+                        | ModuleKind::ControlAdd
+                        | ModuleKind::ControlClamp
                 )
             })
             .map(|m| m.id.as_str())
@@ -338,6 +347,8 @@ impl SynthDefinition {
                     | ModuleKind::ControlMultiply
                     | ModuleKind::ControlAttenuate
                     | ModuleKind::ControlHertz
+                    | ModuleKind::ControlAdd
+                    | ModuleKind::ControlClamp
             ) {
                 return Err("unsupported control source".into());
             }
@@ -430,6 +441,29 @@ impl SynthDefinition {
                         order,
                     )?;
                 }
+                ModuleKind::ControlAdd => {
+                    visit(
+                        graph,
+                        &format!("{id}.left"),
+                        ControlUnit::Bipolar,
+                        active,
+                        order,
+                    )?;
+                    visit(
+                        graph,
+                        &format!("{id}.right"),
+                        ControlUnit::Bipolar,
+                        active,
+                        order,
+                    )?;
+                }
+                ModuleKind::ControlClamp => visit(
+                    graph,
+                    &format!("{id}.control"),
+                    ControlUnit::BipolarWide,
+                    active,
+                    order,
+                )?,
                 ModuleKind::ControlHertz => visit(
                     graph,
                     &format!("{id}.control"),

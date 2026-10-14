@@ -77,6 +77,9 @@ an empty project requires no Git repository or initialization.
   and cable/default precedence, sample/tail/split references and playing publication
 - [x] Slice 3 depth checkpoint: bipolar ControlAttenuate × unit-interval amount,
   envelope-shaped fan-out, independent amplitude wiring, capture and fresh reopen
+- [x] Slice 3 sum/clamp checkpoint: two bipolar Controls add into a distinct
+  -2..2 unit, then an explicit clamp returns -1..1; typed drafts/capture,
+  independent saturated sample reference, rejection and fresh reopen pass
 - [x] Slice 3 rate checkpoint: explicit Hertz input, deterministic phase integration,
   reset ordering, independent waveform references, capture and playing publication
 - [x] Slice 3 fixed control cadence: bounded frame-grid LFO output latching with

@@ -127,6 +127,10 @@ output cadence and explicit Gate-event sampling now share the mono kernel;
 off-grid reset/sample ordering, continuous phase under held output, typed drafts,
 capture, split/live references, save/reopen and distinct semantic fingerprints
 pass headlessly. Broader instantiation scopes and general Event consumers remain open.
+An explicit two-input bipolar add plus separate -1..1 clamp now supports
+inspectable LFO combination; saturated sample references, typed drafts/capture,
+invalid units and fresh-process reopen pass headlessly. Wider combination
+graphs and configurable clamp bounds remain open.
 User-prioritized MicroLab mk3 support now adds generic explicit native MIDI input
 selection, a standalone keyboard diagnostic and construction pattern step entry.
 Velocity, release/mode gating, queue overflow/epoch invalidation, typed capture,

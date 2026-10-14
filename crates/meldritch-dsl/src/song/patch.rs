@@ -187,6 +187,8 @@ impl ModuleKind {
             Self::ControlHertz => "control_hertz",
             Self::ControlAttenuate => "control_attenuate",
             Self::GateHold => "gate_hold",
+            Self::ControlAdd => "control_add",
+            Self::ControlClamp => "control_clamp",
         }
     }
 }
@@ -391,6 +393,8 @@ impl ValidatedSong {
                 ModuleKind::PitchModulate => 2,
                 ModuleKind::ControlHertz => 1,
                 ModuleKind::ControlAttenuate => 2,
+                ModuleKind::ControlAdd => 2,
+                ModuleKind::ControlClamp => 1,
                 _ => 0,
             })
             .sum();

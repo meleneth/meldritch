@@ -25,6 +25,13 @@ pub(crate) enum ControlNode {
         left: usize,
         right: usize,
     },
+    Add {
+        left: usize,
+        right: usize,
+    },
+    ClampBipolar {
+        input: usize,
+    },
     PitchModulate {
         input: usize,
         depth_semitones: f64,
@@ -107,6 +114,13 @@ impl ControlPlan {
                 ModuleKind::ControlAttenuate => ControlNode::Multiply {
                     left: resolve(&format!("{id}.control"))?,
                     right: resolve(&format!("{id}.amount"))?,
+                },
+                ModuleKind::ControlAdd => ControlNode::Add {
+                    left: resolve(&format!("{id}.left"))?,
+                    right: resolve(&format!("{id}.right"))?,
+                },
+                ModuleKind::ControlClamp => ControlNode::ClampBipolar {
+                    input: resolve(&format!("{id}.control"))?,
                 },
                 ModuleKind::PitchModulate => ControlNode::PitchModulate {
                     input: resolve(&format!("{id}.control"))?,
@@ -214,6 +228,8 @@ impl ControlPlan {
                     .mul_add(settings.gain, settings.offset)
                     .clamp(settings.clamp_min, settings.clamp_max),
                 ControlNode::Multiply { left, right } => values[*left] * values[*right],
+                ControlNode::Add { left, right } => values[*left] + values[*right],
+                ControlNode::ClampBipolar { input } => values[*input].clamp(-1.0, 1.0),
                 ControlNode::PitchModulate {
                     input,
                     depth_semitones,
