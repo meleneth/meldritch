@@ -94,6 +94,9 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 3 sustain Gate sampling: declared pedal Gate fans out to GateHold
   and LFO sample/reset; transition-only timing, independent note retrigger,
   pattern/live sample references, capture and authored reopen pass headlessly
+- [x] Slice 3 direct sustain event source: declared Gate samples LFO without
+  GateHold, while note Gate alone articulates ADSR; pattern/live release,
+  partition, capture and authored reopen checks pass headlessly
 - [ ] Slice 3 next: broader instantiation scopes and general Event consumers
 - [x] User-prioritized MIDI keyboard checkpoint: MicroLab/generic input selection,
   diagnostic, bounded reconnect queue, construction pattern entry with velocity,

@@ -74,12 +74,9 @@ impl MonoState {
     }
 
     pub fn set_hold(&mut self, high: bool) {
-        if !self.gate_hold {
-            return;
-        }
         self.pending_hold_rise |= high && !self.hold;
         self.hold = high;
-        if !high && !self.physical_gate && self.resolved_gate {
+        if self.gate_hold && !high && !self.physical_gate && self.resolved_gate {
             self.gate_off();
         }
     }
@@ -144,7 +141,7 @@ pub enum LiveVoiceInput {
     /// 14-bit MIDI value, normalized around exact center 8192 at input.bend.
     /// Pitch changes only through an explicit compatible graph adapter.
     Bend(u16),
-    /// Independent external input.sustain Gate; only authored GateHold consumes it.
+    /// Independent external input.sustain Gate; explicit GateHold and LFO cables consume it.
     Sustain(bool),
     Gate(bool),
 }

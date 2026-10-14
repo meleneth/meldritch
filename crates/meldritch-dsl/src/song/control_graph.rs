@@ -368,7 +368,7 @@ impl SynthDefinition {
                     match (module.lfo.unwrap().reset, reset.as_slice()) {
                         (LfoReset::None, []) => {},
                         (LfoReset::GateRise, [c]) if c.signal == SignalType::Gate &&
-                            (c.from == "input.gate" || (c.from == "input.sustain" && graph.gate_hold_module()?.is_some()) || graph.modules.iter().any(|source|
+                            (c.from == "input.gate" || c.from == "input.sustain" || graph.modules.iter().any(|source|
                                 source.kind == ModuleKind::GateHold && c.from == format!("{}.gate", source.id))) => {},
                         _ => return Err("LFO reset policy requires exactly one explicit input.gate, input.sustain or GateHold.gate cable, or none".into()),
                     }
@@ -379,7 +379,7 @@ impl SynthDefinition {
                         .collect::<Vec<_>>();
                     match (module.lfo.unwrap().evaluation, sample.as_slice()) {
                         (ControlEvaluation::Event, [c]) if c.signal == SignalType::Gate &&
-                            (c.from == "input.gate" || (c.from == "input.sustain" && graph.gate_hold_module()?.is_some()) || graph.modules.iter().any(|source|
+                            (c.from == "input.gate" || c.from == "input.sustain" || graph.modules.iter().any(|source|
                                 source.kind == ModuleKind::GateHold && c.from == format!("{}.gate", source.id))) => {},
                         (ControlEvaluation::Audio | ControlEvaluation::Control { .. }, []) => {},
                         _ => return Err("event LFO evaluation requires exactly one explicit input.gate, input.sustain or GateHold.gate sample cable; other cadence has none".into()),

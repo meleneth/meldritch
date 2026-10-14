@@ -288,6 +288,9 @@ independent reset cable acts before a same-frame sample. Bounded GateHold output
 may feed ADSR, LFO reset and LFO sample simultaneously. Evaluation mode and
 frame period enter semantic fingerprints; audio-rate historical hashes remain
 unchanged. This is Gate-event sampling, not general Event-family processing.
+Declared `input.sustain` may also cable directly to LFO sample/reset, with or
+without GateHold. Its low-to-high events are independent of note Gate; without
+GateHold it cannot extend ADSR articulation.
 ControlAdd combines two bipolar outputs into a distinct wide -2..2 unit;
 ControlClamp is a separate module that clamps that unit to -1..1. The bounded
 mono lowering accepts these as ordinary control DAG nodes, with explicit

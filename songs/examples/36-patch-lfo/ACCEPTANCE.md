@@ -209,12 +209,24 @@ Apply `sustain-event-patch.txt` to `pattern-sustain.project.lua`. The declared
 feeds GateHold and owns ADSR articulation. A low-to-high sustain transition
 samples the free-running LFO once. Repeated high messages and note retriggers
 do not resample. An optional explicit `input.sustain → slow.reset` cable resets
-phase before a same-frame sample. This route requires the supported mono
-GateHold topology; a plain patch cannot use sustain as a hidden control source.
+phase before a same-frame sample. All uses require an explicit declared Gate
+input and cable.
 Independent note/sustain pattern timing, exact sample PCM, split/offline and
 partitioned live rendering, duplicate-driver rejection, typed capture and
 authored save/reopen must pass headlessly. This does not add general Gate or
 Event processing.
+
+## Direct sustain Gate sampling checkpoint
+
+Apply `sustain-direct-patch.txt` to `pattern-sustain.project.lua` after moving
+the `hold-time` note start to tick 240. The script removes GateHold and cables
+`input.gate` directly to ADSR, while `input.sustain` still samples the LFO.
+The pedal may change modulation during a key Gate, but must not extend it.
+Pattern and live references prove the sample at frame 6000/1031 respectively,
+the note release stays at frame 12000, and block partitions match. Native
+typed capture and authored save/reopen preserve the direct graph. Undeclared
+Gate sources and duplicate destinations reject; no implicit envelope hold is
+introduced.
 
 ## Rate checkpoint: one modulator changes another's speed
 

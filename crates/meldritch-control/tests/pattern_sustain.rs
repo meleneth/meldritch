@@ -59,7 +59,7 @@ fn render(source: &ValidatedSong, start: u64, end: u64) -> Vec<f64> {
 
 #[test]
 fn sustain_gate_samples_lfo_independently_of_note_gate() {
-    use meldritch_dsl::{DependentCables, LfoReset, PatchEdit, PatchOperation};
+    use meldritch_dsl::{LfoReset, PatchEdit, PatchOperation};
     use meldritch_render::song_render::{LiveVoiceEvent, LiveVoiceInput, compile_pattern_voice};
     let directory = Directory::new();
     let fixture = FIXTURE.replace("release = 0.005", "release = 0");
@@ -232,16 +232,6 @@ fn sustain_gate_samples_lfo_independently_of_note_gate() {
                 from: "input.gate".into(),
                 to: "slow.sample".into(),
             }],
-            "sustain_sample_without_gate_hold" => vec![
-                PatchOperation::Remove {
-                    id: "hold".into(),
-                    cables: DependentCables::Disconnect,
-                },
-                PatchOperation::Connect {
-                    from: "input.gate".into(),
-                    to: "env.gate".into(),
-                },
-            ],
             kind => panic!("unknown invalid case {kind}"),
         };
         let edited = source.edit_patch(&PatchEdit {
@@ -250,9 +240,6 @@ fn sustain_gate_samples_lfo_independently_of_note_gate() {
         });
         match case["kind"].as_str().unwrap() {
             "duplicate_sample_driver" => assert!(edited.is_err()),
-            "sustain_sample_without_gate_hold" => {
-                assert!(CompiledSongPatch::compile_initial(&edited.unwrap()).is_err());
-            }
             _ => unreachable!(),
         }
     }
@@ -270,6 +257,151 @@ fn sustain_gate_samples_lfo_independently_of_note_gate() {
         source.fingerprint()
     );
     assert_eq!(render(reopened.source().unwrap(), 0, 48_000), audio);
+}
+
+#[test]
+fn declared_sustain_gate_samples_without_gate_hold() {
+    use meldritch_dsl::{PatchEdit, PatchOperation};
+    use meldritch_render::song_render::{LiveVoiceEvent, LiveVoiceInput, compile_pattern_voice};
+    let directory = Directory::new();
+    let fixture = FIXTURE.replace("release = 0.005", "release = 0").replace(
+        "start_tick = 480, duration_ticks = 960",
+        "start_tick = 240, duration_ticks = 960",
+    );
+    let mut app = directory.app_with_source(&fixture);
+    let mut capture = NativeProjectCapture::new(app.authored_source().unwrap(), 24_000);
+    app.dispatch(AppCommand::SelectInstrument("bass".into()))
+        .unwrap();
+    app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+    app.dispatch(AppCommand::TogglePatchEditor).unwrap();
+    for line in
+        include_str!("../../../songs/examples/36-patch-lfo/sustain-direct-patch.txt").lines()
+    {
+        if line.starts_with('#') {
+            continue;
+        }
+        for character in line.chars() {
+            app.dispatch(AppCommand::PatchCharacter(character)).unwrap();
+        }
+        app.dispatch(AppCommand::PatchSubmit).unwrap();
+        capture.checkpoint(&app).unwrap();
+    }
+    let source = app.authored_source().unwrap();
+    assert!(
+        !source.synths()["bass"]
+            .modules()
+            .iter()
+            .any(|module| module.id() == "hold")
+    );
+    let undeclared = load_native_project(
+        &directory.0,
+        include_str!("../../../songs/examples/36-patch-lfo/main.project.lua"),
+    )
+    .unwrap();
+    let invalid: toml::Value = toml::from_str(include_str!(
+        "../../../songs/examples/36-patch-lfo/invalid/sustain-direct.toml"
+    ))
+    .unwrap();
+    for case in invalid["case"].as_array().unwrap() {
+        assert_eq!(case["kind"].as_str(), Some("undeclared_sustain_source"));
+        assert!(
+            undeclared
+                .edit_patch(&PatchEdit {
+                    synth: "bass".into(),
+                    operations: vec![PatchOperation::Connect {
+                        from: "input.sustain".into(),
+                        to: "slow.sample".into()
+                    },]
+                })
+                .is_err()
+        );
+    }
+    let audio = render(&source, 0, 24_000);
+    let mut oscillator = Oscillator::new(Waveform::Sine);
+    let sampled = (std::f64::consts::TAU * (6_000.0 / 31_200.0))
+        .sin()
+        .mul_add(0.5, 0.5);
+    for (frame, &actual) in audio.iter().enumerate() {
+        let wave = oscillator.next(440.0 * 2_f64.powf((48.0 - 69.0) / 12.0), 48_000);
+        let expected =
+            wave * if frame < 12_000 {
+                if frame < 6_000 { 0.5 } else { sampled }
+            } else {
+                0.0
+            } * 0.8;
+        assert!((actual - expected).abs() < 1e-12, "frame {frame}");
+    }
+    let mut split = render(&source, 0, 6_001);
+    split.extend(render(&source, 6_001, 24_000));
+    assert_eq!(split, audio);
+
+    let voice = compile_pattern_voice(&source, &source.pattern_voices()["bass-instance"]).unwrap();
+    let events = [
+        LiveVoiceEvent {
+            frame: 0,
+            input: LiveVoiceInput::Gate(true),
+        },
+        LiveVoiceEvent {
+            frame: 1031,
+            input: LiveVoiceInput::Sustain(true),
+        },
+        LiveVoiceEvent {
+            frame: 2048,
+            input: LiveVoiceInput::Gate(false),
+        },
+    ];
+    let full = voice
+        .live_renderer(48, 0)
+        .unwrap()
+        .render(FrameRange::new(0, 4096).unwrap(), &events)
+        .unwrap();
+    let mut live = voice.live_renderer(48, 0).unwrap();
+    let mut parts = live
+        .render(FrameRange::new(0, 1000).unwrap(), &events[..1])
+        .unwrap()
+        .samples()
+        .to_vec();
+    parts.extend_from_slice(
+        live.render(FrameRange::new(1000, 2000).unwrap(), &events[1..2])
+            .unwrap()
+            .samples(),
+    );
+    parts.extend_from_slice(
+        live.render(FrameRange::new(2000, 4096).unwrap(), &events[2..])
+            .unwrap()
+            .samples(),
+    );
+    assert_eq!(parts, full.samples());
+    assert!(
+        full.samples()[2048..]
+            .iter()
+            .all(|value| value.abs() < 1e-12)
+    );
+    let no_pedal = voice
+        .live_renderer(48, 0)
+        .unwrap()
+        .render(FrameRange::new(0, 4096).unwrap(), &[events[0], events[2]])
+        .unwrap();
+    assert!(
+        full.samples()[1031..2048]
+            .iter()
+            .zip(&no_pedal.samples()[1031..2048])
+            .any(|(a, b)| (a - b).abs() > 1e-6)
+    );
+
+    capture.finish(&app).unwrap();
+    let mut store =
+        NativeProjectStore::open(&meldritch_dsl::load_project_directory(&directory.0).unwrap())
+            .unwrap();
+    store.save(&source).unwrap();
+    let reopened =
+        NativeProjectStore::open(&meldritch_dsl::load_project_directory(&directory.0).unwrap())
+            .unwrap();
+    assert_eq!(
+        reopened.source().unwrap().fingerprint(),
+        source.fingerprint()
+    );
+    assert_eq!(render(reopened.source().unwrap(), 0, 24_000), audio);
 }
 
 #[test]
