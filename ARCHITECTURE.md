@@ -292,6 +292,8 @@ ControlAdd combines two bipolar outputs into a distinct wide -2..2 unit;
 ControlClamp is a separate module that clamps that unit to -1..1. The bounded
 mono lowering accepts these as ordinary control DAG nodes, with explicit
 single-input cables and no implicit destination clamping or summation.
+The clamped sum has composed headless evidence across VCA level, oscillator
+PitchModulate and low-pass cutoff through the separate scale/Hertz adapters.
 `song_render::mono::MonoState` now holds the shared mono DSP execution kernel.
 Offline rendering retains its pre-roll/scheduling behavior; LiveMonoRenderer
 advances that same state through 1..4096-frame worker blocks with at most 128

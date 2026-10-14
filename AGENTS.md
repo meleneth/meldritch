@@ -131,6 +131,8 @@ An explicit two-input bipolar add plus separate -1..1 clamp now supports
 inspectable LFO combination; saturated sample references, typed drafts/capture,
 invalid units and fresh-process reopen pass headlessly. Wider combination
 graphs and configurable clamp bounds remain open.
+The clamped sum additionally fans out to amplitude and pitch while the
+amplitude scale feeds the cutoff adapter; composed PCM/capture/reopen pass.
 User-prioritized MicroLab mk3 support now adds generic explicit native MIDI input
 selection, a standalone keyboard diagnostic and construction pattern step entry.
 Velocity, release/mode gating, queue overflow/epoch invalidation, typed capture,

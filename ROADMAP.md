@@ -131,6 +131,8 @@ An explicit ControlAdd now sums two bipolar inputs into a wide -2..2 unit;
 ControlClamp separately returns a -1..1 bipolar signal before existing adapters.
 Two-LFO saturation, wrong-unit rejection, typed drafts/capture and fresh reopen
 pass headlessly. General sum chains and configurable bipolar clamp bounds remain open.
+Composed fan-out of the clamped sum to amplitude/pitch and the amplitude scale
+to cutoff also has independent oscillator/filter, split, capture and reopen checks.
 An explicit Hertz rate input now integrates phase samplewise, with all-waveform,
 reset, tempo, capture, isolated reopen and playing feedback-rejection checks.
 Fixed-frame and Gate-event LFO cadence now pass bounded headless checks. Full

@@ -80,6 +80,9 @@ an empty project requires no Git repository or initialization.
 - [x] Slice 3 sum/clamp checkpoint: two bipolar Controls add into a distinct
   -2..2 unit, then an explicit clamp returns -1..1; typed drafts/capture,
   independent saturated sample reference, rejection and fresh reopen pass
+- [x] Slice 3 composed sum fan-out: one clamped sum drives amplitude and pitch;
+  the amplitude scale also drives filter Hertz, with independent oscillator/
+  filter recurrence, split PCM, typed capture and fresh reopen checks
 - [x] Slice 3 rate checkpoint: explicit Hertz input, deterministic phase integration,
   reset ordering, independent waveform references, capture and playing publication
 - [x] Slice 3 fixed control cadence: bounded frame-grid LFO output latching with

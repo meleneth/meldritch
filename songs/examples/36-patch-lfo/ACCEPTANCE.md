@@ -154,6 +154,13 @@ unclamped destinations, missing/duplicate/wrong-unit inputs, unused clamps and
 cycles without accepted-source or publication changes. Historical graphs and
 fingerprints remain unchanged.
 
+Apply `sum-fanout-patch.txt` after the sum/clamp, vibrato and filter drafts.
+The one clamped sum fans out to the amplitude scale and PitchModulate; the
+amplitude scale also feeds the Hertz cutoff adapter. An independent oscillator,
+pitch-offset and filter-recurrence reference, split PCM, typed capture and
+fresh-process reopen must agree. The clamped source is evaluated once per
+instance/sample regardless of its destinations.
+
 ## Fixed control cadence checkpoint
 
 Apply `cadence-patch.txt` to the base graph. `slow` still advances phase at the

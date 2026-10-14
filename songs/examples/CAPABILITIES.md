@@ -55,6 +55,9 @@ headlessly. General Event consumers and broader scopes remain design work.
 Two bipolar LFOs can now combine through an explicit wide-unit ControlAdd and
 separate ControlClamp, with independent saturated PCM, typed draft/capture,
 negative and fresh-process checks. General sum chains remain open.
+The same clamped sum also fans out to amplitude and pitch while the amplitude
+scale drives cutoff; independent oscillator/filter recurrence, split PCM,
+capture and fresh reopen pass headlessly.
 
 | Example | Capability | Status |
 | --- | --- | --- |

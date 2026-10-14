@@ -1046,6 +1046,109 @@ fn bipolar_add_and_clamp_render_explicit_two_lfo_sum_and_reopen() {
 }
 
 #[test]
+fn clamped_sum_fans_out_to_amplitude_pitch_and_filter() {
+    use meldritch_control::native_capture::{
+        NativeCommandEnvelope, NativeProjectCapture, load_native_capture_baseline,
+    };
+    let directory = Directory::new();
+    let mut app = directory.app();
+    app.enable_native_project_source(load_native_project(&directory.0, FIXTURE).unwrap())
+        .unwrap();
+    let mut capture = NativeProjectCapture::new(app.authored_source().unwrap(), 96_000);
+    app.dispatch(AppCommand::SelectInstrument("bass".into()))
+        .unwrap();
+    app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+    app.dispatch(AppCommand::TogglePatchEditor).unwrap();
+    for script in [
+        include_str!("../../../songs/examples/36-patch-lfo/sum-clamp-patch.txt"),
+        include_str!("../../../songs/examples/36-patch-lfo/vibrato-patch.txt"),
+        include_str!("../../../songs/examples/36-patch-lfo/filter-patch.txt"),
+        include_str!("../../../songs/examples/36-patch-lfo/sum-fanout-patch.txt"),
+    ] {
+        for line in script.lines() {
+            if line.starts_with('#') {
+                continue;
+            }
+            for character in line.chars() {
+                app.dispatch(AppCommand::PatchCharacter(character)).unwrap();
+            }
+            app.dispatch(AppCommand::PatchSubmit).unwrap();
+            capture.checkpoint(&app).unwrap();
+        }
+    }
+    let source = app.authored_source().unwrap();
+    let graph = &source.synths()["bass"];
+    for (from, to) in [
+        ("bound.control", "unipolar.control"),
+        ("bound.control", "vibrato.control"),
+        ("unipolar.control", "cutoff.control"),
+    ] {
+        assert!(
+            graph
+                .cables()
+                .iter()
+                .any(|c| c.from() == from && c.to() == to)
+        );
+    }
+    let patch = CompiledSongPatch::compile_initial(&source).unwrap();
+    let audio = patch
+        .render_default(FrameRange::new(0, 96_000).unwrap())
+        .unwrap();
+    let mut oscillator = Oscillator::new(Waveform::Sine);
+    let mut filter = [0.0, 0.0];
+    let base = 440.0 * 2_f64.powf((48.0 - 69.0) / 12.0);
+    for (frame, &sample) in audio.samples().iter().enumerate() {
+        let phase = (frame as f64 / 24_000.0).fract();
+        let combined = ((std::f64::consts::TAU * phase).sin()
+            + (std::f64::consts::TAU * (phase + 0.25)).sin())
+        .clamp(-1.0, 1.0);
+        let level = combined.mul_add(0.5, 0.5);
+        let pitch_hz = base * 2_f64.powf(combined * 0.5 / 12.0);
+        let input = oscillator.next(pitch_hz, 48_000) * if frame < 84_000 { level } else { 0.0 };
+        let cutoff = level.mul_add(1800.0, 200.0).clamp(20.0, 20_000.0);
+        let g = (std::f64::consts::PI * cutoff / 48_000.0).tan();
+        let a = 1.0 / (1.0 + g * (g + 2.0));
+        let band = a * (filter[0] + g * (input - filter[1]));
+        let low = filter[1] + g * band;
+        filter = [2.0 * band - filter[0], 2.0 * low - filter[1]];
+        assert!(
+            (sample - low * 0.8).abs() < 1e-12,
+            "frame {frame}: {sample} != {}",
+            low * 0.8
+        );
+    }
+    let mut split = patch
+        .render_default(FrameRange::new(0, 37_001).unwrap())
+        .unwrap()
+        .samples()
+        .to_vec();
+    split.extend_from_slice(
+        patch
+            .render_default(FrameRange::new(37_001, 96_000).unwrap())
+            .unwrap()
+            .samples(),
+    );
+    assert_eq!(split, audio.samples());
+    capture.finish(&app).unwrap();
+    let session = fs::read_to_string(capture.session.as_ref().unwrap().path()).unwrap();
+    let mut replay = directory.app();
+    replay
+        .enable_native_project_source(load_native_capture_baseline(&directory.0, &session).unwrap())
+        .unwrap();
+    let events: toml::Value = toml::from_str(&session).unwrap();
+    for event in events["events"].as_array().unwrap() {
+        let envelope =
+            NativeCommandEnvelope::decode(&toml::to_string(&event["native"]).unwrap()).unwrap();
+        replay.dispatch(envelope.command.into()).unwrap();
+    }
+    assert_eq!(
+        replay.authored_source().unwrap().fingerprint(),
+        source.fingerprint()
+    );
+    assert_fresh_process(&directory, &source);
+}
+
+#[test]
 fn invalid_control_contracts_reject_without_accepted_source_or_history_changes() {
     let directory = Directory::new();
     let source = load_native_project(&directory.0, FIXTURE).unwrap();
