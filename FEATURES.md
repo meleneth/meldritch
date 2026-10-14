@@ -39,6 +39,11 @@ vertical slices are planned in [ROADMAP.md](ROADMAP.md).
   and appropriate Metadata families. Numeric representation does not authorize
   conversion. Pitch and gate remain independently routable; envelopes have no
   inherent amplitude destination, and gates need not originate from notes.
+  A Pitch or Gate output may fan out to multiple compatible consumers at once:
+  the direct note path and a separate mutation path can observe the same source
+  without either consuming or changing the other's signal. Each destination
+  input still has one resolved source unless an explicit combiner or selector
+  is authored. Processing on one branch does not alter its sibling branch.
 - Patterns are independent timed sources. Supported transforms compose through
   inspectable ports with explicit timing, identity and probability commitments.
   There must be no second event engine to implement this direction.

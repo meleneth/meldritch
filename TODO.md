@@ -103,6 +103,9 @@ an empty project requires no Git repository or initialization.
   worker replay; source revisions invalidate binding, fresh saves restore defaults
 - [ ] Slice 4: authored normalization, atomic recipe and dynamic control identity
 - [ ] Slice 5: bounded identity-bearing event transforms in existing scheduling
+  with explicit Pitch/Gate source fan-out to independent note and mutation paths;
+  prove the direct branch preserves source timing/identity and require typed
+  adapters or combiners at incompatible or multiply driven inputs
 - [ ] Slice 6: quantized graph activation and proved compatible DSP-state continuity
 - [ ] Slice 7: typed u64/epoch capture, timed replay and metapattern harvesting
 - [ ] Slice 8: pinned library definitions/assets, local overrides and deliberate updates

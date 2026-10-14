@@ -219,6 +219,12 @@ Depends on slice 3's control ports and slice 1's transaction/save path.
 **Scenario/example:** proposed `38-pattern-event-patch`: melody passes through
 transpose/quantize and rhythm through seeded probability/ratchet/gate-length
 processing; an LFO controls probability sampled at each original event boundary.
+Keep an explicit fork of the original Pitch/Gate source: one branch feeds the
+ordinary note/envelope path while another feeds mutation processing. Both
+branches must be observable at the same time; mutation on one branch cannot
+silently replace the direct branch or change its event identity/timing. Derived
+mutation events retain explicit provenance. Typed adapters must be declared
+where a processor consumes Event rather than Pitch or Gate.
 
 **Sound/control:** changed subdivisions/pitches and deterministic committed
 outcomes appear in event traces and rendered audio. Each transform declares
@@ -226,7 +232,8 @@ time, identity, retrigger and loop semantics; children retain provenance.
 
 **Negative tests:** expansion beyond declared budget, invalid offsets/durations,
 same-frame ambiguity, dropped gate ends, inappropriate continuous-rate evaluation,
-feedback without a timing break and incompatible event adapters.
+feedback without a timing break, incompatible event adapters and two sources
+driving one input without an explicit combiner or selector.
 
 **Persistence/compatibility:** store transforms, seed/commit policy and occurrence
 provenance; a fresh render/replay produces the same supported outcomes. Preserve
