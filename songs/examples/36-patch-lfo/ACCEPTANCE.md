@@ -430,6 +430,18 @@ backpressure reserves the three cleanup slots. Physical pedal gestures and
 listening remain unverified. `--midi-sustain-cc 64` is an explicit example mapping,
 not a claim about the MicroLab mk3's configured pedal message.
 
+## Resolved Gate fan-out checkpoint
+
+Apply `fanout-gate.txt` after the velocity, bend and sustain drafts. The one
+resolved `hold.gate` output feeds both `env.gate` and `slow.reset`. Physical
+Gate rises, including retriggers while sustain is high, reset the LFO before
+that frame is evaluated. Sustain can extend the resolved Gate without creating
+another rise. A direct `input.gate → slow.reset` route remains valid. Each reset
+input accepts one cable; duplicate drivers and unsupported Gate destinations
+reject atomically. The direct ADSR path remains audible, and full/split PCM and
+authored save/reopen agree. This is bounded Gate fan-out, not a general Gate
+processor or a Pitch/Event mutation filter.
+
 ## Editable external-input checkpoint
 
 `ports.project.lua` starts with only independent pitch/gate inputs. In Ctrl-G,

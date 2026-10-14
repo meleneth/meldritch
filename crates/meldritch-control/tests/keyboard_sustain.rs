@@ -7,8 +7,12 @@ use meldritch_control::{
     native_project::{NativeProjectStore, encode_native_project, load_native_project},
 };
 use meldritch_core::FrameRange;
-use meldritch_dsl::{DependentCables, ModuleKind, PatchEdit, PatchOperation, ValidatedSong};
-use meldritch_render::song_render::{LiveVoiceEvent, LiveVoiceInput, compile_pattern_voice};
+use meldritch_dsl::{
+    DependentCables, LfoReset, ModuleKind, PatchEdit, PatchOperation, ValidatedSong,
+};
+use meldritch_render::song_render::{
+    CompiledNotePatch, LiveVoiceEvent, LiveVoiceInput, compile_pattern_voice,
+};
 use std::{fs, path::PathBuf, sync::Arc};
 
 const FIXTURE: &str = include_str!("../../../songs/examples/36-patch-lfo/sustain.project.lua");
@@ -97,6 +101,170 @@ fn unheld(source: &ValidatedSong) -> ValidatedSong {
             ],
         })
         .unwrap()
+}
+
+#[test]
+fn resolved_gate_fans_out_to_envelope_and_lfo_reset_and_reopens() {
+    let directory = Directory::new();
+    let source = directory.constructed();
+    let mut app = directory.app(source);
+    app.dispatch(AppCommand::SelectInstrument("bass".into()))
+        .unwrap();
+    app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+    app.dispatch(AppCommand::TogglePatchEditor).unwrap();
+    for line in include_str!("../../../songs/examples/36-patch-lfo/fanout-gate.txt").lines() {
+        if line.starts_with('#') {
+            continue;
+        }
+        for character in line.chars() {
+            app.dispatch(AppCommand::PatchCharacter(character)).unwrap();
+        }
+        app.dispatch(AppCommand::PatchSubmit).unwrap();
+    }
+    let source = app.authored_source().unwrap();
+    let graph = &source.synths()["bass"];
+    assert!(
+        graph
+            .cables()
+            .iter()
+            .any(|c| c.from() == "hold.gate" && c.to() == "env.gate")
+    );
+    assert!(
+        graph
+            .cables()
+            .iter()
+            .any(|c| c.from() == "hold.gate" && c.to() == "slow.reset")
+    );
+    let patch = compile_pattern_voice(&source, &source.pattern_voices()["bass-instance"]).unwrap();
+    let whole = patch.render(FrameRange::new(0, 24000).unwrap()).unwrap();
+    let split = patch.render(FrameRange::new(0, 7001).unwrap()).unwrap();
+    let tail = patch.render(FrameRange::new(7001, 24000).unwrap()).unwrap();
+    assert_eq!(&whole.samples()[..7001], split.samples());
+    assert_eq!(&whole.samples()[7001..], tail.samples());
+    assert!(whole.samples().iter().any(|sample| sample.abs() > 1e-6));
+
+    let direct = source
+        .edit_patch(&PatchEdit {
+            synth: "bass".into(),
+            operations: vec![
+                PatchOperation::Disconnect {
+                    from: "hold.gate".into(),
+                    to: "slow.reset".into(),
+                },
+                PatchOperation::Connect {
+                    from: "input.gate".into(),
+                    to: "slow.reset".into(),
+                },
+            ],
+        })
+        .unwrap();
+    let direct_patch =
+        compile_pattern_voice(&direct, &direct.pattern_voices()["bass-instance"]).unwrap();
+    assert_eq!(
+        whole.samples(),
+        direct_patch
+            .render(FrameRange::new(0, 24000).unwrap())
+            .unwrap()
+            .samples()
+    );
+    let mut settings = graph
+        .modules()
+        .iter()
+        .find(|m| m.id() == "slow")
+        .unwrap()
+        .lfo()
+        .unwrap();
+    settings.reset = LfoReset::None;
+    let unreset = source
+        .edit_patch(&PatchEdit {
+            synth: "bass".into(),
+            operations: vec![
+                PatchOperation::Disconnect {
+                    from: "hold.gate".into(),
+                    to: "slow.reset".into(),
+                },
+                PatchOperation::ConfigureLfo {
+                    module: "slow".into(),
+                    settings,
+                },
+            ],
+        })
+        .unwrap();
+    let unreset_patch =
+        compile_pattern_voice(&unreset, &unreset.pattern_voices()["bass-instance"]).unwrap();
+    let events = [
+        LiveVoiceEvent {
+            frame: 0,
+            input: LiveVoiceInput::Gate(true),
+        },
+        LiveVoiceEvent {
+            frame: 400,
+            input: LiveVoiceInput::Sustain(true),
+        },
+        LiveVoiceEvent {
+            frame: 512,
+            input: LiveVoiceInput::Gate(false),
+        },
+        LiveVoiceEvent {
+            frame: 2048,
+            input: LiveVoiceInput::Gate(true),
+        },
+        LiveVoiceEvent {
+            frame: 2500,
+            input: LiveVoiceInput::Gate(false),
+        },
+        LiveVoiceEvent {
+            frame: 3200,
+            input: LiveVoiceInput::Sustain(false),
+        },
+    ];
+    let live = |patch: &CompiledNotePatch| {
+        patch
+            .live_renderer(48, 0)
+            .unwrap()
+            .render(FrameRange::new(0, 4096).unwrap(), &events)
+            .unwrap()
+    };
+    let held_audio = live(&patch);
+    assert_eq!(held_audio.samples(), live(&direct_patch).samples());
+    assert!(
+        held_audio.samples()[2048..2500]
+            .iter()
+            .zip(&live(&unreset_patch).samples()[2048..2500])
+            .any(|(a, b)| (a - b).abs() > 1e-6)
+    );
+
+    for operations in [
+        vec![PatchOperation::Connect {
+            from: "input.gate".into(),
+            to: "slow.reset".into(),
+        }],
+        vec![PatchOperation::Connect {
+            from: "hold.gate".into(),
+            to: "osc.gate".into(),
+        }],
+    ] {
+        assert!(
+            source
+                .edit_patch(&PatchEdit {
+                    synth: "bass".into(),
+                    operations
+                })
+                .is_err()
+        );
+    }
+    let encoded = encode_native_project(&source).unwrap();
+    let reopened = load_native_project(&directory.0, &encoded).unwrap();
+    assert_eq!(source.fingerprint(), reopened.fingerprint());
+    let reopened_patch =
+        compile_pattern_voice(&reopened, &reopened.pattern_voices()["bass-instance"]).unwrap();
+    assert_eq!(
+        whole.samples(),
+        reopened_patch
+            .render(FrameRange::new(0, 24000).unwrap())
+            .unwrap()
+            .samples()
+    );
 }
 
 #[test]

@@ -234,14 +234,21 @@ impl SynthDefinition {
                 ));
             }
         }
-        if self
+        for cable in self
             .cables
             .iter()
             .filter(|c| c.from == format!("{}.gate", module.id))
-            .count()
-            != 1
         {
-            return Err("GateHold output currently routes only to ADSR; general gate fan-out is unsupported".into());
+            if cable.to != format!("{}.gate", envelope.id)
+                && !self.modules.iter().any(|target| {
+                    target.kind == ModuleKind::Lfo && cable.to == format!("{}.reset", target.id)
+                })
+            {
+                return Err(
+                    "GateHold output currently supports ADSR gate and LFO reset destinations"
+                        .into(),
+                );
+            }
         }
         Ok(Some(module))
     }

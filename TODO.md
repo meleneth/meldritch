@@ -88,6 +88,9 @@ an empty project requires no Git repository or initialization.
   and callback PCM/allocation acceptance headlessly
 - [x] Bounded keyboard adapters: explicit velocity, bend and GateHold pedal routes,
   headless capture/save/reopen and worker/callback evidence
+- [x] Resolved Gate fan-out: one GateHold output feeds ADSR and LFO reset through
+  distinct typed cables; draft, live retrigger, split PCM, rejection and authored
+  reopen checks pass headlessly
 - [x] Bounded native input editing: atomic velocity/bend/sustain declarations,
   dependent removal, typed capture and authored reopen from a pitch/gate patch
 - [x] Independent mono pattern velocity binding: authored note-start Control,

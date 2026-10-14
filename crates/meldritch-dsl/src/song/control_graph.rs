@@ -346,8 +346,10 @@ impl SynthDefinition {
                         .collect::<Vec<_>>();
                     match (module.lfo.unwrap().reset, reset.as_slice()) {
                         (LfoReset::None, []) => {},
-                        (LfoReset::GateRise, [c]) if c.from == "input.gate" && c.signal == SignalType::Gate => {},
-                        _ => return Err("LFO reset policy requires exactly its explicit input.gate cable or none".into()),
+                        (LfoReset::GateRise, [c]) if c.signal == SignalType::Gate &&
+                            (c.from == "input.gate" || graph.modules.iter().any(|source|
+                                source.kind == ModuleKind::GateHold && c.from == format!("{}.gate", source.id))) => {},
+                        _ => return Err("LFO reset policy requires exactly one explicit input.gate or GateHold.gate cable, or none".into()),
                     }
                     let endpoint = format!("{id}.rate");
                     if let Some(cable) = graph.cables.iter().find(|c| c.to == endpoint) {

@@ -1,0 +1,6 @@
+# Apply after the velocity, bend and sustain drafts to sustain.project.lua.
+# The resolved Gate now feeds both the envelope and the LFO reset.
+clear
+lfo slow sine beats 1 phase 0 reset gate_rise
+connect hold.gate slow.reset
+commit

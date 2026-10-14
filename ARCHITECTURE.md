@@ -239,6 +239,10 @@ Legacy `ModulationMatrix` explicitly sums/clamps a fixed catalog. Keep that
 behavior for historical showcases and lower it to explicit combiners when
 exposing it as graph data; do not transfer implicit summation into new cables.
 Example 36 now loads Lfo/ControlScale/ControlMultiply in the ordinary synth graph.
+The bounded mono GateHold route may also fan its resolved Gate output to ADSR
+and LFO reset through distinct cables. Both consumers observe the same physical
+Gate rises; sustain extends the resolved Gate without inventing a new rise.
+Other Gate destinations still reject until they have executable contracts.
 `control_graph::control_order` validates a bounded control DAG, unit compatibility,
 explicit reset and reachability to VCA level. `song_control::ControlPlan` lowers
 indexed dependencies and reuses the static-rate Lfo kernel; a 33-value/32-origin
