@@ -208,17 +208,10 @@ fn parse_operation(words: &[&str]) -> Result<PatchOperation, String> {
         ["pitch-depth", module, depth] => Ok(PatchOperation::ConfigurePitchModulation { module: (*module).into(), settings: meldritch_dsl::PitchModulationSettings {
             depth_semitones: depth.parse().map_err(|_| "pitch depth requires semitones")?,
         } }),
-        ["lfo", module, shape, rate_kind, value, "phase", phase, "reset", reset] => {
-            use meldritch_dsl::{GraphLfoSettings, GraphLfoRate, GraphLfoShape, LfoReset};
-            let value = value.parse().map_err(|_| "LFO rate requires a number")?;
-            Ok(PatchOperation::ConfigureLfo { module: (*module).into(), settings: GraphLfoSettings {
-                shape: match *shape { "sine" => GraphLfoShape::Sine, "triangle" => GraphLfoShape::Triangle, "saw" => GraphLfoShape::Saw, "square" => GraphLfoShape::Square, _ => return Err("LFO shape requires sine/triangle/saw/square".into()) },
-                rate: match *rate_kind { "beats" => GraphLfoRate::Beats(value), "hertz" => GraphLfoRate::Hertz(value), _ => return Err("LFO rate requires beats or hertz".into()) },
-                phase: phase.parse().map_err(|_| "LFO phase requires a number")?,
-                reset: match *reset { "none" => LfoReset::None, "gate_rise" => LfoReset::GateRise, _ => return Err("LFO reset requires none or gate_rise".into()) },
-                ..GraphLfoSettings::default()
-            } })
-        }
+        ["lfo", module, shape, rate_kind, value, "phase", phase, "reset", reset] =>
+            parse_lfo(module, shape, rate_kind, value, phase, reset, None),
+        ["lfo", module, shape, rate_kind, value, "phase", phase, "reset", reset, "cadence", period] =>
+            parse_lfo(module, shape, rate_kind, value, phase, reset, Some(*period)),
         ["scale", module, gain, offset, min, max] => Ok(PatchOperation::ConfigureControlScale { module: (*module).into(), settings: meldritch_dsl::ControlScaleSettings {
             gain: gain.parse().map_err(|_| "scale gain requires a number")?, offset: offset.parse().map_err(|_| "scale offset requires a number")?,
             clamp_min: min.parse().map_err(|_| "scale minimum requires a number")?, clamp_max: max.parse().map_err(|_| "scale maximum requires a number")?,
@@ -246,4 +239,52 @@ fn parse_operation(words: &[&str]) -> Result<PatchOperation, String> {
         }
         _ => Err("use add ID TYPE | remove ID reject/disconnect | connect FROM TO | disconnect FROM TO | set MODULE PARAM VALUE | commit | clear | save".into()),
     }
+}
+
+fn parse_lfo(
+    module: &str,
+    shape: &str,
+    rate_kind: &str,
+    value: &str,
+    phase: &str,
+    reset: &str,
+    period: Option<&str>,
+) -> Result<PatchOperation, String> {
+    use meldritch_dsl::{
+        ControlEvaluation, GraphLfoRate, GraphLfoSettings, GraphLfoShape, LfoReset,
+    };
+    let value = value.parse().map_err(|_| "LFO rate requires a number")?;
+    let evaluation = match period {
+        None => ControlEvaluation::Audio,
+        Some(period) => ControlEvaluation::Control {
+            period_frames: period
+                .parse()
+                .map_err(|_| "control cadence requires frames in 1..1024")?,
+        },
+    };
+    Ok(PatchOperation::ConfigureLfo {
+        module: module.into(),
+        settings: GraphLfoSettings {
+            shape: match shape {
+                "sine" => GraphLfoShape::Sine,
+                "triangle" => GraphLfoShape::Triangle,
+                "saw" => GraphLfoShape::Saw,
+                "square" => GraphLfoShape::Square,
+                _ => return Err("LFO shape requires sine/triangle/saw/square".into()),
+            },
+            rate: match rate_kind {
+                "beats" => GraphLfoRate::Beats(value),
+                "hertz" => GraphLfoRate::Hertz(value),
+                _ => return Err("LFO rate requires beats or hertz".into()),
+            },
+            phase: phase.parse().map_err(|_| "LFO phase requires a number")?,
+            reset: match reset {
+                "none" => LfoReset::None,
+                "gate_rise" => LfoReset::GateRise,
+                _ => return Err("LFO reset requires none or gate_rise".into()),
+            },
+            evaluation,
+            ..GraphLfoSettings::default()
+        },
+    })
 }

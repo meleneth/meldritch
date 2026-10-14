@@ -1,0 +1,5 @@
+# Apply to main.project.lua. The Gate reset is explicit; the held LFO is not.
+clear
+lfo slow sine beats 1 phase 0 reset gate_rise cadence 64
+connect input.gate slow.reset
+commit

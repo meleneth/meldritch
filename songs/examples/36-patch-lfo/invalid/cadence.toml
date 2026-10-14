@@ -1,0 +1,8 @@
+# Rejected complete LFO configurations; accepted graph and publication remain intact.
+[[case]]
+period_frames = 0
+reason = "zero frames cannot define a control grid"
+
+[[case]]
+period_frames = 1025
+reason = "the per-instance latch budget is at most 1024 frames"

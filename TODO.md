@@ -79,7 +79,10 @@ an empty project requires no Git repository or initialization.
   envelope-shaped fan-out, independent amplitude wiring, capture and fresh reopen
 - [x] Slice 3 rate checkpoint: explicit Hertz input, deterministic phase integration,
   reset ordering, independent waveform references, capture and playing publication
-- [ ] Slice 3 next: explicit control/event cadence and broader instantiation scopes
+- [x] Slice 3 fixed control cadence: bounded frame-grid LFO output latching with
+  off-grid Gate sampling, audio-rate phase integration, native drafts/capture,
+  independent static and pattern-rate references, split/live/reopen checks
+- [ ] Slice 3 next: event-sampled control and broader instantiation scopes
 - [x] User-prioritized MIDI keyboard checkpoint: MicroLab/generic input selection,
   diagnostic, bounded reconnect queue, construction pattern entry with velocity,
   typed capture/save/reopen and playing publication; host MicroLab connection observed

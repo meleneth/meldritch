@@ -14,6 +14,7 @@ pub(super) struct MonoState {
     control_values: [f64; 35],
     control_origins: [u64; 32],
     control_phases: [f64; 32],
+    control_latches: [f64; 32],
     tempo: meldritch_core::Tempo,
 }
 
@@ -47,6 +48,7 @@ impl MonoState {
             },
             control_origins: [0; 32],
             control_phases: [0.0; 32],
+            control_latches: [0.0; 32],
             tempo: meldritch_core::Tempo::new(patch.bpm, patch.sample_rate)
                 .map_err(|e| SongRenderError::InvalidPatternVoice(e.to_string()))?,
         })
@@ -97,6 +99,7 @@ impl MonoState {
                 &mut self.control_values,
                 &mut self.control_origins,
                 &mut self.control_phases,
+                &mut self.control_latches,
             )
         });
         let frequency = patch

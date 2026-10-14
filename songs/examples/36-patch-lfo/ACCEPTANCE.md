@@ -134,6 +134,26 @@ reconstruction. invalid_depth_connections_reject_without_source_or_history_chang
 executes every negative fixture. native_graph_lfo checks the combined depth/pitch/
 filter worker publication and failed-amount-unit continuity while playing.
 
+## Fixed control cadence checkpoint
+
+Apply `cadence-patch.txt` to the base graph. `slow` still advances phase at the
+audio sample rate, but its bipolar output is sampled and held every 64 frames,
+anchored at the instance's frame zero. The first sample is at frame zero.
+An explicitly cabled Gate rise samples immediately after phase reset even when
+it falls between cadence ticks; the next scheduled tick remains on the original
+64-frame grid. A free-running LFO ignores Gate. For a cabled Hertz rate, every
+sample's rate advances phase, even while the output is held. Downstream scale,
+multiply, pitch and cutoff adapters continue evaluating at audio rate with
+the latest held LFO value. Other instances have independent phase and latch
+state. Existing `evaluation = "audio"` remains samplewise and unchanged.
+
+The accepted control period is 1..1024 frames; zero and larger periods reject
+before source/history/publication changes. Tests compare every frame to an
+independent phase/latch reference, including off-grid reset, rate steps,
+full/split rendering and fresh-process save/reopen. Native edits and typed
+capture retain the cadence setting. This checkpoint does not introduce Event
+sampling, control-rate downstream nodes, smoothing or shared/global scope.
+
 ## Rate checkpoint: one modulator changes another's speed
 
 Apply rate-patch.txt to the base patch or its pitch/filter/depth extensions.

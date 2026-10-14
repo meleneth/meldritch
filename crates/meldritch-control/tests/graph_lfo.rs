@@ -441,6 +441,162 @@ fn tremolo_matches_independent_phase_gate_and_oscillator_reference_with_split_re
 }
 
 #[test]
+fn lfo_control_cadence_latches_on_grid_and_off_grid_gate_reset() {
+    use meldritch_control::native_capture::{
+        NativeCommandEnvelope, NativeProjectCapture, load_native_capture_baseline,
+    };
+    use meldritch_dsl::{ControlEvaluation, PatchEdit, PatchOperation};
+    use meldritch_render::song_render::{LiveVoiceEvent, LiveVoiceInput, compile_pattern_voice};
+    let directory = Directory::new();
+    let mut app = directory.app();
+    app.enable_native_project_source(load_native_project(&directory.0, FIXTURE).unwrap())
+        .unwrap();
+    let mut capture = NativeProjectCapture::new(app.authored_source().unwrap(), 96_000);
+    app.dispatch(AppCommand::SelectInstrument("bass".into()))
+        .unwrap();
+    app.dispatch(AppCommand::ToggleInstrumentEditor).unwrap();
+    app.dispatch(AppCommand::TogglePatchEditor).unwrap();
+    for line in include_str!("../../../songs/examples/36-patch-lfo/cadence-patch.txt").lines() {
+        if line.starts_with('#') {
+            continue;
+        }
+        for character in line.chars() {
+            app.dispatch(AppCommand::PatchCharacter(character)).unwrap();
+        }
+        app.dispatch(AppCommand::PatchSubmit).unwrap();
+    }
+    capture.checkpoint(&app).unwrap();
+    let source = app.authored_source().unwrap();
+    let lfo = source.synths()["bass"]
+        .modules()
+        .iter()
+        .find(|m| m.id() == "slow")
+        .unwrap();
+    assert_eq!(
+        lfo.lfo().unwrap().evaluation,
+        ControlEvaluation::Control { period_frames: 64 }
+    );
+    assert!(
+        lfo.ports()
+            .iter()
+            .any(|port| port.endpoint == "slow.control"
+                && port.evaluation == Some(ControlEvaluation::Control { period_frames: 64 }))
+    );
+    let patch = CompiledSongPatch::compile_initial(&source).unwrap();
+    let audio = patch
+        .render_default(FrameRange::new(0, 96_000).unwrap())
+        .unwrap();
+    let mut oscillator = Oscillator::new(Waveform::Sine);
+    let mut reset_origin = 0usize;
+    let mut held = 0.0;
+    for (frame, actual) in audio.samples().iter().enumerate() {
+        let position = frame % 96_000;
+        let rise = position == 0 || position == 36_000;
+        if rise {
+            reset_origin = frame;
+        }
+        if frame % 64 == 0 || rise {
+            held = (std::f64::consts::TAU * ((frame - reset_origin) as f64 / 24_000.0).fract())
+                .sin()
+                .mul_add(0.5, 0.5);
+        }
+        let wave = oscillator.next(440.0 * 2_f64.powf((48.0 - 69.0) / 12.0), 48_000);
+        let expected = wave * if position < 84_000 { held } else { 0.0 } * 0.8;
+        assert!(
+            (actual - expected).abs() < 1e-12,
+            "frame {frame}: {actual} != {expected}"
+        );
+    }
+    let mut split = patch
+        .render_default(FrameRange::new(0, 36_001).unwrap())
+        .unwrap()
+        .samples()
+        .to_vec();
+    split.extend_from_slice(
+        patch
+            .render_default(FrameRange::new(36_001, 96_000).unwrap())
+            .unwrap()
+            .samples(),
+    );
+    assert_eq!(split, audio.samples());
+    let voice = compile_pattern_voice(&source, &source.pattern_voices()["bass-instance"]).unwrap();
+    let events = [
+        LiveVoiceEvent {
+            frame: 0,
+            input: LiveVoiceInput::Gate(true),
+        },
+        LiveVoiceEvent {
+            frame: 997,
+            input: LiveVoiceInput::Gate(false),
+        },
+        LiveVoiceEvent {
+            frame: 1031,
+            input: LiveVoiceInput::Gate(true),
+        },
+    ];
+    let all = voice
+        .live_renderer(48, 0)
+        .unwrap()
+        .render(FrameRange::new(0, 4096).unwrap(), &events)
+        .unwrap();
+    let mut live = voice.live_renderer(48, 0).unwrap();
+    let mut partitioned = Vec::new();
+    for (start, end) in [(0, 257), (257, 1000), (1000, 1032), (1032, 4096)] {
+        let block_events: Vec<_> = events
+            .iter()
+            .copied()
+            .filter(|event| event.frame >= start && event.frame < end)
+            .collect();
+        partitioned.extend_from_slice(
+            live.render(FrameRange::new(start, end).unwrap(), &block_events)
+                .unwrap()
+                .samples(),
+        );
+    }
+    assert_eq!(partitioned, all.samples());
+    let before = source.fingerprint();
+    let history = app.history().len();
+    let invalid: toml::Value = toml::from_str(include_str!(
+        "../../../songs/examples/36-patch-lfo/invalid/cadence.toml"
+    ))
+    .unwrap();
+    for case in invalid["case"].as_array().unwrap() {
+        let period_frames = case["period_frames"].as_integer().unwrap() as u16;
+        let mut settings = lfo.lfo().unwrap();
+        settings.evaluation = ControlEvaluation::Control { period_frames };
+        assert!(
+            app.dispatch(AppCommand::EditPatch(PatchEdit {
+                synth: "bass".into(),
+                operations: vec![PatchOperation::ConfigureLfo {
+                    module: "slow".into(),
+                    settings
+                }],
+            }))
+            .is_err()
+        );
+        assert_eq!(app.authored_source().unwrap().fingerprint(), before);
+        assert_eq!(app.history().len(), history);
+    }
+    capture.finish(&app).unwrap();
+    let session = fs::read_to_string(capture.session.as_ref().unwrap().path()).unwrap();
+    let mut replay = directory.app();
+    replay
+        .enable_native_project_source(load_native_capture_baseline(&directory.0, &session).unwrap())
+        .unwrap();
+    let events: toml::Value = toml::from_str(&session).unwrap();
+    for event in events["events"].as_array().unwrap() {
+        let envelope =
+            NativeCommandEnvelope::decode(&toml::to_string(&event["native"]).unwrap()).unwrap();
+        replay.dispatch(envelope.command.into()).unwrap();
+    }
+    assert_eq!(
+        replay.authored_source().unwrap().fingerprint(),
+        source.fingerprint()
+    );
+    assert_fresh_process(&directory, &source);
+}
+
+#[test]
 fn invalid_control_contracts_reject_without_accepted_source_or_history_changes() {
     let directory = Directory::new();
     let source = load_native_project(&directory.0, FIXTURE).unwrap();

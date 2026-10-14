@@ -2,8 +2,8 @@
 use crate::modulation::{Lfo, LfoRate, LfoShape};
 use meldritch_core::Tempo;
 use meldritch_dsl::{
-    ControlHertzSettings, ControlScaleSettings, GraphLfoRate, GraphLfoSettings, GraphLfoShape,
-    LfoReset, ModuleKind, SynthDefinition,
+    ControlEvaluation, ControlHertzSettings, ControlScaleSettings, GraphLfoRate, GraphLfoSettings,
+    GraphLfoShape, LfoReset, ModuleKind, SynthDefinition,
 };
 
 // Slot 0 is envelope, 1..=32 are bounded graph nodes; independent inputs
@@ -156,6 +156,7 @@ impl ControlPlan {
         values: &mut [f64; 35],
         origins: &mut [u64; 32],
         phases: &mut [f64; 32],
+        latches: &mut [f64; 32],
     ) -> f64 {
         values[0] = envelope;
         for (index, node) in self.nodes.iter().enumerate() {
@@ -178,7 +179,7 @@ impl ControlPlan {
                         phase: settings.phase,
                         seed: 0,
                     };
-                    if let Some(rate) = rate {
+                    let instantaneous = if let Some(rate) = rate {
                         if frame == 0 || (gate_rise && settings.reset == LfoReset::GateRise) {
                             phases[index] = settings.phase;
                         }
@@ -190,6 +191,17 @@ impl ControlPlan {
                         value
                     } else {
                         source.value_at(frame - origins[index], tempo)
+                    };
+                    match settings.evaluation {
+                        ControlEvaluation::Audio => instantaneous,
+                        ControlEvaluation::Control { period_frames } => {
+                            if frame % u64::from(period_frames) == 0
+                                || (gate_rise && settings.reset == LfoReset::GateRise)
+                            {
+                                latches[index] = instantaneous;
+                            }
+                            latches[index]
+                        }
                     }
                 }
                 ControlNode::Scale { input, settings } => values[*input]

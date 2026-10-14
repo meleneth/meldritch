@@ -1,8 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use meldritch_app::{AppCommand, AppCommandResult, AppController, NoteEdit};
-use meldritch_control::native_project::{NativeProjectStore, load_native_project};
+use meldritch_control::native_project::{
+    NativeProjectStore, encode_native_project, load_native_project,
+};
 use meldritch_core::FrameRange;
-use meldritch_dsl::{PatternSignal, ValidatedSong};
+use meldritch_dsl::{ControlEvaluation, PatchEdit, PatchOperation, PatternSignal, ValidatedSong};
 use meldritch_render::{
     dsp::{Oscillator, Waveform},
     song_host::CompiledSongPatch,
@@ -53,6 +55,61 @@ fn render(source: &ValidatedSong, start: u64, end: u64) -> Vec<f64> {
         .unwrap()
         .samples()
         .to_vec()
+}
+
+#[test]
+fn pattern_rate_integrates_each_sample_while_lfo_output_latches() {
+    let directory = Directory::new();
+    let source = directory.source();
+    let mut settings = source.synths()["bass"]
+        .modules()
+        .iter()
+        .find(|module| module.id() == "slow")
+        .unwrap()
+        .lfo()
+        .unwrap();
+    settings.evaluation = ControlEvaluation::Control { period_frames: 64 };
+    let source = source
+        .edit_patch(&PatchEdit {
+            synth: "bass".into(),
+            operations: vec![PatchOperation::ConfigureLfo {
+                module: "slow".into(),
+                settings,
+            }],
+        })
+        .unwrap();
+    let actual = render(&source, 0, 96_000);
+    let mut oscillator = Oscillator::new(Waveform::Sine);
+    let mut phase = 0.0_f64;
+    let mut held = 0.0_f64;
+    for (frame, &sample) in actual.iter().enumerate() {
+        let position = frame % 48_000;
+        let velocity: f64 = if position < 12_000 {
+            0.0
+        } else if position < 24_000 {
+            0.5
+        } else {
+            1.0
+        };
+        if frame % 64 == 0 {
+            held = (std::f64::consts::TAU * phase).sin().mul_add(0.5, 0.5);
+        }
+        let expected =
+            oscillator.next(440.0 * 2_f64.powf((48.0 - 69.0) / 12.0), 48_000) * held * 0.8;
+        assert!(
+            (sample - expected).abs() < 1e-12,
+            "frame {frame}: {sample} != {expected}"
+        );
+        phase = (phase + velocity.mul_add(3.0, 1.0) / 48_000.0).fract();
+    }
+    let mut split = render(&source, 0, 12_001);
+    split.extend(render(&source, 12_001, 48_001));
+    split.extend(render(&source, 48_001, 96_000));
+    assert_eq!(split, actual);
+    let encoded = encode_native_project(&source).unwrap();
+    let reopened = load_native_project(&directory.0, &encoded).unwrap();
+    assert_eq!(source.fingerprint(), reopened.fingerprint());
+    assert_eq!(actual, render(&reopened, 0, 96_000));
 }
 
 #[test]

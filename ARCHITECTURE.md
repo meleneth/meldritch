@@ -278,6 +278,10 @@ cycles. A 32-phase worker stack integrates cabled rate: reset authored phase fir
 evaluate current phase, then advance by this sample's Hertz/sample-rate. Static
 rate retains the absolute-frame kernel. Multiple Hertz adapters may feed distinct
 consumers; cutoff lowering resolves its actual cable rather than the first adapter.
+LFO control outputs may now declare a 1..1024-frame per-instance latch cadence.
+The latch grid starts at instance frame zero; an explicitly cabled Gate rise
+samples immediately after reset without moving later grid ticks. Cabled phase
+still integrates its Hertz input every audio sample while the output is held.
 `song_render::mono::MonoState` now holds the shared mono DSP execution kernel.
 Offline rendering retains its pre-roll/scheduling behavior; LiveMonoRenderer
 advances that same state through 1..4096-frame worker blocks with at most 128

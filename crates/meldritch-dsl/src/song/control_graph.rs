@@ -133,6 +133,7 @@ pub enum GraphLfoShape {
 #[serde(rename_all = "snake_case")]
 pub enum ControlEvaluation {
     Audio,
+    Control { period_frames: u16 },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -196,6 +197,14 @@ pub(super) fn validate_control_settings(
         return Err("control module settings must match module kind".into());
     }
     if let Some(settings) = lfo {
+        if matches!(
+            settings.evaluation,
+            ControlEvaluation::Control {
+                period_frames: 0 | 1025..
+            }
+        ) {
+            return Err("control cadence requires 1..1024 frames".into());
+        }
         let valid = match settings.rate {
             GraphLfoRate::Hertz(value) => value.is_finite() && (0.001..=100.0).contains(&value),
             GraphLfoRate::Beats(value) => {

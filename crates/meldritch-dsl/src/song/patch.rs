@@ -149,9 +149,16 @@ impl ModuleDefinition {
                 ) {
                     ports.push(ModulePort {
                         unit: self.control_unit(name, direction),
-                        evaluation: self
-                            .control_unit(name, direction)
-                            .map(|_| ControlEvaluation::Audio),
+                        evaluation: self.control_unit(name, direction).map(|_| {
+                            if self.kind == ModuleKind::Lfo
+                                && name == "control"
+                                && direction == PortDirection::Output
+                            {
+                                self.lfo.unwrap().evaluation
+                            } else {
+                                ControlEvaluation::Audio
+                            }
+                        }),
                         endpoint,
                         direction,
                         signal,
