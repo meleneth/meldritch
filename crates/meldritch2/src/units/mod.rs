@@ -6,3 +6,4 @@ pub mod mix;
 pub mod multiply;
 pub mod output;
 pub mod sine;
+pub mod switch;

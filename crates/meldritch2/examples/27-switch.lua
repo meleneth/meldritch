@@ -1,0 +1,11 @@
+local graph = meldritch.graph()
+local output = graph:module("output", "output")
+local selector = graph:module("selector", "sine", { frequency = 12000.0 })
+local switch = graph:module("switch", "switch", { threshold = 0.5 })
+local right = graph:module("right", "constant", { value = -0.25 })
+local left = graph:module("left", "constant", { value = 0.25 })
+graph:connect(switch.out, output.input)
+graph:connect(selector.out, switch.select)
+graph:connect(right.out, switch.right)
+graph:connect(left.out, switch.left)
+return graph

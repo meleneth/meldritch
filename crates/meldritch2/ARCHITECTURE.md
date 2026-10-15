@@ -74,6 +74,9 @@ delays activation to a later buffer.
 `Lag` is a stateful signal processor with a contract-owned response range of
 0..1. Authored values, live overrides, and declared control ranges are checked
 against that one bound before publication; its state continues across buffers.
+`Switch` chooses between two signals per sample from an independent selector
+signal and a live threshold parameter; it uses the same contract and schedule
+mechanism as the other units.
 Contracts expose domain and fan-in explicitly so these restrictions are visible.
 
 `compile_at_rate` validates the sample rate; `compile` uses 48 kHz. Live graph

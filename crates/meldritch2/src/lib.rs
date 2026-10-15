@@ -47,6 +47,8 @@ mod tests {
     const LAG_INVALID: &str = include_str!("../examples/24-lag-invalid.lua");
     const LAG_CONTROL_INVALID: &str = include_str!("../examples/25-lag-control-invalid.lua");
     const SMOOTHED_CONTROL: &str = include_str!("../examples/26-smoothed-control.lua");
+    const SWITCH: &str = include_str!("../examples/27-switch.lua");
+    const SWITCH_MISSING: &str = include_str!("../examples/28-switch-missing.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -59,7 +61,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 8);
+        assert_eq!(contract::all().len(), 9);
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.role, Role::Processor);
         assert_eq!(gain.inputs[0].name, "input");
@@ -89,6 +91,16 @@ mod tests {
         let lag = contract::find("lag").unwrap();
         assert_eq!(lag.params[0].name, "response");
         assert_eq!(lag.params[0].range, Some((0.0, 1.0)));
+        let switch = contract::find("switch").unwrap();
+        assert_eq!(
+            switch
+                .inputs
+                .iter()
+                .map(|port| port.name)
+                .collect::<Vec<_>>(),
+            ["left", "right", "select"]
+        );
+        assert_eq!(switch.params[0].name, "threshold");
         assert_eq!(contract::find("output").unwrap().role, Role::Output);
         let error = lua::read(BASIC.replace("gain.input", "gain.missing").as_str()).unwrap_err();
         assert!(
@@ -716,6 +728,60 @@ mod tests {
         assert_eq!(machine.effective_value(&motion), Some(0.0));
         machine.process(&mut samples);
         assert_eq!(samples, [0.1171875, 0.05859375, 0.029296875, 0.0146484375]);
+    }
+
+    #[test]
+    fn audio_rate_switch_compiles_by_dependency_and_preserves_parameter_identity() {
+        let graph = lua::read(SWITCH).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let order = machine.order();
+        assert_eq!(order.last().map(String::as_str), Some("output"));
+        assert!(
+            order.iter().position(|id| id == "selector")
+                < order.iter().position(|id| id == "switch")
+        );
+        assert!(
+            order.iter().position(|id| id == "left") < order.iter().position(|id| id == "switch")
+        );
+        assert!(
+            order.iter().position(|id| id == "right") < order.iter().position(|id| id == "switch")
+        );
+        let threshold = ParameterId::new("switch", "threshold");
+        assert!(machine.parameter_ids().any(|id| id == &threshold));
+        assert_eq!(machine.authored_value(&threshold), Some(0.5));
+
+        let mut first = [f64::NAN; 4];
+        machine.process(&mut first);
+        assert_eq!(first, [0.25, -0.25, 0.25, 0.25]);
+        machine.set_override(&threshold, Some(2.0)).unwrap();
+        assert_eq!(machine.authored_value(&threshold), Some(0.5));
+        assert_eq!(machine.effective_value(&threshold), Some(2.0));
+        machine.process(&mut first);
+        assert_eq!(first, [0.25; 4]);
+        machine.set_override(&threshold, None).unwrap();
+        machine.process(&mut first);
+        assert_eq!(first, [0.25, -0.25, 0.25, 0.25]);
+
+        let mut split = compile(&graph).unwrap();
+        let mut a = [f64::NAN; 3];
+        let mut b = [f64::NAN; 5];
+        split.process(&mut a);
+        split.process(&mut b);
+        assert_eq!(a, [0.25, -0.25, 0.25]);
+        assert_eq!(b, [0.25, 0.25, -0.25, 0.25, 0.25]);
+    }
+
+    #[test]
+    fn missing_switch_selector_rejects_candidate_without_corrupting_accepted_machine() {
+        let mut host = Host::default();
+        host.submit(&lua::read(SWITCH).unwrap()).unwrap();
+        let error = host
+            .submit(&lua::read(SWITCH_MISSING).unwrap())
+            .unwrap_err();
+        assert!(error.contains("switch.select"), "{error}");
+        let mut samples = [f64::NAN; 4];
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.25, -0.25, 0.25, 0.25]);
     }
 
     #[test]

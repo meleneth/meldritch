@@ -218,3 +218,16 @@ silent. CC value 127 publishes motion=1; the next four samples must be
 the next four samples must decay to `[0.1171875, 0.05859375, 0.029296875,
 0.0146484375]`. Neither gesture reconstructs the graph. The MIDI adapter,
 parameter cell, Lag state, and Gain port compose without a special route.
+
+## Audio-rate Switch composition
+
+`27-switch.lua` selects between Constant(0.25) and Constant(-0.25) using a
+12 kHz Sine at 48 kHz. `Switch` chooses its right input when the selector
+sample is at least the threshold; the threshold starts at 0.5. Its first four samples are
+`[0.25, -0.25, 0.25, 0.25]`. Module and cable declarations are out of
+dependency order, and splitting an eight-sample render across buffers must
+preserve the result. A live override of `switch.threshold` to 2 makes the
+next buffer all 0.25, with the authored value and topology intact. Clearing
+the override restores audio-rate selection. `28-switch-missing.lua` omits the
+required selector cable and must reject the candidate while the accepted
+machine continues to process.

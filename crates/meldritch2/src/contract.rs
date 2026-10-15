@@ -42,7 +42,7 @@ pub struct Contract {
     pub params: &'static [Param],
 }
 
-const CONTRACTS: [Contract; 8] = [
+const CONTRACTS: [Contract; 9] = [
     crate::units::constant::CONTRACT,
     crate::units::gain::CONTRACT,
     crate::units::output::CONTRACT,
@@ -51,6 +51,7 @@ const CONTRACTS: [Contract; 8] = [
     crate::units::affine::CONTRACT,
     crate::units::sine::CONTRACT,
     crate::units::lag::CONTRACT,
+    crate::units::switch::CONTRACT,
 ];
 
 pub fn all() -> &'static [Contract] {
