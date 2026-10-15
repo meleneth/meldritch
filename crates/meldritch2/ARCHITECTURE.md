@@ -20,17 +20,26 @@ fan-in, and cycles, then derives a topological schedule and compiles slots and
 module operations. `Host::submit` replaces the accepted machine only after full
 compilation. A rejected candidate leaves it usable.
 
+`LiveControl::submit` compiles a candidate before acquiring a short handoff
+lock. `LiveRuntime::process` uses a nonblocking `try_lock` at buffer entry,
+swaps in at most one complete candidate, and places the old machine in a
+retirement slot. The control side reclaims and drops that old machine. Only one
+candidate may be pending; while the handoff is busy, processing continues with
+the current graph. This is a bounded in-process publication boundary, not a
+physical audio host.
+
 `Machine::process` fills a caller-owned buffer with no allocation, parsing,
 validation, compilation, Lua, UI, or file access. Compiled operations read
 inputs in contract port order from preallocated scratch space. `Mix` sums two
 named inputs; sources may fan out. Current ports are mono audio at one sample
 per frame. Each input permits one cable. Cycles, disconnected required inputs,
 and multiple Output instances are rejected. Feedback, multiple cables to one
-input, other domains, block DSP, graph activation during audio playback, and
-multi-parameter modules remain future work. Parameter publication uses one
+input, other domains, block DSP, physical audio integration, and multi-parameter
+modules remain future work. Parameter publication uses one
 atomic `u64` per parameter; validation and handle lookup happen off the process
-path. Handles from replaced revisions refer only to their old cells. Graph
-replacement itself still requires external coordination with any audio thread.
+path. Handles from replaced revisions refer only to their old cells. The live
+handoff uses a nonblocking lock attempt on the processing side; a busy handoff
+delays activation to a later buffer.
 Contracts expose domain and fan-in explicitly so these restrictions are visible.
 
 Run `cargo run -p meldritch2 -- crates/meldritch2/examples/01-basic.lua` and

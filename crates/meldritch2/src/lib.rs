@@ -1,5 +1,6 @@
 pub mod compiler;
 pub mod contract;
+pub mod live;
 pub mod lua;
 pub mod model;
 
@@ -7,7 +8,9 @@ pub mod model;
 mod tests {
     use crate::{
         compiler::{Host, compile},
-        contract, lua,
+        contract,
+        live::LiveRuntime,
+        lua,
         model::ParameterId,
     };
 
@@ -216,5 +219,46 @@ mod tests {
         host.accepted().unwrap().process(&mut samples);
         assert_eq!(samples, [0.09375; 8]);
         assert_eq!(host.accepted().unwrap().effective_value(&id), Some(0.25));
+    }
+
+    #[test]
+    fn complete_revisions_activate_between_buffers() {
+        let initial = compile(&lua::read(BASIC).unwrap()).unwrap();
+        let (mut runtime, control) = LiveRuntime::new(initial);
+        let mut samples = [0.0; 8];
+        assert!(!runtime.process(&mut samples));
+        assert_eq!(samples, [0.125; 8]);
+
+        let cycle = lua::read(CYCLE).unwrap();
+        assert!(control.submit(&cycle).unwrap_err().contains("cycle"));
+        let mix = lua::read(MIX).unwrap();
+        let publisher = std::thread::spawn(move || {
+            control.submit(&mix).unwrap();
+            assert!(
+                control
+                    .submit(&lua::read(BASIC).unwrap())
+                    .unwrap_err()
+                    .contains("pending")
+            );
+            assert!(control.submit(&cycle).unwrap_err().contains("cycle"));
+            control
+        });
+        let control = publisher.join().unwrap();
+        assert!(runtime.process(&mut samples));
+        assert_eq!(samples, [0.1875; 8]);
+        assert!(!runtime.process(&mut samples));
+        assert_eq!(samples, [0.1875; 8]);
+        assert!(
+            control
+                .submit(&lua::read(BASIC).unwrap())
+                .unwrap_err()
+                .contains("reclaimed")
+        );
+        let retired = control.reclaim().unwrap().unwrap();
+        assert_eq!(retired.order(), ["source", "gain", "output"]);
+        drop(retired);
+        control.submit(&lua::read(BASIC).unwrap()).unwrap();
+        assert!(runtime.process(&mut samples));
+        assert_eq!(samples, [0.125; 8]);
     }
 }

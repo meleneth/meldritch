@@ -30,3 +30,14 @@ without borrowing the machine or changing the authored 0.5. The next complete
 to 0.1875. Invalid values must be rejected. A handle from a replaced graph
 revision must not control the replacement, even when the parameter ID is the
 same. Processing performs only bounded atomic reads and preallocated writes.
+
+## Bounded graph activation milestone
+
+Compile `05-mix.lua` off the processing path while `01-basic.lua` is active.
+Queue the completed candidate and activate it at the start of a later buffer:
+the old buffer is all 0.125 and the new buffer is all 0.1875. The processing
+path must neither compile nor drop the retired machine. The control side
+reclaims it. A rejected cycle candidate leaves the active machine and any
+queued valid candidate intact. Only one replacement may be pending at a time;
+additional submissions receive a useful diagnostic. Activation may be delayed
+when the short handoff lock is busy, without blocking audio processing.
