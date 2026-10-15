@@ -75,12 +75,13 @@ pub fn fill_interleaved<T: Sample + FromSample<f64>>(
     channels: usize,
     scratch: &mut [f64; CHUNK_FRAMES],
 ) {
-    if channels == 0 {
+    if channels == 0 || output.is_empty() {
         return;
     }
+    runtime.begin_buffer();
     for chunk in output.chunks_mut(CHUNK_FRAMES * channels) {
         let frames = chunk.len().div_ceil(channels);
-        runtime.process(&mut scratch[..frames]);
+        runtime.process_prepared(&mut scratch[..frames]);
         for (frame, value) in chunk.chunks_mut(channels).zip(&scratch[..frames]) {
             let converted = T::from_sample(value.clamp(-1.0, 1.0));
             frame.fill(converted);

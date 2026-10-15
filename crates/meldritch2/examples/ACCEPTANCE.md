@@ -60,6 +60,9 @@ preallocated `f64` scratch space, clamps to the device range, and copies each
 sample to every output channel. Headless tests verify chunk boundaries,
 interleaving, and sample conversion. Device opening or playback failure reports
 a diagnostic; actual hardware sound remains a physical check.
+If one callback spans multiple scratch chunks, a parameter publication or
+queued revision after the first chunk must leave its remaining chunks on the
+same parameter snapshot and graph. The next callback observes the update.
 
 ## Instrument-declared control milestone
 

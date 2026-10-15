@@ -135,6 +135,11 @@ pub struct Machine {
 
 impl Machine {
     pub fn process(&mut self, buffer: &mut [f64]) {
+        self.prepare_buffer();
+        self.process_prepared(buffer);
+    }
+
+    pub(crate) fn prepare_buffer(&mut self) {
         // Snapshot all published values once, before processing this buffer.
         for (index, cell) in self.published.iter().enumerate() {
             let bits = cell.load(Ordering::Acquire);
@@ -144,6 +149,9 @@ impl Machine {
                 f64::from_bits(bits)
             };
         }
+    }
+
+    pub(crate) fn process_prepared(&mut self, buffer: &mut [f64]) {
         for sample in buffer {
             for op in &mut self.ops {
                 for (slot, input) in op.inputs.iter().enumerate() {

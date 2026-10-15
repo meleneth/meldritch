@@ -61,6 +61,10 @@ phase across buffers and uses a published frequency at the next buffer entry.
 Its optional `fm_hz` port adds an audio-rate Hertz offset to each sample's phase
 advance; the current output sample is read before advancing phase. Self-feedback
 still rejects as a cycle.
+Device callbacks may exceed the fixed 256-frame scratch chunk. The callback
+activates at most one pending revision and snapshots parameters once before
+rendering all its chunks, so publication during a callback waits for the next
+callback boundary.
 `Mix` sums two named inputs; sources may fan out. Current ports are mono audio
 at one sample per frame. `Multiply` multiplies two independent audio signals
 per sample, supporting explicit audio-rate modulation through ordinary cables.
