@@ -6,6 +6,7 @@ pub enum Domain {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FanIn {
     One,
+    Sum,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -57,6 +58,11 @@ const INPUT: Port = Port {
     domain: Domain::MonoAudio,
     fan_in: FanIn::One,
 };
+const SUM_INPUT: Port = Port {
+    name: "input",
+    domain: Domain::MonoAudio,
+    fan_in: FanIn::Sum,
+};
 const LEFT: Port = Port {
     name: "left",
     domain: Domain::MonoAudio,
@@ -97,7 +103,7 @@ const CONTRACTS: [Contract; 6] = [
         name: "gain",
         process: gain,
         state_len: 0,
-        inputs: &[INPUT],
+        inputs: &[SUM_INPUT],
         outputs: &[OUT],
         params: &[GAIN],
     },

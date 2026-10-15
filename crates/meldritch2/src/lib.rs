@@ -13,7 +13,7 @@ pub mod tui;
 mod tests {
     use crate::{
         compiler::{Host, compile, compile_at_rate},
-        contract,
+        contract::{self, FanIn},
         live::LiveRuntime,
         lua,
         midi::MidiRouter,
@@ -33,6 +33,8 @@ mod tests {
     const MULTIPLY: &str = include_str!("../examples/11-audio-multiply.lua");
     const MULTIPLY_MISSING: &str = include_str!("../examples/12-audio-multiply-missing.lua");
     const TWO_SINES_MULTIPLY: &str = include_str!("../examples/13-two-sines-multiply.lua");
+    const GAIN_FAN_IN: &str = include_str!("../examples/14-gain-fan-in.lua");
+    const OUTPUT_FAN_IN_INVALID: &str = include_str!("../examples/15-output-fan-in-invalid.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -48,6 +50,7 @@ mod tests {
         assert_eq!(contract::all().len(), 6);
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.inputs[0].name, "input");
+        assert_eq!(gain.inputs[0].fan_in, FanIn::Sum);
         assert_eq!(gain.outputs[0].name, "out");
         assert_eq!(gain.params[0].name, "gain");
         let mix = contract::find("mix").unwrap();
@@ -129,7 +132,7 @@ mod tests {
         graph.modules[1].values.insert("gain".into(), f64::NAN);
         assert!(compile(&graph).unwrap_err().contains("must be finite"));
         graph.modules[1].values.insert("gain".into(), 0.5);
-        graph.connections.push(graph.connections[0].clone());
+        graph.connections.push(graph.connections[1].clone());
         assert!(
             compile(&graph)
                 .unwrap_err()
@@ -202,6 +205,40 @@ mod tests {
         for (actual, expected) in samples.into_iter().zip([0.0, peak, 0.0, -peak]) {
             assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
         }
+    }
+
+    #[test]
+    fn declared_gain_fan_in_sums_cables_independent_of_author_order() {
+        let graph = lua::read(GAIN_FAN_IN).unwrap();
+        let mut reordered = graph.clone();
+        reordered.modules.reverse();
+        reordered.connections.reverse();
+        let mut first = compile(&graph).unwrap();
+        let mut second = compile(&reordered).unwrap();
+        assert_eq!(first.order(), ["left", "right", "gain", "output"]);
+        assert_eq!(first.order(), second.order());
+        let mut first_samples = [f64::NAN; 8];
+        let mut second_samples = [f64::NAN; 8];
+        first.process(&mut first_samples);
+        second.process(&mut second_samples);
+        assert_eq!(first_samples, [0.1875; 8]);
+        assert_eq!(first_samples, second_samples);
+    }
+
+    #[test]
+    fn one_connection_port_rejects_second_cable_and_keeps_machine() {
+        let mut host = Host::default();
+        host.submit(&lua::read(GAIN_FAN_IN).unwrap()).unwrap();
+        let error = host
+            .submit(&lua::read(OUTPUT_FAN_IN_INVALID).unwrap())
+            .unwrap_err();
+        assert!(
+            error.contains("output.input' permits one connection"),
+            "{error}"
+        );
+        let mut samples = [f64::NAN; 4];
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.1875; 4]);
     }
 
     #[test]

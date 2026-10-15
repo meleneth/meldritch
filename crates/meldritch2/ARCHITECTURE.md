@@ -53,9 +53,10 @@ phase across buffers and uses a published frequency at the next buffer entry.
 `Mix` sums two named inputs; sources may fan out. Current ports are mono audio
 at one sample per frame. `Multiply` multiplies two independent audio signals
 per sample, supporting explicit audio-rate modulation through ordinary cables.
-Each input permits one cable. Cycles, disconnected
+`gain.input` currently declares summed fan-in; its connected sources execute
+in stable module-ID order. Other inputs permit one cable. Cycles, disconnected
 required inputs, and multiple Output instances are rejected. Feedback,
-multiple cables to one input, other domains, block DSP, and multi-parameter
+other domains, block DSP, and multi-parameter
 modules remain future work. Parameter publication uses one
 atomic `u64` per parameter; validation and handle lookup happen off the process
 path. Handles from replaced revisions refer only to their old cells. The live

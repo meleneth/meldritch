@@ -11,7 +11,7 @@ use crate::model::{Graph, MidiCc, ParameterId};
 struct Op {
     process: fn(&mut [f64], &[f64], f64, f64) -> f64,
     state: Vec<f64>,
-    inputs: Vec<usize>,
+    inputs: Vec<Vec<usize>>,
     output: usize,
     param: Option<usize>,
 }
@@ -124,8 +124,10 @@ impl Machine {
         }
         for sample in buffer {
             for op in &mut self.ops {
-                for (slot, source) in op.inputs.iter().enumerate() {
-                    self.input_scratch[slot] = self.slots[*source];
+                for (slot, sources) in op.inputs.iter().enumerate() {
+                    self.input_scratch[slot] = sources
+                        .iter()
+                        .fold(0.0, |sum, source| sum + self.slots[*source]);
                 }
                 let param = op.param.map(|i| self.params[i]).unwrap_or(0.0);
                 self.slots[op.output] = (op.process)(
@@ -237,7 +239,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         ));
     }
 
-    let mut input_edges = BTreeMap::new();
+    let mut input_edges: BTreeMap<(usize, &str), Vec<usize>> = BTreeMap::new();
     let mut dependents = vec![Vec::<usize>::new(); graph.modules.len()];
     let mut indegree = vec![0usize; graph.modules.len()];
     for edge in &graph.connections {
@@ -271,16 +273,14 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             ));
         }
         let key = (dst, edge.to.port.as_str());
-        if input_edges.insert(key, src).is_some() {
-            match dp.fan_in {
-                FanIn::One => {
-                    return Err(format!(
-                        "input '{}.{}' permits one connection",
-                        edge.to.module, edge.to.port
-                    ));
-                }
-            }
+        let sources = input_edges.entry(key).or_default();
+        if !sources.is_empty() && dp.fan_in == FanIn::One {
+            return Err(format!(
+                "input '{}.{}' permits one connection",
+                edge.to.module, edge.to.port
+            ));
         }
+        sources.push(src);
         dependents[src].push(dst);
         indegree[dst] += 1;
     }
@@ -390,7 +390,11 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         let inputs = c
             .inputs
             .iter()
-            .map(|port| input_edges[&(i, port.name)])
+            .map(|port| {
+                let mut sources = input_edges[&(i, port.name)].clone();
+                sources.sort_by(|a, b| graph.modules[*a].id.cmp(&graph.modules[*b].id));
+                sources
+            })
             .collect();
         let param = c
             .params

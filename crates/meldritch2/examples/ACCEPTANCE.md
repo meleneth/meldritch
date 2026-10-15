@@ -129,3 +129,14 @@ must reject a disconnected right input without replacing an accepted machine.
 Current ports are mono audio at sample cadence; this demonstrates audio-rate
 signal multiplication, not a new control-rate domain or implicit parameter
 modulation rule.
+
+## Declared input fan-in milestone
+
+`14-gain-fan-in.lua` sends two Constants to the same `gain.input`. That port's
+contract explicitly sums incoming samples before applying Gain(0.5), yielding
+0.1875 per sample. The two cable declarations and module declarations are out
+of dependency order. Reversing either order must produce the same schedule and
+samples. `15-output-fan-in-invalid.lua` must reject a second cable to
+`output.input`, whose contract still permits one, without replacing an accepted
+machine. Fan-in aggregation belongs to the port contract and generic executor;
+there is no graph topology case for these three module types.
