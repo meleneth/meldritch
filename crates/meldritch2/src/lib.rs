@@ -53,6 +53,7 @@ mod tests {
     const MIRROR_OUTPUTS: &str = include_str!("../examples/30-mirror-outputs.lua");
     const SAMPLE_HOLD: &str = include_str!("../examples/31-sample-hold.lua");
     const SAMPLE_HOLD_MISSING: &str = include_str!("../examples/32-sample-hold-missing.lua");
+    const HELD_PEAK_SELECTOR: &str = include_str!("../examples/33-held-peak-selector.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -923,6 +924,52 @@ mod tests {
         host.accepted().unwrap().process(&mut samples);
         let peak = std::f64::consts::FRAC_1_SQRT_2;
         for (actual, expected) in samples.iter().zip([peak, -peak, -peak, -peak]) {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
+    }
+
+    #[test]
+    fn held_peak_behavior_emerges_from_existing_units_and_cables() {
+        let graph = lua::read(HELD_PEAK_SELECTOR).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        assert_eq!(
+            machine.order(),
+            ["signal", "trigger", "hold", "switch", "output"]
+        );
+        let mut whole = [f64::NAN; 8];
+        machine.process(&mut whole);
+        let peak = std::f64::consts::FRAC_1_SQRT_2;
+        for (actual, expected) in whole
+            .iter()
+            .zip([0.0, peak, peak, peak, 0.0, -peak, -1.0, -peak])
+        {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
+
+        let mut split = compile(&graph).unwrap();
+        let mut first = [f64::NAN; 3];
+        let mut second = [f64::NAN; 5];
+        split.process(&mut first);
+        split.process(&mut second);
+        assert_eq!(whole[..3], first);
+        assert_eq!(whole[3..], second);
+
+        let mut reordered = graph.clone();
+        reordered.modules.reverse();
+        reordered.connections.reverse();
+        let mut machine = compile(&reordered).unwrap();
+        let mut reordered_samples = [f64::NAN; 8];
+        machine.process(&mut reordered_samples);
+        assert_eq!(whole, reordered_samples);
+
+        let threshold = ParameterId::new("switch", "threshold");
+        machine.set_override(&threshold, Some(2.0)).unwrap();
+        let mut next = [f64::NAN; 8];
+        machine.process(&mut next);
+        for (actual, expected) in next
+            .iter()
+            .zip([0.0, peak, 1.0, peak, 0.0, -peak, -1.0, -peak])
+        {
             assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
         }
     }

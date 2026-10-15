@@ -267,3 +267,15 @@ Publishing a threshold of 2 at a buffer boundary suppresses further captures
 without resetting the held sample or rebuilding the graph. The trigger is an
 audio-rate signal, not a separate event or timing domain. `32-sample-hold-missing.lua`
 must reject a disconnected trigger and leave an accepted machine usable.
+
+## Held-peak composition
+
+`33-held-peak-selector.lua` fans a 6 kHz Sine into SampleHold's signal input
+and both the left and selector inputs of Switch. A 12 kHz Sine triggers the
+hold. When the live signal exceeds 0.5, Switch selects the held sample;
+otherwise it passes the live signal. At 48 kHz, the first eight samples are
+approximately `[0, sqrt(1/2), sqrt(1/2), sqrt(1/2), 0, -sqrt(1/2), -1,
+-sqrt(1/2)]`. Buffer partition and module declaration order must not change
+that sequence. Publishing `switch.threshold = 2` at a buffer boundary makes
+the next eight samples the unmodified 6 kHz Sine, without reconstructing the
+topology. This composition uses existing contracts, ports, and lowering.

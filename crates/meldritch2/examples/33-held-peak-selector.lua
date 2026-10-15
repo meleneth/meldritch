@@ -1,0 +1,13 @@
+local graph = meldritch.graph()
+local output = graph:module("output", "output")
+local switch = graph:module("switch", "switch", { threshold = 0.5 })
+local hold = graph:module("hold", "sample_hold", { threshold = 0.5 })
+local trigger = graph:module("trigger", "sine", { frequency = 12000.0 })
+local signal = graph:module("signal", "sine", { frequency = 6000.0 })
+graph:connect(switch.out, output.input)
+graph:connect(hold.out, switch.right)
+graph:connect(signal.out, switch.select)
+graph:connect(signal.out, switch.left)
+graph:connect(trigger.out, hold.trigger)
+graph:connect(signal.out, hold.signal)
+return graph
