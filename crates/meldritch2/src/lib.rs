@@ -59,6 +59,10 @@ mod tests {
     const ENVELOPE_INVALID_ATTACK: &str =
         include_str!("../examples/36-envelope-invalid-attack.lua");
     const GATED_SINE_VOICE: &str = include_str!("../examples/37-gated-sine-voice.lua");
+    const MIDI_NOTE_VOICE: &str = include_str!("../examples/38-midi-note-voice.lua");
+    const MIDI_NOTE_MISSING_CONTROL: &str =
+        include_str!("../examples/39-midi-note-missing-control.lua");
+    const MIDI_NOTE_NARROW_PITCH: &str = include_str!("../examples/40-midi-note-narrow-pitch.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -1110,6 +1114,109 @@ mod tests {
         assert!(phase_router.dispatch(&[0xB0, 7, 127]));
         phase_probe.process(&mut one);
         assert!((one[0] - 0.125).abs() < 1e-12);
+    }
+
+    #[test]
+    fn midi_notes_drive_pitch_and_gate_with_last_held_priority() {
+        let graph = lua::read(MIDI_NOTE_VOICE).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let router = MidiRouter::from_machine(&machine);
+        let pitch = ParameterId::new("oscillator", "frequency");
+        let gate = ParameterId::new("gate", "value");
+        let mut silent = [f64::NAN; 4];
+        machine.process(&mut silent);
+        assert_eq!(silent, [0.0; 4]);
+        assert!(!router.dispatch(&[0x91, 69, 100]));
+        assert!(!router.dispatch(&[0x90, 69]));
+        assert!(!router.dispatch(&[0x80, 69, 0]));
+        assert!(router.dispatch(&[0x90, 69, 100]));
+        assert_eq!(machine.effective_value(&pitch), Some(440.0));
+        assert_eq!(machine.effective_value(&gate), Some(1.0));
+        assert_eq!(machine.authored_value(&gate), Some(0.0));
+        let mut attack = [f64::NAN; 4];
+        machine.process(&mut attack);
+        for (i, actual) in attack.iter().enumerate() {
+            let level = [0.5, 0.75, 0.875, 0.9375][i];
+            let expected =
+                0.25 * level * (std::f64::consts::TAU * 440.0 * (i + 4) as f64 / 48_000.0).sin();
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
+
+        let clone = router.clone();
+        assert!(clone.dispatch(&[0x90, 81, 80]));
+        assert_eq!(machine.effective_value(&pitch), Some(880.0));
+        assert!(router.dispatch(&[0x80, 81, 0]));
+        assert_eq!(machine.effective_value(&pitch), Some(440.0));
+        assert_eq!(machine.effective_value(&gate), Some(1.0));
+        assert!(clone.dispatch(&[0x90, 81, 80]));
+        assert!(router.dispatch(&[0x80, 69, 0]));
+        assert_eq!(machine.effective_value(&pitch), Some(880.0));
+        assert_eq!(machine.effective_value(&gate), Some(1.0));
+        assert!(router.dispatch(&[0x90, 69, 70]));
+        assert_eq!(machine.effective_value(&pitch), Some(440.0));
+        assert!(router.dispatch(&[0x90, 69, 0]));
+        assert_eq!(machine.effective_value(&pitch), Some(880.0));
+        assert_eq!(machine.effective_value(&gate), Some(1.0));
+        assert!(router.dispatch(&[0x80, 81, 0]));
+        assert_eq!(machine.effective_value(&gate), Some(0.0));
+        assert!(!router.dispatch(&[0x80, 81, 0]));
+        let mut release = [f64::NAN; 4];
+        machine.process(&mut release);
+        assert!(release.iter().all(|sample| sample.is_finite()));
+        assert!(release.iter().any(|sample| *sample != 0.0));
+
+        for note in 0u8..=127 {
+            assert!(router.dispatch(&[0x90, note, 1]));
+        }
+        assert_eq!(machine.effective_value(&gate), Some(1.0));
+        assert!(router.dispatch(&[0x80, 127, 0]));
+        let expected = 440.0 * 2.0_f64.powf((126.0 - 69.0) / 12.0);
+        assert_eq!(machine.effective_value(&pitch), Some(expected));
+        for note in (0u8..=126).rev() {
+            assert!(router.dispatch(&[0x80, note, 0]));
+        }
+        assert_eq!(machine.effective_value(&gate), Some(0.0));
+    }
+
+    #[test]
+    fn invalid_midi_note_bindings_preserve_the_accepted_voice() {
+        let graph = lua::read(MIDI_NOTE_VOICE).unwrap();
+        let mut host = Host::default();
+        host.submit(&graph).unwrap();
+        let error = host
+            .submit(&lua::read(MIDI_NOTE_MISSING_CONTROL).unwrap())
+            .unwrap_err();
+        assert!(error.contains("unknown gate control 'missing'"), "{error}");
+        let error = host
+            .submit(&lua::read(MIDI_NOTE_NARROW_PITCH).unwrap())
+            .unwrap_err();
+        assert!(
+            error.contains("must cover all MIDI note frequencies"),
+            "{error}"
+        );
+        let mut invalid = graph.clone();
+        invalid.midi_notes[0].channel = 17;
+        assert!(host.submit(&invalid).unwrap_err().contains("channel 1..16"));
+        invalid = graph.clone();
+        invalid.midi_notes.push(invalid.midi_notes[0].clone());
+        assert!(
+            host.submit(&invalid)
+                .unwrap_err()
+                .contains("duplicate MIDI note")
+        );
+        invalid = graph.clone();
+        invalid.midi_notes[0].gate_control_id = "pitch".into();
+        assert!(
+            host.submit(&invalid)
+                .unwrap_err()
+                .contains("different parameters")
+        );
+        let machine = host.accepted().unwrap();
+        let router = MidiRouter::from_machine(machine);
+        assert!(router.dispatch(&[0x90, 69, 100]));
+        let mut samples = [f64::NAN; 2];
+        machine.process(&mut samples);
+        assert!(samples[1] > 0.0);
     }
 
     #[test]

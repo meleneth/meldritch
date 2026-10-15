@@ -34,6 +34,15 @@ bytes. The router belongs to one compiled graph revision. MIDI device opening
 is explicit through `midi-ports` and `perform --midi=INDEX`. The input callback
 only decodes and publishes CC values; the terminal view reads those values from
 the same parameter cells. Physical CC gestures remain unverified.
+Lua may also map a MIDI channel's note messages to named pitch and gate
+controls. The MIDI adapter keeps a bounded last-pressed held-key stack per
+mapped channel, converts the active note to Hertz, and publishes 0/1 gate
+through those same control cells. Note-on with zero velocity releases a key;
+releasing the top key restores the prior held pitch without dropping gate.
+The controls must cover all MIDI note frequencies and 0..1 gate. This is a
+buffer-boundary mono route: pitch and gate use separate atomic cells, so an
+audio snapshot racing a note message can observe one before the other.
+Timed input, velocity, and atomic paired publication remain open.
 
 Lua's `meldritch.graph()` API constructs a candidate graph. `graph:module(id,
 type, values)` returns handles with contract-derived ports; `graph:connect(src,

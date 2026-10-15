@@ -34,12 +34,20 @@ pub struct MidiCc {
     pub number: u8,
 }
 
+#[derive(Clone, Debug)]
+pub struct MidiNotes {
+    pub channel: u8,
+    pub pitch_control_id: String,
+    pub gate_control_id: String,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Graph {
     pub modules: Vec<Module>,
     pub connections: Vec<Connection>,
     pub controls: Vec<Control>,
     pub midi_ccs: Vec<MidiCc>,
+    pub midi_notes: Vec<MidiNotes>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]

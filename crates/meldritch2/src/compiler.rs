@@ -5,7 +5,7 @@ use std::sync::{
 };
 
 use crate::contract::{self, FanIn, Role};
-use crate::model::{Graph, MidiCc, ParameterId};
+use crate::model::{Graph, MidiCc, MidiNotes, ParameterId};
 
 #[derive(Clone, Debug)]
 struct Op {
@@ -128,6 +128,7 @@ pub struct Machine {
     param_ids: BTreeMap<ParameterId, usize>,
     controls: BTreeMap<String, ControlBinding>,
     midi_ccs: Vec<MidiCc>,
+    midi_notes: Vec<MidiNotes>,
     output_slot: usize,
     order: Vec<String>,
     sample_rate: f64,
@@ -213,6 +214,9 @@ impl Machine {
     }
     pub fn midi_ccs(&self) -> &[MidiCc] {
         &self.midi_ccs
+    }
+    pub fn midi_notes(&self) -> &[MidiNotes] {
+        &self.midi_notes
     }
     pub fn control_handle(&self, id: &str) -> Option<ControlHandle> {
         let binding = self.controls.get(id)?;
@@ -438,6 +442,52 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             ));
         }
     }
+    let mut mapped_note_channels = BTreeSet::new();
+    for binding in &graph.midi_notes {
+        if !(1..=16).contains(&binding.channel) {
+            return Err(format!(
+                "MIDI note mapping requires channel 1..16, got {}",
+                binding.channel
+            ));
+        }
+        if !mapped_note_channels.insert(binding.channel) {
+            return Err(format!(
+                "duplicate MIDI note mapping for channel {}",
+                binding.channel
+            ));
+        }
+        let pitch = controls.get(&binding.pitch_control_id).ok_or_else(|| {
+            format!(
+                "MIDI note mapping targets unknown pitch control '{}'",
+                binding.pitch_control_id
+            )
+        })?;
+        let gate = controls.get(&binding.gate_control_id).ok_or_else(|| {
+            format!(
+                "MIDI note mapping targets unknown gate control '{}'",
+                binding.gate_control_id
+            )
+        })?;
+        if pitch.target == gate.target {
+            return Err(
+                "MIDI note pitch and gate controls must target different parameters".into(),
+            );
+        }
+        let lowest_hz = 440.0 * 2.0_f64.powf((0.0 - 69.0) / 12.0);
+        let highest_hz = 440.0 * 2.0_f64.powf((127.0 - 69.0) / 12.0);
+        if pitch.min > lowest_hz || pitch.max < highest_hz {
+            return Err(format!(
+                "MIDI note pitch control '{}' must cover all MIDI note frequencies",
+                binding.pitch_control_id
+            ));
+        }
+        if gate.min > 0.0 || gate.max < 1.0 {
+            return Err(format!(
+                "MIDI note gate control '{}' must cover 0..1",
+                binding.gate_control_id
+            ));
+        }
+    }
     let mut ops = Vec::with_capacity(schedule.len());
     for &i in &schedule {
         let module = &graph.modules[i];
@@ -512,6 +562,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         param_ids,
         controls,
         midi_ccs: graph.midi_ccs.clone(),
+        midi_notes: graph.midi_notes.clone(),
         output_slot,
         order: schedule
             .iter()

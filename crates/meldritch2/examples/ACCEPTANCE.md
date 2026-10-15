@@ -312,3 +312,21 @@ phase advanced through silence. Splitting attack and release across buffers
 must preserve both sequences. This proves oscillator, envelope, Gain,
 and MIDI control composition in the existing graph executor. Physical
 listening and MIDI note input remain separate checkpoints.
+
+## Declared mono MIDI note input
+
+`38-midi-note-voice.lua` declares two named controls: Sine frequency in Hertz
+covering MIDI notes 0..127, and Constant gate covering 0..1. Its
+`graph:midi_notes(1, "pitch", "gate")` maps channel 1 note-on/off messages
+through those control identities into the existing oscillator/envelope graph.
+Note 69 publishes 440 Hz and opens gate at the next buffer boundary; note 81
+publishes 880 Hz. Releasing the newest held key restores the prior pitch and
+keeps gate open. The last release closes gate; note-on velocity zero is a
+release. Repeated release, malformed messages, and other channels are ignored.
+The fixed 128-key priority stack is shared by cloned routers, and dispatch
+allocates no per-message storage. Authored parameter values remain unchanged.
+`39-midi-note-missing-control.lua` and `40-midi-note-narrow-pitch.lua` must
+reject without replacing an accepted machine. Duplicate channel mappings,
+invalid channels, and identical pitch/gate targets must also reject. Pitch
+and gate are currently separate parameter publications and may cross a racing
+audio buffer snapshot; timed, paired publication and velocity are later work.

@@ -3,12 +3,12 @@ use std::collections::BTreeMap;
 use mlua::{Lua, Table, Value};
 
 use crate::contract;
-use crate::model::{Connection, Control, Endpoint, Graph, MidiCc, Module, ParameterId};
+use crate::model::{Connection, Control, Endpoint, Graph, MidiCc, MidiNotes, Module, ParameterId};
 
 const API: &str = r#"
 meldritch = {}
 function meldritch.graph()
-  local graph = { modules = {}, connections = {}, controls = {}, midi_ccs = {} }
+  local graph = { modules = {}, connections = {}, controls = {}, midi_ccs = {}, note_bindings = {} }
   function graph:module(id, kind, values)
     assert(type(id) == "string" and type(kind) == "string", "module ID and type must be strings")
     local spec = meldritch._contract(kind)
@@ -39,6 +39,12 @@ function meldritch.graph()
   function graph:midi_cc(control_id, channel, number)
     assert(type(control_id) == "string", "MIDI target must be a control ID")
     table.insert(self.midi_ccs, { control_id = control_id, channel = channel, number = number })
+  end
+  function graph:midi_notes(channel, pitch_control_id, gate_control_id)
+    assert(type(pitch_control_id) == "string" and type(gate_control_id) == "string",
+      "MIDI note targets must be control IDs")
+    table.insert(self.note_bindings, { channel = channel,
+      pitch_control_id = pitch_control_id, gate_control_id = gate_control_id })
   end
   return graph
 end
@@ -128,6 +134,17 @@ pub fn read(script: &str) -> Result<Graph, String> {
             control_id: item.get("control_id").map_err(|e| e.to_string())?,
             channel: item.get("channel").map_err(|e| e.to_string())?,
             number: item.get("number").map_err(|e| e.to_string())?,
+        });
+    }
+    let midi_notes: Table = table
+        .get("note_bindings")
+        .map_err(|e| format!("graph.note_bindings: {e}"))?;
+    for item in midi_notes.sequence_values::<Table>() {
+        let item = item.map_err(|e| e.to_string())?;
+        graph.midi_notes.push(MidiNotes {
+            channel: item.get("channel").map_err(|e| e.to_string())?,
+            pitch_control_id: item.get("pitch_control_id").map_err(|e| e.to_string())?,
+            gate_control_id: item.get("gate_control_id").map_err(|e| e.to_string())?,
         });
     }
     Ok(graph)
