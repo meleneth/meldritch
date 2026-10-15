@@ -9,7 +9,8 @@ use crate::model::{Graph, ParameterId};
 
 #[derive(Clone, Debug)]
 struct Op {
-    process: fn(&[f64], f64) -> f64,
+    process: fn(&mut [f64], &[f64], f64, f64) -> f64,
+    state: Vec<f64>,
     inputs: Vec<usize>,
     output: usize,
     param: Option<usize>,
@@ -57,6 +58,7 @@ pub struct Machine {
     param_ids: BTreeMap<ParameterId, usize>,
     output_slot: usize,
     order: Vec<String>,
+    sample_rate: f64,
 }
 
 impl Machine {
@@ -71,12 +73,17 @@ impl Machine {
             };
         }
         for sample in buffer {
-            for op in &self.ops {
+            for op in &mut self.ops {
                 for (slot, source) in op.inputs.iter().enumerate() {
                     self.input_scratch[slot] = self.slots[*source];
                 }
                 let param = op.param.map(|i| self.params[i]).unwrap_or(0.0);
-                self.slots[op.output] = (op.process)(&self.input_scratch[..op.inputs.len()], param);
+                self.slots[op.output] = (op.process)(
+                    &mut op.state,
+                    &self.input_scratch[..op.inputs.len()],
+                    param,
+                    self.sample_rate,
+                );
             }
             *sample = self.slots[self.output_slot];
         }
@@ -84,6 +91,9 @@ impl Machine {
 
     pub fn order(&self) -> &[String] {
         &self.order
+    }
+    pub fn sample_rate(&self) -> f64 {
+        self.sample_rate
     }
     pub fn parameter_ids(&self) -> impl Iterator<Item = &ParameterId> {
         self.param_ids.keys()
@@ -123,6 +133,13 @@ impl Machine {
 }
 
 pub fn compile(graph: &Graph) -> Result<Machine, String> {
+    compile_at_rate(graph, 48_000.0)
+}
+
+pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, String> {
+    if !sample_rate.is_finite() || sample_rate < 1.0 {
+        return Err("sample rate must be finite and at least 1 Hz".into());
+    }
     let mut ids = BTreeMap::new();
     for (index, module) in graph.modules.iter().enumerate() {
         if module.id.is_empty() {
@@ -260,6 +277,7 @@ pub fn compile(graph: &Graph) -> Result<Machine, String> {
             .map(|p| param_ids[&ParameterId::new(&module.id, p.name)]);
         ops.push(Op {
             process: c.process,
+            state: vec![0.0; c.state_len],
             inputs,
             output: i,
             param,
@@ -296,6 +314,7 @@ pub fn compile(graph: &Graph) -> Result<Machine, String> {
             .iter()
             .map(|&i| graph.modules[i].id.clone())
             .collect(),
+        sample_rate,
     })
 }
 

@@ -41,3 +41,12 @@ reclaims it. A rejected cycle candidate leaves the active machine and any
 queued valid candidate intact. Only one replacement may be pending at a time;
 additional submissions receive a useful diagnostic. Activation may be delayed
 when the short handoff lock is busy, without blocking audio processing.
+
+## Stateful sine milestone
+
+`08-sine.lua` compiles at an explicit 48 kHz sample rate. Its 12 kHz Sine feeds
+Gain(0.25), yielding the repeating sequence approximately `[0, 0.25, 0,
+-0.25]`. Splitting rendering across buffers must produce the same sequence
+as one buffer; the oscillator phase belongs to its compiled instance. A live
+frequency update must take effect at the next buffer boundary without resetting
+phase. Invalid sample rates are rejected before a machine is accepted.

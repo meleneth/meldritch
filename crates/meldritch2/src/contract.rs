@@ -24,23 +24,29 @@ pub struct Param {
 #[derive(Clone, Copy, Debug)]
 pub struct Contract {
     pub name: &'static str,
-    pub process: fn(&[f64], f64) -> f64,
+    pub process: fn(&mut [f64], &[f64], f64, f64) -> f64,
+    pub state_len: usize,
     pub inputs: &'static [Port],
     pub outputs: &'static [Port],
     pub params: &'static [Param],
 }
 
-fn constant(_: &[f64], value: f64) -> f64 {
+fn constant(_: &mut [f64], _: &[f64], value: f64, _: f64) -> f64 {
     value
 }
-fn gain(input: &[f64], gain: f64) -> f64 {
+fn gain(_: &mut [f64], input: &[f64], gain: f64, _: f64) -> f64 {
     input[0] * gain
 }
-fn output(input: &[f64], _: f64) -> f64 {
+fn output(_: &mut [f64], input: &[f64], _: f64, _: f64) -> f64 {
     input[0]
 }
-fn mix(input: &[f64], _: f64) -> f64 {
+fn mix(_: &mut [f64], input: &[f64], _: f64, _: f64) -> f64 {
     input[0] + input[1]
+}
+fn sine(state: &mut [f64], _: &[f64], frequency: f64, sample_rate: f64) -> f64 {
+    let sample = (std::f64::consts::TAU * state[0]).sin();
+    state[0] = (state[0] + frequency / sample_rate).rem_euclid(1.0);
+    sample
 }
 
 const INPUT: Port = Port {
@@ -71,10 +77,15 @@ const GAIN: Param = Param {
     name: "gain",
     default: 1.0,
 };
-const CONTRACTS: [Contract; 4] = [
+const FREQUENCY: Param = Param {
+    name: "frequency",
+    default: 440.0,
+};
+const CONTRACTS: [Contract; 5] = [
     Contract {
         name: "constant",
         process: constant,
+        state_len: 0,
         inputs: &[],
         outputs: &[OUT],
         params: &[VALUE],
@@ -82,6 +93,7 @@ const CONTRACTS: [Contract; 4] = [
     Contract {
         name: "gain",
         process: gain,
+        state_len: 0,
         inputs: &[INPUT],
         outputs: &[OUT],
         params: &[GAIN],
@@ -89,6 +101,7 @@ const CONTRACTS: [Contract; 4] = [
     Contract {
         name: "output",
         process: output,
+        state_len: 0,
         inputs: &[INPUT],
         outputs: &[],
         params: &[],
@@ -96,9 +109,18 @@ const CONTRACTS: [Contract; 4] = [
     Contract {
         name: "mix",
         process: mix,
+        state_len: 0,
         inputs: &[LEFT, RIGHT],
         outputs: &[OUT],
         params: &[],
+    },
+    Contract {
+        name: "sine",
+        process: sine,
+        state_len: 1,
+        inputs: &[],
+        outputs: &[OUT],
+        params: &[FREQUENCY],
     },
 ];
 

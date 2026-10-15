@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    compiler::{Machine, compile},
+    compiler::{Machine, compile_at_rate},
     model::Graph,
 };
 
@@ -20,17 +20,22 @@ pub struct LiveRuntime {
 /// Compile and queue complete graph revisions off the processing path.
 pub struct LiveControl {
     handoff: Arc<Mutex<Handoff>>,
+    sample_rate: f64,
 }
 
 impl LiveRuntime {
     pub fn new(initial: Machine) -> (Self, LiveControl) {
         let handoff = Arc::new(Mutex::new(Handoff::default()));
+        let sample_rate = initial.sample_rate();
         (
             Self {
                 current: initial,
                 handoff: Arc::clone(&handoff),
             },
-            LiveControl { handoff },
+            LiveControl {
+                handoff,
+                sample_rate,
+            },
         )
     }
 
@@ -57,7 +62,7 @@ impl LiveRuntime {
 
 impl LiveControl {
     pub fn submit(&self, graph: &Graph) -> Result<(), String> {
-        let candidate = compile(graph)?;
+        let candidate = compile_at_rate(graph, self.sample_rate)?;
         let mut handoff = self.handoff.lock().map_err(|_| "graph handoff poisoned")?;
         if handoff.pending.is_some() {
             return Err("a graph revision is already pending".into());

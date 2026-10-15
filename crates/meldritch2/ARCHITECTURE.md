@@ -30,9 +30,12 @@ physical audio host.
 
 `Machine::process` fills a caller-owned buffer with no allocation, parsing,
 validation, compilation, Lua, UI, or file access. Compiled operations read
-inputs in contract port order from preallocated scratch space. `Mix` sums two
-named inputs; sources may fan out. Current ports are mono audio at one sample
-per frame. Each input permits one cable. Cycles, disconnected required inputs,
+inputs in contract port order from preallocated scratch space. Each operation
+owns a fixed, contract-declared state vector allocated at compile time. `Sine`
+uses one state value for phase and the machine's explicit sample rate; it keeps
+phase across buffers and uses a published frequency at the next buffer entry.
+`Mix` sums two named inputs; sources may fan out. Current ports are mono audio
+at one sample per frame. Each input permits one cable. Cycles, disconnected required inputs,
 and multiple Output instances are rejected. Feedback, multiple cables to one
 input, other domains, block DSP, physical audio integration, and multi-parameter
 modules remain future work. Parameter publication uses one
@@ -42,5 +45,7 @@ handoff uses a nonblocking lock attempt on the processing side; a busy handoff
 delays activation to a later buffer.
 Contracts expose domain and fan-in explicitly so these restrictions are visible.
 
-Run `cargo run -p meldritch2 -- crates/meldritch2/examples/01-basic.lua` and
+`compile_at_rate` validates the sample rate; `compile` uses 48 kHz. Live graph
+revisions inherit the active runtime's sample rate and start with fresh DSP
+state. Run `cargo run -p meldritch2 -- crates/meldritch2/examples/08-sine.lua` and
 `cargo test -p meldritch2`. See `examples/ACCEPTANCE.md` for the corpus.

@@ -7,7 +7,7 @@ pub mod model;
 #[cfg(test)]
 mod tests {
     use crate::{
-        compiler::{Host, compile},
+        compiler::{Host, compile, compile_at_rate},
         contract,
         live::LiveRuntime,
         lua,
@@ -21,6 +21,7 @@ mod tests {
     const MIX: &str = include_str!("../examples/05-mix.lua");
     const MIX_MISSING: &str = include_str!("../examples/06-mix-missing.lua");
     const MIX_REORDERED: &str = include_str!("../examples/07-mix-reordered.lua");
+    const SINE: &str = include_str!("../examples/08-sine.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -33,7 +34,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 4);
+        assert_eq!(contract::all().len(), 5);
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.inputs[0].name, "input");
         assert_eq!(gain.outputs[0].name, "out");
@@ -260,5 +261,62 @@ mod tests {
         control.submit(&lua::read(BASIC).unwrap()).unwrap();
         assert!(runtime.process(&mut samples));
         assert_eq!(samples, [0.125; 8]);
+    }
+
+    #[test]
+    fn sine_phase_is_stateful_and_partition_invariant() {
+        let graph = lua::read(SINE).unwrap();
+        let mut full = compile_at_rate(&graph, 48_000.0).unwrap();
+        assert_eq!(full.sample_rate(), 48_000.0);
+        let mut expected = [0.0; 16];
+        full.process(&mut expected);
+        for (index, sample) in expected.iter().enumerate() {
+            let reference = [0.0, 0.25, 0.0, -0.25][index % 4];
+            assert!(
+                (sample - reference).abs() < 1e-12,
+                "sample {index}: {sample}"
+            );
+        }
+        let mut split = compile_at_rate(&graph, 48_000.0).unwrap();
+        let mut first = [0.0; 3];
+        let mut second = [0.0; 13];
+        split.process(&mut first);
+        split.process(&mut second);
+        assert_eq!(&expected[..3], &first);
+        assert_eq!(&expected[3..], &second);
+    }
+
+    #[test]
+    fn live_frequency_update_preserves_phase() {
+        let mut machine = compile(&lua::read(SINE).unwrap()).unwrap();
+        let handle = machine
+            .parameter_handle(&ParameterId::new("oscillator", "frequency"))
+            .unwrap();
+        let mut first = [0.0; 1];
+        machine.process(&mut first);
+        assert_eq!(first, [0.0]);
+        handle.publish(Some(6_000.0)).unwrap();
+        let mut next = [0.0; 2];
+        machine.process(&mut next);
+        assert!((next[0] - 0.25).abs() < 1e-12);
+        assert!((next[1] - 0.25 * std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
+        assert!(
+            compile_at_rate(&lua::read(SINE).unwrap(), 0.0)
+                .unwrap_err()
+                .contains("sample rate")
+        );
+        assert!(compile_at_rate(&lua::read(SINE).unwrap(), f64::NAN).is_err());
+    }
+
+    #[test]
+    fn live_revisions_keep_the_initial_sample_rate() {
+        let initial = compile_at_rate(&lua::read(BASIC).unwrap(), 96_000.0).unwrap();
+        let (mut runtime, control) = LiveRuntime::new(initial);
+        control.submit(&lua::read(SINE).unwrap()).unwrap();
+        let mut samples = [0.0; 2];
+        assert!(runtime.process(&mut samples));
+        assert_eq!(runtime.current().sample_rate(), 96_000.0);
+        assert_eq!(samples[0], 0.0);
+        assert!((samples[1] - 0.25 * std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
     }
 }
