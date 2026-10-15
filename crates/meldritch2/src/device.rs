@@ -9,7 +9,7 @@ use cpal::{
 };
 
 use crate::{
-    compiler::compile_at_rate,
+    compiler::{ControlHandle, compile_at_rate},
     live::{LiveControl, LiveRuntime},
     model::Graph,
 };
@@ -39,6 +39,7 @@ pub fn fill_interleaved<T: Sample + FromSample<f64>>(
 pub struct DeviceOutput {
     stream: cpal::Stream,
     control: LiveControl,
+    controls: Vec<(ControlHandle, f64)>,
     errors: Arc<AtomicU64>,
     first_error: Arc<OnceLock<String>>,
     pub device_name: String,
@@ -65,6 +66,16 @@ impl DeviceOutput {
             return Err("output device reported zero channels".into());
         }
         let machine = compile_at_rate(graph, f64::from(config.sample_rate))?;
+        let controls = machine
+            .control_ids()
+            .map(|id| {
+                let handle = machine.control_handle(id).expect("compiled control");
+                let value = machine
+                    .effective_value(handle.target())
+                    .expect("compiled parameter");
+                (handle, value)
+            })
+            .collect();
         let (runtime, control) = LiveRuntime::new(machine);
         let errors = Arc::new(AtomicU64::new(0));
         let first_error = Arc::new(OnceLock::new());
@@ -107,6 +118,7 @@ impl DeviceOutput {
         Ok(Self {
             stream,
             control,
+            controls,
             errors,
             first_error,
             device_name,
@@ -123,6 +135,10 @@ impl DeviceOutput {
 
     pub fn control(&self) -> &LiveControl {
         &self.control
+    }
+
+    pub fn controls(&self) -> Vec<(ControlHandle, f64)> {
+        self.controls.clone()
     }
     pub fn stream_errors(&self) -> u64 {
         self.errors.load(Ordering::Relaxed)

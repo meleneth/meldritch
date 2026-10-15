@@ -17,6 +17,10 @@ presentation range. Rust validates the binding against the module contract;
 `ControlHandle` publishes through the existing parameter cell. A control's
 range limits that control's gestures, not DSP parameter validity. Handles are
 scoped to one compiled revision.
+`Panel` turns declared controls into selectable rows and bounded gestures.
+`perform` renders those rows in a small terminal view while CPAL runs; it has
+no fixed instrument knobs. This first view tracks the opened graph revision
+and does not refresh itself after a structural graph replacement.
 
 Lua's `meldritch.graph()` API constructs a candidate graph. `graph:module(id,
 type, values)` returns handles with contract-derived ports; `graph:connect(src,
@@ -57,6 +61,7 @@ at its sample rate, and copies bounded mono `f64` chunks into interleaved device
 channels. It reports the first stream error outside the audio callback. Run
 `cargo run -p meldritch2 -- crates/meldritch2/examples/08-sine.lua`,
 `cargo run -p meldritch2 -- play crates/meldritch2/examples/08-sine.lua 3`, and
+`cargo run -p meldritch2 -- perform crates/meldritch2/examples/09-controls.lua`, and
 `cargo test -p meldritch2`. The host device smoke opened a 48 kHz stereo stream
 but reported buffer underruns; physical listening and deadline reliability are
 unverified. See `examples/ACCEPTANCE.md` for the corpus.

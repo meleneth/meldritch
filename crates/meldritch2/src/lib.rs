@@ -4,6 +4,8 @@ pub mod device;
 pub mod live;
 pub mod lua;
 pub mod model;
+pub mod panel;
+pub mod tui;
 
 #[cfg(test)]
 mod tests {
@@ -326,7 +328,10 @@ mod tests {
     fn instrument_control_resolves_shared_parameter_identity() {
         let graph = lua::read(CONTROLS).unwrap();
         let mut machine = compile(&graph).unwrap();
-        assert_eq!(machine.control_ids().collect::<Vec<_>>(), ["level"]);
+        assert_eq!(
+            machine.control_ids().collect::<Vec<_>>(),
+            ["left-value", "level"]
+        );
         let control = machine.control_handle("level").unwrap();
         assert_eq!(control.id(), "level");
         assert_eq!(control.target(), &ParameterId::new("gain", "gain"));

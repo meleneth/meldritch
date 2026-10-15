@@ -70,3 +70,13 @@ the next buffer 0.28125. Out-of-range values, unknown parameters, duplicate
 control IDs, and invalid ranges are rejected. A retained control handle from a
 replaced graph revision cannot change the new machine. Controls are presentation
 and performance bindings; their ranges do not redefine DSP parameter validity.
+
+## Terminal performance milestone
+
+`meldritch2 perform crates/meldritch2/examples/09-controls.lua` opens the
+declared graph and shows its named controls. Up/Down selects a control;
+Left/Right changes it by one percent of its declared range; Home/End choose
+its bounds; Q exits. The view renders only instrument-declared controls and
+publishes through `ControlHandle`. A headless panel test verifies selection,
+value changes, bounds, and the resulting graph samples. Physical key gestures
+and listening remain unverified on this host.

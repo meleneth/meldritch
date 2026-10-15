@@ -320,7 +320,11 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         if control.id.is_empty() {
             return Err("control ID must not be empty".into());
         }
-        if !control.min.is_finite() || !control.max.is_finite() || control.min >= control.max {
+        if !control.min.is_finite()
+            || !control.max.is_finite()
+            || control.min >= control.max
+            || !(control.max - control.min).is_finite()
+        {
             return Err(format!(
                 "control '{}' requires finite min < max",
                 control.id

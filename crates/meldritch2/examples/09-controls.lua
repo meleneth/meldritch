@@ -8,5 +8,6 @@ graph:connect(left.out, mix.left)
 graph:connect(right.out, mix.right)
 graph:connect(mix.out, gain.input)
 graph:connect(gain.out, output.input)
+graph:control("left-value", left, "value", { min = 0.0, max = 1.0 })
 graph:control("level", gain, "gain", { min = 0.0, max = 1.0 })
 return graph
