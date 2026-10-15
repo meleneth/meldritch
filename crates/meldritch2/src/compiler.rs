@@ -46,6 +46,46 @@ impl ParameterHandle {
     }
 }
 
+#[derive(Clone, Debug)]
+struct ControlBinding {
+    target: ParameterId,
+    min: f64,
+    max: f64,
+}
+
+/// A named instrument control bound to a parameter in one graph revision.
+#[derive(Clone, Debug)]
+pub struct ControlHandle {
+    id: String,
+    parameter: ParameterHandle,
+    min: f64,
+    max: f64,
+}
+
+impl ControlHandle {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+    pub fn target(&self) -> &ParameterId {
+        self.parameter.id()
+    }
+    pub fn range(&self) -> (f64, f64) {
+        (self.min, self.max)
+    }
+    pub fn publish(&self, value: f64) -> Result<(), String> {
+        if !value.is_finite() || value < self.min || value > self.max {
+            return Err(format!(
+                "control '{}' requires a finite value in {}..{}",
+                self.id, self.min, self.max
+            ));
+        }
+        self.parameter.publish(Some(value))
+    }
+    pub fn clear(&self) -> Result<(), String> {
+        self.parameter.publish(None)
+    }
+}
+
 /// An accepted, executable graph. Its processing buffers are allocated at compile time.
 #[derive(Debug)]
 pub struct Machine {
@@ -56,6 +96,7 @@ pub struct Machine {
     authored: Vec<f64>,
     published: Vec<Arc<AtomicU64>>,
     param_ids: BTreeMap<ParameterId, usize>,
+    controls: BTreeMap<String, ControlBinding>,
     output_slot: usize,
     order: Vec<String>,
     sample_rate: f64,
@@ -115,6 +156,18 @@ impl Machine {
         self.param_ids.get(id).map(|&i| ParameterHandle {
             id: id.clone(),
             cell: Arc::clone(&self.published[i]),
+        })
+    }
+    pub fn control_ids(&self) -> impl Iterator<Item = &str> {
+        self.controls.keys().map(String::as_str)
+    }
+    pub fn control_handle(&self, id: &str) -> Option<ControlHandle> {
+        let binding = self.controls.get(id)?;
+        Some(ControlHandle {
+            id: id.to_owned(),
+            parameter: self.parameter_handle(&binding.target)?,
+            min: binding.min,
+            max: binding.max,
         })
     }
     pub fn set_override(&self, id: &ParameterId, value: Option<f64>) -> Result<(), String> {
@@ -262,6 +315,37 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             param_ids.insert(ParameterId::new(&module.id, p.name), index);
         }
     }
+    let mut controls = BTreeMap::new();
+    for control in &graph.controls {
+        if control.id.is_empty() {
+            return Err("control ID must not be empty".into());
+        }
+        if !control.min.is_finite() || !control.max.is_finite() || control.min >= control.max {
+            return Err(format!(
+                "control '{}' requires finite min < max",
+                control.id
+            ));
+        }
+        if !param_ids.contains_key(&control.target) {
+            return Err(format!(
+                "control '{}' targets unknown parameter '{}.{}'",
+                control.id, control.target.module, control.target.name
+            ));
+        }
+        if controls
+            .insert(
+                control.id.clone(),
+                ControlBinding {
+                    target: control.target.clone(),
+                    min: control.min,
+                    max: control.max,
+                },
+            )
+            .is_some()
+        {
+            return Err(format!("duplicate control ID '{}'", control.id));
+        }
+    }
     let mut ops = Vec::with_capacity(schedule.len());
     for &i in &schedule {
         let module = &graph.modules[i];
@@ -309,6 +393,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             .collect(),
         params,
         param_ids,
+        controls,
         output_slot,
         order: schedule
             .iter()

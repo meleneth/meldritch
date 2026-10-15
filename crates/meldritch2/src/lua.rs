@@ -3,17 +3,17 @@ use std::collections::BTreeMap;
 use mlua::{Lua, Table, Value};
 
 use crate::contract;
-use crate::model::{Connection, Endpoint, Graph, Module};
+use crate::model::{Connection, Control, Endpoint, Graph, Module, ParameterId};
 
 const API: &str = r#"
 meldritch = {}
 function meldritch.graph()
-  local graph = { modules = {}, connections = {} }
+  local graph = { modules = {}, connections = {}, controls = {} }
   function graph:module(id, kind, values)
     assert(type(id) == "string" and type(kind) == "string", "module ID and type must be strings")
     local spec = meldritch._contract(kind)
     assert(spec, "unknown module type: " .. kind)
-    local handle = {}
+    local handle = { id = id }
     for _, name in ipairs(spec.inputs) do
       handle[name] = { module = id, port = name, direction = "input" }
     end
@@ -27,6 +27,14 @@ function meldritch.graph()
     assert(type(source) == "table" and source.direction == "output", "source must be an output port")
     assert(type(destination) == "table" and destination.direction == "input", "destination must be an input port")
     table.insert(self.connections, { from = source, to = destination })
+  end
+  function graph:control(id, module, parameter, range)
+    assert(type(id) == "string", "control ID must be a string")
+    assert(type(module) == "table" and type(module.id) == "string", "control target must be a module")
+    assert(type(parameter) == "string", "control parameter must be a string")
+    assert(type(range) == "table", "control range must be a table")
+    table.insert(self.controls, { id = id, module = module.id, parameter = parameter,
+      min = range.min, max = range.max })
   end
   return graph
 end
@@ -90,6 +98,21 @@ pub fn read(script: &str) -> Result<Graph, String> {
         graph.connections.push(Connection {
             from: endpoint(item.get("from").map_err(|e| e.to_string())?)?,
             to: endpoint(item.get("to").map_err(|e| e.to_string())?)?,
+        });
+    }
+    let controls: Table = table
+        .get("controls")
+        .map_err(|e| format!("graph.controls: {e}"))?;
+    for item in controls.sequence_values::<Table>() {
+        let item = item.map_err(|e| e.to_string())?;
+        graph.controls.push(Control {
+            id: item.get("id").map_err(|e| e.to_string())?,
+            target: ParameterId::new(
+                item.get::<String>("module").map_err(|e| e.to_string())?,
+                item.get::<String>("parameter").map_err(|e| e.to_string())?,
+            ),
+            min: item.get("min").map_err(|e| e.to_string())?,
+            max: item.get("max").map_err(|e| e.to_string())?,
         });
     }
     Ok(graph)

@@ -60,3 +60,13 @@ preallocated `f64` scratch space, clamps to the device range, and copies each
 sample to every output channel. Headless tests verify chunk boundaries,
 interleaving, and sample conversion. Device opening or playback failure reports
 a diagnostic; actual hardware sound remains a physical check.
+
+## Instrument-declared control milestone
+
+`09-controls.lua` names `level` and binds it to `gain.gain` over 0..1. Rust
+must resolve that target from the same module contract used by graph validation.
+Initial output remains 0.1875; publishing 0.75 through the named control makes
+the next buffer 0.28125. Out-of-range values, unknown parameters, duplicate
+control IDs, and invalid ranges are rejected. A retained control handle from a
+replaced graph revision cannot change the new machine. Controls are presentation
+and performance bindings; their ranges do not redefine DSP parameter validity.

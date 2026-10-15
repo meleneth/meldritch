@@ -19,10 +19,19 @@ pub struct Connection {
     pub to: Endpoint,
 }
 
+#[derive(Clone, Debug)]
+pub struct Control {
+    pub id: String,
+    pub target: ParameterId,
+    pub min: f64,
+    pub max: f64,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Graph {
     pub modules: Vec<Module>,
     pub connections: Vec<Connection>,
+    pub controls: Vec<Control>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]

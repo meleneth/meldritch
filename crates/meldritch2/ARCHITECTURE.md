@@ -12,6 +12,11 @@ validation, and lowering. Authored values live in `Graph`; live overrides are
 published through per-revision `ParameterHandle`s. `Machine::process` snapshots
 all overrides once at buffer entry, so each buffer uses one effective value per
 parameter. Clearing an override restores the authored value.
+Lua can declare named controls bound to these same parameter IDs with a
+presentation range. Rust validates the binding against the module contract;
+`ControlHandle` publishes through the existing parameter cell. A control's
+range limits that control's gestures, not DSP parameter validity. Handles are
+scoped to one compiled revision.
 
 Lua's `meldritch.graph()` API constructs a candidate graph. `graph:module(id,
 type, values)` returns handles with contract-derived ports; `graph:connect(src,

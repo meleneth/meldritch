@@ -23,6 +23,7 @@ mod tests {
     const MIX_MISSING: &str = include_str!("../examples/06-mix-missing.lua");
     const MIX_REORDERED: &str = include_str!("../examples/07-mix-reordered.lua");
     const SINE: &str = include_str!("../examples/08-sine.lua");
+    const CONTROLS: &str = include_str!("../examples/09-controls.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -319,5 +320,87 @@ mod tests {
         assert_eq!(runtime.current().sample_rate(), 96_000.0);
         assert_eq!(samples[0], 0.0);
         assert!((samples[1] - 0.25 * std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn instrument_control_resolves_shared_parameter_identity() {
+        let graph = lua::read(CONTROLS).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        assert_eq!(machine.control_ids().collect::<Vec<_>>(), ["level"]);
+        let control = machine.control_handle("level").unwrap();
+        assert_eq!(control.id(), "level");
+        assert_eq!(control.target(), &ParameterId::new("gain", "gain"));
+        assert_eq!(control.range(), (0.0, 1.0));
+        let mut samples = [0.0; 8];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.1875; 8]);
+        assert!(control.publish(1.5).is_err());
+        assert!(control.publish(f64::NAN).is_err());
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.1875; 8]);
+        control.publish(0.75).unwrap();
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.28125; 8]);
+        control.clear().unwrap();
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.1875; 8]);
+    }
+
+    #[test]
+    fn invalid_control_declarations_reject_without_replacing_machine() {
+        let mut host = Host::default();
+        let graph = lua::read(CONTROLS).unwrap();
+        host.submit(&graph).unwrap();
+        let mut invalid = graph.clone();
+        invalid.controls[0].target.name = "missing".into();
+        assert!(
+            host.submit(&invalid)
+                .unwrap_err()
+                .contains("unknown parameter")
+        );
+        invalid = graph.clone();
+        invalid.controls.push(invalid.controls[0].clone());
+        assert!(
+            host.submit(&invalid)
+                .unwrap_err()
+                .contains("duplicate control ID")
+        );
+        invalid = graph.clone();
+        invalid.controls[0].max = f64::INFINITY;
+        assert!(
+            host.submit(&invalid)
+                .unwrap_err()
+                .contains("finite min < max")
+        );
+        invalid.controls[0].max = 0.0;
+        assert!(
+            host.submit(&invalid)
+                .unwrap_err()
+                .contains("finite min < max")
+        );
+        let mut samples = [0.0; 4];
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.1875; 4]);
+    }
+
+    #[test]
+    fn old_control_handle_cannot_affect_new_revision() {
+        let graph = lua::read(CONTROLS).unwrap();
+        let mut host = Host::default();
+        host.submit(&graph).unwrap();
+        let old = host.accepted().unwrap().control_handle("level").unwrap();
+        let mut replacement = graph.clone();
+        replacement
+            .modules
+            .iter_mut()
+            .find(|m| m.id == "gain")
+            .unwrap()
+            .values
+            .insert("gain".into(), 0.25);
+        host.submit(&replacement).unwrap();
+        old.publish(1.0).unwrap();
+        let mut samples = [0.0; 4];
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.09375; 4]);
     }
 }
