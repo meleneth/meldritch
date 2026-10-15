@@ -1,0 +1,13 @@
+local graph = meldritch.graph()
+local output = graph:module("output", "output")
+local level = graph:module("level", "gain", { gain = 0.25 })
+local envelope = graph:module("envelope", "envelope", { attack = 0.5, release = 0.25 })
+local oscillator = graph:module("oscillator", "sine", { frequency = 12000.0 })
+local gate = graph:module("gate", "constant", { value = 0.0 })
+graph:connect(level.out, output.input)
+graph:connect(envelope.out, level.mod)
+graph:connect(oscillator.out, level.input)
+graph:connect(gate.out, envelope.gate)
+graph:control("gate", gate, "value", { min = 0.0, max = 1.0 })
+graph:midi_cc("gate", 1, 7)
+return graph

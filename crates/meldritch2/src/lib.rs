@@ -58,6 +58,7 @@ mod tests {
     const ENVELOPE_MISSING_GATE: &str = include_str!("../examples/35-envelope-missing-gate.lua");
     const ENVELOPE_INVALID_ATTACK: &str =
         include_str!("../examples/36-envelope-invalid-attack.lua");
+    const GATED_SINE_VOICE: &str = include_str!("../examples/37-gated-sine-voice.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -1054,6 +1055,61 @@ mod tests {
         assert_eq!(samples, [0.0; 2]);
         machine.set_override(&release_id, None).unwrap();
         assert_eq!(machine.effective_value(&release_id), Some(0.25));
+    }
+
+    #[test]
+    fn sine_voice_is_gated_by_envelope_without_stopping_oscillator_phase() {
+        let graph = lua::read(GATED_SINE_VOICE).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let router = MidiRouter::from_machine(&machine);
+        let mut silent = [f64::NAN; 4];
+        machine.process(&mut silent);
+        assert_eq!(silent, [0.0; 4]);
+
+        assert!(router.dispatch(&[0xB0, 7, 127]));
+        let mut attack = [f64::NAN; 4];
+        machine.process(&mut attack);
+        let expected_attack = [0.0, 0.1875, 0.0, -0.234375];
+        for (actual, expected) in attack.into_iter().zip(expected_attack) {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
+
+        assert!(router.dispatch(&[0xB0, 7, 0]));
+        let mut release = [f64::NAN; 4];
+        machine.process(&mut release);
+        let expected_release = [0.0, 0.1318359375, 0.0, -0.07415771484375];
+        for (actual, expected) in release.into_iter().zip(expected_release) {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
+
+        let mut split = compile(&graph).unwrap();
+        let split_router = MidiRouter::from_machine(&split);
+        split.process(&mut silent);
+        assert!(split_router.dispatch(&[0xB0, 7, 127]));
+        let mut first = [f64::NAN; 1];
+        let mut second = [f64::NAN; 3];
+        split.process(&mut first);
+        split.process(&mut second);
+        let split_attack = [first[0], second[0], second[1], second[2]];
+        for (actual, expected) in split_attack.into_iter().zip(expected_attack) {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
+        assert!(split_router.dispatch(&[0xB0, 7, 0]));
+        split.process(&mut first);
+        split.process(&mut second);
+        let split_release = [first[0], second[0], second[1], second[2]];
+        for (actual, expected) in split_release.into_iter().zip(expected_release) {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
+
+        let mut phase_probe = compile(&graph).unwrap();
+        let phase_router = MidiRouter::from_machine(&phase_probe);
+        let mut one = [f64::NAN; 1];
+        phase_probe.process(&mut one);
+        assert_eq!(one, [0.0]);
+        assert!(phase_router.dispatch(&[0xB0, 7, 127]));
+        phase_probe.process(&mut one);
+        assert!((one[0] - 0.125).abs() < 1e-12);
     }
 
     #[test]

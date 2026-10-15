@@ -298,3 +298,17 @@ rebuilding the graph. `35-envelope-missing-gate.lua` and
 `36-envelope-invalid-attack.lua` must reject their candidates while an
 accepted envelope continues to run. This gate is an audio-rate signal;
 sample-accurate MIDI scheduling and a separate event domain remain open.
+
+## Gated sine voice composition
+
+`37-gated-sine-voice.lua` replaces the constant signal with a 12 kHz Sine
+feeding Gain(0.25). The declared CC 7 gate still drives Envelope's separate
+audio-rate input; its output enters `level.mod`. At 48 kHz the oscillator
+continues its phase while the gate is low. After four silent frames, CC 127
+renders approximately `[0, 0.1875, 0, -0.234375]`, and CC 0 then renders
+`[0, 0.1318359375, 0, -0.07415771484375]`. After one silent frame, opening
+the gate must start at the oscillator's second sample (0.125 output), proving
+phase advanced through silence. Splitting attack and release across buffers
+must preserve both sequences. This proves oscillator, envelope, Gain,
+and MIDI control composition in the existing graph executor. Physical
+listening and MIDI note input remain separate checkpoints.
