@@ -207,3 +207,14 @@ the next buffer all 1 without resetting state. The contract owns the inclusive
 ranges use it. `24-lag-invalid.lua` rejects response=1.5 and
 `25-lag-control-invalid.lua` rejects a control range extending below zero.
 Both rejected candidates leave an accepted machine usable.
+
+## Smoothed instrument control composition
+
+`26-smoothed-control.lua` binds channel-1 CC 7 to a Constant named `motion`.
+That Constant feeds Lag(response=0.5), whose output feeds `gain.mod` while an
+independent Constant(0.25) supplies `gain.input`. The authored graph starts
+silent. CC value 127 publishes motion=1; the next four samples must be
+`[0.125, 0.1875, 0.21875, 0.234375]`. CC value 0 then publishes motion=0;
+the next four samples must decay to `[0.1171875, 0.05859375, 0.029296875,
+0.0146484375]`. Neither gesture reconstructs the graph. The MIDI adapter,
+parameter cell, Lag state, and Gain port compose without a special route.

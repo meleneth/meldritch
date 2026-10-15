@@ -1,0 +1,13 @@
+local graph = meldritch.graph()
+local output = graph:module("output", "output")
+local gain = graph:module("gain", "gain", { gain = 1.0 })
+local lag = graph:module("lag", "lag", { response = 0.5 })
+local motion = graph:module("motion", "constant", { value = 0.0 })
+local signal = graph:module("signal", "constant", { value = 0.25 })
+graph:connect(signal.out, gain.input)
+graph:connect(motion.out, lag.input)
+graph:connect(lag.out, gain.mod)
+graph:connect(gain.out, output.input)
+graph:control("motion", motion, "value", { min = 0.0, max = 1.0 })
+graph:midi_cc("motion", 1, 7)
+return graph

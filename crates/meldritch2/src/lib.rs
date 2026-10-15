@@ -45,6 +45,7 @@ mod tests {
     const LAG: &str = include_str!("../examples/23-lag.lua");
     const LAG_INVALID: &str = include_str!("../examples/24-lag-invalid.lua");
     const LAG_CONTROL_INVALID: &str = include_str!("../examples/25-lag-control-invalid.lua");
+    const SMOOTHED_CONTROL: &str = include_str!("../examples/26-smoothed-control.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -664,6 +665,29 @@ mod tests {
         let mut next = [f64::NAN; 1];
         host.accepted().unwrap().process(&mut next);
         assert_eq!(next, [0.96875]);
+    }
+
+    #[test]
+    fn midi_control_smooths_through_independent_graph_modules() {
+        let graph = lua::read(SMOOTHED_CONTROL).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let motion = ParameterId::new("motion", "value");
+        assert_eq!(machine.control_handle("motion").unwrap().target(), &motion);
+        let router = MidiRouter::from_machine(&machine);
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.0; 4]);
+
+        assert!(router.dispatch(&[0xB0, 7, 127]));
+        assert_eq!(machine.authored_value(&motion), Some(0.0));
+        assert_eq!(machine.effective_value(&motion), Some(1.0));
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.125, 0.1875, 0.21875, 0.234375]);
+
+        assert!(router.dispatch(&[0xB0, 7, 0]));
+        assert_eq!(machine.effective_value(&motion), Some(0.0));
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.1171875, 0.05859375, 0.029296875, 0.0146484375]);
     }
 
     #[test]
