@@ -1,6 +1,6 @@
 use std::sync::{
-    Arc, OnceLock,
-    atomic::{AtomicU64, Ordering},
+    Arc,
+    atomic::{AtomicU8, AtomicU64, Ordering},
 };
 
 use cpal::{
@@ -16,6 +16,57 @@ use crate::{
 };
 
 const CHUNK_FRAMES: usize = 256;
+
+fn stream_error_code(kind: cpal::ErrorKind) -> u8 {
+    use cpal::ErrorKind;
+    match kind {
+        ErrorKind::DeviceBusy => 1,
+        ErrorKind::DeviceChanged => 2,
+        ErrorKind::DeviceNotAvailable => 3,
+        ErrorKind::HostUnavailable => 4,
+        ErrorKind::InvalidInput => 5,
+        ErrorKind::PermissionDenied => 6,
+        ErrorKind::RealtimeDenied => 7,
+        ErrorKind::ResourceExhausted => 8,
+        ErrorKind::StreamInvalidated => 9,
+        ErrorKind::UnsupportedConfig => 10,
+        ErrorKind::UnsupportedOperation => 11,
+        ErrorKind::Xrun => 12,
+        ErrorKind::BackendError => 13,
+        ErrorKind::Other => 14,
+        _ => 14,
+    }
+}
+
+fn stream_error_label(code: u8) -> Option<&'static str> {
+    match code {
+        0 => None,
+        1 => Some("audio device busy"),
+        2 => Some("audio route changed"),
+        3 => Some("audio device unavailable"),
+        4 => Some("audio host unavailable"),
+        5 => Some("invalid audio input"),
+        6 => Some("audio device permission denied"),
+        7 => Some("real-time scheduling denied"),
+        8 => Some("audio resource exhausted"),
+        9 => Some("audio stream invalidated"),
+        10 => Some("unsupported audio configuration"),
+        11 => Some("unsupported audio operation"),
+        12 => Some("audio buffer underrun or overrun"),
+        13 => Some("audio backend error"),
+        _ => Some("other audio stream error"),
+    }
+}
+
+fn record_stream_error(kind: cpal::ErrorKind, errors: &AtomicU64, first_error: &AtomicU8) {
+    let _ = first_error.compare_exchange(
+        0,
+        stream_error_code(kind),
+        Ordering::Release,
+        Ordering::Relaxed,
+    );
+    errors.fetch_add(1, Ordering::Relaxed);
+}
 
 /// Copy mono graph output to every device channel without allocating.
 pub fn fill_interleaved<T: Sample + FromSample<f64>>(
@@ -43,7 +94,7 @@ pub struct DeviceOutput {
     controls: Vec<(ControlHandle, f64)>,
     midi_router: MidiRouter,
     errors: Arc<AtomicU64>,
-    first_error: Arc<OnceLock<String>>,
+    first_error: Arc<AtomicU8>,
     pub device_name: String,
     pub sample_rate: u32,
     pub channels: u16,
@@ -111,7 +162,7 @@ impl DeviceOutput {
         let midi_router = MidiRouter::from_machine(&machine);
         let (runtime, control) = LiveRuntime::new(machine);
         let errors = Arc::new(AtomicU64::new(0));
-        let first_error = Arc::new(OnceLock::new());
+        let first_error = Arc::new(AtomicU8::new(0));
         let channels = usize::from(config.channels);
         macro_rules! build {
             ($sample:ty) => {{
@@ -125,10 +176,7 @@ impl DeviceOutput {
                         fill_interleaved(&mut runtime, output, channels, &mut scratch);
                     },
                     move |error| {
-                        if first_error.get().is_none() {
-                            let _ = first_error.set(error.to_string());
-                        }
-                        errors.fetch_add(1, Ordering::Relaxed);
+                        record_stream_error(error.kind(), &errors, &first_error);
                     },
                     None,
                 )
@@ -181,15 +229,29 @@ impl DeviceOutput {
         self.errors.load(Ordering::Relaxed)
     }
 
-    pub fn first_stream_error(&self) -> Option<&str> {
-        self.first_error.get().map(String::as_str)
+    pub fn first_stream_error(&self) -> Option<&'static str> {
+        stream_error_label(self.first_error.load(Ordering::Acquire))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CHUNK_FRAMES, fill_interleaved};
+    use super::{CHUNK_FRAMES, fill_interleaved, record_stream_error, stream_error_label};
     use crate::{compiler::compile, live::LiveRuntime, lua};
+    use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+
+    #[test]
+    fn stream_error_recording_keeps_first_kind_without_formatting() {
+        let errors = AtomicU64::new(0);
+        let first = AtomicU8::new(0);
+        record_stream_error(cpal::ErrorKind::Xrun, &errors, &first);
+        record_stream_error(cpal::ErrorKind::DeviceNotAvailable, &errors, &first);
+        assert_eq!(errors.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            stream_error_label(first.load(Ordering::Acquire)),
+            Some("audio buffer underrun or overrun")
+        );
+    }
 
     #[test]
     fn mono_values_fill_all_channels_across_chunks() {

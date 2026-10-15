@@ -78,8 +78,9 @@ revisions inherit the active runtime's sample rate and start with fresh DSP
 state. `DeviceOutput` opens CPAL's default device on explicit `play`, compiles
 at its sample rate, and copies bounded mono `f64` chunks into interleaved device
 channels. `devices` lists output endpoints and `--device=INDEX` selects one for
-`play` or `perform`; this is host policy, outside the graph. It reports the
-first stream error outside the audio callback. Run
+`play` or `perform`; this is host policy, outside the graph. The stream error
+handler atomically records a bounded error category and count without formatting
+or allocation; the first category is described outside the callback. Run
 `cargo run -p meldritch2 -- crates/meldritch2/examples/08-sine.lua`,
 `cargo run -p meldritch2 -- play crates/meldritch2/examples/08-sine.lua 3`,
 `cargo run -p meldritch2 -- perform crates/meldritch2/examples/09-controls.lua`,
