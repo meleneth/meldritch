@@ -11,6 +11,7 @@ use cpal::{
 use crate::{
     compiler::{ControlHandle, compile_at_rate},
     live::{LiveControl, LiveRuntime},
+    midi::MidiRouter,
     model::Graph,
 };
 
@@ -40,6 +41,7 @@ pub struct DeviceOutput {
     stream: cpal::Stream,
     control: LiveControl,
     controls: Vec<(ControlHandle, f64)>,
+    midi_router: MidiRouter,
     errors: Arc<AtomicU64>,
     first_error: Arc<OnceLock<String>>,
     pub device_name: String,
@@ -106,6 +108,7 @@ impl DeviceOutput {
                 (handle, value)
             })
             .collect();
+        let midi_router = MidiRouter::from_machine(&machine);
         let (runtime, control) = LiveRuntime::new(machine);
         let errors = Arc::new(AtomicU64::new(0));
         let first_error = Arc::new(OnceLock::new());
@@ -149,6 +152,7 @@ impl DeviceOutput {
             stream,
             control,
             controls,
+            midi_router,
             errors,
             first_error,
             device_name,
@@ -169,6 +173,9 @@ impl DeviceOutput {
 
     pub fn controls(&self) -> Vec<(ControlHandle, f64)> {
         self.controls.clone()
+    }
+    pub fn midi_router(&self) -> MidiRouter {
+        self.midi_router.clone()
     }
     pub fn stream_errors(&self) -> u64 {
         self.errors.load(Ordering::Relaxed)

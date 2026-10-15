@@ -4,6 +4,7 @@ use meldritch2::{
     compiler::compile,
     device::{DeviceOutput, output_device_names},
     lua,
+    midi_device::{MidiInputSession, input_port_names},
     model::{Graph, ParameterId},
     tui,
 };
@@ -32,7 +33,7 @@ fn main() {
     let mut args = env::args().skip(1);
     let Some(first) = args.next() else {
         eprintln!(
-            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX]"
+            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]"
         );
         process::exit(2);
     };
@@ -44,6 +45,24 @@ fn main() {
         match output_device_names() {
             Ok(devices) => {
                 for (index, name) in devices.iter().enumerate() {
+                    println!("{index}: {name}");
+                }
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                process::exit(1);
+            }
+        }
+        return;
+    }
+    if first == "midi-ports" {
+        if args.next().is_some() {
+            eprintln!("midi-ports takes no arguments");
+            process::exit(2);
+        }
+        match input_port_names() {
+            Ok(ports) => {
+                for (index, name) in ports.iter().enumerate() {
                     println!("{index}: {name}");
                 }
             }
@@ -106,15 +125,50 @@ fn main() {
             eprintln!("perform requires GRAPH.lua");
             process::exit(2);
         };
-        let device_arg = args.next();
-        if args.next().is_some() {
-            eprintln!("too many arguments");
-            process::exit(2);
+        let mut device_arg = None;
+        let mut midi_index = None;
+        for argument in args {
+            if argument.starts_with("--device=") {
+                if device_arg.replace(argument).is_some() {
+                    eprintln!("--device may appear only once");
+                    process::exit(2);
+                }
+            } else if let Some(index) = argument.strip_prefix("--midi=") {
+                let index = index.parse::<usize>().unwrap_or_else(|_| {
+                    eprintln!("MIDI input index must be a nonnegative integer");
+                    process::exit(2);
+                });
+                if midi_index.replace(index).is_some() {
+                    eprintln!("--midi may appear only once");
+                    process::exit(2);
+                }
+            } else {
+                eprintln!("unknown perform option '{argument}'");
+                process::exit(2);
+            }
         }
         let result = load_graph(&path).and_then(|graph| open_output(&graph, device_arg));
         match result {
             Ok(output) => {
-                if let Err(error) = output.start().and_then(|_| tui::perform(&output)) {
+                let midi_session = match midi_index {
+                    Some(index) => {
+                        match MidiInputSession::open_index(index, output.midi_router()) {
+                            Ok(session) => Some(session),
+                            Err(error) => {
+                                eprintln!("{error}");
+                                process::exit(1);
+                            }
+                        }
+                    }
+                    None => None,
+                };
+                let midi_port = midi_session
+                    .as_ref()
+                    .map(|session| session.port_name.as_str());
+                if let Err(error) = output
+                    .start()
+                    .and_then(|_| tui::perform(&output, midi_port))
+                {
                     eprintln!("{error}");
                     process::exit(1);
                 }
@@ -126,6 +180,7 @@ fn main() {
                     );
                     process::exit(1);
                 }
+                drop(midi_session);
             }
             Err(error) => {
                 eprintln!("{error}");

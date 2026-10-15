@@ -25,7 +25,9 @@ Lua may also bind channel 1..16 MIDI CC numbers to a named control. Graph
 validation checks those declarations; `MidiRouter` precomputes a bounded raw
 CC lookup and publishes through `ControlHandle`. DSP modules never see MIDI
 bytes. The router belongs to one compiled graph revision. MIDI device opening
-and physical gestures remain separate from this headless routing contract.
+is explicit through `midi-ports` and `perform --midi=INDEX`. The input callback
+only decodes and publishes CC values; the terminal view reads those values from
+the same parameter cells. Physical CC gestures remain unverified.
 
 Lua's `meldritch.graph()` API constructs a candidate graph. `graph:module(id,
 type, values)` returns handles with contract-derived ports; `graph:connect(src,
@@ -69,7 +71,10 @@ first stream error outside the audio callback. Run
 `cargo run -p meldritch2 -- crates/meldritch2/examples/08-sine.lua`,
 `cargo run -p meldritch2 -- play crates/meldritch2/examples/08-sine.lua 3`,
 `cargo run -p meldritch2 -- perform crates/meldritch2/examples/09-controls.lua`,
+`cargo run -p meldritch2 -- midi-ports`,
+`cargo run -p meldritch2 -- perform crates/meldritch2/examples/10-midi-control.lua --midi=INDEX`,
 and `cargo test -p meldritch2`. Host smoke tests found underruns on the default
 and PulseAudio routes, a busy Audio Expansion Card endpoint, and no stream
-errors on the discard endpoint. Physical listening and deadline reliability
-remain unverified. See `examples/ACCEPTANCE.md` for the corpus.
+errors on the discard endpoint. The APC mini mk2 Control input opened in a
+terminal session with the discard output. Physical CC gestures, listening, and
+deadline reliability remain unverified. See `examples/ACCEPTANCE.md` for the corpus.

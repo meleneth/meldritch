@@ -36,7 +36,7 @@ impl Drop for Terminal {
     }
 }
 
-fn draw(panel: &Panel, output: &DeviceOutput) -> Result<(), String> {
+fn draw(panel: &Panel, output: &DeviceOutput, midi_port: Option<&str>) -> Result<(), String> {
     let mut out = stdout();
     queue!(
         out,
@@ -44,6 +44,8 @@ fn draw(panel: &Panel, output: &DeviceOutput) -> Result<(), String> {
         Clear(ClearType::All),
         Print("Meldritch 2 | "),
         Print(&output.device_name),
+        Print(" | MIDI: "),
+        Print(midi_port.unwrap_or("none")),
         Print(" | q: quit\r\n"),
         Print("Up/Down: select  Left/Right: adjust  Home/End: bounds\r\n\r\n")
     )
@@ -81,12 +83,13 @@ fn draw(panel: &Panel, output: &DeviceOutput) -> Result<(), String> {
     out.flush().map_err(|error| error.to_string())
 }
 
-pub fn perform(output: &DeviceOutput) -> Result<(), String> {
+pub fn perform(output: &DeviceOutput, midi_port: Option<&str>) -> Result<(), String> {
     let mut panel = Panel::new(output.controls());
     let _terminal = Terminal::enter()?;
-    draw(&panel, output)?;
+    draw(&panel, output, midi_port)?;
     loop {
         if !event::poll(Duration::from_millis(100)).map_err(|error| error.to_string())? {
+            draw(&panel, output, midi_port)?;
             continue;
         }
         let Event::Key(key) = event::read().map_err(|error| error.to_string())? else {
@@ -108,7 +111,7 @@ pub fn perform(output: &DeviceOutput) -> Result<(), String> {
         };
         if let Some(gesture) = gesture {
             panel.apply(gesture)?;
-            draw(&panel, output)?;
+            draw(&panel, output, midi_port)?;
         }
     }
     Ok(())

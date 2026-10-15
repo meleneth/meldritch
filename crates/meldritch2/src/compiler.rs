@@ -44,6 +44,11 @@ impl ParameterHandle {
         self.cell.store(bits, Ordering::Release);
         Ok(())
     }
+
+    pub fn override_value(&self) -> Option<f64> {
+        let bits = self.cell.load(Ordering::Acquire);
+        (bits != NO_OVERRIDE).then(|| f64::from_bits(bits))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -71,6 +76,9 @@ impl ControlHandle {
     }
     pub fn range(&self) -> (f64, f64) {
         (self.min, self.max)
+    }
+    pub fn override_value(&self) -> Option<f64> {
+        self.parameter.override_value()
     }
     pub fn publish(&self, value: f64) -> Result<(), String> {
         if !value.is_finite() || value < self.min || value > self.max {

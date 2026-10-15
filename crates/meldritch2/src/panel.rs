@@ -12,7 +12,7 @@ pub enum Gesture {
 
 pub struct ControlRow {
     handle: ControlHandle,
-    value: f64,
+    authored_value: f64,
 }
 
 impl ControlRow {
@@ -26,7 +26,7 @@ impl ControlRow {
         self.handle.range()
     }
     pub fn value(&self) -> f64 {
-        self.value
+        self.handle.override_value().unwrap_or(self.authored_value)
     }
 }
 
@@ -41,7 +41,10 @@ impl Panel {
         Self {
             rows: controls
                 .into_iter()
-                .map(|(handle, value)| ControlRow { handle, value })
+                .map(|(handle, authored_value)| ControlRow {
+                    handle,
+                    authored_value,
+                })
                 .collect(),
             selected: 0,
         }
@@ -66,14 +69,13 @@ impl Panel {
                 let (min, max) = row.handle.range();
                 let step = (max - min) / 100.0;
                 let value = match gesture {
-                    Gesture::Decrease => (row.value - step).clamp(min, max),
-                    Gesture::Increase => (row.value + step).clamp(min, max),
+                    Gesture::Decrease => (row.value() - step).clamp(min, max),
+                    Gesture::Increase => (row.value() + step).clamp(min, max),
                     Gesture::Minimum => min,
                     Gesture::Maximum => max,
                     _ => unreachable!(),
                 };
                 row.handle.publish(value)?;
-                row.value = value;
             }
         }
         Ok(())
@@ -120,5 +122,20 @@ mod tests {
         assert_eq!(samples, [0.375; 4]);
         panel.apply(Gesture::Previous).unwrap();
         assert_eq!(panel.selected(), Some(0));
+    }
+
+    #[test]
+    fn external_publication_updates_display_and_next_gesture() {
+        let graph = lua::read(include_str!("../examples/10-midi-control.lua")).unwrap();
+        let machine = compile(&graph).unwrap();
+        let handle = machine.control_handle("level").unwrap();
+        let authored = machine.effective_value(handle.target()).unwrap();
+        let mut panel = Panel::new(vec![(handle.clone(), authored)]);
+        handle.publish(0.75).unwrap();
+        assert_eq!(panel.rows()[0].value(), 0.75);
+        panel.apply(Gesture::Increase).unwrap();
+        assert!((panel.rows()[0].value() - 0.76).abs() < 1e-12);
+        handle.clear().unwrap();
+        assert_eq!(panel.rows()[0].value(), authored);
     }
 }

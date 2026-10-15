@@ -103,3 +103,15 @@ Raw `[0xB0, 7, 127]` publishes level 1 and the next graph buffer renders
 other channels, malformed messages, and note messages leave it unchanged.
 The MIDI adapter uses the same `ControlHandle` as the terminal view; no DSP
 module interprets MIDI bytes. Hardware connection is a later checkpoint.
+
+## MIDI input checkpoint
+
+`meldritch2 midi-ports` lists host input ports. `perform` accepts
+`--midi=INDEX` alongside optional `--device=INDEX`; it opens that port and
+routes incoming bytes through the graph's declared CC mapping. Port selection
+is explicit. Invalid indices and connection failures report diagnostics.
+The connection is held for the performance session and closed on exit.
+The terminal view displays the selected port and reflects published CC values;
+subsequent keyboard gestures start from the current value.
+Headless routing acceptance above remains the authority for signal behavior;
+physical CC gestures require a separate device check.

@@ -4,6 +4,7 @@ pub mod device;
 pub mod live;
 pub mod lua;
 pub mod midi;
+pub mod midi_device;
 pub mod model;
 pub mod panel;
 pub mod tui;
