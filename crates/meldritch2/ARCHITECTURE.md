@@ -44,9 +44,9 @@ owns a fixed, contract-declared state vector allocated at compile time. `Sine`
 uses one state value for phase and the machine's explicit sample rate; it keeps
 phase across buffers and uses a published frequency at the next buffer entry.
 `Mix` sums two named inputs; sources may fan out. Current ports are mono audio
-at one sample per frame. Each input permits one cable. Cycles, disconnected required inputs,
-and multiple Output instances are rejected. Feedback, multiple cables to one
-input, other domains, block DSP, physical audio integration, and multi-parameter
+at one sample per frame. Each input permits one cable. Cycles, disconnected
+required inputs, and multiple Output instances are rejected. Feedback,
+multiple cables to one input, other domains, block DSP, and multi-parameter
 modules remain future work. Parameter publication uses one
 atomic `u64` per parameter; validation and handle lookup happen off the process
 path. Handles from replaced revisions refer only to their old cells. The live
@@ -58,10 +58,13 @@ Contracts expose domain and fan-in explicitly so these restrictions are visible.
 revisions inherit the active runtime's sample rate and start with fresh DSP
 state. `DeviceOutput` opens CPAL's default device on explicit `play`, compiles
 at its sample rate, and copies bounded mono `f64` chunks into interleaved device
-channels. It reports the first stream error outside the audio callback. Run
+channels. `devices` lists output endpoints and `--device=INDEX` selects one for
+`play` or `perform`; this is host policy, outside the graph. It reports the
+first stream error outside the audio callback. Run
 `cargo run -p meldritch2 -- crates/meldritch2/examples/08-sine.lua`,
-`cargo run -p meldritch2 -- play crates/meldritch2/examples/08-sine.lua 3`, and
-`cargo run -p meldritch2 -- perform crates/meldritch2/examples/09-controls.lua`, and
-`cargo test -p meldritch2`. The host device smoke opened a 48 kHz stereo stream
-but reported buffer underruns; physical listening and deadline reliability are
-unverified. See `examples/ACCEPTANCE.md` for the corpus.
+`cargo run -p meldritch2 -- play crates/meldritch2/examples/08-sine.lua 3`,
+`cargo run -p meldritch2 -- perform crates/meldritch2/examples/09-controls.lua`,
+and `cargo test -p meldritch2`. Host smoke tests found underruns on the default
+and PulseAudio routes, a busy Audio Expansion Card endpoint, and no stream
+errors on the discard endpoint. Physical listening and deadline reliability
+remain unverified. See `examples/ACCEPTANCE.md` for the corpus.

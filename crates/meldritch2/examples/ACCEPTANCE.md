@@ -80,3 +80,16 @@ its bounds; Q exits. The view renders only instrument-declared controls and
 publishes through `ControlHandle`. A headless panel test verifies selection,
 value changes, bounds, and the resulting graph samples. Physical key gestures
 and listening remain unverified on this host.
+
+## Explicit output selection checkpoint
+
+`meldritch2 devices` lists output devices by index. `play` and `perform` accept
+`--device=INDEX` to select one explicitly. The selection is resolved before
+stream creation; indices reflect the current host enumeration, and an invalid
+index reports a diagnostic. This keeps the DSP
+graph independent of host device policy. The host default route reported
+buffer underruns in both debug and release smoke tests, so the selectable
+devices must be checked separately before claiming physical playback. On this
+host, the discard endpoint ran without stream errors, PulseAudio still
+underran, and the Audio Expansion Card endpoint was busy. No listening result
+is claimed.

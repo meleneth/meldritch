@@ -47,12 +47,42 @@ pub struct DeviceOutput {
     pub channels: u16,
 }
 
+pub fn output_device_names() -> Result<Vec<String>, String> {
+    let host = cpal::default_host();
+    let devices = host
+        .output_devices()
+        .map_err(|error| format!("failed to list output devices: {error}"))?;
+    Ok(devices
+        .map(|device| {
+            device
+                .description()
+                .map(|description| description.name().to_owned())
+                .unwrap_or_else(|_| "unknown output device".into())
+        })
+        .collect())
+}
+
 impl DeviceOutput {
     pub fn open_default(graph: &Graph) -> Result<Self, String> {
+        Self::open(graph, None)
+    }
+
+    pub fn open_index(graph: &Graph, index: usize) -> Result<Self, String> {
+        Self::open(graph, Some(index))
+    }
+
+    fn open(graph: &Graph, index: Option<usize>) -> Result<Self, String> {
         let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .ok_or("no default audio output device is available")?;
+        let device = match index {
+            Some(index) => host
+                .output_devices()
+                .map_err(|error| format!("failed to list output devices: {error}"))?
+                .nth(index)
+                .ok_or_else(|| format!("output device index {index} does not exist"))?,
+            None => host
+                .default_output_device()
+                .ok_or("no default audio output device is available")?,
+        };
         let device_name = device
             .description()
             .map(|description| description.name().to_owned())

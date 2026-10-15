@@ -2,7 +2,7 @@ use std::{env, fs, process, thread, time::Duration};
 
 use meldritch2::{
     compiler::compile,
-    device::DeviceOutput,
+    device::{DeviceOutput, output_device_names},
     lua,
     model::{Graph, ParameterId},
     tui,
@@ -14,14 +14,46 @@ fn load_graph(path: &str) -> Result<Graph, String> {
         .and_then(|script| lua::read(&script))
 }
 
+fn open_output(graph: &Graph, device_arg: Option<String>) -> Result<DeviceOutput, String> {
+    match device_arg {
+        None => DeviceOutput::open_default(graph),
+        Some(argument) => {
+            let index = argument
+                .strip_prefix("--device=")
+                .ok_or("expected --device=INDEX")?
+                .parse::<usize>()
+                .map_err(|_| "device index must be a nonnegative integer")?;
+            DeviceOutput::open_index(graph, index)
+        }
+    }
+}
+
 fn main() {
     let mut args = env::args().skip(1);
     let Some(first) = args.next() else {
         eprintln!(
-            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 play GRAPH.lua SECONDS | meldritch2 perform GRAPH.lua"
+            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX]"
         );
         process::exit(2);
     };
+    if first == "devices" {
+        if args.next().is_some() {
+            eprintln!("devices takes no arguments");
+            process::exit(2);
+        }
+        match output_device_names() {
+            Ok(devices) => {
+                for (index, name) in devices.iter().enumerate() {
+                    println!("{index}: {name}");
+                }
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                process::exit(1);
+            }
+        }
+        return;
+    }
     if first == "play" {
         let Some(path) = args.next() else {
             eprintln!("play requires GRAPH.lua");
@@ -31,6 +63,7 @@ fn main() {
             eprintln!("play requires SECONDS");
             process::exit(2);
         };
+        let device_arg = args.next();
         if args.next().is_some() {
             eprintln!("too many arguments");
             process::exit(2);
@@ -40,7 +73,7 @@ fn main() {
             eprintln!("SECONDS must be finite and between 0 and 3600");
             process::exit(2);
         }
-        let result = load_graph(&path).and_then(|graph| DeviceOutput::open_default(&graph));
+        let result = load_graph(&path).and_then(|graph| open_output(&graph, device_arg));
         match result {
             Ok(output) => {
                 if let Err(error) = output.start() {
@@ -73,11 +106,12 @@ fn main() {
             eprintln!("perform requires GRAPH.lua");
             process::exit(2);
         };
+        let device_arg = args.next();
         if args.next().is_some() {
             eprintln!("too many arguments");
             process::exit(2);
         }
-        let result = load_graph(&path).and_then(|graph| DeviceOutput::open_default(&graph));
+        let result = load_graph(&path).and_then(|graph| open_output(&graph, device_arg));
         match result {
             Ok(output) => {
                 if let Err(error) = output.start().and_then(|_| tui::perform(&output)) {
