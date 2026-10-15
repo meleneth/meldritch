@@ -128,6 +128,7 @@ impl ControlHandle {
 /// An accepted, executable graph. Its processing buffers are allocated at compile time.
 #[derive(Debug)]
 pub struct Machine {
+    revision: Arc<()>,
     ops: Vec<Op>,
     slots: Vec<f64>,
     input_scratch: Vec<f64>,
@@ -218,6 +219,42 @@ impl Machine {
     }
     pub fn sample_rate(&self) -> f64 {
         self.sample_rate
+    }
+    pub(crate) fn revision_token(&self) -> Arc<()> {
+        Arc::clone(&self.revision)
+    }
+    pub(crate) fn is_revision(&self, token: &Arc<()>) -> bool {
+        Arc::ptr_eq(&self.revision, token)
+    }
+    pub(crate) fn resolve_timed_note(
+        &self,
+        channel: u8,
+        pitch_hz: f64,
+    ) -> Result<(usize, usize), String> {
+        let binding = self
+            .midi_notes
+            .iter()
+            .find(|binding| binding.channel == channel)
+            .ok_or_else(|| format!("no MIDI note mapping for channel {channel}"))?;
+        let pitch = &self.controls[&binding.pitch_control_id];
+        if !pitch_hz.is_finite() || pitch_hz < pitch.min || pitch_hz > pitch.max {
+            return Err(format!(
+                "timed note pitch must be finite and within control '{}' {}..{}",
+                binding.pitch_control_id, pitch.min, pitch.max
+            ));
+        }
+        let gate = &self.controls[&binding.gate_control_id];
+        Ok((self.param_ids[&pitch.target], self.param_ids[&gate.target]))
+    }
+    pub(crate) fn apply_timed_note(
+        &mut self,
+        pitch_index: usize,
+        gate_index: usize,
+        pitch_hz: f64,
+        gate: bool,
+    ) {
+        self.params[pitch_index] = pitch_hz;
+        self.params[gate_index] = if gate { 1.0 } else { 0.0 };
     }
     pub fn parameter_ids(&self) -> impl Iterator<Item = &ParameterId> {
         self.param_ids.keys()
@@ -586,6 +623,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
     }
     let output_slot = slot_bases[output_slots[0]];
     Ok(Machine {
+        revision: Arc::new(()),
         ops,
         slots: vec![0.0; slot_count],
         input_scratch: vec![

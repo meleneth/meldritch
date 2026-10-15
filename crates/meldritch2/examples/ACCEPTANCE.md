@@ -346,3 +346,22 @@ reject two note channels writing the same pitch/gate targets and leave the
 accepted machine usable. This snapshot contract applies to note-pair writes;
 independent panel or CC gestures on those controls retain their existing
 parameter semantics.
+
+## Prepared absolute-frame note timeline
+
+`43-timed-note-voice.lua` is a mono graph with explicit cabled Hertz pitch and
+Gate envelope paths. A control-side plan lowers bounded typed channel-1 note
+states at absolute `u64` frames 3 (440 Hz, on), 7 (880 Hz, on), and 11 (off).
+The event at each frame applies before that frame's DSP sample. Frames 0..2
+and 11 onward are silent; frames 3..10 follow the oscillator's uninterrupted
+phase with frequency changes at the declared frames. One 16-frame render and
+partitions 5+4+7 must have identical samples. Same-frame events apply in
+authored order, and an event exactly at the end of a buffer waits for the
+next buffer. Other parameter controls snapshot on each buffer while the timed
+note state persists. The prepared plan contains at most 64 events, and each
+render call accepts at most 1024 frames. Preparation rejects decreasing frames,
+nonfinite or out-of-control-range pitch, unmapped channel, or plans for another machine
+revision before changing audio state. `44-timed-note-no-binding.lua` proves
+the unmapped-channel diagnostic. Rendering performs no allocation, locking,
+parsing, or source validation. This is a prepared headless timeline; MIDI device
+timestamps and audio-clock synchronization remain open.

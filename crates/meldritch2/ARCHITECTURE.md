@@ -45,8 +45,19 @@ the audio callback makes one bounded pair read at buffer entry. If a note
 write overlaps that read, it reuses the prior complete pitch/gate pair for
 that buffer. Note writers serialize on their bounded held-key state lock; the
 audio path reads only atomics and its own cached pair. Other control gestures
-on those parameters remain independent publications. Timed input and
-velocity remain open.
+on those parameters remain independent publications. MIDI device timestamp
+mapping and velocity remain open.
+
+`TimedNotePlan` is a separate prepared timeline for absolute `u64` frame
+positions. The control side resolves at most 64 typed channel/pitch/gate
+states against one machine revision. Each bounded render call snapshots
+ordinary parameters, reapplies the held timed note states, then renders up to
+1024 frames in segments split at event frames. Events at the same frame apply
+in declaration order before that frame's sample. Rendering makes no source
+lookups, allocations, locks, or retries. It is a headless execution path;
+mapping host MIDI timestamps to audio frames and feeding live device callbacks
+remain open. A plan owns one sequential render; ordinary `Machine::process`
+starts a new parameter snapshot outside that plan.
 
 Lua's `meldritch.graph()` API constructs a candidate graph. `graph:module(id,
 type, values)` returns handles with contract-derived ports; `graph:connect(src,

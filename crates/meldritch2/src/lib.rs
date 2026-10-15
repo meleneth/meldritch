@@ -7,6 +7,7 @@ pub mod midi;
 pub mod midi_device;
 pub mod model;
 pub mod panel;
+pub mod timed;
 pub mod tui;
 mod units;
 
@@ -19,6 +20,9 @@ mod tests {
         lua,
         midi::MidiRouter,
         model::ParameterId,
+        timed::{
+            MAX_EVENTS, MAX_FRAMES_PER_RENDER, TimedNotePlan, TimedNoteState, TimedRenderError,
+        },
     };
 
     const BASIC: &str = include_str!("../examples/01-basic.lua");
@@ -66,6 +70,8 @@ mod tests {
     const CABLED_MIDI_NOTE_PAIR: &str = include_str!("../examples/41-cabled-midi-note-pair.lua");
     const MIDI_NOTE_SHARED_TARGET: &str =
         include_str!("../examples/42-midi-note-shared-target.lua");
+    const TIMED_NOTE_VOICE: &str = include_str!("../examples/43-timed-note-voice.lua");
+    const TIMED_NOTE_NO_BINDING: &str = include_str!("../examples/44-timed-note-no-binding.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -1292,6 +1298,222 @@ mod tests {
         let mut samples = [f64::NAN; 2];
         machine.process(&mut samples);
         assert_eq!(samples, [0.0; 2]);
+    }
+
+    #[test]
+    fn absolute_frame_note_states_render_identically_across_partitions() {
+        let graph = lua::read(TIMED_NOTE_VOICE).unwrap();
+        let events = [
+            TimedNoteState {
+                frame: 3,
+                channel: 1,
+                pitch_hz: 440.0,
+                gate: true,
+            },
+            TimedNoteState {
+                frame: 7,
+                channel: 1,
+                pitch_hz: 880.0,
+                gate: true,
+            },
+            TimedNoteState {
+                frame: 11,
+                channel: 1,
+                pitch_hz: 880.0,
+                gate: false,
+            },
+        ];
+        let mut whole_machine = compile(&graph).unwrap();
+        let mut whole_plan = TimedNotePlan::prepare(&whole_machine, 0, &events).unwrap();
+        let mut whole = [f64::NAN; 16];
+        whole_plan
+            .render_next(&mut whole_machine, &mut whole)
+            .unwrap();
+        assert_eq!(whole_plan.cursor(), 16);
+        for (frame, actual) in whole.iter().enumerate() {
+            let cycles = if frame < 7 {
+                440.0 * frame as f64
+            } else {
+                440.0 * 7.0 + 880.0 * (frame - 7) as f64
+            };
+            let expected = if (3..11).contains(&frame) {
+                0.25 * (std::f64::consts::TAU * cycles / 48_000.0).sin()
+            } else {
+                0.0
+            };
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "frame {frame}: {actual} != {expected}"
+            );
+        }
+
+        let mut split_machine = compile(&graph).unwrap();
+        let mut split_plan = TimedNotePlan::prepare(&split_machine, 0, &events).unwrap();
+        let mut first = [f64::NAN; 5];
+        let mut second = [f64::NAN; 4];
+        let mut third = [f64::NAN; 7];
+        split_plan
+            .render_next(&mut split_machine, &mut first)
+            .unwrap();
+        split_plan
+            .render_next(&mut split_machine, &mut second)
+            .unwrap();
+        split_plan
+            .render_next(&mut split_machine, &mut third)
+            .unwrap();
+        assert_eq!(whole[..5], first);
+        assert_eq!(whole[5..9], second);
+        assert_eq!(whole[9..], third);
+    }
+
+    #[test]
+    fn timed_note_boundary_and_same_frame_order_are_explicit() {
+        let graph = lua::read(TIMED_NOTE_VOICE).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let events = [
+            TimedNoteState {
+                frame: 4,
+                channel: 1,
+                pitch_hz: 440.0,
+                gate: true,
+            },
+            TimedNoteState {
+                frame: 4,
+                channel: 1,
+                pitch_hz: 440.0,
+                gate: false,
+            },
+            TimedNoteState {
+                frame: 8,
+                channel: 1,
+                pitch_hz: 880.0,
+                gate: true,
+            },
+        ];
+        let mut plan = TimedNotePlan::prepare(&machine, 0, &events).unwrap();
+        let mut before = [f64::NAN; 4];
+        plan.render_next(&mut machine, &mut before).unwrap();
+        assert_eq!(before, [0.0; 4]);
+        let mut middle = [f64::NAN; 4];
+        plan.render_next(&mut machine, &mut middle).unwrap();
+        assert_eq!(middle, [0.0; 4]);
+        let mut after = [f64::NAN; 1];
+        plan.render_next(&mut machine, &mut after).unwrap();
+        let expected = 0.25 * (std::f64::consts::TAU * 440.0 * 8.0 / 48_000.0).sin();
+        assert!((after[0] - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn timed_note_state_survives_control_snapshots_between_blocks() {
+        let graph = lua::read(TIMED_NOTE_VOICE).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let event = TimedNoteState {
+            frame: 0,
+            channel: 1,
+            pitch_hz: 440.0,
+            gate: true,
+        };
+        let mut plan = TimedNotePlan::prepare(&machine, 0, &[event]).unwrap();
+        let mut sample = [f64::NAN; 1];
+        plan.render_next(&mut machine, &mut sample).unwrap();
+        assert_eq!(sample, [0.0]);
+        machine
+            .parameter_handle(&ParameterId::new("level", "gain"))
+            .unwrap()
+            .publish(Some(0.5))
+            .unwrap();
+        plan.render_next(&mut machine, &mut sample).unwrap();
+        let expected = 0.5 * (std::f64::consts::TAU * 440.0 / 48_000.0).sin();
+        assert!((sample[0] - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn invalid_timed_note_plans_and_render_calls_do_not_change_machine() {
+        let graph = lua::read(TIMED_NOTE_VOICE).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let valid = TimedNoteState {
+            frame: 3,
+            channel: 1,
+            pitch_hz: 440.0,
+            gate: true,
+        };
+        assert!(
+            TimedNotePlan::prepare(&machine, 0, &[valid, TimedNoteState { frame: 2, ..valid }])
+                .unwrap_err()
+                .contains("nondecreasing")
+        );
+        assert!(
+            TimedNotePlan::prepare(
+                &machine,
+                0,
+                &[TimedNoteState {
+                    channel: 2,
+                    ..valid
+                }]
+            )
+            .unwrap_err()
+            .contains("no MIDI note mapping")
+        );
+        assert!(
+            TimedNotePlan::prepare(
+                &machine,
+                0,
+                &[TimedNoteState {
+                    pitch_hz: f64::NAN,
+                    ..valid
+                }]
+            )
+            .unwrap_err()
+            .contains("finite")
+        );
+        assert!(
+            TimedNotePlan::prepare(
+                &machine,
+                0,
+                &[TimedNoteState {
+                    pitch_hz: 20_000.0,
+                    ..valid
+                }]
+            )
+            .unwrap_err()
+            .contains("within control")
+        );
+        assert!(
+            TimedNotePlan::prepare(&machine, 0, &vec![valid; MAX_EVENTS + 1])
+                .unwrap_err()
+                .contains("at most")
+        );
+        let unbound = compile(&lua::read(TIMED_NOTE_NO_BINDING).unwrap()).unwrap();
+        assert!(
+            TimedNotePlan::prepare(&unbound, 0, &[valid])
+                .unwrap_err()
+                .contains("no MIDI note mapping")
+        );
+
+        let mut plan = TimedNotePlan::prepare(&machine, 0, &[valid]).unwrap();
+        let mut other = compile(&graph).unwrap();
+        let mut sample = [f64::NAN; 1];
+        assert_eq!(
+            plan.render_next(&mut other, &mut sample),
+            Err(TimedRenderError::WrongMachine)
+        );
+        assert!(sample[0].is_nan());
+        let mut oversized = vec![f64::NAN; MAX_FRAMES_PER_RENDER + 1];
+        assert_eq!(
+            plan.render_next(&mut machine, &mut oversized),
+            Err(TimedRenderError::InvalidBufferSize)
+        );
+        assert_eq!(plan.cursor(), 0);
+        plan.render_next(&mut machine, &mut sample).unwrap();
+        assert_eq!(sample, [0.0]);
+
+        let mut overflow = TimedNotePlan::prepare(&machine, u64::MAX - 1, &[]).unwrap();
+        let mut two = [f64::NAN; 2];
+        assert_eq!(
+            overflow.render_next(&mut machine, &mut two),
+            Err(TimedRenderError::FrameOverflow)
+        );
+        assert!(two.iter().all(|value| value.is_nan()));
     }
 
     #[test]
