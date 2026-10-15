@@ -4,6 +4,7 @@ pub mod device;
 pub mod live;
 pub mod lua;
 pub mod midi;
+pub mod midi_clock;
 pub mod midi_device;
 pub mod model;
 pub mod panel;
@@ -19,6 +20,7 @@ mod tests {
         live::LiveRuntime,
         lua,
         midi::MidiRouter,
+        midi_clock::{ClockError, ClockStatus, FrameStamp, MidiFrameClock},
         model::ParameterId,
         timed::{
             MAX_EVENTS, MAX_FRAMES_PER_RENDER, TimedNotePlan, TimedNoteState, TimedRenderError,
@@ -72,6 +74,7 @@ mod tests {
         include_str!("../examples/42-midi-note-shared-target.lua");
     const TIMED_NOTE_VOICE: &str = include_str!("../examples/43-timed-note-voice.lua");
     const TIMED_NOTE_NO_BINDING: &str = include_str!("../examples/44-timed-note-no-binding.lua");
+    const MIDI_TIME_ANCHOR: &str = include_str!("../examples/45-midi-time-anchor.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -1514,6 +1517,136 @@ mod tests {
             Err(TimedRenderError::FrameOverflow)
         );
         assert!(two.iter().all(|value| value.is_nan()));
+    }
+
+    #[test]
+    fn midi_microseconds_anchor_to_timed_note_pcm() {
+        let graph = lua::read(MIDI_TIME_ANCHOR).unwrap();
+        let mut clock = MidiFrameClock::new(48_000, 3).unwrap();
+        let first = clock.map(1_000_000, 0).unwrap();
+        let second = clock.map(1_000_084, 0).unwrap();
+        let third = clock.map(1_000_167, 0).unwrap();
+        assert_eq!(
+            first,
+            FrameStamp {
+                frame: 3,
+                status: ClockStatus::Anchored
+            }
+        );
+        assert_eq!(
+            second,
+            FrameStamp {
+                frame: 7,
+                status: ClockStatus::Mapped
+            }
+        );
+        assert_eq!(
+            third,
+            FrameStamp {
+                frame: 11,
+                status: ClockStatus::Mapped
+            }
+        );
+        let events = [
+            TimedNoteState {
+                frame: first.frame,
+                channel: 1,
+                pitch_hz: 440.0,
+                gate: true,
+            },
+            TimedNoteState {
+                frame: second.frame,
+                channel: 1,
+                pitch_hz: 880.0,
+                gate: true,
+            },
+            TimedNoteState {
+                frame: third.frame,
+                channel: 1,
+                pitch_hz: 880.0,
+                gate: false,
+            },
+        ];
+        let mut machine = compile(&graph).unwrap();
+        let mut plan = TimedNotePlan::prepare(&machine, 0, &events).unwrap();
+        let mut whole = [f64::NAN; 16];
+        plan.render_next(&mut machine, &mut whole).unwrap();
+        for (frame, actual) in whole.iter().enumerate() {
+            let cycles = if frame < 7 {
+                440.0 * frame as f64
+            } else {
+                440.0 * 7.0 + 880.0 * (frame - 7) as f64
+            };
+            let expected = if (3..11).contains(&frame) {
+                0.5 * (std::f64::consts::TAU * cycles / 48_000.0).sin()
+            } else {
+                0.0
+            };
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "frame {frame}: {actual} != {expected}"
+            );
+        }
+        let mut split_machine = compile(&graph).unwrap();
+        let mut split_plan = TimedNotePlan::prepare(&split_machine, 0, &events).unwrap();
+        let mut a = [f64::NAN; 5];
+        let mut b = [f64::NAN; 4];
+        let mut c = [f64::NAN; 7];
+        split_plan.render_next(&mut split_machine, &mut a).unwrap();
+        split_plan.render_next(&mut split_machine, &mut b).unwrap();
+        split_plan.render_next(&mut split_machine, &mut c).unwrap();
+        assert_eq!(whole[..5], a);
+        assert_eq!(whole[5..9], b);
+        assert_eq!(whole[9..], c);
+    }
+
+    #[test]
+    fn midi_frame_clock_clamps_late_events_and_resets_on_backward_time() {
+        let mut clock = MidiFrameClock::new(48_000, 3).unwrap();
+        assert_eq!(clock.map(1_000_000, 0).unwrap().frame, 3);
+        assert_eq!(clock.map(1_000_084, 0).unwrap().frame, 7);
+        assert_eq!(
+            clock.map(1_000_167, 20).unwrap(),
+            FrameStamp {
+                frame: 20,
+                status: ClockStatus::Late
+            }
+        );
+        assert_eq!(
+            clock.map(1_000_168, 19),
+            Err(ClockError::AudioFrameRegressed)
+        );
+        assert_eq!(
+            clock.map(999_000, 30).unwrap(),
+            FrameStamp {
+                frame: 33,
+                status: ClockStatus::Reset
+            }
+        );
+        assert_eq!(
+            clock.map(999_100, 30).unwrap(),
+            FrameStamp {
+                frame: 37,
+                status: ClockStatus::Mapped
+            }
+        );
+        assert_eq!(
+            MidiFrameClock::new(0, 0).err(),
+            Some(ClockError::ZeroSampleRate)
+        );
+        assert_eq!(
+            MidiFrameClock::new(48_000, 48_001).err(),
+            Some(ClockError::LeadTooLong)
+        );
+        let mut overflow = MidiFrameClock::new(48_000, 3).unwrap();
+        assert_eq!(
+            overflow.map(1_000_000, u64::MAX - 2),
+            Err(ClockError::FrameOverflow)
+        );
+        assert_eq!(overflow.map(1_000_000, 0).unwrap().frame, 3);
+        let mut far = MidiFrameClock::new(u32::MAX, 0).unwrap();
+        assert_eq!(far.map(0, 0).unwrap().frame, 0);
+        assert_eq!(far.map(u64::MAX, 0), Err(ClockError::FrameOverflow));
     }
 
     #[test]

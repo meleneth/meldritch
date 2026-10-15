@@ -55,9 +55,17 @@ ordinary parameters, reapplies the held timed note states, then renders up to
 1024 frames in segments split at event frames. Events at the same frame apply
 in declaration order before that frame's sample. Rendering makes no source
 lookups, allocations, locks, or retries. It is a headless execution path;
-mapping host MIDI timestamps to audio frames and feeding live device callbacks
-remain open. A plan owns one sequential render; ordinary `Machine::process`
+feeding mapped host events to live device callbacks remains open. A plan owns
+one sequential render; ordinary `Machine::process`
 starts a new parameter snapshot outside that plan.
+The pinned `midir` callback supplies elapsed microseconds from an arbitrary
+origin fixed for one input connection. `MidiFrameClock` maps that timestamp to
+absolute audio frames using a caller-provided first-unrendered frame and a
+bounded lead. It anchors the first event, uses `u128` integer arithmetic and
+floor rounding for later events, clamps late events to the first unrendered
+frame, and re-anchors if MIDI time moves backward. A regressing audio cursor
+or frame overflow rejects without changing the clock. The live device path
+does not yet provide the audio cursor or consume the mapped event timeline.
 
 Lua's `meldritch.graph()` API constructs a candidate graph. `graph:module(id,
 type, values)` returns handles with contract-derived ports; `graph:connect(src,

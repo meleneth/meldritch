@@ -365,3 +365,19 @@ revision before changing audio state. `44-timed-note-no-binding.lua` proves
 the unmapped-channel diagnostic. Rendering performs no allocation, locking,
 parsing, or source validation. This is a prepared headless timeline; MIDI device
 timestamps and audio-clock synchronization remain open.
+
+## MIDI microsecond to audio-frame anchor
+
+`45-midi-time-anchor.lua` uses the declared mono note path and an immediate
+Gate envelope. A control-side clock at 48 kHz with a three-frame lead maps
+the first MIDI timestamp 1,000,000 microseconds to absolute frame 3 when the
+first unrendered audio frame is 0. Timestamps 1,000,084 and 1,000,167 map
+to frames 7 and 11 by floor-rounded integer conversion. Lowered note states
+at those frames produce the same complete/split PCM as a directly prepared
+timeline, scaled by the example's 0.5 Gain. A late event clamps to the first
+unrendered audio frame and reports `Late`. A backward MIDI timestamp
+re-anchors at that frame plus the configured lead and reports `Reset`.
+Regressing audio cursors, zero sample rate, lead beyond one second, and frame
+overflow reject without corrupting the clock. This adapter only computes
+frame positions; capturing a real device's audio cursor, feeding a live event
+queue, and measuring physical latency remain open.
