@@ -3,6 +3,7 @@ pub mod contract;
 pub mod device;
 pub mod live;
 pub mod lua;
+pub mod midi;
 pub mod model;
 pub mod panel;
 pub mod tui;
@@ -14,6 +15,7 @@ mod tests {
         contract,
         live::LiveRuntime,
         lua,
+        midi::MidiRouter,
         model::ParameterId,
     };
 
@@ -26,6 +28,7 @@ mod tests {
     const MIX_REORDERED: &str = include_str!("../examples/07-mix-reordered.lua");
     const SINE: &str = include_str!("../examples/08-sine.lua");
     const CONTROLS: &str = include_str!("../examples/09-controls.lua");
+    const MIDI: &str = include_str!("../examples/10-midi-control.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -404,6 +407,91 @@ mod tests {
             .insert("gain".into(), 0.25);
         host.submit(&replacement).unwrap();
         old.publish(1.0).unwrap();
+        let mut samples = [0.0; 4];
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.09375; 4]);
+    }
+
+    #[test]
+    fn declared_midi_cc_uses_the_named_control() {
+        let mut machine = compile(&lua::read(MIDI).unwrap()).unwrap();
+        let router = MidiRouter::from_machine(&machine);
+        let mut samples = [0.0; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.1875; 4]);
+        for ignored in [
+            [0x90, 7, 127],
+            [0xB1, 7, 127],
+            [0xB0, 8, 127],
+            [0xB0, 7, 128],
+        ] {
+            assert!(!router.dispatch(&ignored));
+        }
+        assert!(!router.dispatch(&[0xB0, 7]));
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.1875; 4]);
+        assert!(router.dispatch(&[0xB0, 7, 127]));
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.375; 4]);
+        assert!(router.dispatch(&[0xB0, 7, 0]));
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.0; 4]);
+        assert!(router.dispatch(&[0xB0, 7, 64]));
+        machine.process(&mut samples);
+        let expected = 0.375 * 64.0 / 127.0;
+        assert!(
+            samples
+                .iter()
+                .all(|sample| (*sample - expected).abs() < 1e-12)
+        );
+    }
+
+    #[test]
+    fn invalid_midi_mappings_reject_without_corrupting_accepted_graph() {
+        let graph = lua::read(MIDI).unwrap();
+        let mut host = Host::default();
+        host.submit(&graph).unwrap();
+        let mut invalid = graph.clone();
+        invalid.midi_ccs[0].channel = 17;
+        assert!(host.submit(&invalid).unwrap_err().contains("channel 1..16"));
+        invalid = graph.clone();
+        invalid.midi_ccs[0].number = 128;
+        assert!(host.submit(&invalid).unwrap_err().contains("number 0..127"));
+        invalid = graph.clone();
+        invalid.midi_ccs[0].control_id = "missing".into();
+        assert!(
+            host.submit(&invalid)
+                .unwrap_err()
+                .contains("unknown control")
+        );
+        invalid = graph.clone();
+        invalid.midi_ccs.push(invalid.midi_ccs[0].clone());
+        assert!(
+            host.submit(&invalid)
+                .unwrap_err()
+                .contains("duplicate MIDI CC")
+        );
+        let mut samples = [0.0; 4];
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.1875; 4]);
+    }
+
+    #[test]
+    fn old_midi_router_cannot_change_replacement_revision() {
+        let graph = lua::read(MIDI).unwrap();
+        let mut host = Host::default();
+        host.submit(&graph).unwrap();
+        let router = MidiRouter::from_machine(host.accepted().unwrap());
+        let mut replacement = graph.clone();
+        replacement
+            .modules
+            .iter_mut()
+            .find(|module| module.id == "gain")
+            .unwrap()
+            .values
+            .insert("gain".into(), 0.25);
+        host.submit(&replacement).unwrap();
+        assert!(router.dispatch(&[0xB0, 7, 127]));
         let mut samples = [0.0; 4];
         host.accepted().unwrap().process(&mut samples);
         assert_eq!(samples, [0.09375; 4]);

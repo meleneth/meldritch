@@ -93,3 +93,13 @@ devices must be checked separately before claiming physical playback. On this
 host, the discard endpoint ran without stream errors, PulseAudio still
 underran, and the Audio Expansion Card endpoint was busy. No listening result
 is claimed.
+
+## Declared MIDI CC routing milestone
+
+`10-midi-control.lua` binds channel 1 CC 7 to the authored `level` control.
+Rust validates channel, CC number, target control, and duplicate assignments.
+Raw `[0xB0, 7, 127]` publishes level 1 and the next graph buffer renders
+0.375; `[0xB0, 7, 0]` publishes level 0 and renders silence. Unbound CCs,
+other channels, malformed messages, and note messages leave it unchanged.
+The MIDI adapter uses the same `ControlHandle` as the terminal view; no DSP
+module interprets MIDI bytes. Hardware connection is a later checkpoint.

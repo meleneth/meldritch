@@ -27,11 +27,19 @@ pub struct Control {
     pub max: f64,
 }
 
+#[derive(Clone, Debug)]
+pub struct MidiCc {
+    pub control_id: String,
+    pub channel: u8,
+    pub number: u8,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Graph {
     pub modules: Vec<Module>,
     pub connections: Vec<Connection>,
     pub controls: Vec<Control>,
+    pub midi_ccs: Vec<MidiCc>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]

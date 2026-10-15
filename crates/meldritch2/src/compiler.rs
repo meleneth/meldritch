@@ -5,7 +5,7 @@ use std::sync::{
 };
 
 use crate::contract::{self, FanIn};
-use crate::model::{Graph, ParameterId};
+use crate::model::{Graph, MidiCc, ParameterId};
 
 #[derive(Clone, Debug)]
 struct Op {
@@ -97,6 +97,7 @@ pub struct Machine {
     published: Vec<Arc<AtomicU64>>,
     param_ids: BTreeMap<ParameterId, usize>,
     controls: BTreeMap<String, ControlBinding>,
+    midi_ccs: Vec<MidiCc>,
     output_slot: usize,
     order: Vec<String>,
     sample_rate: f64,
@@ -160,6 +161,9 @@ impl Machine {
     }
     pub fn control_ids(&self) -> impl Iterator<Item = &str> {
         self.controls.keys().map(String::as_str)
+    }
+    pub fn midi_ccs(&self) -> &[MidiCc] {
+        &self.midi_ccs
     }
     pub fn control_handle(&self, id: &str) -> Option<ControlHandle> {
         let binding = self.controls.get(id)?;
@@ -350,6 +354,27 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             return Err(format!("duplicate control ID '{}'", control.id));
         }
     }
+    let mut mapped_ccs = BTreeSet::new();
+    for binding in &graph.midi_ccs {
+        if !(1..=16).contains(&binding.channel) || binding.number > 127 {
+            return Err(format!(
+                "MIDI CC mapping for '{}' requires channel 1..16 and number 0..127",
+                binding.control_id
+            ));
+        }
+        if !controls.contains_key(&binding.control_id) {
+            return Err(format!(
+                "MIDI CC mapping targets unknown control '{}'",
+                binding.control_id
+            ));
+        }
+        if !mapped_ccs.insert((binding.channel, binding.number)) {
+            return Err(format!(
+                "duplicate MIDI CC mapping for channel {} CC {}",
+                binding.channel, binding.number
+            ));
+        }
+    }
     let mut ops = Vec::with_capacity(schedule.len());
     for &i in &schedule {
         let module = &graph.modules[i];
@@ -398,6 +423,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         params,
         param_ids,
         controls,
+        midi_ccs: graph.midi_ccs.clone(),
         output_slot,
         order: schedule
             .iter()

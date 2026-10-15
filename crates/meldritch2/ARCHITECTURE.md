@@ -21,6 +21,11 @@ scoped to one compiled revision.
 `perform` renders those rows in a small terminal view while CPAL runs; it has
 no fixed instrument knobs. This first view tracks the opened graph revision
 and does not refresh itself after a structural graph replacement.
+Lua may also bind channel 1..16 MIDI CC numbers to a named control. Graph
+validation checks those declarations; `MidiRouter` precomputes a bounded raw
+CC lookup and publishes through `ControlHandle`. DSP modules never see MIDI
+bytes. The router belongs to one compiled graph revision. MIDI device opening
+and physical gestures remain separate from this headless routing contract.
 
 Lua's `meldritch.graph()` API constructs a candidate graph. `graph:module(id,
 type, values)` returns handles with contract-derived ports; `graph:connect(src,
