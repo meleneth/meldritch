@@ -38,6 +38,7 @@ mod tests {
     const AFFINE: &str = include_str!("../examples/16-affine.lua");
     const MODULATED_GAIN: &str = include_str!("../examples/17-gain-modulated.lua");
     const MODULATED_GAIN_MISSING: &str = include_str!("../examples/18-gain-mod-missing-input.lua");
+    const AFFINE_CONTROLS: &str = include_str!("../examples/19-affine-controls.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -318,6 +319,32 @@ mod tests {
         let mut samples = [f64::NAN; 4];
         host.accepted().unwrap().process(&mut samples);
         assert_eq!(samples, [0.125; 4]);
+    }
+
+    #[test]
+    fn two_named_controls_route_to_distinct_parameters_of_one_module() {
+        let graph = lua::read(AFFINE_CONTROLS).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let scale = ParameterId::new("transform", "scale");
+        let offset = ParameterId::new("transform", "offset");
+        assert_eq!(machine.control_handle("scale").unwrap().target(), &scale);
+        assert_eq!(machine.control_handle("offset").unwrap().target(), &offset);
+        let router = MidiRouter::from_machine(&machine);
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.25; 4]);
+        assert!(router.dispatch(&[0xB0, 7, 127]));
+        assert_eq!(machine.effective_value(&scale), Some(1.0));
+        assert_eq!(machine.effective_value(&offset), Some(0.125));
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.375; 4]);
+        assert!(router.dispatch(&[0xB0, 8, 0]));
+        assert_eq!(machine.effective_value(&scale), Some(1.0));
+        assert_eq!(machine.effective_value(&offset), Some(-0.5));
+        machine.process(&mut samples);
+        assert_eq!(samples, [-0.25; 4]);
+        assert_eq!(machine.authored_value(&scale), Some(0.5));
+        assert_eq!(machine.authored_value(&offset), Some(0.125));
     }
 
     #[test]

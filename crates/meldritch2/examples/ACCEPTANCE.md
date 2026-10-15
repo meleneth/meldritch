@@ -161,3 +161,13 @@ the graph. The modulation cable does not change the authored or effective
 parameter value. Existing Gain graphs leave `mod` disconnected and receive its
 contract neutral value of 1. `18-gain-mod-missing-input.lua` must still reject
 a disconnected required `gain.input` and preserve an accepted machine.
+
+## Independent controls on one module
+
+`19-affine-controls.lua` exposes `transform.scale` and `transform.offset` as
+separate named controls with distinct channel-1 CC assignments. It begins at
+0.25 per sample. CC 7 value 127 sets scale to 1 and renders 0.375; CC 8 value
+0 sets offset to -0.5 and renders -0.25. Each gesture must leave the other
+parameter unchanged. The TUI and MIDI adapter resolve both names through the
+same compiled contract and parameter IDs; no per-module control catalogue is
+added.
