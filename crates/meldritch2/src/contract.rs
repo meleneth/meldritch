@@ -9,6 +9,12 @@ pub enum FanIn {
     Sum,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Role {
+    Processor,
+    Output,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Port {
     pub name: &'static str,
@@ -28,6 +34,7 @@ pub struct Param {
 #[derive(Clone, Copy, Debug)]
 pub struct Contract {
     pub name: &'static str,
+    pub role: Role,
     pub process: fn(&mut [f64], &[f64], &[f64], f64) -> f64,
     pub state_len: usize,
     pub inputs: &'static [Port],
@@ -138,6 +145,7 @@ const RESPONSE: Param = Param {
 const CONTRACTS: [Contract; 8] = [
     Contract {
         name: "constant",
+        role: Role::Processor,
         process: constant,
         state_len: 0,
         inputs: &[],
@@ -146,6 +154,7 @@ const CONTRACTS: [Contract; 8] = [
     },
     Contract {
         name: "gain",
+        role: Role::Processor,
         process: gain,
         state_len: 0,
         inputs: &[SUM_INPUT, MOD_INPUT],
@@ -154,6 +163,7 @@ const CONTRACTS: [Contract; 8] = [
     },
     Contract {
         name: "output",
+        role: Role::Output,
         process: output,
         state_len: 0,
         inputs: &[INPUT],
@@ -162,6 +172,7 @@ const CONTRACTS: [Contract; 8] = [
     },
     Contract {
         name: "mix",
+        role: Role::Processor,
         process: mix,
         state_len: 0,
         inputs: &[LEFT, RIGHT],
@@ -170,6 +181,7 @@ const CONTRACTS: [Contract; 8] = [
     },
     Contract {
         name: "multiply",
+        role: Role::Processor,
         process: multiply,
         state_len: 0,
         inputs: &[LEFT, RIGHT],
@@ -178,6 +190,7 @@ const CONTRACTS: [Contract; 8] = [
     },
     Contract {
         name: "affine",
+        role: Role::Processor,
         process: affine,
         state_len: 0,
         inputs: &[INPUT],
@@ -186,6 +199,7 @@ const CONTRACTS: [Contract; 8] = [
     },
     Contract {
         name: "sine",
+        role: Role::Processor,
         process: sine,
         state_len: 1,
         inputs: &[FM_HZ_INPUT],
@@ -194,6 +208,7 @@ const CONTRACTS: [Contract; 8] = [
     },
     Contract {
         name: "lag",
+        role: Role::Processor,
         process: lag,
         state_len: 1,
         inputs: &[INPUT],

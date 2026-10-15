@@ -4,7 +4,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-use crate::contract::{self, FanIn};
+use crate::contract::{self, FanIn, Role};
 use crate::model::{Graph, MidiCc, ParameterId};
 
 #[derive(Clone, Debug)]
@@ -248,10 +248,19 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             validate_parameter_value(&ParameterId::new(&module.id, name), param.range, *value)?;
         }
     }
-    let outputs = graph.modules.iter().filter(|m| m.kind == "output").count();
-    if outputs != 1 {
+    let output_slots: Vec<usize> = graph
+        .modules
+        .iter()
+        .enumerate()
+        .filter(|(_, module)| {
+            contract::find(&module.kind).expect("module checked").role == Role::Output
+        })
+        .map(|(index, _)| index)
+        .collect();
+    if output_slots.len() != 1 {
         return Err(format!(
-            "expected exactly one output module, found {outputs}"
+            "expected exactly one output module, found {}",
+            output_slots.len()
         ));
     }
 
@@ -441,11 +450,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             params,
         });
     }
-    let output_slot = graph
-        .modules
-        .iter()
-        .position(|m| m.kind == "output")
-        .expect("one output checked");
+    let output_slot = output_slots[0];
     Ok(Machine {
         ops,
         slots: vec![0.0; graph.modules.len()],

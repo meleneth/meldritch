@@ -13,7 +13,7 @@ pub mod tui;
 mod tests {
     use crate::{
         compiler::{Host, compile, compile_at_rate},
-        contract::{self, FanIn},
+        contract::{self, FanIn, Role},
         live::LiveRuntime,
         lua,
         midi::MidiRouter,
@@ -60,6 +60,7 @@ mod tests {
     fn contract_discovery_and_port_resolution() {
         assert_eq!(contract::all().len(), 8);
         let gain = contract::find("gain").unwrap();
+        assert_eq!(gain.role, Role::Processor);
         assert_eq!(gain.inputs[0].name, "input");
         assert_eq!(gain.inputs[0].fan_in, FanIn::Sum);
         assert_eq!(gain.inputs[0].unconnected, None);
@@ -87,6 +88,7 @@ mod tests {
         let lag = contract::find("lag").unwrap();
         assert_eq!(lag.params[0].name, "response");
         assert_eq!(lag.params[0].range, Some((0.0, 1.0)));
+        assert_eq!(contract::find("output").unwrap().role, Role::Output);
         let error = lua::read(BASIC.replace("gain.input", "gain.missing").as_str()).unwrap_err();
         assert!(
             error.contains("destination must be an input port"),
@@ -150,6 +152,31 @@ mod tests {
         );
         host.accepted().unwrap().process(&mut samples);
         assert_eq!(samples, [0.125; 4]);
+    }
+
+    #[test]
+    fn graph_requires_exactly_one_contract_declared_output() {
+        let graph = lua::read(BASIC).unwrap();
+        let mut missing = graph.clone();
+        missing.modules.retain(|module| module.kind != "output");
+        missing
+            .connections
+            .retain(|edge| edge.to.module != "output");
+        assert!(compile(&missing).unwrap_err().contains("found 0"));
+
+        let mut duplicate = graph;
+        let mut second = duplicate
+            .modules
+            .iter()
+            .find(|module| module.kind == "output")
+            .unwrap()
+            .clone();
+        second.id = "output_two".into();
+        duplicate.modules.push(second);
+        let mut extra_cable = duplicate.connections.last().unwrap().clone();
+        extra_cable.to.module = "output_two".into();
+        duplicate.connections.push(extra_cable);
+        assert!(compile(&duplicate).unwrap_err().contains("found 2"));
     }
 
     #[test]
