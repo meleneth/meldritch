@@ -52,9 +52,9 @@ fn multiply(_: &mut [f64], input: &[f64], _: &[f64], _: f64) -> f64 {
 fn affine(_: &mut [f64], input: &[f64], params: &[f64], _: f64) -> f64 {
     input[0] * params[0] + params[1]
 }
-fn sine(state: &mut [f64], _: &[f64], params: &[f64], sample_rate: f64) -> f64 {
+fn sine(state: &mut [f64], input: &[f64], params: &[f64], sample_rate: f64) -> f64 {
     let sample = (std::f64::consts::TAU * state[0]).sin();
-    state[0] = (state[0] + params[0] / sample_rate).rem_euclid(1.0);
+    state[0] = (state[0] + (params[0] + input[0]) / sample_rate).rem_euclid(1.0);
     sample
 }
 
@@ -75,6 +75,12 @@ const MOD_INPUT: Port = Port {
     domain: Domain::MonoAudio,
     fan_in: FanIn::One,
     unconnected: Some(1.0),
+};
+const FM_HZ_INPUT: Port = Port {
+    name: "fm_hz",
+    domain: Domain::MonoAudio,
+    fan_in: FanIn::One,
+    unconnected: Some(0.0),
 };
 const LEFT: Port = Port {
     name: "left",
@@ -167,7 +173,7 @@ const CONTRACTS: [Contract; 7] = [
         name: "sine",
         process: sine,
         state_len: 1,
-        inputs: &[],
+        inputs: &[FM_HZ_INPUT],
         outputs: &[OUT],
         params: &[FREQUENCY],
     },

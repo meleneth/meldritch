@@ -171,3 +171,16 @@ separate named controls with distinct channel-1 CC assignments. It begins at
 parameter unchanged. The TUI and MIDI adapter resolve both names through the
 same compiled contract and parameter IDs; no per-module control catalogue is
 added.
+
+## Explicit audio-rate frequency modulation
+
+`20-sine-fm.lua` connects a 12 kHz Sine through Gain(6000) to the optional
+`carrier.fm_hz` port of a 6 kHz Sine. The input sample is a Hertz offset to
+the authored frequency for that sample's phase advance; the output sample is
+read before that advance. At 48 kHz the first four frames are approximately
+`[0, sqrt(1/2), sqrt(1/2), 0]`, and splitting processing across buffers must
+match one complete buffer. Publishing `depth.gain = 0` between buffers removes
+modulation on the next buffer without reconstructing the graph or resetting
+carrier phase. Existing Sine graphs leave `fm_hz` unconnected and receive 0.
+`21-sine-fm-cycle.lua` must reject self-feedback as an unsupported cycle while
+leaving an accepted graph usable.

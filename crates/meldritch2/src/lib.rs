@@ -39,6 +39,8 @@ mod tests {
     const MODULATED_GAIN: &str = include_str!("../examples/17-gain-modulated.lua");
     const MODULATED_GAIN_MISSING: &str = include_str!("../examples/18-gain-mod-missing-input.lua");
     const AFFINE_CONTROLS: &str = include_str!("../examples/19-affine-controls.lua");
+    const SINE_FM: &str = include_str!("../examples/20-sine-fm.lua");
+    const SINE_FM_CYCLE: &str = include_str!("../examples/21-sine-fm-cycle.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -74,6 +76,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["scale", "offset"]
         );
+        let sine = contract::find("sine").unwrap();
+        assert_eq!(sine.inputs[0].name, "fm_hz");
+        assert_eq!(sine.inputs[0].unconnected, Some(0.0));
         let error = lua::read(BASIC.replace("gain.input", "gain.missing").as_str()).unwrap_err();
         assert!(
             error.contains("destination must be an input port"),
@@ -508,6 +513,59 @@ mod tests {
                 .contains("sample rate")
         );
         assert!(compile_at_rate(&lua::read(SINE).unwrap(), f64::NAN).is_err());
+    }
+
+    #[test]
+    fn explicit_fm_advances_carrier_phase_per_sample_and_across_buffers() {
+        let graph = lua::read(SINE_FM).unwrap();
+        let mut full = compile_at_rate(&graph, 48_000.0).unwrap();
+        assert_eq!(full.order(), ["modulator", "depth", "carrier", "output"]);
+        let mut expected = [f64::NAN; 8];
+        full.process(&mut expected);
+        let peak = std::f64::consts::FRAC_1_SQRT_2;
+        for (actual, reference) in expected[..4].iter().copied().zip([0.0, peak, peak, 0.0]) {
+            assert!(
+                (actual - reference).abs() < 1e-12,
+                "{actual} != {reference}"
+            );
+        }
+        let mut split = compile_at_rate(&graph, 48_000.0).unwrap();
+        let mut first = [f64::NAN; 3];
+        let mut second = [f64::NAN; 5];
+        split.process(&mut first);
+        split.process(&mut second);
+        assert_eq!(expected[..3], first);
+        assert_eq!(expected[3..], second);
+    }
+
+    #[test]
+    fn fm_depth_update_preserves_carrier_state_and_cycle_rejection() {
+        let graph = lua::read(SINE_FM).unwrap();
+        let mut host = Host::default();
+        host.submit(&graph).unwrap();
+        let error = host.submit(&lua::read(SINE_FM_CYCLE).unwrap()).unwrap_err();
+        assert!(error.contains("cycle"), "{error}");
+        let machine = host.accepted().unwrap();
+        let depth = ParameterId::new("depth", "gain");
+        let handle = machine.parameter_handle(&depth).unwrap();
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        let peak = std::f64::consts::FRAC_1_SQRT_2;
+        for (actual, reference) in samples.into_iter().zip([0.0, peak, peak, 0.0]) {
+            assert!(
+                (actual - reference).abs() < 1e-12,
+                "{actual} != {reference}"
+            );
+        }
+        handle.publish(Some(0.0)).unwrap();
+        assert_eq!(machine.authored_value(&depth), Some(6000.0));
+        machine.process(&mut samples);
+        for (actual, reference) in samples.into_iter().zip([0.0, -peak, -1.0, -peak]) {
+            assert!(
+                (actual - reference).abs() < 1e-12,
+                "{actual} != {reference}"
+            );
+        }
     }
 
     #[test]

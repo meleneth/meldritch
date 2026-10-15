@@ -50,6 +50,9 @@ inputs in contract port order from preallocated scratch space. Each operation
 owns a fixed, contract-declared state vector allocated at compile time. `Sine`
 uses one state value for phase and the machine's explicit sample rate; it keeps
 phase across buffers and uses a published frequency at the next buffer entry.
+Its optional `fm_hz` port adds an audio-rate Hertz offset to each sample's phase
+advance; the current output sample is read before advancing phase. Self-feedback
+still rejects as a cycle.
 `Mix` sums two named inputs; sources may fan out. Current ports are mono audio
 at one sample per frame. `Multiply` multiplies two independent audio signals
 per sample, supporting explicit audio-rate modulation through ordinary cables.
