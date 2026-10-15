@@ -171,4 +171,50 @@ mod tests {
         host.accepted().unwrap().process(&mut samples);
         assert_eq!(samples, [0.25; 4]);
     }
+
+    #[test]
+    fn control_thread_publishes_at_processing_boundary() {
+        let mut machine = compile(&lua::read(MIX).unwrap()).unwrap();
+        let id = ParameterId::new("gain", "gain");
+        let handle = machine.parameter_handle(&id).unwrap();
+        assert_eq!(handle.id(), &id);
+        let mut samples = [0.0; 16];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.1875; 16]);
+        let control = std::thread::spawn(move || {
+            assert!(handle.publish(Some(f64::INFINITY)).is_err());
+            handle.publish(Some(0.75)).unwrap();
+            handle
+        });
+        let handle = control.join().unwrap();
+        assert_eq!(machine.authored_value(&id), Some(0.5));
+        assert_eq!(machine.effective_value(&id), Some(0.75));
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.28125; 16]);
+        handle.publish(None).unwrap();
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.1875; 16]);
+    }
+
+    #[test]
+    fn old_revision_handle_cannot_change_replacement() {
+        let id = ParameterId::new("gain", "gain");
+        let mut host = Host::default();
+        host.submit(&lua::read(MIX).unwrap()).unwrap();
+        let old_handle = host.accepted().unwrap().parameter_handle(&id).unwrap();
+        let mut replacement = lua::read(MIX).unwrap();
+        replacement
+            .modules
+            .iter_mut()
+            .find(|module| module.id == "gain")
+            .unwrap()
+            .values
+            .insert("gain".into(), 0.25);
+        host.submit(&replacement).unwrap();
+        old_handle.publish(Some(0.9)).unwrap();
+        let mut samples = [0.0; 8];
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.09375; 8]);
+        assert_eq!(host.accepted().unwrap().effective_value(&id), Some(0.25));
+    }
 }

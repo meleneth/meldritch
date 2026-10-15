@@ -1,4 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 use crate::contract::{self, FanIn};
 use crate::model::{Graph, ParameterId};
@@ -11,6 +15,36 @@ struct Op {
     param: Option<usize>,
 }
 
+const NO_OVERRIDE: u64 = f64::NAN.to_bits();
+
+/// A control-side handle for one parameter in one compiled graph revision.
+#[derive(Clone, Debug)]
+pub struct ParameterHandle {
+    id: ParameterId,
+    cell: Arc<AtomicU64>,
+}
+
+impl ParameterHandle {
+    pub fn id(&self) -> &ParameterId {
+        &self.id
+    }
+
+    pub fn publish(&self, value: Option<f64>) -> Result<(), String> {
+        let bits = match value {
+            Some(value) if value.is_finite() => value.to_bits(),
+            Some(_) => {
+                return Err(format!(
+                    "{}.{} must be finite",
+                    self.id.module, self.id.name
+                ));
+            }
+            None => NO_OVERRIDE,
+        };
+        self.cell.store(bits, Ordering::Release);
+        Ok(())
+    }
+}
+
 /// An accepted, executable graph. Its processing buffers are allocated at compile time.
 #[derive(Debug)]
 pub struct Machine {
@@ -19,6 +53,7 @@ pub struct Machine {
     input_scratch: Vec<f64>,
     params: Vec<f64>,
     authored: Vec<f64>,
+    published: Vec<Arc<AtomicU64>>,
     param_ids: BTreeMap<ParameterId, usize>,
     output_slot: usize,
     order: Vec<String>,
@@ -26,6 +61,15 @@ pub struct Machine {
 
 impl Machine {
     pub fn process(&mut self, buffer: &mut [f64]) {
+        // Snapshot all published values once, before processing this buffer.
+        for (index, cell) in self.published.iter().enumerate() {
+            let bits = cell.load(Ordering::Acquire);
+            self.params[index] = if bits == NO_OVERRIDE {
+                self.authored[index]
+            } else {
+                f64::from_bits(bits)
+            };
+        }
         for sample in buffer {
             for op in &self.ops {
                 for (slot, source) in op.inputs.iter().enumerate() {
@@ -48,19 +92,32 @@ impl Machine {
         self.param_ids.get(id).map(|&i| self.authored[i])
     }
     pub fn effective_value(&self, id: &ParameterId) -> Option<f64> {
-        self.param_ids.get(id).map(|&i| self.params[i])
+        self.param_ids.get(id).map(|&i| {
+            let bits = self.published[i].load(Ordering::Acquire);
+            if bits == NO_OVERRIDE {
+                self.authored[i]
+            } else {
+                f64::from_bits(bits)
+            }
+        })
     }
-    pub fn set_override(&mut self, id: &ParameterId, value: Option<f64>) -> Result<(), String> {
+    pub fn parameter_handle(&self, id: &ParameterId) -> Option<ParameterHandle> {
+        self.param_ids.get(id).map(|&i| ParameterHandle {
+            id: id.clone(),
+            cell: Arc::clone(&self.published[i]),
+        })
+    }
+    pub fn set_override(&self, id: &ParameterId, value: Option<f64>) -> Result<(), String> {
         let &index = self
             .param_ids
             .get(id)
             .ok_or_else(|| format!("unknown parameter {}.{}", id.module, id.name))?;
-        if let Some(v) = value {
-            if !v.is_finite() {
-                return Err(format!("{}.{} must be finite", id.module, id.name));
-            }
-        }
-        self.params[index] = value.unwrap_or(self.authored[index]);
+        let bits = match value {
+            Some(value) if value.is_finite() => value.to_bits(),
+            Some(_) => return Err(format!("{}.{} must be finite", id.module, id.name)),
+            None => NO_OVERRIDE,
+        };
+        self.published[index].store(bits, Ordering::Release);
         Ok(())
     }
 }
@@ -229,6 +286,9 @@ pub fn compile(graph: &Graph) -> Result<Machine, String> {
                 .unwrap_or(0)
         ],
         authored: params.clone(),
+        published: (0..params.len())
+            .map(|_| Arc::new(AtomicU64::new(NO_OVERRIDE)))
+            .collect(),
         params,
         param_ids,
         output_slot,
