@@ -6,5 +6,6 @@ pub mod mirror;
 pub mod mix;
 pub mod multiply;
 pub mod output;
+pub mod sample_hold;
 pub mod sine;
 pub mod switch;

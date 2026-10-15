@@ -82,6 +82,9 @@ against that one bound before publication; its state continues across buffers.
 `Switch` chooses between two signals per sample from an independent selector
 signal and a live threshold parameter; it uses the same contract and schedule
 mechanism as the other units.
+`SampleHold` detects upward threshold crossings on an audio-rate trigger input,
+captures its separate signal input, and retains the value in compiled instance
+state across buffers. This is a signal processor, not a general event domain.
 Contracts expose domain and fan-in explicitly so these restrictions are visible.
 
 `compile_at_rate` validates the sample rate; `compile` uses 48 kHz. Live graph

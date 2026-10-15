@@ -51,6 +51,8 @@ mod tests {
     const SWITCH_MISSING: &str = include_str!("../examples/28-switch-missing.lua");
     const SWITCH_CONTROL: &str = include_str!("../examples/29-switch-control.lua");
     const MIRROR_OUTPUTS: &str = include_str!("../examples/30-mirror-outputs.lua");
+    const SAMPLE_HOLD: &str = include_str!("../examples/31-sample-hold.lua");
+    const SAMPLE_HOLD_MISSING: &str = include_str!("../examples/32-sample-hold-missing.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -63,7 +65,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 10);
+        assert_eq!(contract::all().len(), 11);
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.role, Role::Processor);
         assert_eq!(gain.inputs[0].name, "input");
@@ -112,6 +114,16 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["out", "inverted"]
         );
+        let sample_hold = contract::find("sample_hold").unwrap();
+        assert_eq!(
+            sample_hold
+                .inputs
+                .iter()
+                .map(|port| port.name)
+                .collect::<Vec<_>>(),
+            ["signal", "trigger"]
+        );
+        assert_eq!(sample_hold.params[0].name, "threshold");
         assert_eq!(contract::find("output").unwrap().role, Role::Output);
         let error = lua::read(BASIC.replace("gain.input", "gain.missing").as_str()).unwrap_err();
         assert!(
@@ -862,6 +874,57 @@ mod tests {
         let mut samples = [f64::NAN; 4];
         host.accepted().unwrap().process(&mut samples);
         assert_eq!(samples, [-0.125; 4]);
+    }
+
+    #[test]
+    fn sample_hold_captures_on_audio_crossing_and_keeps_state_across_buffers() {
+        let graph = lua::read(SAMPLE_HOLD).unwrap();
+        let mut full = compile(&graph).unwrap();
+        let mut whole = [f64::NAN; 8];
+        full.process(&mut whole);
+        let peak = std::f64::consts::FRAC_1_SQRT_2;
+        for (actual, expected) in whole
+            .iter()
+            .zip([0.0, peak, peak, peak, peak, -peak, -peak, -peak])
+        {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
+        let mut split = compile(&graph).unwrap();
+        let mut first = [f64::NAN; 3];
+        let mut second = [f64::NAN; 5];
+        split.process(&mut first);
+        split.process(&mut second);
+        assert_eq!(whole[..3], first);
+        assert_eq!(whole[3..], second);
+
+        let mut updated = compile(&graph).unwrap();
+        let threshold = ParameterId::new("hold", "threshold");
+        assert!(updated.parameter_ids().any(|id| id == &threshold));
+        let mut samples = [f64::NAN; 4];
+        updated.process(&mut samples);
+        updated.set_override(&threshold, Some(2.0)).unwrap();
+        assert_eq!(updated.authored_value(&threshold), Some(0.5));
+        updated.process(&mut samples);
+        for sample in samples {
+            assert!((sample - peak).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn missing_sample_hold_trigger_rejects_without_erasing_state() {
+        let mut host = Host::default();
+        host.submit(&lua::read(SAMPLE_HOLD).unwrap()).unwrap();
+        let mut samples = [f64::NAN; 4];
+        host.accepted().unwrap().process(&mut samples);
+        let error = host
+            .submit(&lua::read(SAMPLE_HOLD_MISSING).unwrap())
+            .unwrap_err();
+        assert!(error.contains("hold.trigger"), "{error}");
+        host.accepted().unwrap().process(&mut samples);
+        let peak = std::f64::consts::FRAC_1_SQRT_2;
+        for (actual, expected) in samples.iter().zip([peak, -peak, -peak, -peak]) {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
     }
 
     #[test]

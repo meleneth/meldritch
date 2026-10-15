@@ -251,3 +251,16 @@ slots are assigned to individual output ports, so two cables from one instance
 can carry different samples. An invalid source port must reject the candidate
 without replacing an accepted machine. Summed fan-in is ordered by source
 module ID and output port position, independent of cable declaration order.
+
+## Audio-rate SampleHold
+
+`31-sample-hold.lua` connects a 6 kHz Sine signal and a 12 kHz Sine trigger to
+SampleHold. At 48 kHz, a trigger crossing upward through threshold 0.5 captures
+the current signal sample and holds it until the next upward crossing. It starts
+at zero. Its first eight output samples are approximately `[0, sqrt(1/2),
+sqrt(1/2), sqrt(1/2), sqrt(1/2), -sqrt(1/2), -sqrt(1/2), -sqrt(1/2)]`.
+Splitting processing across buffers must preserve the sequence and held state.
+Publishing a threshold of 2 at a buffer boundary suppresses further captures
+without resetting the held sample or rebuilding the graph. The trigger is an
+audio-rate signal, not a separate event or timing domain. `32-sample-hold-missing.lua`
+must reject a disconnected trigger and leave an accepted machine usable.
