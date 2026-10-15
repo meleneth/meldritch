@@ -115,3 +115,17 @@ The terminal view displays the selected port and reflects published CC values;
 subsequent keyboard gestures start from the current value.
 Headless routing acceptance above remains the authority for signal behavior;
 physical CC gestures require a separate device check.
+
+## Audio multiplication milestone
+
+`11-audio-multiply.lua` connects an independently instantiated Constant and
+Sine to the two inputs of Multiply. At 48 kHz its output repeats approximately
+`[0, 0.25, 0, -0.25]`. Modules are declared out of dependency order, and the
+compiler must derive the schedule without a Multiply-specific topology case.
+The same signal must render across split buffers. `12-audio-multiply-missing.lua`
+must reject a disconnected right input without replacing an accepted machine.
+`13-two-sines-multiply.lua` connects two time-varying signals and must render
+`[0, sqrt(1/2), 0, -sqrt(1/2)]` for its first four frames at 48 kHz.
+Current ports are mono audio at sample cadence; this demonstrates audio-rate
+signal multiplication, not a new control-rate domain or implicit parameter
+modulation rule.

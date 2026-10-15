@@ -30,6 +30,9 @@ mod tests {
     const SINE: &str = include_str!("../examples/08-sine.lua");
     const CONTROLS: &str = include_str!("../examples/09-controls.lua");
     const MIDI: &str = include_str!("../examples/10-midi-control.lua");
+    const MULTIPLY: &str = include_str!("../examples/11-audio-multiply.lua");
+    const MULTIPLY_MISSING: &str = include_str!("../examples/12-audio-multiply-missing.lua");
+    const TWO_SINES_MULTIPLY: &str = include_str!("../examples/13-two-sines-multiply.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -42,7 +45,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 5);
+        assert_eq!(contract::all().len(), 6);
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.inputs[0].name, "input");
         assert_eq!(gain.outputs[0].name, "out");
@@ -151,6 +154,54 @@ mod tests {
         let (order, samples) = render(MIX_REORDERED);
         assert_eq!(order, ["left", "right", "mix", "gain", "output"]);
         assert_eq!(samples, [0.1875; 8]);
+    }
+
+    #[test]
+    fn independent_audio_signals_multiply_across_buffers() {
+        let graph = lua::read(MULTIPLY).unwrap();
+        let mut machine = compile_at_rate(&graph, 48_000.0).unwrap();
+        assert_eq!(
+            machine.order(),
+            ["amplitude", "oscillator", "product", "output"]
+        );
+        let mut first = [f64::NAN; 3];
+        let mut second = [f64::NAN; 5];
+        machine.process(&mut first);
+        machine.process(&mut second);
+        for (actual, expected) in first
+            .into_iter()
+            .chain(second)
+            .zip([0.0, 0.25, 0.0, -0.25, 0.0, 0.25, 0.0, -0.25])
+        {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
+    }
+
+    #[test]
+    fn disconnected_multiply_rejects_without_replacing_accepted_machine() {
+        let mut host = Host::default();
+        host.submit(&lua::read(MULTIPLY).unwrap()).unwrap();
+        let error = host
+            .submit(&lua::read(MULTIPLY_MISSING).unwrap())
+            .unwrap_err();
+        assert!(error.contains("product.right' is disconnected"), "{error}");
+        let mut samples = [f64::NAN; 4];
+        host.accepted().unwrap().process(&mut samples);
+        for (actual, expected) in samples.into_iter().zip([0.0, 0.25, 0.0, -0.25]) {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
+    }
+
+    #[test]
+    fn two_time_varying_signals_multiply_per_sample() {
+        let graph = lua::read(TWO_SINES_MULTIPLY).unwrap();
+        let mut machine = compile_at_rate(&graph, 48_000.0).unwrap();
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        let peak = std::f64::consts::FRAC_1_SQRT_2;
+        for (actual, expected) in samples.into_iter().zip([0.0, peak, 0.0, -peak]) {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
     }
 
     #[test]

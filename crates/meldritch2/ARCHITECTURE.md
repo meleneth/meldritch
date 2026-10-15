@@ -51,7 +51,9 @@ owns a fixed, contract-declared state vector allocated at compile time. `Sine`
 uses one state value for phase and the machine's explicit sample rate; it keeps
 phase across buffers and uses a published frequency at the next buffer entry.
 `Mix` sums two named inputs; sources may fan out. Current ports are mono audio
-at one sample per frame. Each input permits one cable. Cycles, disconnected
+at one sample per frame. `Multiply` multiplies two independent audio signals
+per sample, supporting explicit audio-rate modulation through ordinary cables.
+Each input permits one cable. Cycles, disconnected
 required inputs, and multiple Output instances are rejected. Feedback,
 multiple cables to one input, other domains, block DSP, and multi-parameter
 modules remain future work. Parameter publication uses one

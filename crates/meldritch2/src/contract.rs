@@ -43,6 +43,9 @@ fn output(_: &mut [f64], input: &[f64], _: f64, _: f64) -> f64 {
 fn mix(_: &mut [f64], input: &[f64], _: f64, _: f64) -> f64 {
     input[0] + input[1]
 }
+fn multiply(_: &mut [f64], input: &[f64], _: f64, _: f64) -> f64 {
+    input[0] * input[1]
+}
 fn sine(state: &mut [f64], _: &[f64], frequency: f64, sample_rate: f64) -> f64 {
     let sample = (std::f64::consts::TAU * state[0]).sin();
     state[0] = (state[0] + frequency / sample_rate).rem_euclid(1.0);
@@ -81,7 +84,7 @@ const FREQUENCY: Param = Param {
     name: "frequency",
     default: 440.0,
 };
-const CONTRACTS: [Contract; 5] = [
+const CONTRACTS: [Contract; 6] = [
     Contract {
         name: "constant",
         process: constant,
@@ -109,6 +112,14 @@ const CONTRACTS: [Contract; 5] = [
     Contract {
         name: "mix",
         process: mix,
+        state_len: 0,
+        inputs: &[LEFT, RIGHT],
+        outputs: &[OUT],
+        params: &[],
+    },
+    Contract {
+        name: "multiply",
+        process: multiply,
         state_len: 0,
         inputs: &[LEFT, RIGHT],
         outputs: &[OUT],
