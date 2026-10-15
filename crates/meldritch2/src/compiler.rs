@@ -11,9 +11,15 @@ use crate::model::{Graph, MidiCc, ParameterId};
 struct Op {
     process: fn(&mut [f64], &[f64], &[f64], f64) -> f64,
     state: Vec<f64>,
-    inputs: Vec<Vec<usize>>,
+    inputs: Vec<InputPlan>,
     output: usize,
     params: Vec<usize>,
+}
+
+#[derive(Clone, Debug)]
+struct InputPlan {
+    sources: Vec<usize>,
+    unconnected: f64,
 }
 
 const NO_OVERRIDE: u64 = f64::NAN.to_bits();
@@ -125,10 +131,15 @@ impl Machine {
         }
         for sample in buffer {
             for op in &mut self.ops {
-                for (slot, sources) in op.inputs.iter().enumerate() {
-                    self.input_scratch[slot] = sources
-                        .iter()
-                        .fold(0.0, |sum, source| sum + self.slots[*source]);
+                for (slot, input) in op.inputs.iter().enumerate() {
+                    self.input_scratch[slot] = if input.sources.is_empty() {
+                        input.unconnected
+                    } else {
+                        input
+                            .sources
+                            .iter()
+                            .fold(0.0, |sum, source| sum + self.slots[*source])
+                    };
                 }
                 for (slot, index) in op.params.iter().enumerate() {
                     self.param_scratch[slot] = self.params[*index];
@@ -284,7 +295,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
     for (i, module) in graph.modules.iter().enumerate() {
         let c = contract::find(&module.kind).expect("module checked");
         for port in c.inputs {
-            if !input_edges.contains_key(&(i, port.name)) {
+            if !input_edges.contains_key(&(i, port.name)) && port.unconnected.is_none() {
                 return Err(format!(
                     "required input '{}.{}' is disconnected",
                     module.id, port.name
@@ -388,9 +399,15 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             .inputs
             .iter()
             .map(|port| {
-                let mut sources = input_edges[&(i, port.name)].clone();
+                let mut sources = input_edges
+                    .get(&(i, port.name))
+                    .cloned()
+                    .unwrap_or_default();
                 sources.sort_by(|a, b| graph.modules[*a].id.cmp(&graph.modules[*b].id));
-                sources
+                InputPlan {
+                    sources,
+                    unconnected: port.unconnected.unwrap_or(0.0),
+                }
             })
             .collect();
         let params = c

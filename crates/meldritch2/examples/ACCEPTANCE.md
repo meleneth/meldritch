@@ -150,3 +150,14 @@ control-side update to `transform.scale = 0.75` must render 0.3125 at the next
 buffer boundary while `transform.offset` remains authored at 0.125. Clearing
 the override restores 0.25. The executor must use contract parameter order
 without recognizing Affine as a special topology or allocating in processing.
+
+## Optional audio-rate modulation input milestone
+
+`17-gain-modulated.lua` connects a 0.25 Constant to `gain.input` and a 12 kHz
+Sine to `gain.mod`. With authored `gain.gain = 0.5`, its output at 48 kHz
+repeats approximately `[0, 0.125, 0, -0.125]`; overriding the parameter to
+0.75 changes the next buffer to `[0, 0.1875, 0, -0.1875]` without changing
+the graph. The modulation cable does not change the authored or effective
+parameter value. Existing Gain graphs leave `mod` disconnected and receive its
+contract neutral value of 1. `18-gain-mod-missing-input.lua` must still reject
+a disconnected required `gain.input` and preserve an accepted machine.

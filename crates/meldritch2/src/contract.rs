@@ -14,6 +14,8 @@ pub struct Port {
     pub name: &'static str,
     pub domain: Domain,
     pub fan_in: FanIn,
+    /// Neutral input sample when no cable is connected; None means required.
+    pub unconnected: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -36,7 +38,7 @@ fn constant(_: &mut [f64], _: &[f64], params: &[f64], _: f64) -> f64 {
     params[0]
 }
 fn gain(_: &mut [f64], input: &[f64], params: &[f64], _: f64) -> f64 {
-    input[0] * params[0]
+    input[0] * params[0] * input[1]
 }
 fn output(_: &mut [f64], input: &[f64], _: &[f64], _: f64) -> f64 {
     input[0]
@@ -60,26 +62,37 @@ const INPUT: Port = Port {
     name: "input",
     domain: Domain::MonoAudio,
     fan_in: FanIn::One,
+    unconnected: None,
 };
 const SUM_INPUT: Port = Port {
     name: "input",
     domain: Domain::MonoAudio,
     fan_in: FanIn::Sum,
+    unconnected: None,
+};
+const MOD_INPUT: Port = Port {
+    name: "mod",
+    domain: Domain::MonoAudio,
+    fan_in: FanIn::One,
+    unconnected: Some(1.0),
 };
 const LEFT: Port = Port {
     name: "left",
     domain: Domain::MonoAudio,
     fan_in: FanIn::One,
+    unconnected: None,
 };
 const RIGHT: Port = Port {
     name: "right",
     domain: Domain::MonoAudio,
     fan_in: FanIn::One,
+    unconnected: None,
 };
 const OUT: Port = Port {
     name: "out",
     domain: Domain::MonoAudio,
     fan_in: FanIn::One,
+    unconnected: None,
 };
 const VALUE: Param = Param {
     name: "value",
@@ -114,7 +127,7 @@ const CONTRACTS: [Contract; 7] = [
         name: "gain",
         process: gain,
         state_len: 0,
-        inputs: &[SUM_INPUT],
+        inputs: &[SUM_INPUT, MOD_INPUT],
         outputs: &[OUT],
         params: &[GAIN],
     },

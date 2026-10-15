@@ -36,6 +36,8 @@ mod tests {
     const GAIN_FAN_IN: &str = include_str!("../examples/14-gain-fan-in.lua");
     const OUTPUT_FAN_IN_INVALID: &str = include_str!("../examples/15-output-fan-in-invalid.lua");
     const AFFINE: &str = include_str!("../examples/16-affine.lua");
+    const MODULATED_GAIN: &str = include_str!("../examples/17-gain-modulated.lua");
+    const MODULATED_GAIN_MISSING: &str = include_str!("../examples/18-gain-mod-missing-input.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -52,6 +54,9 @@ mod tests {
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.inputs[0].name, "input");
         assert_eq!(gain.inputs[0].fan_in, FanIn::Sum);
+        assert_eq!(gain.inputs[0].unconnected, None);
+        assert_eq!(gain.inputs[1].name, "mod");
+        assert_eq!(gain.inputs[1].unconnected, Some(1.0));
         assert_eq!(gain.outputs[0].name, "out");
         assert_eq!(gain.params[0].name, "gain");
         let mix = contract::find("mix").unwrap();
@@ -277,6 +282,42 @@ mod tests {
         offset_handle.publish(None).unwrap();
         machine.process(&mut samples);
         assert_eq!(samples, [0.25; 4]);
+    }
+
+    #[test]
+    fn optional_modulation_is_a_signal_not_a_parameter_override() {
+        let graph = lua::read(MODULATED_GAIN).unwrap();
+        let mut machine = compile_at_rate(&graph, 48_000.0).unwrap();
+        assert_eq!(machine.order(), ["modulator", "source", "gain", "output"]);
+        let id = ParameterId::new("gain", "gain");
+        let handle = machine.parameter_handle(&id).unwrap();
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        for (actual, expected) in samples.into_iter().zip([0.0, 0.125, 0.0, -0.125]) {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
+        assert_eq!(machine.authored_value(&id), Some(0.5));
+        assert_eq!(machine.effective_value(&id), Some(0.5));
+        handle.publish(Some(0.75)).unwrap();
+        machine.process(&mut samples);
+        for (actual, expected) in samples.into_iter().zip([0.0, 0.1875, 0.0, -0.1875]) {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
+        assert_eq!(machine.authored_value(&id), Some(0.5));
+        assert_eq!(machine.effective_value(&id), Some(0.75));
+    }
+
+    #[test]
+    fn optional_modulation_does_not_make_signal_input_optional() {
+        let mut host = Host::default();
+        host.submit(&lua::read(BASIC).unwrap()).unwrap();
+        let error = host
+            .submit(&lua::read(MODULATED_GAIN_MISSING).unwrap())
+            .unwrap_err();
+        assert!(error.contains("gain.input' is disconnected"), "{error}");
+        let mut samples = [f64::NAN; 4];
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.125; 4]);
     }
 
     #[test]

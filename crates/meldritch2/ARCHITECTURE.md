@@ -54,8 +54,10 @@ phase across buffers and uses a published frequency at the next buffer entry.
 at one sample per frame. `Multiply` multiplies two independent audio signals
 per sample, supporting explicit audio-rate modulation through ordinary cables.
 `gain.input` currently declares summed fan-in; its connected sources execute
-in stable module-ID order. Other inputs permit one cable. Cycles, disconnected
-required inputs, and multiple Output instances are rejected. Feedback,
+in stable module-ID order. `gain.mod` permits one optional cable, using 1 when
+disconnected; its audio-rate signal multiplies the authored/live Gain value
+without changing parameter identity. Other inputs permit one cable. Cycles,
+disconnected required inputs, and multiple Output instances are rejected. Feedback,
 other domains, and block DSP remain future work. `Affine` demonstrates two
 independently identified parameters on one module; the executor passes values
 in contract order from preallocated scratch space. Parameter publication uses one
