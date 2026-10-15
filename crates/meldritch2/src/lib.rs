@@ -63,6 +63,9 @@ mod tests {
     const MIDI_NOTE_MISSING_CONTROL: &str =
         include_str!("../examples/39-midi-note-missing-control.lua");
     const MIDI_NOTE_NARROW_PITCH: &str = include_str!("../examples/40-midi-note-narrow-pitch.lua");
+    const CABLED_MIDI_NOTE_PAIR: &str = include_str!("../examples/41-cabled-midi-note-pair.lua");
+    const MIDI_NOTE_SHARED_TARGET: &str =
+        include_str!("../examples/42-midi-note-shared-target.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -1176,6 +1179,10 @@ mod tests {
             assert!(router.dispatch(&[0x80, note, 0]));
         }
         assert_eq!(machine.effective_value(&gate), Some(0.0));
+        let second_router = MidiRouter::from_machine(&machine);
+        assert!(router.dispatch(&[0x90, 60, 100]));
+        assert!(second_router.dispatch(&[0x80, 60, 0]));
+        assert_eq!(machine.effective_value(&gate), Some(0.0));
     }
 
     #[test]
@@ -1217,6 +1224,74 @@ mod tests {
         let mut samples = [f64::NAN; 2];
         machine.process(&mut samples);
         assert!(samples[1] > 0.0);
+    }
+
+    #[test]
+    fn midi_note_pair_is_published_together_at_audio_buffer_entry() {
+        let graph = lua::read(CABLED_MIDI_NOTE_PAIR).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let router = MidiRouter::from_machine(&machine);
+        let pitch = ParameterId::new("pitch_hz", "value");
+        let gate = ParameterId::new("gate", "value");
+        let state = machine.midi_note_state(1).unwrap();
+        let mut one = [f64::NAN; 1];
+        machine.process(&mut one);
+        assert_eq!(one, [0.0]);
+
+        state.begin_update();
+        machine
+            .parameter_handle(&pitch)
+            .unwrap()
+            .publish(Some(880.0))
+            .unwrap();
+        machine.process(&mut one);
+        assert_eq!(one, [0.0]);
+        machine
+            .parameter_handle(&gate)
+            .unwrap()
+            .publish(Some(1.0))
+            .unwrap();
+        machine.process(&mut one);
+        assert_eq!(one, [0.0]);
+
+        state.end_update();
+        let mut opened = [f64::NAN; 2];
+        machine.process(&mut opened);
+        let first = 0.125 * (std::f64::consts::TAU * 440.0 * 3.0 / 48_000.0).sin();
+        let second = 0.1875 * (std::f64::consts::TAU * (440.0 * 3.0 + 880.0) / 48_000.0).sin();
+        assert!((opened[0] - first).abs() < 1e-12);
+        assert!((opened[1] - second).abs() < 1e-12);
+
+        state.begin_update();
+        machine
+            .parameter_handle(&gate)
+            .unwrap()
+            .publish(Some(0.0))
+            .unwrap();
+        machine.process(&mut one);
+        assert!(one[0] > 0.0);
+        state.end_update();
+        machine.process(&mut one);
+        assert!(one[0] > 0.0);
+        let before = state.epoch();
+        assert!(router.dispatch(&[0x90, 69, 100]));
+        assert_eq!(state.epoch(), before + 2);
+    }
+
+    #[test]
+    fn shared_midi_note_targets_reject_without_replacing_machine() {
+        let mut host = Host::default();
+        host.submit(&lua::read(CABLED_MIDI_NOTE_PAIR).unwrap())
+            .unwrap();
+        let error = host
+            .submit(&lua::read(MIDI_NOTE_SHARED_TARGET).unwrap())
+            .unwrap_err();
+        assert!(error.contains("distinct pitch and gate targets"), "{error}");
+        let machine = host.accepted().unwrap();
+        assert!(machine.midi_note_state(1).is_some());
+        let mut samples = [f64::NAN; 2];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.0; 2]);
     }
 
     #[test]

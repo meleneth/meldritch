@@ -328,5 +328,21 @@ allocates no per-message storage. Authored parameter values remain unchanged.
 `39-midi-note-missing-control.lua` and `40-midi-note-narrow-pitch.lua` must
 reject without replacing an accepted machine. Duplicate channel mappings,
 invalid channels, and identical pitch/gate targets must also reject. Pitch
-and gate are currently separate parameter publications and may cross a racing
-audio buffer snapshot; timed, paired publication and velocity are later work.
+and gate retain separate parameter identities. Timed input and velocity are
+later work.
+
+## Coherent note-pair buffer snapshot
+
+`41-cabled-midi-note-pair.lua` routes the named MIDI pitch control through a
+Constant and an explicit cable to `oscillator.fm_hz`, with Sine's authored
+frequency at zero. Its separate gate control still drives Envelope. While a
+note writer publishes 880 Hz and gate 1, an audio buffer observing the
+in-progress pair must continue to use the prior complete 440 Hz/closed-gate
+pair. The next buffer after publication must use 880 Hz/open gate together.
+The callback makes one bounded epoch check and may defer a racing pair by one
+buffer. It never locks or retries. A racing release likewise keeps the prior
+open pair until the release is complete. `42-midi-note-shared-target.lua` must
+reject two note channels writing the same pitch/gate targets and leave the
+accepted machine usable. This snapshot contract applies to note-pair writes;
+independent panel or CC gestures on those controls retain their existing
+parameter semantics.

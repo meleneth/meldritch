@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
 
 use crate::compiler::{ControlHandle, Machine};
 
@@ -6,13 +9,41 @@ use crate::compiler::{ControlHandle, Machine};
 struct NoteRoute {
     pitch: ControlHandle,
     gate: ControlHandle,
-    held: Arc<Mutex<HeldNotes>>,
+    state: Arc<NoteState>,
     frequencies: [f64; 128],
 }
 
+#[derive(Debug)]
 struct HeldNotes {
     keys: [u8; 128],
     len: usize,
+}
+
+#[derive(Debug)]
+pub(crate) struct NoteState {
+    epoch: AtomicU64,
+    held: Mutex<HeldNotes>,
+}
+
+impl NoteState {
+    pub(crate) fn new() -> Self {
+        Self {
+            epoch: AtomicU64::new(0),
+            held: Mutex::new(HeldNotes::new()),
+        }
+    }
+
+    pub(crate) fn epoch(&self) -> u64 {
+        self.epoch.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn begin_update(&self) {
+        self.epoch.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn end_update(&self) {
+        self.epoch.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 impl HeldNotes {
@@ -66,7 +97,9 @@ impl MidiRouter {
                 gate: machine
                     .control_handle(&binding.gate_control_id)
                     .expect("compiled MIDI gate control"),
-                held: Arc::new(Mutex::new(HeldNotes::new())),
+                state: machine
+                    .midi_note_state(binding.channel)
+                    .expect("compiled MIDI note state"),
                 frequencies: std::array::from_fn(|note| {
                     440.0 * 2.0_f64.powf((note as f64 - 69.0) / 12.0)
                 }),
@@ -103,7 +136,11 @@ impl MidiRouter {
         let Some(route) = &self.notes[usize::from(message[0] & 0x0F)] else {
             return false;
         };
-        let mut held = route.held.lock().unwrap_or_else(|error| error.into_inner());
+        let mut held = route
+            .state
+            .held
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let previous = held.latest();
         let note = message[1];
         if message[0] & 0xF0 == 0x90 && message[2] != 0 {
@@ -113,17 +150,21 @@ impl MidiRouter {
         }
         let current = held.latest();
         if current != previous {
-            if let Some(current) = current {
+            route.state.begin_update();
+            let result = if let Some(current) = current {
                 let hz = route.frequencies[usize::from(current)];
-                if route.pitch.publish(hz).is_err() {
-                    return false;
-                }
-                if previous.is_none() && route.gate.publish(1.0).is_err() {
-                    return false;
-                }
-            } else if route.gate.publish(0.0).is_err() {
-                return false;
-            }
+                route.pitch.publish(hz).and_then(|_| {
+                    if previous.is_none() {
+                        route.gate.publish(1.0)
+                    } else {
+                        Ok(())
+                    }
+                })
+            } else {
+                route.gate.publish(0.0)
+            };
+            route.state.end_update();
+            return result.is_ok();
         }
         true
     }

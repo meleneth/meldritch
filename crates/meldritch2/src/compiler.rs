@@ -5,6 +5,7 @@ use std::sync::{
 };
 
 use crate::contract::{self, FanIn, Role};
+use crate::midi::NoteState;
 use crate::model::{Graph, MidiCc, MidiNotes, ParameterId};
 
 #[derive(Clone, Debug)]
@@ -20,6 +21,16 @@ struct Op {
 struct InputPlan {
     sources: Vec<usize>,
     unconnected: f64,
+}
+
+#[derive(Debug)]
+struct NotePair {
+    channel: u8,
+    pitch_index: usize,
+    gate_index: usize,
+    state: Arc<NoteState>,
+    last_pitch: f64,
+    last_gate: f64,
 }
 
 const NO_OVERRIDE: u64 = f64::NAN.to_bits();
@@ -129,6 +140,7 @@ pub struct Machine {
     controls: BTreeMap<String, ControlBinding>,
     midi_ccs: Vec<MidiCc>,
     midi_notes: Vec<MidiNotes>,
+    note_pairs: Vec<NotePair>,
     output_slot: usize,
     order: Vec<String>,
     sample_rate: f64,
@@ -149,6 +161,27 @@ impl Machine {
             } else {
                 f64::from_bits(bits)
             };
+        }
+        for pair in &mut self.note_pairs {
+            let before = pair.state.epoch();
+            if before & 1 == 0 {
+                let read = |index: usize| {
+                    let bits = self.published[index].load(Ordering::Acquire);
+                    if bits == NO_OVERRIDE {
+                        self.authored[index]
+                    } else {
+                        f64::from_bits(bits)
+                    }
+                };
+                let pitch = read(pair.pitch_index);
+                let gate = read(pair.gate_index);
+                if before == pair.state.epoch() {
+                    pair.last_pitch = pitch;
+                    pair.last_gate = gate;
+                }
+            }
+            self.params[pair.pitch_index] = pair.last_pitch;
+            self.params[pair.gate_index] = pair.last_gate;
         }
     }
 
@@ -217,6 +250,12 @@ impl Machine {
     }
     pub fn midi_notes(&self) -> &[MidiNotes] {
         &self.midi_notes
+    }
+    pub(crate) fn midi_note_state(&self, channel: u8) -> Option<Arc<NoteState>> {
+        self.note_pairs
+            .iter()
+            .find(|pair| pair.channel == channel)
+            .map(|pair| Arc::clone(&pair.state))
     }
     pub fn control_handle(&self, id: &str) -> Option<ControlHandle> {
         let binding = self.controls.get(id)?;
@@ -443,6 +482,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         }
     }
     let mut mapped_note_channels = BTreeSet::new();
+    let mut mapped_note_targets = BTreeSet::new();
     for binding in &graph.midi_notes {
         if !(1..=16).contains(&binding.channel) {
             return Err(format!(
@@ -473,6 +513,9 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 "MIDI note pitch and gate controls must target different parameters".into(),
             );
         }
+        if !mapped_note_targets.insert(&pitch.target) || !mapped_note_targets.insert(&gate.target) {
+            return Err("MIDI note mappings must use distinct pitch and gate targets".into());
+        }
         let lowest_hz = 440.0 * 2.0_f64.powf((0.0 - 69.0) / 12.0);
         let highest_hz = 440.0 * 2.0_f64.powf((127.0 - 69.0) / 12.0);
         if pitch.min > lowest_hz || pitch.max < highest_hz {
@@ -488,6 +531,22 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             ));
         }
     }
+    let note_pairs = graph
+        .midi_notes
+        .iter()
+        .map(|binding| {
+            let pitch_index = param_ids[&controls[&binding.pitch_control_id].target];
+            let gate_index = param_ids[&controls[&binding.gate_control_id].target];
+            NotePair {
+                channel: binding.channel,
+                pitch_index,
+                gate_index,
+                state: Arc::new(NoteState::new()),
+                last_pitch: params[pitch_index],
+                last_gate: params[gate_index],
+            }
+        })
+        .collect();
     let mut ops = Vec::with_capacity(schedule.len());
     for &i in &schedule {
         let module = &graph.modules[i];
@@ -563,6 +622,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         controls,
         midi_ccs: graph.midi_ccs.clone(),
         midi_notes: graph.midi_notes.clone(),
+        note_pairs,
         output_slot,
         order: schedule
             .iter()

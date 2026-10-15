@@ -40,9 +40,13 @@ mapped channel, converts the active note to Hertz, and publishes 0/1 gate
 through those same control cells. Note-on with zero velocity releases a key;
 releasing the top key restores the prior held pitch without dropping gate.
 The controls must cover all MIDI note frequencies and 0..1 gate. This is a
-buffer-boundary mono route: pitch and gate use separate atomic cells, so an
-audio snapshot racing a note message can observe one before the other.
-Timed input, velocity, and atomic paired publication remain open.
+buffer-boundary mono route. Each note channel owns a shared publication epoch;
+the audio callback makes one bounded pair read at buffer entry. If a note
+write overlaps that read, it reuses the prior complete pitch/gate pair for
+that buffer. Note writers serialize on their bounded held-key state lock; the
+audio path reads only atomics and its own cached pair. Other control gestures
+on those parameters remain independent publications. Timed input and
+velocity remain open.
 
 Lua's `meldritch.graph()` API constructs a candidate graph. `graph:module(id,
 type, values)` returns handles with contract-derived ports; `graph:connect(src,
