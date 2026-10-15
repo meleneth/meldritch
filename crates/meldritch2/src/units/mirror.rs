@@ -1,4 +1,4 @@
-use crate::contract::{Contract, Domain, FanIn, Port, Role};
+use crate::contract::{Contract, Domain, FanIn, InputPort, OutputPort, Role};
 
 fn process(_: &mut [f64], input: &[f64], _: &[f64], _: f64, outputs: &mut [f64]) {
     outputs[0] = input[0];
@@ -10,24 +10,20 @@ pub const CONTRACT: Contract = Contract {
     role: Role::Processor,
     process,
     state_len: 0,
-    inputs: &[Port {
+    inputs: &[InputPort {
         name: "input",
         domain: Domain::MonoAudio,
         fan_in: FanIn::One,
         unconnected: None,
     }],
     outputs: &[
-        Port {
+        OutputPort {
             name: "out",
             domain: Domain::MonoAudio,
-            fan_in: FanIn::One,
-            unconnected: None,
         },
-        Port {
+        OutputPort {
             name: "inverted",
             domain: Domain::MonoAudio,
-            fan_in: FanIn::One,
-            unconnected: None,
         },
     ],
     params: &[],

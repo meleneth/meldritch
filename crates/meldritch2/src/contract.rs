@@ -16,12 +16,18 @@ pub enum Role {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct Port {
+pub struct InputPort {
     pub name: &'static str,
     pub domain: Domain,
     pub fan_in: FanIn,
     /// Neutral input sample when no cable is connected; None means required.
     pub unconnected: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct OutputPort {
+    pub name: &'static str,
+    pub domain: Domain,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -37,8 +43,8 @@ pub struct Contract {
     pub role: Role,
     pub process: fn(&mut [f64], &[f64], &[f64], f64, &mut [f64]),
     pub state_len: usize,
-    pub inputs: &'static [Port],
-    pub outputs: &'static [Port],
+    pub inputs: &'static [InputPort],
+    pub outputs: &'static [OutputPort],
     pub params: &'static [Param],
 }
 

@@ -8,6 +8,9 @@ Each `src/units/*.rs` file owns one module type's ports, parameters, and
 processing function. `contract.rs` defines their shared shape and explicit
 registry. A module contract declares its Output role; compilation selects that
 role rather than recognizing a module type string.
+Input ports declare fan-in and a required or neutral disconnected value;
+output ports declare only a name and signal domain. Their distinct Rust types
+keep input-only policy out of source-port contracts.
 Graph instances have unique string IDs. A port is an instance ID plus a named,
 directional endpoint. Connections are explicit edges. Parameters are identified
 by `(instance ID, parameter name)` from the same contract used by Lua discovery,

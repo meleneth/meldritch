@@ -1,4 +1,4 @@
-use crate::contract::{Contract, Domain, FanIn, Param, Port, Role};
+use crate::contract::{Contract, Domain, FanIn, InputPort, OutputPort, Param, Role};
 
 fn process(_: &mut [f64], input: &[f64], params: &[f64], _: f64, outputs: &mut [f64]) {
     outputs[0] = if input[2] >= params[0] {
@@ -14,30 +14,28 @@ pub const CONTRACT: Contract = Contract {
     process,
     state_len: 0,
     inputs: &[
-        Port {
+        InputPort {
             name: "left",
             domain: Domain::MonoAudio,
             fan_in: FanIn::One,
             unconnected: None,
         },
-        Port {
+        InputPort {
             name: "right",
             domain: Domain::MonoAudio,
             fan_in: FanIn::One,
             unconnected: None,
         },
-        Port {
+        InputPort {
             name: "select",
             domain: Domain::MonoAudio,
             fan_in: FanIn::One,
             unconnected: None,
         },
     ],
-    outputs: &[Port {
+    outputs: &[OutputPort {
         name: "out",
         domain: Domain::MonoAudio,
-        fan_in: FanIn::One,
-        unconnected: None,
     }],
     params: &[Param {
         name: "threshold",
