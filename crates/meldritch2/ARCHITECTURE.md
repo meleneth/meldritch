@@ -47,5 +47,11 @@ Contracts expose domain and fan-in explicitly so these restrictions are visible.
 
 `compile_at_rate` validates the sample rate; `compile` uses 48 kHz. Live graph
 revisions inherit the active runtime's sample rate and start with fresh DSP
-state. Run `cargo run -p meldritch2 -- crates/meldritch2/examples/08-sine.lua` and
-`cargo test -p meldritch2`. See `examples/ACCEPTANCE.md` for the corpus.
+state. `DeviceOutput` opens CPAL's default device on explicit `play`, compiles
+at its sample rate, and copies bounded mono `f64` chunks into interleaved device
+channels. It reports the first stream error outside the audio callback. Run
+`cargo run -p meldritch2 -- crates/meldritch2/examples/08-sine.lua`,
+`cargo run -p meldritch2 -- play crates/meldritch2/examples/08-sine.lua 3`, and
+`cargo test -p meldritch2`. The host device smoke opened a 48 kHz stereo stream
+but reported buffer underruns; physical listening and deadline reliability are
+unverified. See `examples/ACCEPTANCE.md` for the corpus.

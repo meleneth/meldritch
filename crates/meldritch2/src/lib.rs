@@ -1,5 +1,6 @@
 pub mod compiler;
 pub mod contract;
+pub mod device;
 pub mod live;
 pub mod lua;
 pub mod model;

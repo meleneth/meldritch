@@ -1,22 +1,79 @@
-use std::{env, fs, process};
+use std::{env, fs, process, thread, time::Duration};
 
-use meldritch2::{compiler::compile, lua, model::ParameterId};
+use meldritch2::{
+    compiler::compile,
+    device::DeviceOutput,
+    lua,
+    model::{Graph, ParameterId},
+};
+
+fn load_graph(path: &str) -> Result<Graph, String> {
+    fs::read_to_string(path)
+        .map_err(|error| error.to_string())
+        .and_then(|script| lua::read(&script))
+}
 
 fn main() {
     let mut args = env::args().skip(1);
-    let Some(path) = args.next() else {
-        eprintln!("usage: meldritch2 GRAPH.lua [--set MODULE.PARAM=VALUE]");
+    let Some(first) = args.next() else {
+        eprintln!(
+            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 play GRAPH.lua SECONDS"
+        );
         process::exit(2);
     };
+    if first == "play" {
+        let Some(path) = args.next() else {
+            eprintln!("play requires GRAPH.lua");
+            process::exit(2);
+        };
+        let Some(seconds) = args.next() else {
+            eprintln!("play requires SECONDS");
+            process::exit(2);
+        };
+        if args.next().is_some() {
+            eprintln!("too many arguments");
+            process::exit(2);
+        }
+        let seconds: f64 = seconds.parse().unwrap_or(0.0);
+        if !seconds.is_finite() || seconds <= 0.0 || seconds > 3600.0 {
+            eprintln!("SECONDS must be finite and between 0 and 3600");
+            process::exit(2);
+        }
+        let result = load_graph(&path).and_then(|graph| DeviceOutput::open_default(&graph));
+        match result {
+            Ok(output) => {
+                if let Err(error) = output.start() {
+                    eprintln!("{error}");
+                    process::exit(1);
+                }
+                println!(
+                    "playing on {} at {} Hz ({} channels)",
+                    output.device_name, output.sample_rate, output.channels
+                );
+                thread::sleep(Duration::from_secs_f64(seconds));
+                if output.stream_errors() > 0 {
+                    eprintln!(
+                        "output stream reported {} errors: {}",
+                        output.stream_errors(),
+                        output.first_stream_error().unwrap_or("unknown error")
+                    );
+                    process::exit(1);
+                }
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                process::exit(1);
+            }
+        }
+        return;
+    }
+    let path = first;
     let update = args.next();
     if args.next().is_some() {
         eprintln!("too many arguments");
         process::exit(2);
     }
-    let result = fs::read_to_string(&path)
-        .map_err(|e| e.to_string())
-        .and_then(|script| lua::read(&script))
-        .and_then(|graph| compile(&graph));
+    let result = load_graph(&path).and_then(|graph| compile(&graph));
     match result {
         Ok(mut machine) => {
             let mut samples = [0.0; 8];

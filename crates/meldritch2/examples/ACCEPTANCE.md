@@ -50,3 +50,13 @@ Gain(0.25), yielding the repeating sequence approximately `[0, 0.25, 0,
 as one buffer; the oscillator phase belongs to its compiled instance. A live
 frequency update must take effect at the next buffer boundary without resetting
 phase. Invalid sample rates are rejected before a machine is accepted.
+
+## Device output milestone
+
+`meldritch2 play crates/meldritch2/examples/08-sine.lua 3` opens the default
+output device only when explicitly requested. The device's sample rate is
+passed to graph compilation. The callback renders bounded mono chunks into
+preallocated `f64` scratch space, clamps to the device range, and copies each
+sample to every output channel. Headless tests verify chunk boundaries,
+interleaving, and sample conversion. Device opening or playback failure reports
+a diagnostic; actual hardware sound remains a physical check.
