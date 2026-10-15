@@ -231,3 +231,11 @@ next buffer all 0.25, with the authored value and topology intact. Clearing
 the override restores audio-rate selection. `28-switch-missing.lua` omits the
 required selector cable and must reject the candidate while the accepted
 machine continues to process.
+
+`29-switch-control.lua` exposes `switch.threshold` through a named control and
+channel-1 CC 7. At 48 kHz, CC value 127 publishes threshold 2 and the next
+buffer selects the left input throughout. Publishing threshold 0 through the
+same control selects the right input on the selector's zero and positive
+samples. Clearing the override restores the authored 0.5 threshold. The
+contract-derived parameter ID is identical through Lua, the control, MIDI,
+and the executable machine.

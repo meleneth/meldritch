@@ -49,6 +49,7 @@ mod tests {
     const SMOOTHED_CONTROL: &str = include_str!("../examples/26-smoothed-control.lua");
     const SWITCH: &str = include_str!("../examples/27-switch.lua");
     const SWITCH_MISSING: &str = include_str!("../examples/28-switch-missing.lua");
+    const SWITCH_CONTROL: &str = include_str!("../examples/29-switch-control.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -781,6 +782,32 @@ mod tests {
         assert!(error.contains("switch.select"), "{error}");
         let mut samples = [f64::NAN; 4];
         host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.25, -0.25, 0.25, 0.25]);
+    }
+
+    #[test]
+    fn new_unit_parameter_uses_existing_control_and_midi_route() {
+        let mut machine = compile(&lua::read(SWITCH_CONTROL).unwrap()).unwrap();
+        let threshold = ParameterId::new("switch", "threshold");
+        let control = machine.control_handle("threshold").unwrap();
+        assert_eq!(control.target(), &threshold);
+        assert_eq!(control.range(), (0.0, 2.0));
+        let router = MidiRouter::from_machine(&machine);
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.25, -0.25, 0.25, 0.25]);
+
+        assert!(router.dispatch(&[0xB0, 7, 127]));
+        assert_eq!(machine.authored_value(&threshold), Some(0.5));
+        assert_eq!(machine.effective_value(&threshold), Some(2.0));
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.25; 4]);
+
+        control.publish(0.0).unwrap();
+        machine.process(&mut samples);
+        assert_eq!(samples, [-0.25, -0.25, -0.25, 0.25]);
+        control.clear().unwrap();
+        machine.process(&mut samples);
         assert_eq!(samples, [0.25, -0.25, 0.25, 0.25]);
     }
 
