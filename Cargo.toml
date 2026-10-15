@@ -8,6 +8,7 @@ members = [
     "crates/meldritch-dsl",
     "crates/meldritch-render",
     "crates/meldritch-tui",
+    "crates/meldritch2",
 ]
 resolver = "2"
 

@@ -1,0 +1,103 @@
+use std::collections::BTreeMap;
+
+use mlua::{Lua, Table, Value};
+
+use crate::contract;
+use crate::model::{Connection, Endpoint, Graph, Module};
+
+const API: &str = r#"
+meldritch = {}
+function meldritch.graph()
+  local graph = { modules = {}, connections = {} }
+  function graph:module(id, kind, values)
+    assert(type(id) == "string" and type(kind) == "string", "module ID and type must be strings")
+    local spec = meldritch._contract(kind)
+    assert(spec, "unknown module type: " .. kind)
+    local handle = {}
+    for _, name in ipairs(spec.inputs) do
+      handle[name] = { module = id, port = name, direction = "input" }
+    end
+    for _, name in ipairs(spec.outputs) do
+      handle[name] = { module = id, port = name, direction = "output" }
+    end
+    table.insert(self.modules, { id = id, kind = kind, values = values or {} })
+    return handle
+  end
+  function graph:connect(source, destination)
+    assert(type(source) == "table" and source.direction == "output", "source must be an output port")
+    assert(type(destination) == "table" and destination.direction == "input", "destination must be an input port")
+    table.insert(self.connections, { from = source, to = destination })
+  end
+  return graph
+end
+"#;
+
+pub fn read(script: &str) -> Result<Graph, String> {
+    let lua = Lua::new();
+    let discover = lua
+        .create_function(|lua, kind: String| {
+            let Some(c) = contract::find(&kind) else {
+                return Ok(Value::Nil);
+            };
+            let spec = lua.create_table()?;
+            let inputs = lua.create_table()?;
+            for (i, p) in c.inputs.iter().enumerate() {
+                inputs.set(i + 1, p.name)?;
+            }
+            let outputs = lua.create_table()?;
+            for (i, p) in c.outputs.iter().enumerate() {
+                outputs.set(i + 1, p.name)?;
+            }
+            let params = lua.create_table()?;
+            for p in c.params {
+                params.set(p.name, p.default)?;
+            }
+            spec.set("inputs", inputs)?;
+            spec.set("outputs", outputs)?;
+            spec.set("params", params)?;
+            Ok(Value::Table(spec))
+        })
+        .map_err(|e| e.to_string())?;
+    lua.load(API).exec().map_err(|e| e.to_string())?;
+    let meldritch: Table = lua.globals().get("meldritch").map_err(|e| e.to_string())?;
+    meldritch
+        .set("_contract", discover)
+        .map_err(|e| e.to_string())?;
+    let table: Table = lua.load(script).eval().map_err(|e| e.to_string())?;
+    let mut graph = Graph::default();
+    let modules: Table = table
+        .get("modules")
+        .map_err(|e| format!("graph.modules: {e}"))?;
+    for item in modules.sequence_values::<Table>() {
+        let item = item.map_err(|e| e.to_string())?;
+        let values: Table = item.get("values").map_err(|e| e.to_string())?;
+        let mut params = BTreeMap::new();
+        for pair in values.pairs::<String, f64>() {
+            let (name, value) = pair.map_err(|e| e.to_string())?;
+            params.insert(name, value);
+        }
+        graph.modules.push(Module {
+            id: item.get("id").map_err(|e| e.to_string())?,
+            kind: item.get("kind").map_err(|e| e.to_string())?,
+            values: params,
+        });
+    }
+    let connections: Table = table
+        .get("connections")
+        .map_err(|e| format!("graph.connections: {e}"))?;
+    for item in connections.sequence_values::<Table>() {
+        let item = item.map_err(|e| e.to_string())?;
+        graph.connections.push(Connection {
+            from: endpoint(item.get("from").map_err(|e| e.to_string())?)?,
+            to: endpoint(item.get("to").map_err(|e| e.to_string())?)?,
+        });
+    }
+    Ok(graph)
+}
+
+fn endpoint(table: Table) -> Result<Endpoint, String> {
+    Ok(Endpoint {
+        module: table.get("module").map_err(|e| e.to_string())?,
+        port: table.get("port").map_err(|e| e.to_string())?,
+    })
+}

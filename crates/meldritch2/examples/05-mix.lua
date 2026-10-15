@@ -1,0 +1,11 @@
+local graph = meldritch.graph()
+local left = graph:module("left", "constant", { value = 0.25 })
+local right = graph:module("right", "constant", { value = 0.125 })
+local mix = graph:module("mix", "mix")
+local gain = graph:module("gain", "gain", { gain = 0.5 })
+local output = graph:module("output", "output")
+graph:connect(left.out, mix.left)
+graph:connect(right.out, mix.right)
+graph:connect(mix.out, gain.input)
+graph:connect(gain.out, output.input)
+return graph
