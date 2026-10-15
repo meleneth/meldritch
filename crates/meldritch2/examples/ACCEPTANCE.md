@@ -239,3 +239,15 @@ same control selects the right input on the selector's zero and positive
 samples. Clearing the override restores the authored 0.5 threshold. The
 contract-derived parameter ID is identical through Lua, the control, MIDI,
 and the executable machine.
+
+## Distinct output ports
+
+`30-mirror-outputs.lua` feeds Constant(0.25) into Mirror, which produces a
+direct `out` sample and an `inverted` sample. The direct output passes through
+Gain(0.5), while the inverted output enters the other Mix input. Output must
+render -0.125 per sample. Lua declares modules and cables in reverse dependency
+order; reversing those declarations again must preserve the result. Compiler
+slots are assigned to individual output ports, so two cables from one instance
+can carry different samples. An invalid source port must reject the candidate
+without replacing an accepted machine. Summed fan-in is ordered by source
+module ID and output port position, independent of cable declaration order.

@@ -1,7 +1,7 @@
 use crate::contract::{Contract, Domain, FanIn, Param, Port, Role};
 
-fn process(_: &mut [f64], _: &[f64], params: &[f64], _: f64) -> f64 {
-    params[0]
+fn process(_: &mut [f64], _: &[f64], params: &[f64], _: f64, outputs: &mut [f64]) {
+    outputs[0] = params[0];
 }
 
 pub const CONTRACT: Contract = Contract {

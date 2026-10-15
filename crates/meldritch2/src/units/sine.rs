@@ -1,9 +1,14 @@
 use crate::contract::{Contract, Domain, FanIn, Param, Port, Role};
 
-fn process(state: &mut [f64], input: &[f64], params: &[f64], sample_rate: f64) -> f64 {
-    let sample = (std::f64::consts::TAU * state[0]).sin();
+fn process(
+    state: &mut [f64],
+    input: &[f64],
+    params: &[f64],
+    sample_rate: f64,
+    outputs: &mut [f64],
+) {
+    outputs[0] = (std::f64::consts::TAU * state[0]).sin();
     state[0] = (state[0] + (params[0] + input[0]) / sample_rate).rem_euclid(1.0);
-    sample
 }
 
 pub const CONTRACT: Contract = Contract {

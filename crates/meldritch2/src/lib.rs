@@ -50,6 +50,7 @@ mod tests {
     const SWITCH: &str = include_str!("../examples/27-switch.lua");
     const SWITCH_MISSING: &str = include_str!("../examples/28-switch-missing.lua");
     const SWITCH_CONTROL: &str = include_str!("../examples/29-switch-control.lua");
+    const MIRROR_OUTPUTS: &str = include_str!("../examples/30-mirror-outputs.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -62,7 +63,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 9);
+        assert_eq!(contract::all().len(), 10);
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.role, Role::Processor);
         assert_eq!(gain.inputs[0].name, "input");
@@ -102,6 +103,15 @@ mod tests {
             ["left", "right", "select"]
         );
         assert_eq!(switch.params[0].name, "threshold");
+        let mirror = contract::find("mirror").unwrap();
+        assert_eq!(
+            mirror
+                .outputs
+                .iter()
+                .map(|port| port.name)
+                .collect::<Vec<_>>(),
+            ["out", "inverted"]
+        );
         assert_eq!(contract::find("output").unwrap().role, Role::Output);
         let error = lua::read(BASIC.replace("gain.input", "gain.missing").as_str()).unwrap_err();
         assert!(
@@ -809,6 +819,49 @@ mod tests {
         control.clear().unwrap();
         machine.process(&mut samples);
         assert_eq!(samples, [0.25, -0.25, 0.25, 0.25]);
+    }
+
+    #[test]
+    fn two_output_ports_route_distinct_samples_without_topology_cases() {
+        let graph = lua::read(MIRROR_OUTPUTS).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        assert_eq!(
+            machine.order(),
+            ["source", "mirror", "gain", "mix", "output"]
+        );
+        let mut samples = [f64::NAN; 8];
+        machine.process(&mut samples);
+        assert_eq!(samples, [-0.125; 8]);
+
+        let mut reordered = graph.clone();
+        reordered.modules.reverse();
+        reordered.connections.reverse();
+        let mut machine = compile(&reordered).unwrap();
+        machine.process(&mut samples);
+        assert_eq!(samples, [-0.125; 8]);
+
+        let mut repatched = graph;
+        repatched.connections[1].from.port = "out".into();
+        let mut machine = compile(&repatched).unwrap();
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.375; 8]);
+    }
+
+    #[test]
+    fn invalid_multi_output_port_rejects_without_replacing_accepted_machine() {
+        let graph = lua::read(MIRROR_OUTPUTS).unwrap();
+        let mut host = Host::default();
+        host.submit(&graph).unwrap();
+        let mut invalid = graph.clone();
+        invalid.connections[1].from.port = "missing".into();
+        let error = host.submit(&invalid).unwrap_err();
+        assert!(
+            error.contains("invalid output port 'mirror.missing'"),
+            "{error}"
+        );
+        let mut samples = [f64::NAN; 4];
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [-0.125; 4]);
     }
 
     #[test]

@@ -1,0 +1,12 @@
+local graph = meldritch.graph()
+local output = graph:module("output", "output")
+local mix = graph:module("mix", "mix")
+local gain = graph:module("gain", "gain", { gain = 0.5 })
+local mirror = graph:module("mirror", "mirror")
+local source = graph:module("source", "constant", { value = 0.25 })
+graph:connect(mix.out, output.input)
+graph:connect(mirror.inverted, mix.right)
+graph:connect(gain.out, mix.left)
+graph:connect(mirror.out, gain.input)
+graph:connect(source.out, mirror.input)
+return graph

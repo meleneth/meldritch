@@ -2,6 +2,7 @@ pub mod affine;
 pub mod constant;
 pub mod gain;
 pub mod lag;
+pub mod mirror;
 pub mod mix;
 pub mod multiply;
 pub mod output;

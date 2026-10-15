@@ -9,10 +9,10 @@ use crate::model::{Graph, MidiCc, ParameterId};
 
 #[derive(Clone, Debug)]
 struct Op {
-    process: fn(&mut [f64], &[f64], &[f64], f64) -> f64,
+    process: fn(&mut [f64], &[f64], &[f64], f64, &mut [f64]),
     state: Vec<f64>,
     inputs: Vec<InputPlan>,
-    output: usize,
+    outputs: std::ops::Range<usize>,
     params: Vec<usize>,
 }
 
@@ -159,11 +159,12 @@ impl Machine {
                 for (slot, index) in op.params.iter().enumerate() {
                     self.param_scratch[slot] = self.params[*index];
                 }
-                self.slots[op.output] = (op.process)(
+                (op.process)(
                     &mut op.state,
                     &self.input_scratch[..op.inputs.len()],
                     &self.param_scratch[..op.params.len()],
                     self.sample_rate,
+                    &mut self.slots[op.outputs.clone()],
                 );
             }
             *sample = self.slots[self.output_slot];
@@ -264,7 +265,17 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         ));
     }
 
-    let mut input_edges: BTreeMap<(usize, &str), Vec<usize>> = BTreeMap::new();
+    // Slots belong to declared output ports. The Output role has no exposed
+    // port, but owns one private slot for the final sample.
+    let mut slot_bases = Vec::with_capacity(graph.modules.len());
+    let mut slot_count = 0;
+    for module in &graph.modules {
+        slot_bases.push(slot_count);
+        let c = contract::find(&module.kind).expect("module checked");
+        slot_count += c.outputs.len().max(1);
+    }
+
+    let mut input_edges: BTreeMap<(usize, &str), Vec<(usize, usize)>> = BTreeMap::new();
     let mut dependents = vec![Vec::<usize>::new(); graph.modules.len()];
     let mut indegree = vec![0usize; graph.modules.len()];
     for edge in &graph.connections {
@@ -279,7 +290,8 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         let sp = sc
             .outputs
             .iter()
-            .find(|p| p.name == edge.from.port)
+            .enumerate()
+            .find(|(_, p)| p.name == edge.from.port)
             .ok_or_else(|| {
                 format!(
                     "invalid output port '{}.{}'",
@@ -291,7 +303,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             .iter()
             .find(|p| p.name == edge.to.port)
             .ok_or_else(|| format!("invalid input port '{}.{}'", edge.to.module, edge.to.port))?;
-        if sp.domain != dp.domain {
+        if sp.1.domain != dp.domain {
             return Err(format!(
                 "incompatible ports '{}.{}' and '{}.{}'",
                 edge.from.module, edge.from.port, edge.to.module, edge.to.port
@@ -305,7 +317,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 edge.to.module, edge.to.port
             ));
         }
-        sources.push(src);
+        sources.push((src, slot_bases[src] + sp.0));
         dependents[src].push(dst);
         indegree[dst] += 1;
     }
@@ -430,9 +442,14 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                     .get(&(i, port.name))
                     .cloned()
                     .unwrap_or_default();
-                sources.sort_by(|a, b| graph.modules[*a].id.cmp(&graph.modules[*b].id));
+                sources.sort_by(|a, b| {
+                    graph.modules[a.0]
+                        .id
+                        .cmp(&graph.modules[b.0].id)
+                        .then(a.1.cmp(&b.1))
+                });
                 InputPlan {
-                    sources,
+                    sources: sources.into_iter().map(|(_, slot)| slot).collect(),
                     unconnected: port.unconnected.unwrap_or(0.0),
                 }
             })
@@ -446,14 +463,14 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             process: c.process,
             state: vec![0.0; c.state_len],
             inputs,
-            output: i,
+            outputs: slot_bases[i]..slot_bases[i] + c.outputs.len().max(1),
             params,
         });
     }
-    let output_slot = output_slots[0];
+    let output_slot = slot_bases[output_slots[0]];
     Ok(Machine {
         ops,
-        slots: vec![0.0; graph.modules.len()],
+        slots: vec![0.0; slot_count],
         input_scratch: vec![
             0.0;
             graph

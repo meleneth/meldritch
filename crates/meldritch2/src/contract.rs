@@ -35,14 +35,14 @@ pub struct Param {
 pub struct Contract {
     pub name: &'static str,
     pub role: Role,
-    pub process: fn(&mut [f64], &[f64], &[f64], f64) -> f64,
+    pub process: fn(&mut [f64], &[f64], &[f64], f64, &mut [f64]),
     pub state_len: usize,
     pub inputs: &'static [Port],
     pub outputs: &'static [Port],
     pub params: &'static [Param],
 }
 
-const CONTRACTS: [Contract; 9] = [
+const CONTRACTS: [Contract; 10] = [
     crate::units::constant::CONTRACT,
     crate::units::gain::CONTRACT,
     crate::units::output::CONTRACT,
@@ -52,6 +52,7 @@ const CONTRACTS: [Contract; 9] = [
     crate::units::sine::CONTRACT,
     crate::units::lag::CONTRACT,
     crate::units::switch::CONTRACT,
+    crate::units::mirror::CONTRACT,
 ];
 
 pub fn all() -> &'static [Contract] {

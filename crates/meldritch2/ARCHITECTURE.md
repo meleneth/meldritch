@@ -38,6 +38,11 @@ dst)` records edges. Rust receives only graph data, validates names, values,
 fan-in, and cycles, then derives a topological schedule and compiles slots and
 module operations. `Host::submit` replaces the accepted machine only after full
 compilation. A rejected candidate leaves it usable.
+Each declared output port has its own compiled sample slot. A unit's process
+function writes its declared outputs in contract order; cables read the named
+source port's slot. The terminal Output role has a private sample slot but no
+connectable output port. `Mirror` demonstrates two distinct outputs from one
+module instance.
 
 `LiveControl::submit` compiles a candidate before acquiring a short handoff
 lock. `LiveRuntime::process` uses a nonblocking `try_lock` at buffer entry,

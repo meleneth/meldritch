@@ -1,11 +1,11 @@
 use crate::contract::{Contract, Domain, FanIn, Param, Port, Role};
 
-fn process(_: &mut [f64], input: &[f64], params: &[f64], _: f64) -> f64 {
-    if input[2] >= params[0] {
+fn process(_: &mut [f64], input: &[f64], params: &[f64], _: f64, outputs: &mut [f64]) {
+    outputs[0] = if input[2] >= params[0] {
         input[1]
     } else {
         input[0]
-    }
+    };
 }
 
 pub const CONTRACT: Contract = Contract {
