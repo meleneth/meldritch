@@ -22,6 +22,7 @@ pub struct Port {
 pub struct Param {
     pub name: &'static str,
     pub default: f64,
+    pub range: Option<(f64, f64)>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -56,6 +57,10 @@ fn sine(state: &mut [f64], input: &[f64], params: &[f64], sample_rate: f64) -> f
     let sample = (std::f64::consts::TAU * state[0]).sin();
     state[0] = (state[0] + (params[0] + input[0]) / sample_rate).rem_euclid(1.0);
     sample
+}
+fn lag(state: &mut [f64], input: &[f64], params: &[f64], _: f64) -> f64 {
+    state[0] += params[0] * (input[0] - state[0]);
+    state[0]
 }
 
 const INPUT: Port = Port {
@@ -103,24 +108,34 @@ const OUT: Port = Port {
 const VALUE: Param = Param {
     name: "value",
     default: 0.0,
+    range: None,
 };
 const GAIN: Param = Param {
     name: "gain",
     default: 1.0,
+    range: None,
 };
 const SCALE: Param = Param {
     name: "scale",
     default: 1.0,
+    range: None,
 };
 const OFFSET: Param = Param {
     name: "offset",
     default: 0.0,
+    range: None,
 };
 const FREQUENCY: Param = Param {
     name: "frequency",
     default: 440.0,
+    range: None,
 };
-const CONTRACTS: [Contract; 7] = [
+const RESPONSE: Param = Param {
+    name: "response",
+    default: 0.5,
+    range: Some((0.0, 1.0)),
+};
+const CONTRACTS: [Contract; 8] = [
     Contract {
         name: "constant",
         process: constant,
@@ -176,6 +191,14 @@ const CONTRACTS: [Contract; 7] = [
         inputs: &[FM_HZ_INPUT],
         outputs: &[OUT],
         params: &[FREQUENCY],
+    },
+    Contract {
+        name: "lag",
+        process: lag,
+        state_len: 1,
+        inputs: &[INPUT],
+        outputs: &[OUT],
+        params: &[RESPONSE],
     },
 ];
 

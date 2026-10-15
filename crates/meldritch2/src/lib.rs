@@ -42,6 +42,9 @@ mod tests {
     const SINE_FM: &str = include_str!("../examples/20-sine-fm.lua");
     const SINE_FM_CYCLE: &str = include_str!("../examples/21-sine-fm-cycle.lua");
     const SHARED_MODULATOR: &str = include_str!("../examples/22-shared-modulator.lua");
+    const LAG: &str = include_str!("../examples/23-lag.lua");
+    const LAG_INVALID: &str = include_str!("../examples/24-lag-invalid.lua");
+    const LAG_CONTROL_INVALID: &str = include_str!("../examples/25-lag-control-invalid.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -54,7 +57,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 7);
+        assert_eq!(contract::all().len(), 8);
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.inputs[0].name, "input");
         assert_eq!(gain.inputs[0].fan_in, FanIn::Sum);
@@ -80,6 +83,9 @@ mod tests {
         let sine = contract::find("sine").unwrap();
         assert_eq!(sine.inputs[0].name, "fm_hz");
         assert_eq!(sine.inputs[0].unconnected, Some(0.0));
+        let lag = contract::find("lag").unwrap();
+        assert_eq!(lag.params[0].name, "response");
+        assert_eq!(lag.params[0].range, Some((0.0, 1.0)));
         let error = lua::read(BASIC.replace("gain.input", "gain.missing").as_str()).unwrap_err();
         assert!(
             error.contains("destination must be an input port"),
@@ -608,6 +614,56 @@ mod tests {
         alternate.process(&mut second);
         assert_eq!(expected[..3], first);
         assert_eq!(expected[3..], second);
+    }
+
+    #[test]
+    fn lag_state_is_continuous_and_response_updates_at_buffer_boundary() {
+        let graph = lua::read(LAG).unwrap();
+        let mut full = compile(&graph).unwrap();
+        assert_eq!(full.order(), ["source", "lag", "output"]);
+        let mut expected = [f64::NAN; 8];
+        full.process(&mut expected);
+        assert_eq!(expected[..4], [0.5, 0.75, 0.875, 0.9375]);
+        let mut split = compile(&graph).unwrap();
+        let mut first = [f64::NAN; 3];
+        let mut second = [f64::NAN; 5];
+        split.process(&mut first);
+        split.process(&mut second);
+        assert_eq!(expected[..3], first);
+        assert_eq!(expected[3..], second);
+
+        let mut updated = compile(&graph).unwrap();
+        let response = ParameterId::new("lag", "response");
+        let handle = updated.parameter_handle(&response).unwrap();
+        let control = updated.control_handle("response").unwrap();
+        let mut samples = [f64::NAN; 4];
+        updated.process(&mut samples);
+        assert_eq!(samples, [0.5, 0.75, 0.875, 0.9375]);
+        assert!(handle.publish(Some(1.5)).unwrap_err().contains("0..1"));
+        assert!(updated.set_override(&response, Some(-0.5)).is_err());
+        assert_eq!(updated.effective_value(&response), Some(0.5));
+        control.publish(1.0).unwrap();
+        assert_eq!(updated.authored_value(&response), Some(0.5));
+        updated.process(&mut samples);
+        assert_eq!(samples, [1.0; 4]);
+    }
+
+    #[test]
+    fn invalid_lag_candidates_leave_accepted_state_intact() {
+        let mut host = Host::default();
+        host.submit(&lua::read(LAG).unwrap()).unwrap();
+        let mut samples = [f64::NAN; 4];
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.5, 0.75, 0.875, 0.9375]);
+        let error = host.submit(&lua::read(LAG_INVALID).unwrap()).unwrap_err();
+        assert!(error.contains("lag.response must be in 0..1"), "{error}");
+        let error = host
+            .submit(&lua::read(LAG_CONTROL_INVALID).unwrap())
+            .unwrap_err();
+        assert!(error.contains("control 'response' range"), "{error}");
+        let mut next = [f64::NAN; 1];
+        host.accepted().unwrap().process(&mut next);
+        assert_eq!(next, [0.96875]);
     }
 
     #[test]

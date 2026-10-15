@@ -24,11 +24,28 @@ struct InputPlan {
 
 const NO_OVERRIDE: u64 = f64::NAN.to_bits();
 
+fn validate_parameter_value(
+    id: &ParameterId,
+    range: Option<(f64, f64)>,
+    value: f64,
+) -> Result<(), String> {
+    if !value.is_finite() {
+        return Err(format!("{}.{} must be finite", id.module, id.name));
+    }
+    if let Some((min, max)) = range {
+        if value < min || value > max {
+            return Err(format!("{}.{} must be in {min}..{max}", id.module, id.name));
+        }
+    }
+    Ok(())
+}
+
 /// A control-side handle for one parameter in one compiled graph revision.
 #[derive(Clone, Debug)]
 pub struct ParameterHandle {
     id: ParameterId,
     cell: Arc<AtomicU64>,
+    range: Option<(f64, f64)>,
 }
 
 impl ParameterHandle {
@@ -38,12 +55,9 @@ impl ParameterHandle {
 
     pub fn publish(&self, value: Option<f64>) -> Result<(), String> {
         let bits = match value {
-            Some(value) if value.is_finite() => value.to_bits(),
-            Some(_) => {
-                return Err(format!(
-                    "{}.{} must be finite",
-                    self.id.module, self.id.name
-                ));
+            Some(value) => {
+                validate_parameter_value(&self.id, self.range, value)?;
+                value.to_bits()
             }
             None => NO_OVERRIDE,
         };
@@ -110,6 +124,7 @@ pub struct Machine {
     params: Vec<f64>,
     authored: Vec<f64>,
     published: Vec<Arc<AtomicU64>>,
+    param_ranges: Vec<Option<(f64, f64)>>,
     param_ids: BTreeMap<ParameterId, usize>,
     controls: BTreeMap<String, ControlBinding>,
     midi_ccs: Vec<MidiCc>,
@@ -181,6 +196,7 @@ impl Machine {
         self.param_ids.get(id).map(|&i| ParameterHandle {
             id: id.clone(),
             cell: Arc::clone(&self.published[i]),
+            range: self.param_ranges[i],
         })
     }
     pub fn control_ids(&self) -> impl Iterator<Item = &str> {
@@ -199,17 +215,9 @@ impl Machine {
         })
     }
     pub fn set_override(&self, id: &ParameterId, value: Option<f64>) -> Result<(), String> {
-        let &index = self
-            .param_ids
-            .get(id)
-            .ok_or_else(|| format!("unknown parameter {}.{}", id.module, id.name))?;
-        let bits = match value {
-            Some(value) if value.is_finite() => value.to_bits(),
-            Some(_) => return Err(format!("{}.{} must be finite", id.module, id.name)),
-            None => NO_OVERRIDE,
-        };
-        self.published[index].store(bits, Ordering::Release);
-        Ok(())
+        self.parameter_handle(id)
+            .ok_or_else(|| format!("unknown parameter {}.{}", id.module, id.name))?
+            .publish(value)
     }
 }
 
@@ -232,12 +240,12 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         let contract = contract::find(&module.kind)
             .ok_or_else(|| format!("unknown module type '{}'", module.kind))?;
         for (name, value) in &module.values {
-            if !contract.params.iter().any(|p| p.name == name) {
-                return Err(format!("{}.{} is not a parameter", module.id, name));
-            }
-            if !value.is_finite() {
-                return Err(format!("{}.{} must be finite", module.id, name));
-            }
+            let param = contract
+                .params
+                .iter()
+                .find(|p| p.name == name)
+                .ok_or_else(|| format!("{}.{} is not a parameter", module.id, name))?;
+            validate_parameter_value(&ParameterId::new(&module.id, name), param.range, *value)?;
         }
     }
     let outputs = graph.modules.iter().filter(|m| m.kind == "output").count();
@@ -326,12 +334,14 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
 
     let mut params = Vec::new();
     let mut param_ids = BTreeMap::new();
+    let mut param_ranges = Vec::new();
     for &i in &schedule {
         let module = &graph.modules[i];
         let c = contract::find(&module.kind).expect("module checked");
         for p in c.params {
             let index = params.len();
             params.push(*module.values.get(p.name).unwrap_or(&p.default));
+            param_ranges.push(p.range);
             param_ids.insert(ParameterId::new(&module.id, p.name), index);
         }
     }
@@ -350,11 +360,19 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 control.id
             ));
         }
-        if !param_ids.contains_key(&control.target) {
+        let Some(&parameter_index) = param_ids.get(&control.target) else {
             return Err(format!(
                 "control '{}' targets unknown parameter '{}.{}'",
                 control.id, control.target.module, control.target.name
             ));
+        };
+        if let Some((min, max)) = param_ranges[parameter_index] {
+            if control.min < min || control.max > max {
+                return Err(format!(
+                    "control '{}' range must stay within {}.{} {min}..{max}",
+                    control.id, control.target.module, control.target.name
+                ));
+            }
         }
         if controls
             .insert(
@@ -460,6 +478,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             .map(|_| Arc::new(AtomicU64::new(NO_OVERRIDE)))
             .collect(),
         params,
+        param_ranges,
         param_ids,
         controls,
         midi_ccs: graph.midi_ccs.clone(),

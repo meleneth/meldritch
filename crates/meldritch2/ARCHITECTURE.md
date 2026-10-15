@@ -68,6 +68,9 @@ atomic `u64` per parameter; validation and handle lookup happen off the process
 path. Handles from replaced revisions refer only to their old cells. The live
 handoff uses a nonblocking lock attempt on the processing side; a busy handoff
 delays activation to a later buffer.
+`Lag` is a stateful signal processor with a contract-owned response range of
+0..1. Authored values, live overrides, and declared control ranges are checked
+against that one bound before publication; its state continues across buffers.
 Contracts expose domain and fan-in explicitly so these restrictions are visible.
 
 `compile_at_rate` validates the sample rate; `compile` uses 48 kHz. Live graph

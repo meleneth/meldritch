@@ -195,3 +195,15 @@ to Output. At 48 kHz the first four frames are approximately
 order; reversing module and cable declaration order must preserve the schedule
 and samples. A split buffer must match a continuous buffer. The compiler adds
 no case for the combined FM/AM shape.
+
+## Stateful Lag and parameter bounds
+
+`23-lag.lua` connects Constant(1) to Lag(response=0.5) and Output. Lag starts
+at zero and applies `state += response * (input - state)` each sample, yielding
+`[0.5, 0.75, 0.875, 0.9375]` for the first four frames. Split buffers must
+match a continuous buffer. Publishing response=1 at a buffer boundary makes
+the next buffer all 1 without resetting state. The contract owns the inclusive
+0..1 response bound; authored values, live overrides, and declared control
+ranges use it. `24-lag-invalid.lua` rejects response=1.5 and
+`25-lag-control-invalid.lua` rejects a control range extending below zero.
+Both rejected candidates leave an accepted machine usable.
