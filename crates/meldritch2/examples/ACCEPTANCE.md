@@ -184,3 +184,14 @@ modulation on the next buffer without reconstructing the graph or resetting
 carrier phase. Existing Sine graphs leave `fm_hz` unconnected and receive 0.
 `21-sine-fm-cycle.lua` must reject self-feedback as an unsupported cycle while
 leaving an accepted graph usable.
+
+## Shared modulation composition
+
+`22-shared-modulator.lua` fans one Sine into two ordinary processing paths:
+Gain scales it to a Hertz offset for `carrier.fm_hz`, while Affine shapes it
+into a 0..1 factor for `level.mod`. The carrier's output passes through level
+to Output. At 48 kHz the first four frames are approximately
+`[0, sqrt(1/2), sqrt(1/2)/2, 0]`. The graph is declared out of dependency
+order; reversing module and cable declaration order must preserve the schedule
+and samples. A split buffer must match a continuous buffer. The compiler adds
+no case for the combined FM/AM shape.

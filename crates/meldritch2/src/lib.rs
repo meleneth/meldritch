@@ -41,6 +41,7 @@ mod tests {
     const AFFINE_CONTROLS: &str = include_str!("../examples/19-affine-controls.lua");
     const SINE_FM: &str = include_str!("../examples/20-sine-fm.lua");
     const SINE_FM_CYCLE: &str = include_str!("../examples/21-sine-fm-cycle.lua");
+    const SHARED_MODULATOR: &str = include_str!("../examples/22-shared-modulator.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -566,6 +567,47 @@ mod tests {
                 "{actual} != {reference}"
             );
         }
+    }
+
+    #[test]
+    fn shared_signal_composes_frequency_and_amplitude_modulation() {
+        let graph = lua::read(SHARED_MODULATOR).unwrap();
+        let mut reordered = graph.clone();
+        reordered.modules.reverse();
+        reordered.connections.reverse();
+        let mut full = compile_at_rate(&graph, 48_000.0).unwrap();
+        let mut alternate = compile_at_rate(&reordered, 48_000.0).unwrap();
+        assert_eq!(
+            full.order(),
+            [
+                "modulator",
+                "amplitude",
+                "depth",
+                "carrier",
+                "level",
+                "output"
+            ]
+        );
+        assert_eq!(full.order(), alternate.order());
+        let mut expected = [f64::NAN; 8];
+        full.process(&mut expected);
+        let peak = std::f64::consts::FRAC_1_SQRT_2;
+        for (actual, reference) in expected[..4]
+            .iter()
+            .copied()
+            .zip([0.0, peak, peak / 2.0, 0.0])
+        {
+            assert!(
+                (actual - reference).abs() < 1e-12,
+                "{actual} != {reference}"
+            );
+        }
+        let mut first = [f64::NAN; 3];
+        let mut second = [f64::NAN; 5];
+        alternate.process(&mut first);
+        alternate.process(&mut second);
+        assert_eq!(expected[..3], first);
+        assert_eq!(expected[3..], second);
     }
 
     #[test]
