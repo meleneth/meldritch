@@ -8,6 +8,7 @@ pub mod midi_device;
 pub mod model;
 pub mod panel;
 pub mod tui;
+mod units;
 
 #[cfg(test)]
 mod tests {

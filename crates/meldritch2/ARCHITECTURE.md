@@ -4,9 +4,10 @@ Meldritch 2 composes musical machines from independently defined Rust modules.
 Its first slices are an offline mono `f64` graph executor, isolated from the
 prototype.
 
-`contract.rs` owns each module type's ports, parameters, and processing function.
-It also declares which type is an Output; compilation selects that role from
-the contract rather than recognizing a module type string.
+Each `src/units/*.rs` file owns one module type's ports, parameters, and
+processing function. `contract.rs` defines their shared shape and explicit
+registry. A module contract declares its Output role; compilation selects that
+role rather than recognizing a module type string.
 Graph instances have unique string IDs. A port is an instance ID plus a named,
 directional endpoint. Connections are explicit edges. Parameters are identified
 by `(instance ID, parameter name)` from the same contract used by Lua discovery,
