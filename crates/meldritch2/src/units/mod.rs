@@ -1,5 +1,6 @@
 pub mod affine;
 pub mod constant;
+pub mod envelope;
 pub mod gain;
 pub mod lag;
 pub mod mirror;

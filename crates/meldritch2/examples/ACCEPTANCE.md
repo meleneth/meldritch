@@ -279,3 +279,22 @@ approximately `[0, sqrt(1/2), sqrt(1/2), sqrt(1/2), 0, -sqrt(1/2), -1,
 that sequence. Publishing `switch.threshold = 2` at a buffer boundary makes
 the next eight samples the unmodified 6 kHz Sine, without reconstructing the
 topology. This composition uses existing contracts, ports, and lowering.
+
+## Gated attack/release envelope
+
+`34-gated-envelope.lua` routes a declared channel-1 CC 7 control through a
+Constant into Envelope's required `gate` input. Gate samples at least 0.5
+target 1, and lower samples target 0. Envelope starts at zero and applies
+`state += response * (target - state)` on every sample, using its independent
+attack or release response according to the target. Both responses are bounded
+to 0..1 by the module contract. The output modulates a Gain over a 0.25
+Constant. Before a gesture it is silent; CC 127 produces
+`[0.125, 0.1875, 0.21875, 0.234375]`, and CC 0 then produces
+`[0.17578125, 0.1318359375, 0.098876953125, 0.07415771484375]`.
+Splitting either phase across buffers must give identical samples. The
+authored gate remains zero while the live control changes it. A release
+override of 1 makes the next release sample zero without resetting or
+rebuilding the graph. `35-envelope-missing-gate.lua` and
+`36-envelope-invalid-attack.lua` must reject their candidates while an
+accepted envelope continues to run. This gate is an audio-rate signal;
+sample-accurate MIDI scheduling and a separate event domain remain open.

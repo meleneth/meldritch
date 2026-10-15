@@ -1,0 +1,13 @@
+local graph = meldritch.graph()
+local output = graph:module("output", "output")
+local level = graph:module("level", "gain", { gain = 1.0 })
+local envelope = graph:module("envelope", "envelope", { attack = 0.5, release = 0.25 })
+local gate = graph:module("gate", "constant", { value = 0.0 })
+local signal = graph:module("signal", "constant", { value = 0.25 })
+graph:connect(level.out, output.input)
+graph:connect(envelope.out, level.mod)
+graph:connect(signal.out, level.input)
+graph:connect(gate.out, envelope.gate)
+graph:control("gate", gate, "value", { min = 0.0, max = 1.0 })
+graph:midi_cc("gate", 1, 7)
+return graph

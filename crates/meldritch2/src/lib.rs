@@ -54,6 +54,10 @@ mod tests {
     const SAMPLE_HOLD: &str = include_str!("../examples/31-sample-hold.lua");
     const SAMPLE_HOLD_MISSING: &str = include_str!("../examples/32-sample-hold-missing.lua");
     const HELD_PEAK_SELECTOR: &str = include_str!("../examples/33-held-peak-selector.lua");
+    const GATED_ENVELOPE: &str = include_str!("../examples/34-gated-envelope.lua");
+    const ENVELOPE_MISSING_GATE: &str = include_str!("../examples/35-envelope-missing-gate.lua");
+    const ENVELOPE_INVALID_ATTACK: &str =
+        include_str!("../examples/36-envelope-invalid-attack.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -66,7 +70,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 11);
+        assert_eq!(contract::all().len(), 12);
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.role, Role::Processor);
         assert_eq!(gain.inputs[0].name, "input");
@@ -125,6 +129,10 @@ mod tests {
             ["signal", "trigger"]
         );
         assert_eq!(sample_hold.params[0].name, "threshold");
+        let envelope = contract::find("envelope").unwrap();
+        assert_eq!(envelope.inputs[0].name, "gate");
+        assert_eq!(envelope.params[0].name, "attack");
+        assert_eq!(envelope.params[1].name, "release");
         assert_eq!(contract::find("output").unwrap().role, Role::Output);
         let error = lua::read(BASIC.replace("gain.input", "gain.missing").as_str()).unwrap_err();
         assert!(
@@ -972,6 +980,80 @@ mod tests {
         {
             assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
         }
+    }
+
+    #[test]
+    fn gated_envelope_has_independent_attack_release_and_continuous_state() {
+        let graph = lua::read(GATED_ENVELOPE).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        assert_eq!(
+            machine.order(),
+            ["gate", "envelope", "signal", "level", "output"]
+        );
+        let router = MidiRouter::from_machine(&machine);
+        let gate = ParameterId::new("gate", "value");
+        let mut silent = [f64::NAN; 2];
+        machine.process(&mut silent);
+        assert_eq!(silent, [0.0; 2]);
+
+        assert!(router.dispatch(&[0xB0, 7, 127]));
+        assert_eq!(machine.authored_value(&gate), Some(0.0));
+        let mut attack = [f64::NAN; 4];
+        machine.process(&mut attack);
+        assert_eq!(attack, [0.125, 0.1875, 0.21875, 0.234375]);
+
+        assert!(router.dispatch(&[0xB0, 7, 0]));
+        let mut release = [f64::NAN; 4];
+        machine.process(&mut release);
+        assert_eq!(
+            release,
+            [0.17578125, 0.1318359375, 0.098876953125, 0.07415771484375]
+        );
+
+        let mut split = compile(&graph).unwrap();
+        let split_router = MidiRouter::from_machine(&split);
+        split.process(&mut silent);
+        assert!(split_router.dispatch(&[0xB0, 7, 127]));
+        let mut first = [f64::NAN; 1];
+        let mut second = [f64::NAN; 3];
+        split.process(&mut first);
+        split.process(&mut second);
+        assert_eq!(attack, [first[0], second[0], second[1], second[2]]);
+        assert!(split_router.dispatch(&[0xB0, 7, 0]));
+        split.process(&mut first);
+        split.process(&mut second);
+        assert_eq!(release, [first[0], second[0], second[1], second[2]]);
+    }
+
+    #[test]
+    fn envelope_parameter_updates_and_rejected_candidates_preserve_machine() {
+        let graph = lua::read(GATED_ENVELOPE).unwrap();
+        let mut host = Host::default();
+        host.submit(&graph).unwrap();
+        let machine = host.accepted().unwrap();
+        let router = MidiRouter::from_machine(machine);
+        let release_id = ParameterId::new("envelope", "release");
+        let mut samples = [f64::NAN; 2];
+        assert!(router.dispatch(&[0xB0, 7, 127]));
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.125, 0.1875]);
+        let error = host
+            .submit(&lua::read(ENVELOPE_MISSING_GATE).unwrap())
+            .unwrap_err();
+        assert!(error.contains("envelope.gate"), "{error}");
+        let error = host
+            .submit(&lua::read(ENVELOPE_INVALID_ATTACK).unwrap())
+            .unwrap_err();
+        assert!(error.contains("envelope.attack must be in 0..1"), "{error}");
+        let machine = host.accepted().unwrap();
+        assert_eq!(machine.authored_value(&release_id), Some(0.25));
+        assert!(machine.set_override(&release_id, Some(-0.1)).is_err());
+        machine.set_override(&release_id, Some(1.0)).unwrap();
+        assert!(router.dispatch(&[0xB0, 7, 0]));
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.0; 2]);
+        machine.set_override(&release_id, None).unwrap();
+        assert_eq!(machine.effective_value(&release_id), Some(0.25));
     }
 
     #[test]

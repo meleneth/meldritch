@@ -92,6 +92,8 @@ mechanism as the other units.
 `SampleHold` detects upward threshold crossings on an audio-rate trigger input,
 captures its separate signal input, and retains the value in compiled instance
 state across buffers. This is a signal processor, not a general event domain.
+`Envelope` follows a thresholded audio-rate Gate with separate attack and
+release responses in 0..1; its compiled state continues across buffers.
 Contracts expose domain and fan-in explicitly so these restrictions are visible.
 
 `compile_at_rate` validates the sample rate; `compile` uses 48 kHz. Live graph
