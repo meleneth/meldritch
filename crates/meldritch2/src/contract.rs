@@ -25,31 +25,34 @@ pub struct Param {
 #[derive(Clone, Copy, Debug)]
 pub struct Contract {
     pub name: &'static str,
-    pub process: fn(&mut [f64], &[f64], f64, f64) -> f64,
+    pub process: fn(&mut [f64], &[f64], &[f64], f64) -> f64,
     pub state_len: usize,
     pub inputs: &'static [Port],
     pub outputs: &'static [Port],
     pub params: &'static [Param],
 }
 
-fn constant(_: &mut [f64], _: &[f64], value: f64, _: f64) -> f64 {
-    value
+fn constant(_: &mut [f64], _: &[f64], params: &[f64], _: f64) -> f64 {
+    params[0]
 }
-fn gain(_: &mut [f64], input: &[f64], gain: f64, _: f64) -> f64 {
-    input[0] * gain
+fn gain(_: &mut [f64], input: &[f64], params: &[f64], _: f64) -> f64 {
+    input[0] * params[0]
 }
-fn output(_: &mut [f64], input: &[f64], _: f64, _: f64) -> f64 {
+fn output(_: &mut [f64], input: &[f64], _: &[f64], _: f64) -> f64 {
     input[0]
 }
-fn mix(_: &mut [f64], input: &[f64], _: f64, _: f64) -> f64 {
+fn mix(_: &mut [f64], input: &[f64], _: &[f64], _: f64) -> f64 {
     input[0] + input[1]
 }
-fn multiply(_: &mut [f64], input: &[f64], _: f64, _: f64) -> f64 {
+fn multiply(_: &mut [f64], input: &[f64], _: &[f64], _: f64) -> f64 {
     input[0] * input[1]
 }
-fn sine(state: &mut [f64], _: &[f64], frequency: f64, sample_rate: f64) -> f64 {
+fn affine(_: &mut [f64], input: &[f64], params: &[f64], _: f64) -> f64 {
+    input[0] * params[0] + params[1]
+}
+fn sine(state: &mut [f64], _: &[f64], params: &[f64], sample_rate: f64) -> f64 {
     let sample = (std::f64::consts::TAU * state[0]).sin();
-    state[0] = (state[0] + frequency / sample_rate).rem_euclid(1.0);
+    state[0] = (state[0] + params[0] / sample_rate).rem_euclid(1.0);
     sample
 }
 
@@ -86,11 +89,19 @@ const GAIN: Param = Param {
     name: "gain",
     default: 1.0,
 };
+const SCALE: Param = Param {
+    name: "scale",
+    default: 1.0,
+};
+const OFFSET: Param = Param {
+    name: "offset",
+    default: 0.0,
+};
 const FREQUENCY: Param = Param {
     name: "frequency",
     default: 440.0,
 };
-const CONTRACTS: [Contract; 6] = [
+const CONTRACTS: [Contract; 7] = [
     Contract {
         name: "constant",
         process: constant,
@@ -130,6 +141,14 @@ const CONTRACTS: [Contract; 6] = [
         inputs: &[LEFT, RIGHT],
         outputs: &[OUT],
         params: &[],
+    },
+    Contract {
+        name: "affine",
+        process: affine,
+        state_len: 0,
+        inputs: &[INPUT],
+        outputs: &[OUT],
+        params: &[SCALE, OFFSET],
     },
     Contract {
         name: "sine",

@@ -35,6 +35,7 @@ mod tests {
     const TWO_SINES_MULTIPLY: &str = include_str!("../examples/13-two-sines-multiply.lua");
     const GAIN_FAN_IN: &str = include_str!("../examples/14-gain-fan-in.lua");
     const OUTPUT_FAN_IN_INVALID: &str = include_str!("../examples/15-output-fan-in-invalid.lua");
+    const AFFINE: &str = include_str!("../examples/16-affine.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -47,7 +48,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 6);
+        assert_eq!(contract::all().len(), 7);
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.inputs[0].name, "input");
         assert_eq!(gain.inputs[0].fan_in, FanIn::Sum);
@@ -57,6 +58,15 @@ mod tests {
         assert_eq!(
             mix.inputs.iter().map(|port| port.name).collect::<Vec<_>>(),
             ["left", "right"]
+        );
+        let affine = contract::find("affine").unwrap();
+        assert_eq!(
+            affine
+                .params
+                .iter()
+                .map(|param| param.name)
+                .collect::<Vec<_>>(),
+            ["scale", "offset"]
         );
         let error = lua::read(BASIC.replace("gain.input", "gain.missing").as_str()).unwrap_err();
         assert!(
@@ -239,6 +249,34 @@ mod tests {
         let mut samples = [f64::NAN; 4];
         host.accepted().unwrap().process(&mut samples);
         assert_eq!(samples, [0.1875; 4]);
+    }
+
+    #[test]
+    fn two_module_parameters_retain_independent_identities() {
+        let graph = lua::read(AFFINE).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        assert_eq!(machine.order(), ["source", "transform", "output"]);
+        let scale = ParameterId::new("transform", "scale");
+        let offset = ParameterId::new("transform", "offset");
+        assert_eq!(machine.authored_value(&scale), Some(0.5));
+        assert_eq!(machine.authored_value(&offset), Some(0.125));
+        let scale_handle = machine.parameter_handle(&scale).unwrap();
+        let offset_handle = machine.parameter_handle(&offset).unwrap();
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.25; 4]);
+        scale_handle.publish(Some(0.75)).unwrap();
+        assert_eq!(machine.authored_value(&scale), Some(0.5));
+        assert_eq!(machine.effective_value(&offset), Some(0.125));
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.3125; 4]);
+        offset_handle.publish(Some(0.25)).unwrap();
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.4375; 4]);
+        scale_handle.publish(None).unwrap();
+        offset_handle.publish(None).unwrap();
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.25; 4]);
     }
 
     #[test]

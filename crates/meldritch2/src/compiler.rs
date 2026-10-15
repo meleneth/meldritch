@@ -9,11 +9,11 @@ use crate::model::{Graph, MidiCc, ParameterId};
 
 #[derive(Clone, Debug)]
 struct Op {
-    process: fn(&mut [f64], &[f64], f64, f64) -> f64,
+    process: fn(&mut [f64], &[f64], &[f64], f64) -> f64,
     state: Vec<f64>,
     inputs: Vec<Vec<usize>>,
     output: usize,
-    param: Option<usize>,
+    params: Vec<usize>,
 }
 
 const NO_OVERRIDE: u64 = f64::NAN.to_bits();
@@ -100,6 +100,7 @@ pub struct Machine {
     ops: Vec<Op>,
     slots: Vec<f64>,
     input_scratch: Vec<f64>,
+    param_scratch: Vec<f64>,
     params: Vec<f64>,
     authored: Vec<f64>,
     published: Vec<Arc<AtomicU64>>,
@@ -129,11 +130,13 @@ impl Machine {
                         .iter()
                         .fold(0.0, |sum, source| sum + self.slots[*source]);
                 }
-                let param = op.param.map(|i| self.params[i]).unwrap_or(0.0);
+                for (slot, index) in op.params.iter().enumerate() {
+                    self.param_scratch[slot] = self.params[*index];
+                }
                 self.slots[op.output] = (op.process)(
                     &mut op.state,
                     &self.input_scratch[..op.inputs.len()],
-                    param,
+                    &self.param_scratch[..op.params.len()],
                     self.sample_rate,
                 );
             }
@@ -217,12 +220,6 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         }
         let contract = contract::find(&module.kind)
             .ok_or_else(|| format!("unknown module type '{}'", module.kind))?;
-        if contract.params.len() > 1 {
-            return Err(format!(
-                "module type '{}' exceeds the current one-parameter executor",
-                module.kind
-            ));
-        }
         for (name, value) in &module.values {
             if !contract.params.iter().any(|p| p.name == name) {
                 return Err(format!("{}.{} is not a parameter", module.id, name));
@@ -396,16 +393,17 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 sources
             })
             .collect();
-        let param = c
+        let params = c
             .params
-            .first()
-            .map(|p| param_ids[&ParameterId::new(&module.id, p.name)]);
+            .iter()
+            .map(|p| param_ids[&ParameterId::new(&module.id, p.name)])
+            .collect();
         ops.push(Op {
             process: c.process,
             state: vec![0.0; c.state_len],
             inputs,
             output: i,
-            param,
+            params,
         });
     }
     let output_slot = graph
@@ -424,6 +422,18 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 .map(|m| contract::find(&m.kind)
                     .expect("module checked")
                     .inputs
+                    .len())
+                .max()
+                .unwrap_or(0)
+        ],
+        param_scratch: vec![
+            0.0;
+            graph
+                .modules
+                .iter()
+                .map(|m| contract::find(&m.kind)
+                    .expect("module checked")
+                    .params
                     .len())
                 .max()
                 .unwrap_or(0)

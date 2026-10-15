@@ -140,3 +140,13 @@ samples. `15-output-fan-in-invalid.lua` must reject a second cable to
 `output.input`, whose contract still permits one, without replacing an accepted
 machine. Fan-in aggregation belongs to the port contract and generic executor;
 there is no graph topology case for these three module types.
+
+## Multiple parameters per module milestone
+
+`16-affine.lua` applies `input * scale + offset` with independently authored
+`transform.scale = 0.5` and `transform.offset = 0.125`, rendering 0.25 per
+sample. The contract exposes both parameters through Lua and inspection. A
+control-side update to `transform.scale = 0.75` must render 0.3125 at the next
+buffer boundary while `transform.offset` remains authored at 0.125. Clearing
+the override restores 0.25. The executor must use contract parameter order
+without recognizing Affine as a special topology or allocating in processing.

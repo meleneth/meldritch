@@ -56,8 +56,9 @@ per sample, supporting explicit audio-rate modulation through ordinary cables.
 `gain.input` currently declares summed fan-in; its connected sources execute
 in stable module-ID order. Other inputs permit one cable. Cycles, disconnected
 required inputs, and multiple Output instances are rejected. Feedback,
-other domains, block DSP, and multi-parameter
-modules remain future work. Parameter publication uses one
+other domains, and block DSP remain future work. `Affine` demonstrates two
+independently identified parameters on one module; the executor passes values
+in contract order from preallocated scratch space. Parameter publication uses one
 atomic `u64` per parameter; validation and handle lookup happen off the process
 path. Handles from replaced revisions refer only to their old cells. The live
 handoff uses a nonblocking lock attempt on the processing side; a busy handoff
