@@ -391,8 +391,11 @@ before rendering and enqueues frame 3 on/440 Hz, frame 7 on/880 Hz, and frame
 prepared 16-frame timeline. Each event applies before its sample, including
 events on a buffer boundary. The producer sees the first unrendered absolute
 frame after each completed block. A state submitted behind that cursor clamps
-forward; out-of-order states also clamp forward to preserve queue order.
-The queue holds 64 states and reports full without changing accepted entries.
+forward; out-of-order states on the same channel also clamp forward. Different
+channels may enter the queue in a different order from their frame positions;
+the consumer orders them by frame and preserves arrival order for ties. The
+queue holds 64 states, including deferred future states, and reports full
+without changing accepted entries.
 Unmapped channels, nonfinite or out-of-range pitch, wrong machine revisions,
 invalid buffer lengths, and frame overflow reject without mutating DSP state.
 Producer validation and target resolution happen outside the audio path; the
@@ -441,6 +444,11 @@ one for frame 103. Channel-1 CC 123 then closes only its Gate at the next
 chunk, discards its frame-99 event, and leaves channel 2 sounding. The
 remaining 110-frame render must match a prepared timeline with channel 1 off
 at frame 4 and channel 2 changing pitch at frame 103, sample for sample.
+After that channel-1 reset, a new channel-1 note at frame 15 must sound before
+the still-pending channel-2 frame-103 change, despite entering the queue later.
+The complete PCM matches a prepared timeline. Deferred states still count
+toward the 64-state cap. A reset also discards a deferred event after more than
+64 other-channel events have been processed.
 
 ## Explicit MIDI note velocity
 

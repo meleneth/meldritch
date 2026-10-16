@@ -19,6 +19,18 @@ struct Event {
     pitch_hz: f64,
     gate: bool,
     velocity: f64,
+    reset_epoch: u64,
+}
+
+#[derive(Clone, Copy)]
+struct PendingEvent {
+    sequence: u64,
+    event: Event,
+}
+
+fn older_epoch(event: u64, seen: u64) -> bool {
+    let distance = seen.wrapping_sub(event);
+    distance != 0 && distance < (1_u64 << 63)
 }
 
 struct Slot {
@@ -30,6 +42,7 @@ struct Slot {
     pitch_bits: AtomicU64,
     gate: AtomicBool,
     velocity_bits: AtomicU64,
+    reset_epoch: AtomicU64,
 }
 
 impl Slot {
@@ -43,6 +56,7 @@ impl Slot {
             pitch_bits: AtomicU64::new(0),
             gate: AtomicBool::new(false),
             velocity_bits: AtomicU64::new(1.0_f64.to_bits()),
+            reset_epoch: AtomicU64::new(0),
         }
     }
 
@@ -60,6 +74,7 @@ impl Slot {
         self.gate.store(event.gate, Ordering::Relaxed);
         self.velocity_bits
             .store(event.velocity.to_bits(), Ordering::Relaxed);
+        self.reset_epoch.store(event.reset_epoch, Ordering::Relaxed);
     }
 
     fn read(&self) -> Event {
@@ -75,6 +90,7 @@ impl Slot {
             pitch_hz: f64::from_bits(self.pitch_bits.load(Ordering::Relaxed)),
             gate: self.gate.load(Ordering::Relaxed),
             velocity: f64::from_bits(self.velocity_bits.load(Ordering::Relaxed)),
+            reset_epoch: self.reset_epoch.load(Ordering::Relaxed),
         }
     }
 }
@@ -83,8 +99,8 @@ struct Queue {
     slots: [Slot; MAX_EVENTS],
     head: AtomicU64,
     tail: AtomicU64,
+    pending_count: AtomicUsize,
     cursor: AtomicU64,
-    reset_tail: [AtomicU64; 16],
     reset_epoch: [AtomicU64; 16],
 }
 
@@ -113,8 +129,7 @@ pub struct RenderReport {
 pub struct LiveNoteProducer {
     queue: Arc<Queue>,
     targets: [Option<TimedNoteTarget>; 16],
-    last_frame: u64,
-    discard_before: [u64; 16],
+    last_frame: [u64; 16],
 }
 
 /// The sole reader; owns the sequential DSP cursor and held note state.
@@ -124,7 +139,7 @@ pub struct LiveNoteConsumer {
     cursor: u64,
     active: [Option<Event>; 16],
     seen_reset: [u64; 16],
-    discard_before: [u64; 16],
+    pending: [Option<PendingEvent>; MAX_EVENTS],
 }
 
 pub fn live_note_queue(
@@ -143,16 +158,15 @@ pub fn live_note_queue(
         slots: array::from_fn(|_| Slot::new()),
         head: AtomicU64::new(0),
         tail: AtomicU64::new(0),
+        pending_count: AtomicUsize::new(0),
         cursor: AtomicU64::new(start_frame),
-        reset_tail: array::from_fn(|_| AtomicU64::new(0)),
         reset_epoch: array::from_fn(|_| AtomicU64::new(0)),
     });
     (
         LiveNoteProducer {
             queue: Arc::clone(&queue),
             targets,
-            last_frame: start_frame,
-            discard_before: [0; 16],
+            last_frame: [start_frame; 16],
         },
         LiveNoteConsumer {
             queue,
@@ -160,7 +174,7 @@ pub fn live_note_queue(
             cursor: start_frame,
             active: [None; 16],
             seen_reset: [0; 16],
-            discard_before: [0; 16],
+            pending: [None; MAX_EVENTS],
         },
     )
 }
@@ -178,29 +192,12 @@ impl LiveNoteProducer {
         if self.targets.get(index).and_then(|target| *target).is_none() {
             return Err(PushError::UnmappedChannel);
         }
-        let tail = self.queue.tail.load(Ordering::Relaxed);
-        self.queue.reset_tail[index].store(tail, Ordering::Relaxed);
         self.queue.reset_epoch[index].fetch_add(1, Ordering::Release);
-        self.discard_before[index] = tail;
-        let head = self.queue.head.load(Ordering::Acquire);
-        let mut last_frame = self.first_unrendered_frame();
-        for offset in 0..tail.wrapping_sub(head).min(MAX_EVENTS as u64) {
-            let sequence = head.wrapping_add(offset);
-            let event = self.queue.slots[(sequence as usize) % MAX_EVENTS].read();
-            let channel = usize::from(event.channel - 1);
-            let cutoff = self.discard_before[channel];
-            let canceled = self.queue.reset_epoch[channel].load(Ordering::Relaxed) != 0
-                && cutoff.wrapping_sub(sequence) > 0
-                && cutoff.wrapping_sub(sequence) <= MAX_EVENTS as u64;
-            if !canceled {
-                last_frame = last_frame.max(event.frame);
-            }
-        }
-        self.last_frame = last_frame;
+        self.last_frame[index] = self.first_unrendered_frame();
         Ok(())
     }
 
-    /// Enqueue with unity velocity. Stale or reordered frames clamp forward.
+    /// Enqueue with unity velocity. Stale or reordered frames clamp per channel.
     pub fn try_push(&mut self, state: TimedNoteState) -> Result<PushOutcome, PushError> {
         self.try_push_velocity(state, 1.0)
     }
@@ -227,13 +224,18 @@ impl LiveNoteProducer {
         }
         let tail = self.queue.tail.load(Ordering::Relaxed);
         let head = self.queue.head.load(Ordering::Acquire);
-        if tail.wrapping_sub(head) >= MAX_EVENTS as u64 {
+        if self.queue.pending_count.load(Ordering::Acquire) >= MAX_EVENTS
+            || tail.wrapping_sub(head) >= MAX_EVENTS as u64
+        {
             return Err(PushError::Full);
         }
+        let channel = usize::from(state.channel - 1);
         let frame = state
             .frame
-            .max(self.last_frame)
+            .max(self.last_frame[channel])
             .max(self.first_unrendered_frame());
+        // Count before publishing the slot, so the reader can always retire it.
+        self.queue.pending_count.fetch_add(1, Ordering::AcqRel);
         self.queue.slots[(tail as usize) % MAX_EVENTS].write(Event {
             frame,
             channel: state.channel,
@@ -243,11 +245,12 @@ impl LiveNoteProducer {
             pitch_hz: state.pitch_hz,
             gate: state.gate,
             velocity,
+            reset_epoch: self.queue.reset_epoch[channel].load(Ordering::Relaxed),
         });
         self.queue
             .tail
             .store(tail.wrapping_add(1), Ordering::Release);
-        self.last_frame = frame;
+        self.last_frame[channel] = frame;
         Ok(PushOutcome {
             frame,
             clamped: frame != state.frame,
@@ -301,8 +304,6 @@ impl LiveNoteConsumer {
             let epoch = self.queue.reset_epoch[channel].load(Ordering::Acquire);
             if epoch != self.seen_reset[channel] {
                 self.seen_reset[channel] = epoch;
-                self.discard_before[channel] =
-                    self.queue.reset_tail[channel].load(Ordering::Relaxed);
                 if let Some(event) = &mut self.active[channel] {
                     event.gate = false;
                 }
@@ -319,25 +320,58 @@ impl LiveNoteConsumer {
         }
         let mut rendered = 0;
         let mut report = RenderReport::default();
-        loop {
-            let head = self.queue.head.load(Ordering::Relaxed);
-            if head == self.queue.tail.load(Ordering::Acquire) {
-                break;
+        // A reset may invalidate events already moved out of the ring.
+        for entry in &mut self.pending {
+            if let Some(pending) = entry {
+                let channel = usize::from(pending.event.channel - 1);
+                if older_epoch(pending.event.reset_epoch, self.seen_reset[channel]) {
+                    *entry = None;
+                    self.queue.pending_count.fetch_sub(1, Ordering::AcqRel);
+                    report.discarded += 1;
+                }
             }
+        }
+        // Snapshot the published tail. New arrivals wait for the next block;
+        // the fixed pending array bounds both memory and per-block work.
+        let tail = self.queue.tail.load(Ordering::Acquire);
+        let mut head = self.queue.head.load(Ordering::Relaxed);
+        while head != tail {
             let event = self.queue.slots[(head as usize) % MAX_EVENTS].read();
             let channel = usize::from(event.channel - 1);
-            let before = self.discard_before[channel].wrapping_sub(head);
-            if self.seen_reset[channel] != 0 && before > 0 && before <= MAX_EVENTS as u64 {
+            if older_epoch(event.reset_epoch, self.seen_reset[channel]) {
+                self.queue.pending_count.fetch_sub(1, Ordering::AcqRel);
                 report.discarded += 1;
-                self.queue
-                    .head
-                    .store(head.wrapping_add(1), Ordering::Release);
-                continue;
+            } else {
+                let slot = self
+                    .pending
+                    .iter_mut()
+                    .find(|entry| entry.is_none())
+                    .expect("pending count bounds deferred events");
+                *slot = Some(PendingEvent {
+                    sequence: head,
+                    event,
+                });
             }
-            if event.frame >= end {
-                break;
-            }
-            // A producer can publish while an earlier segment is rendering.
+            head = head.wrapping_add(1);
+            self.queue.head.store(head, Ordering::Release);
+        }
+        loop {
+            let next = self
+                .pending
+                .iter()
+                .enumerate()
+                .filter_map(|(index, entry)| {
+                    entry
+                        .filter(|pending| {
+                            pending.event.frame < end
+                                && pending.event.reset_epoch
+                                    == self.seen_reset[usize::from(pending.event.channel - 1)]
+                        })
+                        .map(|pending| (index, pending))
+                })
+                .min_by_key(|(_, pending)| (pending.event.frame, pending.sequence));
+            let Some((index, pending)) = next else { break };
+            let event = pending.event;
             // Never revisit samples already written in this block.
             let requested = event.frame.saturating_sub(self.cursor) as usize;
             let offset = requested.max(rendered);
@@ -353,9 +387,8 @@ impl LiveNoteConsumer {
             report.applied += 1;
             report.late += usize::from(event.frame < self.cursor || offset > requested);
             rendered = offset;
-            self.queue
-                .head
-                .store(head.wrapping_add(1), Ordering::Release);
+            self.pending[index] = None;
+            self.queue.pending_count.fetch_sub(1, Ordering::AcqRel);
         }
         machine.process_prepared(&mut buffer[rendered..]);
         self.cursor = end;

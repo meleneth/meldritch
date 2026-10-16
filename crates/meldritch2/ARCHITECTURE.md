@@ -72,10 +72,13 @@ floor rounding for later events, clamps late events to the first unrendered
 frame, and re-anchors if MIDI time moves backward. A regressing audio cursor
 or frame overflow rejects without changing the clock. `live_note_queue` adds
 a fixed 64-state single-writer/single-reader handoff. Its producer validates
-pitches against resolved MIDI note targets and publishes nondecreasing absolute
-frames through atomic slots. Its consumer applies available states at sample
-boundaries through the existing machine kernel, keeps per-channel held state
-across buffers, and publishes its first unrendered frame. Events that arrive
+pitches against resolved MIDI note targets and publishes absolute frames through
+atomic slots, clamping stale or reordered frames within each channel. Its
+consumer holds at most 64 pending states in fixed storage and applies them by
+frame, with arrival order breaking same-frame ties. The 64-state limit includes
+deferred future states. Per-event reset generations invalidate old states even
+when another channel advances past them. The consumer keeps per-channel held
+state across buffers and publishes its first unrendered frame. Events that arrive
 after a block has passed their frame apply at the next block start. A producer
 passes that cursor to `MidiFrameClock` in the MIDI callback. The callback
 keeps a fixed held-key priority stack per mapped channel and commits its

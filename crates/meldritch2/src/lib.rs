@@ -2017,6 +2017,138 @@ mod tests {
     }
 
     #[test]
+    fn channel_reset_can_schedule_before_another_channels_deferred_event() {
+        let graph = lua::read(include_str!("../examples/49-channel-reset.lua")).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let (mut producer, mut consumer) = live_note_queue(&machine, 0);
+        let state = |frame, channel, pitch_hz, gate| TimedNoteState {
+            frame,
+            channel,
+            pitch_hz,
+            gate,
+        };
+        producer.try_push(state(3, 1, 440.0, true)).unwrap();
+        producer.try_push(state(3, 2, 440.0, true)).unwrap();
+        let mut actual = [0.0; 114];
+        consumer
+            .render_next(&mut machine, &mut actual[..4])
+            .unwrap();
+        producer.try_push(state(99, 1, 880.0, true)).unwrap();
+        producer.try_push(state(103, 2, 880.0, true)).unwrap();
+        producer.emergency_release(1).unwrap();
+        let report = consumer
+            .render_next(&mut machine, &mut actual[4..12])
+            .unwrap();
+        assert_eq!(report.discarded, 1);
+        assert_eq!(report.applied, 0);
+        let outcome = producer.try_push(state(15, 1, 880.0, true)).unwrap();
+        assert_eq!(outcome.frame, 15);
+        assert!(!outcome.clamped);
+        let report = consumer
+            .render_next(&mut machine, &mut actual[12..])
+            .unwrap();
+        assert_eq!(report.applied, 2);
+
+        let mut reference = compile(&graph).unwrap();
+        let mut plan = TimedNotePlan::prepare(
+            &reference,
+            0,
+            &[
+                state(3, 1, 440.0, true),
+                state(3, 2, 440.0, true),
+                state(4, 1, 440.0, false),
+                state(15, 1, 880.0, true),
+                state(103, 2, 880.0, true),
+            ],
+        )
+        .unwrap();
+        let mut expected = [0.0; 114];
+        plan.render_next(&mut reference, &mut expected).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn deferred_future_events_still_use_queue_capacity() {
+        let graph = lua::read(include_str!("../examples/49-channel-reset.lua")).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let (mut producer, mut consumer) = live_note_queue(&machine, 0);
+        let state = TimedNoteState {
+            frame: 100,
+            channel: 1,
+            pitch_hz: 440.0,
+            gate: true,
+        };
+        for _ in 0..MAX_EVENTS {
+            producer.try_push(state).unwrap();
+        }
+        assert_eq!(
+            consumer
+                .render_next(&mut machine, &mut [0.0; 1])
+                .unwrap()
+                .applied,
+            0
+        );
+        assert_eq!(producer.try_push(state), Err(PushError::Full));
+        let mut through_future = [0.0; 100];
+        assert_eq!(
+            consumer
+                .render_next(&mut machine, &mut through_future)
+                .unwrap()
+                .applied,
+            MAX_EVENTS
+        );
+        assert_eq!(producer.try_push(state).unwrap().frame, 101);
+    }
+
+    #[test]
+    fn reset_discards_a_deferred_event_after_many_other_channel_events() {
+        let graph = lua::read(include_str!("../examples/49-channel-reset.lua")).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let (mut producer, mut consumer) = live_note_queue(&machine, 0);
+        producer
+            .try_push(TimedNoteState {
+                frame: 10_000,
+                channel: 1,
+                pitch_hz: 440.0,
+                gate: true,
+            })
+            .unwrap();
+        for frame in 0..130 {
+            producer
+                .try_push(TimedNoteState {
+                    frame,
+                    channel: 2,
+                    pitch_hz: 440.0,
+                    gate: true,
+                })
+                .unwrap();
+            assert_eq!(
+                consumer
+                    .render_next(&mut machine, &mut [0.0; 1])
+                    .unwrap()
+                    .applied,
+                1
+            );
+        }
+        producer.emergency_release(1).unwrap();
+        let report = consumer.render_next(&mut machine, &mut [0.0; 1]).unwrap();
+        assert_eq!(report.discarded, 1);
+        assert_eq!(report.applied, 0);
+        assert_eq!(
+            producer
+                .try_push(TimedNoteState {
+                    frame: 131,
+                    channel: 1,
+                    pitch_hz: 880.0,
+                    gate: true,
+                })
+                .unwrap()
+                .frame,
+            131
+        );
+    }
+
+    #[test]
     fn live_note_queue_clamps_late_events_and_preserves_capacity() {
         let graph = lua::read(LIVE_NOTE_QUEUE).unwrap();
         let mut machine = compile(&graph).unwrap();
