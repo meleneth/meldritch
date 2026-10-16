@@ -1,6 +1,6 @@
 use std::{
     io::{Write, stdout},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crossterm::{
@@ -13,9 +13,106 @@ use crossterm::{
 
 use crate::{
     device::DeviceOutput,
+    midi::{TimedMidiError, TimedMidiRouter},
     midi_device::MidiInputSession,
     panel::{Gesture, Panel},
 };
+
+const NOTE_KEYS: [(char, u8); 12] = [
+    ('z', 60),
+    ('s', 61),
+    ('x', 62),
+    ('d', 63),
+    ('c', 64),
+    ('v', 65),
+    ('g', 66),
+    ('b', 67),
+    ('h', 68),
+    ('n', 69),
+    ('j', 70),
+    ('m', 71),
+];
+const NOTE_NAMES: [&str; 12] = [
+    "C4", "C#4", "D4", "D#4", "E4", "F4", "F#4", "G4", "G#4", "A4", "A#4", "B4",
+];
+
+/// A latched one-octave TUI keyboard using the compiled timed-note route.
+pub struct TuiKeyboard {
+    router: TimedMidiRouter,
+    channel: u8,
+    active: Option<u8>,
+    started: Instant,
+    last_error: Option<String>,
+}
+
+impl TuiKeyboard {
+    pub fn new(router: TimedMidiRouter) -> Option<Self> {
+        let channel = router.first_mapped_channel()?;
+        Some(Self {
+            router,
+            channel,
+            active: None,
+            started: Instant::now(),
+            last_error: None,
+        })
+    }
+
+    fn elapsed_us(&self) -> u64 {
+        u64::try_from(self.started.elapsed().as_micros()).unwrap_or(u64::MAX)
+    }
+
+    fn send(&mut self, midi_us: u64, message: [u8; 3]) -> Result<(), TimedMidiError> {
+        if let Err(error) = self.router.dispatch_recovering(midi_us, &message) {
+            self.router.release_all();
+            self.active = None;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// One press selects a pitch; Space releases the latched Gate.
+    fn handle_key_at(&mut self, code: KeyCode, midi_us: u64) -> Result<bool, TimedMidiError> {
+        let note = match code {
+            KeyCode::Char(' ') => {
+                if let Some(previous) = self.active {
+                    self.send(midi_us, [0x80 | (self.channel - 1), previous, 0])?;
+                    self.active = None;
+                }
+                self.last_error = None;
+                return Ok(true);
+            }
+            KeyCode::Char(key) => NOTE_KEYS
+                .iter()
+                .find(|(candidate, _)| *candidate == key.to_ascii_lowercase())
+                .map(|(_, note)| *note),
+            _ => None,
+        };
+        let Some(note) = note else { return Ok(false) };
+        if self.active == Some(note) {
+            return Ok(true);
+        }
+        if let Some(previous) = self.active {
+            self.send(midi_us, [0x80 | (self.channel - 1), previous, 0])?;
+            self.active = None;
+        }
+        self.send(midi_us, [0x90 | (self.channel - 1), note, 127])?;
+        self.active = Some(note);
+        self.last_error = None;
+        Ok(true)
+    }
+
+    fn active_name(&self) -> &'static str {
+        self.active
+            .map(|note| NOTE_NAMES[usize::from(note - 60)])
+            .unwrap_or("off")
+    }
+}
+
+impl Drop for TuiKeyboard {
+    fn drop(&mut self) {
+        self.router.release_all();
+    }
+}
 
 struct Terminal;
 
@@ -41,6 +138,7 @@ fn draw(
     panel: &Panel,
     output: &DeviceOutput,
     midi_session: Option<&MidiInputSession>,
+    keyboard: Option<&TuiKeyboard>,
 ) -> Result<(), String> {
     let mut out = stdout();
     queue!(
@@ -55,6 +153,21 @@ fn draw(
         Print("Up/Down: select  Left/Right: adjust  Home/End: bounds\r\n\r\n")
     )
     .map_err(|error| error.to_string())?;
+    if let Some(keyboard) = keyboard {
+        queue!(
+            out,
+            Print(format!(
+                "Z S X D C V G B H N J M: C4-B4  Space: release | channel {} | note: {}\r\n",
+                keyboard.channel,
+                keyboard.active_name(),
+            ))
+        )
+        .map_err(|error| error.to_string())?;
+        if let Some(error) = &keyboard.last_error {
+            queue!(out, Print(format!("Keyboard note error: {error}\r\n")))
+                .map_err(|error| error.to_string())?;
+        }
+    }
     if panel.rows().is_empty() {
         queue!(out, Print("This instrument declares no controls.\r\n"))
             .map_err(|error| error.to_string())?;
@@ -96,13 +209,14 @@ fn draw(
 pub fn perform(
     output: &DeviceOutput,
     midi_session: Option<&MidiInputSession>,
+    mut keyboard: Option<TuiKeyboard>,
 ) -> Result<(), String> {
     let mut panel = Panel::new(output.controls());
     let _terminal = Terminal::enter()?;
-    draw(&panel, output, midi_session)?;
+    draw(&panel, output, midi_session, keyboard.as_ref())?;
     loop {
         if !event::poll(Duration::from_millis(100)).map_err(|error| error.to_string())? {
-            draw(&panel, output, midi_session)?;
+            draw(&panel, output, midi_session, keyboard.as_ref())?;
             continue;
         }
         let Event::Key(key) = event::read().map_err(|error| error.to_string())? else {
@@ -111,9 +225,29 @@ pub fn perform(
         if key.kind != KeyEventKind::Press {
             continue;
         }
+        if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
+            || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+        {
+            break;
+        }
+        if key.modifiers.difference(KeyModifiers::SHIFT).is_empty()
+            && let Some(keyboard) = &mut keyboard
+        {
+            let midi_us = keyboard.elapsed_us();
+            match keyboard.handle_key_at(key.code, midi_us) {
+                Ok(true) => {
+                    draw(&panel, output, midi_session, Some(keyboard))?;
+                    continue;
+                }
+                Err(error) => {
+                    keyboard.last_error = Some(format!("{error:?}"));
+                    draw(&panel, output, midi_session, Some(keyboard))?;
+                    continue;
+                }
+                Ok(false) => {}
+            }
+        }
         let gesture = match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => break,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
             KeyCode::Up => Some(Gesture::Previous),
             KeyCode::Down => Some(Gesture::Next),
             KeyCode::Left => Some(Gesture::Decrease),
@@ -124,8 +258,102 @@ pub fn perform(
         };
         if let Some(gesture) = gesture {
             panel.apply(gesture)?;
-            draw(&panel, output, midi_session)?;
+            draw(&panel, output, midi_session, keyboard.as_ref())?;
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::KeyCode;
+
+    use super::TuiKeyboard;
+    use crate::{
+        compiler::compile,
+        live_notes::live_note_queue,
+        lua,
+        midi::TimedMidiRouter,
+        timed::{TimedNotePlan, TimedNoteState},
+    };
+
+    #[test]
+    fn tui_keys_select_pitch_and_space_releases_the_gate() {
+        let graph = lua::read(include_str!("../examples/53-tui-keys.lua")).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let router = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        let mut keyboard = TuiKeyboard::new(router).unwrap();
+        assert_eq!(keyboard.channel, 1);
+        assert_eq!(keyboard.handle_key_at(KeyCode::Char('q'), 0), Ok(false));
+        assert_eq!(keyboard.handle_key_at(KeyCode::Char('z'), 0), Ok(true));
+        assert_eq!(keyboard.handle_key_at(KeyCode::Char('z'), 42), Ok(true));
+        assert_eq!(keyboard.handle_key_at(KeyCode::Char('X'), 84), Ok(true));
+        assert_eq!(keyboard.active_name(), "D4");
+        assert_eq!(keyboard.handle_key_at(KeyCode::Char(' '), 167), Ok(true));
+        assert_eq!(keyboard.active_name(), "off");
+        let mut actual = [f64::NAN; 16];
+        assert_eq!(
+            consumer
+                .render_next(&mut machine, &mut actual)
+                .unwrap()
+                .applied,
+            4
+        );
+
+        let c4 = 440.0 * 2.0_f64.powf((60.0 - 69.0) / 12.0);
+        let d4 = 440.0 * 2.0_f64.powf((62.0 - 69.0) / 12.0);
+        let mut reference = compile(&graph).unwrap();
+        let mut plan = TimedNotePlan::prepare(
+            &reference,
+            0,
+            &[
+                TimedNoteState {
+                    frame: 3,
+                    channel: 1,
+                    pitch_hz: c4,
+                    gate: true,
+                },
+                TimedNoteState {
+                    frame: 7,
+                    channel: 1,
+                    pitch_hz: c4,
+                    gate: false,
+                },
+                TimedNoteState {
+                    frame: 7,
+                    channel: 1,
+                    pitch_hz: d4,
+                    gate: true,
+                },
+                TimedNoteState {
+                    frame: 11,
+                    channel: 1,
+                    pitch_hz: d4,
+                    gate: false,
+                },
+            ],
+        )
+        .unwrap();
+        let mut expected = [0.0; 16];
+        plan.render_next(&mut reference, &mut expected).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn closing_tui_keyboard_releases_its_active_note() {
+        let graph = lua::read(include_str!("../examples/53-tui-keys.lua")).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let router = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        let mut keyboard = TuiKeyboard::new(router).unwrap();
+        keyboard.handle_key_at(KeyCode::Char('z'), 0).unwrap();
+        let mut opening = [0.0; 4];
+        consumer.render_next(&mut machine, &mut opening).unwrap();
+        assert!(opening[3].abs() > 0.0);
+        drop(keyboard);
+        let mut released = [f64::NAN; 4];
+        consumer.render_next(&mut machine, &mut released).unwrap();
+        assert_eq!(released, [0.0; 4]);
+    }
 }

@@ -166,9 +166,16 @@ fn main() {
                     }
                     None => None,
                 };
+                let keyboard = if midi_session.is_none() {
+                    output
+                        .take_timed_midi_router()
+                        .and_then(tui::TuiKeyboard::new)
+                } else {
+                    None
+                };
                 if let Err(error) = output
                     .start()
-                    .and_then(|_| tui::perform(&output, midi_session.as_ref()))
+                    .and_then(|_| tui::perform(&output, midi_session.as_ref(), keyboard))
                 {
                     eprintln!("{error}");
                     process::exit(1);

@@ -481,3 +481,16 @@ remains retryable and leaves held state intact on Full. In a two-channel graph,
 device overflow on channel 1 releases only channel 1 and preserves channel 2's
 queued changes and audio. This is a headless callback-adapter contract; physical
 overflow and listening remain unverified.
+
+## Native TUI note row
+
+`53-tui-keys.lua` declares a cabled mono pitch/Gate voice. In `perform` with
+no external MIDI input, Z S X D C V G B H N J M select C4 through B4 on the
+lowest mapped note channel. One press latches the note; another pitch changes it
+without leaving an older key held; Space releases Gate. Repeating the same key
+adds no event. The TUI shows its active note and channel, and closing the TUI
+releases the voice. Headless key gestures at MIDI times 0, 84, and 167
+microseconds render the same 16-frame PCM as a prepared frame-3 on, frame-7
+pitch change, and frame-11 off timeline with a three-frame test lead. The
+production output retains its internal lead. Physical terminal gestures and
+listening remain unverified.

@@ -75,6 +75,13 @@ impl TimedMidiRouter {
         self.producer.first_unrendered_frame()
     }
 
+    pub(crate) fn first_mapped_channel(&self) -> Option<u8> {
+        self.notes
+            .iter()
+            .position(Option::is_some)
+            .map(|index| index as u8 + 1)
+    }
+
     fn release_channel(&mut self, channel: usize) -> bool {
         let Some(route) = &mut self.notes[channel] else {
             return false;

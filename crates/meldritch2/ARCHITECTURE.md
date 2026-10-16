@@ -89,6 +89,12 @@ graph revision disables the old queue and continues ordinary rendering until
 the output is reopened; the audio callback retains the old queue allocation.
 The MIDI session shows clock/queue failures in the terminal and reports them
 after exit.
+When `perform` has a note-mapped graph and no external MIDI input, the TUI
+owns that same timed-note producer. Its one-octave press-to-latch row selects
+the lowest mapped channel, uses note off/on for pitch changes, and Space closes
+the Gate. The TUI displays the active note, and teardown publishes the existing
+all-notes-off reset. The control side timestamps gestures; the audio callback
+keeps the same bounded note consumer.
 The device MIDI callback uses a recovery route for queue overflow: a dropped
 note change releases that channel through the reset marker, clears its held
 stack, and records the error. The direct router API retains transactional
