@@ -13,10 +13,12 @@ use crate::{
     live::{LiveControl, LiveRuntime},
     live_notes::{LiveNoteConsumer, live_note_queue},
     midi::{MidiRouter, TimedMidiRouter},
+    midi_clock::ClockError,
     model::Graph,
 };
 
 const CHUNK_FRAMES: usize = 256;
+pub const DEFAULT_MIDI_LEAD_FRAMES: u32 = 256;
 
 fn stream_error_code(kind: cpal::ErrorKind) -> u8 {
     use cpal::ErrorKind;
@@ -159,14 +161,18 @@ pub fn output_device_names() -> Result<Vec<String>, String> {
 
 impl DeviceOutput {
     pub fn open_default(graph: &Graph) -> Result<Self, String> {
-        Self::open(graph, None)
+        Self::open_with_midi_lead(graph, None, DEFAULT_MIDI_LEAD_FRAMES)
     }
 
     pub fn open_index(graph: &Graph, index: usize) -> Result<Self, String> {
-        Self::open(graph, Some(index))
+        Self::open_with_midi_lead(graph, Some(index), DEFAULT_MIDI_LEAD_FRAMES)
     }
 
-    fn open(graph: &Graph, index: Option<usize>) -> Result<Self, String> {
+    pub fn open_with_midi_lead(
+        graph: &Graph,
+        index: Option<usize>,
+        lead_frames: u32,
+    ) -> Result<Self, String> {
         let host = cpal::default_host();
         let device = match index {
             Some(index) => host
@@ -206,8 +212,14 @@ impl DeviceOutput {
             (None, None)
         } else {
             let (producer, consumer) = live_note_queue(&machine, 0);
-            let router = TimedMidiRouter::new(&machine, producer, config.sample_rate, 256)
-                .map_err(|error| format!("invalid MIDI note clock: {error:?}"))?;
+            let router = TimedMidiRouter::new(&machine, producer, config.sample_rate, lead_frames)
+                .map_err(|error| match error {
+                    ClockError::LeadTooLong => format!(
+                        "MIDI lead {lead_frames} frames exceeds one second at {} Hz",
+                        config.sample_rate
+                    ),
+                    _ => format!("invalid MIDI note clock: {error:?}"),
+                })?;
             (Some(router), Some(consumer))
         };
         let (runtime, control) = LiveRuntime::new(machine);

@@ -2,7 +2,7 @@ use std::{env, fs, process, thread, time::Duration};
 
 use meldritch2::{
     compiler::compile,
-    device::{DeviceOutput, output_device_names},
+    device::{DEFAULT_MIDI_LEAD_FRAMES, DeviceOutput, output_device_names},
     lua,
     midi_device::{MidiInputSession, input_port_names},
     model::{Graph, ParameterId},
@@ -15,25 +15,49 @@ fn load_graph(path: &str) -> Result<Graph, String> {
         .and_then(|script| lua::read(&script))
 }
 
-fn open_output(graph: &Graph, device_arg: Option<String>) -> Result<DeviceOutput, String> {
-    match device_arg {
-        None => DeviceOutput::open_default(graph),
-        Some(argument) => {
-            let index = argument
+fn open_output(
+    graph: &Graph,
+    device_arg: Option<String>,
+    midi_lead: Option<u32>,
+) -> Result<DeviceOutput, String> {
+    let index = match device_arg {
+        None => None,
+        Some(argument) => Some(
+            argument
                 .strip_prefix("--device=")
                 .ok_or("expected --device=INDEX")?
                 .parse::<usize>()
-                .map_err(|_| "device index must be a nonnegative integer")?;
-            DeviceOutput::open_index(graph, index)
-        }
+                .map_err(|_| "device index must be a nonnegative integer")?,
+        ),
+    };
+    DeviceOutput::open_with_midi_lead(graph, index, midi_lead.unwrap_or(DEFAULT_MIDI_LEAD_FRAMES))
+}
+
+fn parse_midi_lead(value: &str) -> Result<u32, String> {
+    value
+        .parse()
+        .map_err(|_| "MIDI lead must be a nonnegative integer frame count".into())
+}
+
+fn validate_midi_lead_option(
+    graph: &Graph,
+    midi_index: Option<usize>,
+    midi_lead: Option<u32>,
+) -> Result<(), String> {
+    if midi_lead.is_some() && midi_index.is_none() {
+        return Err("--midi-lead requires --midi=INDEX".into());
     }
+    if midi_lead.is_some() && graph.midi_notes.is_empty() {
+        return Err("--midi-lead requires a graph with midi_notes".into());
+    }
+    Ok(())
 }
 
 fn main() {
     let mut args = env::args().skip(1);
     let Some(first) = args.next() else {
         eprintln!(
-            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]"
+            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX] [--midi-lead=FRAMES]"
         );
         process::exit(2);
     };
@@ -92,7 +116,7 @@ fn main() {
             eprintln!("SECONDS must be finite and between 0 and 3600");
             process::exit(2);
         }
-        let result = load_graph(&path).and_then(|graph| open_output(&graph, device_arg));
+        let result = load_graph(&path).and_then(|graph| open_output(&graph, device_arg, None));
         match result {
             Ok(output) => {
                 if let Err(error) = output.start() {
@@ -127,6 +151,7 @@ fn main() {
         };
         let mut device_arg = None;
         let mut midi_index = None;
+        let mut midi_lead = None;
         for argument in args {
             if argument.starts_with("--device=") {
                 if device_arg.replace(argument).is_some() {
@@ -142,12 +167,24 @@ fn main() {
                     eprintln!("--midi may appear only once");
                     process::exit(2);
                 }
+            } else if let Some(value) = argument.strip_prefix("--midi-lead=") {
+                let frames = parse_midi_lead(value).unwrap_or_else(|error| {
+                    eprintln!("{error}");
+                    process::exit(2);
+                });
+                if midi_lead.replace(frames).is_some() {
+                    eprintln!("--midi-lead may appear only once");
+                    process::exit(2);
+                }
             } else {
                 eprintln!("unknown perform option '{argument}'");
                 process::exit(2);
             }
         }
-        let result = load_graph(&path).and_then(|graph| open_output(&graph, device_arg));
+        let result = load_graph(&path).and_then(|graph| {
+            validate_midi_lead_option(&graph, midi_index, midi_lead)?;
+            open_output(&graph, device_arg, midi_lead)
+        });
         match result {
             Ok(mut output) => {
                 let midi_session = match midi_index {
@@ -251,5 +288,38 @@ fn main() {
             eprintln!("{error}");
             process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_midi_lead, validate_midi_lead_option};
+    use meldritch2::lua;
+
+    #[test]
+    fn midi_lead_requires_a_nonnegative_u32_frame_count() {
+        assert_eq!(parse_midi_lead("0"), Ok(0));
+        assert_eq!(parse_midi_lead("256"), Ok(256));
+        assert!(parse_midi_lead("-1").is_err());
+        assert!(parse_midi_lead("4294967296").is_err());
+        assert!(parse_midi_lead("1.5").is_err());
+    }
+
+    #[test]
+    fn midi_lead_requires_a_note_mapped_input() {
+        let mapped = lua::read(include_str!("../examples/53-midi-lead.lua")).unwrap();
+        let plain = lua::read(include_str!("../examples/09-controls.lua")).unwrap();
+        assert_eq!(validate_midi_lead_option(&mapped, Some(0), Some(3)), Ok(()));
+        assert!(
+            validate_midi_lead_option(&mapped, None, Some(3))
+                .unwrap_err()
+                .contains("--midi=INDEX")
+        );
+        assert!(
+            validate_midi_lead_option(&plain, Some(0), Some(3))
+                .unwrap_err()
+                .contains("midi_notes")
+        );
+        assert_eq!(validate_midi_lead_option(&plain, Some(0), None), Ok(()));
     }
 }

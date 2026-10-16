@@ -481,3 +481,15 @@ remains retryable and leaves held state intact on Full. In a two-channel graph,
 device overflow on channel 1 releases only channel 1 and preserves channel 2's
 queued changes and audio. This is a headless callback-adapter contract; physical
 overflow and listening remain unverified.
+
+## Selectable MIDI note lead
+
+`53-midi-lead.lua` is a mono Gate voice for the `perform --midi=INDEX
+--midi-lead=FRAMES` option. The default remains 256 frames. Leads of 0, 3, and
+7 frames move a note-on at MIDI time 1,000,000 microseconds to absolute frames
+0, 3, and 7; note-off at 1,000,084 microseconds lands four frames later. Each
+16-frame render matches its independently prepared timeline, including the
+silent leading and trailing samples. The option requires a MIDI input and a
+graph with a `midi_notes` declaration. Negative, fractional, and out-of-range
+integer arguments reject; the resolved lead may not exceed one second at the
+selected output sample rate. No physical latency calibration is claimed.

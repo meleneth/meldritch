@@ -1950,6 +1950,63 @@ mod tests {
     }
 
     #[test]
+    fn configured_midi_lead_moves_note_onset_without_changing_note_pcm() {
+        let graph = lua::read(include_str!("../examples/53-midi-lead.lua")).unwrap();
+        for lead in [0, 3, 7] {
+            let mut machine = compile(&graph).unwrap();
+            let (producer, mut consumer) = live_note_queue(&machine, 0);
+            let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, lead).unwrap();
+            assert_eq!(midi.dispatch(1_000_000, &[0x90, 69, 100]), Ok(true));
+            assert_eq!(midi.dispatch(1_000_084, &[0x80, 69, 0]), Ok(true));
+            let mut actual = [f64::NAN; 16];
+            assert_eq!(
+                consumer
+                    .render_next(&mut machine, &mut actual)
+                    .unwrap()
+                    .applied,
+                2
+            );
+            assert!(actual[..lead as usize].iter().all(|sample| *sample == 0.0));
+            assert!(actual[lead as usize].abs() > 0.0 || lead == 0);
+            assert!(
+                actual[lead as usize + 4..]
+                    .iter()
+                    .all(|sample| *sample == 0.0)
+            );
+
+            let mut reference = compile(&graph).unwrap();
+            let mut plan = TimedNotePlan::prepare(
+                &reference,
+                0,
+                &[
+                    TimedNoteState {
+                        frame: u64::from(lead),
+                        channel: 1,
+                        pitch_hz: 440.0,
+                        gate: true,
+                    },
+                    TimedNoteState {
+                        frame: u64::from(lead + 4),
+                        channel: 1,
+                        pitch_hz: 440.0,
+                        gate: false,
+                    },
+                ],
+            )
+            .unwrap();
+            let mut expected = [0.0; 16];
+            plan.render_next(&mut reference, &mut expected).unwrap();
+            assert_eq!(actual, expected);
+        }
+        let machine = compile(&graph).unwrap();
+        let (producer, _) = live_note_queue(&machine, 0);
+        assert!(matches!(
+            TimedMidiRouter::new(&machine, producer, 48_000, 48_001),
+            Err(ClockError::LeadTooLong)
+        ));
+    }
+
+    #[test]
     fn invalid_velocity_bindings_and_values_preserve_accepted_voice() {
         let valid = lua::read(include_str!("../examples/50-midi-velocity.lua")).unwrap();
         let invalid = lua::read(include_str!("../examples/51-midi-velocity-invalid.lua")).unwrap();

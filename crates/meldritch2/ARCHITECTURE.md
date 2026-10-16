@@ -89,6 +89,10 @@ graph revision disables the old queue and continues ordinary rendering until
 the output is reopened; the audio callback retains the old queue allocation.
 The MIDI session shows clock/queue failures in the terminal and reports them
 after exit.
+`perform --midi-lead=FRAMES` selects the note clock's lookahead for an explicit
+MIDI input; it defaults to 256 frames and is bounded by one second at the
+opened output's sample rate. This changes only host timing, not the graph.
+The current value is user selected rather than measured against physical output.
 The device MIDI callback uses a recovery route for queue overflow: a dropped
 note change releases that channel through the reset marker, clears its held
 stack, and records the error. The direct router API retains transactional
