@@ -77,7 +77,7 @@ impl MidiInputSession {
                 port,
                 "meldritch2-timed-note-input",
                 move |timestamp, message, router: &mut TimedMidiRouter| {
-                    if router.dispatch(timestamp, message).is_err() {
+                    if router.dispatch_recovering(timestamp, message).is_err() {
                         callback_errors.fetch_add(1, Ordering::Relaxed);
                     }
                 },

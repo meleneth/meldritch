@@ -468,3 +468,16 @@ Three-argument `midi_notes` declarations retain their existing output.
 0..1. Unknown or shared velocity targets and invalid queued velocity values
 also reject without replacing an accepted graph or consuming queue capacity.
 Physical velocity gestures and listening remain unverified.
+
+## Device MIDI overflow recovery
+
+`52-midi-overflow-release.lua` declares a mono Gate voice with immediate
+release. A held note sounds at frame 3. After 64 future note states fill the
+queue, a device-callback note-off that cannot enter the queue reports Full and
+publishes an emergency channel reset. The next audio block discards those
+states, closes Gate, and is silent. Former held keys no longer count; a fresh
+note can enter and sound at its mapped frame. The direct router `dispatch`
+remains retryable and leaves held state intact on Full. In a two-channel graph,
+device overflow on channel 1 releases only channel 1 and preserves channel 2's
+queued changes and audio. This is a headless callback-adapter contract; physical
+overflow and listening remain unverified.

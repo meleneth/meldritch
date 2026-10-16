@@ -1854,6 +1854,102 @@ mod tests {
     }
 
     #[test]
+    fn device_midi_overflow_releases_gate_and_allows_fresh_note() {
+        let graph = lua::read(include_str!("../examples/52-midi-overflow-release.lua")).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        assert_eq!(midi.dispatch_recovering(0, &[0x90, 69, 100]), Ok(true));
+        let mut opening = [0.0; 4];
+        consumer.render_next(&mut machine, &mut opening).unwrap();
+        assert!(opening[3].abs() > 0.0);
+
+        for offset in 0..MAX_EVENTS as u64 {
+            let note = if offset % 2 == 0 { 81 } else { 69 };
+            assert_eq!(
+                midi.dispatch_recovering(1_000_000 + offset, &[0x90, note, 100]),
+                Ok(true)
+            );
+        }
+        assert_eq!(
+            midi.dispatch_recovering(1_000_064, &[0x80, 69, 0]),
+            Err(TimedMidiError::Queue(PushError::Full))
+        );
+        let mut released = [f64::NAN; 8];
+        let report = consumer.render_next(&mut machine, &mut released).unwrap();
+        assert_eq!(report.discarded, MAX_EVENTS);
+        assert_eq!(report.applied, 0);
+        assert_eq!(released, [0.0; 8]);
+        assert_eq!(midi.dispatch_recovering(1, &[0x80, 69, 0]), Ok(false));
+        assert_eq!(midi.dispatch_recovering(1, &[0x90, 81, 100]), Ok(true));
+        let mut fresh = [0.0; 4];
+        assert_eq!(
+            consumer
+                .render_next(&mut machine, &mut fresh)
+                .unwrap()
+                .applied,
+            1
+        );
+        assert_eq!(fresh[..3], [0.0; 3]);
+        assert!(fresh[3].abs() > 0.0);
+    }
+
+    #[test]
+    fn device_overflow_recovery_keeps_other_channels_pending_notes() {
+        let graph = lua::read(include_str!("../examples/49-channel-reset.lua")).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        midi.dispatch_recovering(0, &[0x90, 69, 100]).unwrap();
+        midi.dispatch_recovering(0, &[0x91, 69, 100]).unwrap();
+        consumer.render_next(&mut machine, &mut [0.0; 4]).unwrap();
+        for offset in 0..MAX_EVENTS as u64 {
+            let note = if offset % 2 == 0 { 81 } else { 69 };
+            midi.dispatch_recovering(2_000 + offset, &[0x91, note, 100])
+                .unwrap();
+        }
+        assert_eq!(
+            midi.dispatch_recovering(2_064, &[0x80, 69, 0]),
+            Err(TimedMidiError::Queue(PushError::Full))
+        );
+        let mut actual = [0.0; 110];
+        let report = consumer.render_next(&mut machine, &mut actual).unwrap();
+        assert_eq!(report.discarded, 0);
+        assert_eq!(report.applied, MAX_EVENTS);
+        assert_eq!(midi.dispatch_recovering(1, &[0x80, 69, 0]), Ok(false));
+
+        let mut reference = compile(&graph).unwrap();
+        let mut plan = TimedNotePlan::prepare(
+            &reference,
+            0,
+            &[
+                TimedNoteState {
+                    frame: 3,
+                    channel: 1,
+                    pitch_hz: 440.0,
+                    gate: true,
+                },
+                TimedNoteState {
+                    frame: 3,
+                    channel: 2,
+                    pitch_hz: 440.0,
+                    gate: true,
+                },
+                TimedNoteState {
+                    frame: 4,
+                    channel: 1,
+                    pitch_hz: 440.0,
+                    gate: false,
+                },
+            ],
+        )
+        .unwrap();
+        let mut expected = [0.0; 99];
+        plan.render_next(&mut reference, &mut expected).unwrap();
+        assert_eq!(actual[..95], expected[4..]);
+    }
+
+    #[test]
     fn invalid_velocity_bindings_and_values_preserve_accepted_voice() {
         let valid = lua::read(include_str!("../examples/50-midi-velocity.lua")).unwrap();
         let invalid = lua::read(include_str!("../examples/51-midi-velocity-invalid.lua")).unwrap();

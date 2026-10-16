@@ -89,6 +89,11 @@ graph revision disables the old queue and continues ordinary rendering until
 the output is reopened; the audio callback retains the old queue allocation.
 The MIDI session shows clock/queue failures in the terminal and reports them
 after exit.
+The device MIDI callback uses a recovery route for queue overflow: a dropped
+note change releases that channel through the reset marker, clears its held
+stack, and records the error. The direct router API retains transactional
+Full/retry behavior for callers that can retry. Other channels keep their
+pending events and active Gates.
 Timed MIDI CC 120/123 with value zero releases the addressed channel; MIDI
 system reset releases every mapped channel. The producer publishes a separate
 per-channel reset marker even when the 64-event ring is full. At the next

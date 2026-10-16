@@ -148,6 +148,21 @@ impl TimedMidiRouter {
         route.held = proposed;
         Ok(true)
     }
+
+    /// Device callbacks cannot retry a lost note-off. A full note queue
+    /// releases that channel immediately through the separate reset marker.
+    pub(crate) fn dispatch_recovering(
+        &mut self,
+        midi_us: u64,
+        message: &[u8],
+    ) -> Result<bool, TimedMidiError> {
+        let result = self.dispatch(midi_us, message);
+        if result == Err(TimedMidiError::Queue(PushError::Full)) {
+            let channel = usize::from(message[0] & 0x0F);
+            self.release_channel(channel);
+        }
+        result
+    }
 }
 
 #[derive(Debug)]
