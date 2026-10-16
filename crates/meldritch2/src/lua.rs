@@ -40,11 +40,14 @@ function meldritch.graph()
     assert(type(control_id) == "string", "MIDI target must be a control ID")
     table.insert(self.midi_ccs, { control_id = control_id, channel = channel, number = number })
   end
-  function graph:midi_notes(channel, pitch_control_id, gate_control_id)
+  function graph:midi_notes(channel, pitch_control_id, gate_control_id, velocity_control_id)
     assert(type(pitch_control_id) == "string" and type(gate_control_id) == "string",
       "MIDI note targets must be control IDs")
+    assert(velocity_control_id == nil or type(velocity_control_id) == "string",
+      "MIDI velocity target must be a control ID")
     table.insert(self.note_bindings, { channel = channel,
-      pitch_control_id = pitch_control_id, gate_control_id = gate_control_id })
+      pitch_control_id = pitch_control_id, gate_control_id = gate_control_id,
+      velocity_control_id = velocity_control_id })
   end
   return graph
 end
@@ -145,6 +148,7 @@ pub fn read(script: &str) -> Result<Graph, String> {
             channel: item.get("channel").map_err(|e| e.to_string())?,
             pitch_control_id: item.get("pitch_control_id").map_err(|e| e.to_string())?,
             gate_control_id: item.get("gate_control_id").map_err(|e| e.to_string())?,
+            velocity_control_id: item.get("velocity_control_id").map_err(|e| e.to_string())?,
         });
     }
     Ok(graph)

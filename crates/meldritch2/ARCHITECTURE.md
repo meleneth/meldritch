@@ -47,7 +47,12 @@ that buffer. Note writers serialize on their bounded held-key state lock; the
 audio path reads only atomics and its own cached pair. Other control gestures
 on those parameters remain independent publications. This immediate router
 still serves direct/headless callers; `perform` now uses the timed queue for
-declared notes. Velocity remains open.
+declared notes. An optional fourth `midi_notes` control resolves unit-interval
+velocity to an independent graph parameter. The immediate router snapshots
+pitch, Gate, and velocity under one note epoch. The timed router carries
+velocity through fixed queue slots and restores each held key's velocity on
+fallback. DSP uses velocity only where the author explicitly cables that
+control's Constant output; three-argument bindings retain their prior sound.
 
 `TimedNotePlan` is a separate prepared timeline for absolute `u64` frame
 positions. The control side resolves at most 64 typed channel/pitch/gate

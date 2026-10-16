@@ -14,6 +14,7 @@ use crate::{
 struct NoteRoute {
     pitch: ControlHandle,
     gate: ControlHandle,
+    velocity: Option<ControlHandle>,
     state: Arc<NoteState>,
     frequencies: [f64; 128],
 }
@@ -21,12 +22,14 @@ struct NoteRoute {
 #[derive(Clone, Copy, Debug)]
 struct HeldNotes {
     keys: [u8; 128],
+    velocities: [u8; 128],
     len: usize,
 }
 
 struct TimedNoteRoute {
     held: HeldNotes,
     frequencies: [f64; 128],
+    velocity_mapped: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -57,6 +60,7 @@ impl TimedMidiRouter {
                 frequencies: std::array::from_fn(|note| {
                     440.0 * 2.0_f64.powf((note as f64 - 69.0) / 12.0)
                 }),
+                velocity_mapped: mapping.velocity_control_id.is_some(),
             });
         }
         Ok(Self {
@@ -112,26 +116,32 @@ impl TimedMidiRouter {
         };
         let mut proposed = route.held;
         let previous = route.held.latest();
+        let previous_velocity = route.held.latest_velocity();
         if message[0] & 0xF0 == 0x90 && message[2] != 0 {
-            proposed.press(message[1]);
+            proposed.press(message[1], message[2]);
         } else if !proposed.remove(message[1]) {
             return Ok(false);
         }
         let current = proposed.latest();
-        if current != previous {
+        let current_velocity = proposed.latest_velocity();
+        if current != previous || (route.velocity_mapped && current_velocity != previous_velocity) {
             let mut clock = self.clock.clone();
             let frame = clock
                 .map(midi_us, self.producer.first_unrendered_frame())
                 .map_err(TimedMidiError::Clock)?
                 .frame;
             let note = current.or(previous).expect("note state changed");
+            let velocity = f64::from(current_velocity.or(previous_velocity).unwrap_or(127)) / 127.0;
             self.producer
-                .try_push(TimedNoteState {
-                    frame,
-                    channel: channel as u8 + 1,
-                    pitch_hz: route.frequencies[usize::from(note)],
-                    gate: current.is_some(),
-                })
+                .try_push_velocity(
+                    TimedNoteState {
+                        frame,
+                        channel: channel as u8 + 1,
+                        pitch_hz: route.frequencies[usize::from(note)],
+                        gate: current.is_some(),
+                    },
+                    velocity,
+                )
                 .map_err(TimedMidiError::Queue)?;
             self.clock = clock;
         }
@@ -171,6 +181,7 @@ impl HeldNotes {
     fn new() -> Self {
         Self {
             keys: [0; 128],
+            velocities: [0; 128],
             len: 0,
         }
     }
@@ -179,18 +190,24 @@ impl HeldNotes {
         (self.len > 0).then(|| self.keys[self.len.saturating_sub(1)])
     }
 
+    fn latest_velocity(&self) -> Option<u8> {
+        (self.len > 0).then(|| self.velocities[self.len.saturating_sub(1)])
+    }
+
     fn remove(&mut self, note: u8) -> bool {
         let Some(index) = self.keys[..self.len].iter().position(|key| *key == note) else {
             return false;
         };
         self.keys.copy_within(index + 1..self.len, index);
+        self.velocities.copy_within(index + 1..self.len, index);
         self.len -= 1;
         true
     }
 
-    fn press(&mut self, note: u8) {
+    fn press(&mut self, note: u8, velocity: u8) {
         self.remove(note);
         self.keys[self.len] = note;
+        self.velocities[self.len] = velocity;
         self.len += 1;
     }
 }
@@ -218,6 +235,11 @@ impl MidiRouter {
                 gate: machine
                     .control_handle(&binding.gate_control_id)
                     .expect("compiled MIDI gate control"),
+                velocity: binding.velocity_control_id.as_ref().map(|id| {
+                    machine
+                        .control_handle(id)
+                        .expect("compiled MIDI velocity control")
+                }),
                 state: machine
                     .midi_note_state(binding.channel)
                     .expect("compiled MIDI note state"),
@@ -263,18 +285,26 @@ impl MidiRouter {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let previous = held.latest();
+        let previous_velocity = held.latest_velocity();
         let note = message[1];
         if message[0] & 0xF0 == 0x90 && message[2] != 0 {
-            held.press(note);
+            held.press(note, message[2]);
         } else if !held.remove(note) {
             return false;
         }
         let current = held.latest();
-        if current != previous {
+        let current_velocity = held.latest_velocity();
+        if current != previous
+            || (route.velocity.is_some() && current_velocity != previous_velocity)
+        {
             route.state.begin_update();
             let result = if let Some(current) = current {
                 let hz = route.frequencies[usize::from(current)];
                 route.pitch.publish(hz).and_then(|_| {
+                    if let Some(velocity) = &route.velocity {
+                        velocity
+                            .publish(f64::from(current_velocity.expect("held note")) / 127.0)?;
+                    }
                     if previous.is_none() {
                         route.gate.publish(1.0)
                     } else {

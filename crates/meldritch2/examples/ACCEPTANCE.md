@@ -441,3 +441,22 @@ one for frame 103. Channel-1 CC 123 then closes only its Gate at the next
 chunk, discards its frame-99 event, and leaves channel 2 sounding. The
 remaining 110-frame render must match a prepared timeline with channel 1 off
 at frame 4 and channel 2 changing pitch at frame 103, sample for sample.
+
+## Explicit MIDI note velocity
+
+`50-midi-velocity.lua` adds a fourth, optional velocity control ID to the
+channel-1 `midi_notes` declaration. The control targets a Constant whose output
+is explicitly multiplied with Envelope before reaching `level.mod`; the
+oscillator, pitch, Gate, and Gain remain separate modules. At 48 kHz with a
+three-frame lead, note 69 at velocity 64 opens at frame 3; repeating it at
+velocity 32 changes amplitude at frame 5 without a Gate retrigger. Note 81 at
+velocity 127 takes priority at frame 7. Releasing it at frame 11 restores note
+69 and velocity 32 while Gate stays open; releasing note 69 at frame 15 closes
+Gate. The 20-frame device output must match the independent phase/amplitude
+reference and a 6+6+8 split render. The existing immediate MIDI route must
+snapshot pitch, Gate, and velocity together and restore held-key velocity.
+Three-argument `midi_notes` declarations retain their existing output.
+`51-midi-velocity-invalid.lua` rejects a velocity control that fails to cover
+0..1. Unknown or shared velocity targets and invalid queued velocity values
+also reject without replacing an accepted graph or consuming queue capacity.
+Physical velocity gestures and listening remain unverified.

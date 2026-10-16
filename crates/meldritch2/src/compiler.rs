@@ -28,9 +28,11 @@ struct NotePair {
     channel: u8,
     pitch_index: usize,
     gate_index: usize,
+    velocity_index: Option<usize>,
     state: Arc<NoteState>,
     last_pitch: f64,
     last_gate: f64,
+    last_velocity: f64,
 }
 
 const NO_OVERRIDE: u64 = f64::NAN.to_bits();
@@ -151,6 +153,7 @@ pub struct Machine {
 pub(crate) struct TimedNoteTarget {
     pub pitch_index: usize,
     pub gate_index: usize,
+    pub velocity_index: Option<usize>,
     pub min_pitch: f64,
     pub max_pitch: f64,
 }
@@ -184,13 +187,20 @@ impl Machine {
                 };
                 let pitch = read(pair.pitch_index);
                 let gate = read(pair.gate_index);
+                let velocity = pair.velocity_index.map(&read);
                 if before == pair.state.epoch() {
                     pair.last_pitch = pitch;
                     pair.last_gate = gate;
+                    if let Some(velocity) = velocity {
+                        pair.last_velocity = velocity;
+                    }
                 }
             }
             self.params[pair.pitch_index] = pair.last_pitch;
             self.params[pair.gate_index] = pair.last_gate;
+            if let Some(index) = pair.velocity_index {
+                self.params[index] = pair.last_velocity;
+            }
         }
     }
 
@@ -259,6 +269,10 @@ impl Machine {
         Ok(TimedNoteTarget {
             pitch_index: self.param_ids[&pitch.target],
             gate_index: self.param_ids[&gate.target],
+            velocity_index: binding
+                .velocity_control_id
+                .as_ref()
+                .map(|id| self.param_ids[&self.controls[id].target]),
             min_pitch: pitch.min,
             max_pitch: pitch.max,
         })
@@ -272,6 +286,11 @@ impl Machine {
     ) {
         self.params[pitch_index] = pitch_hz;
         self.params[gate_index] = if gate { 1.0 } else { 0.0 };
+    }
+    pub(crate) fn apply_timed_velocity(&mut self, index: Option<usize>, velocity: f64) {
+        if let Some(index) = index {
+            self.params[index] = velocity;
+        }
     }
     pub fn parameter_ids(&self) -> impl Iterator<Item = &ParameterId> {
         self.param_ids.keys()
@@ -584,6 +603,20 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 binding.gate_control_id
             ));
         }
+        if let Some(id) = &binding.velocity_control_id {
+            let velocity = controls.get(id).ok_or_else(|| {
+                format!("MIDI note mapping targets unknown velocity control '{id}'")
+            })?;
+            if velocity.target == pitch.target
+                || velocity.target == gate.target
+                || !mapped_note_targets.insert(&velocity.target)
+            {
+                return Err("MIDI note velocity must target a distinct parameter".into());
+            }
+            if velocity.min > 0.0 || velocity.max < 1.0 {
+                return Err(format!("MIDI note velocity control '{id}' must cover 0..1"));
+            }
+        }
     }
     let note_pairs = graph
         .midi_notes
@@ -591,13 +624,19 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         .map(|binding| {
             let pitch_index = param_ids[&controls[&binding.pitch_control_id].target];
             let gate_index = param_ids[&controls[&binding.gate_control_id].target];
+            let velocity_index = binding
+                .velocity_control_id
+                .as_ref()
+                .map(|id| param_ids[&controls[id].target]);
             NotePair {
                 channel: binding.channel,
                 pitch_index,
                 gate_index,
+                velocity_index,
                 state: Arc::new(NoteState::new()),
                 last_pitch: params[pitch_index],
                 last_gate: params[gate_index],
+                last_velocity: velocity_index.map_or(1.0, |index| params[index]),
             }
         })
         .collect();

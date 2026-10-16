@@ -483,4 +483,79 @@ mod tests {
         assert_eq!(errors.load(Ordering::Relaxed), 0);
         assert_eq!(consumer.cursor(), 0);
     }
+
+    #[test]
+    fn timed_midi_velocity_routes_through_explicit_graph_modulation() {
+        let graph = lua::read(include_str!("../examples/50-midi-velocity.lua")).unwrap();
+        let messages = [
+            (0, [0x90, 69, 64]),
+            (42, [0x90, 69, 32]),
+            (84, [0x90, 81, 127]),
+            (167, [0x80, 81, 0]),
+            (250, [0x80, 69, 0]),
+        ];
+        let machine = compile(&graph).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        for (time, message) in messages {
+            assert_eq!(midi.dispatch(time, &message), Ok(true));
+        }
+        let (mut runtime, _) = LiveRuntime::new(machine);
+        let mut whole = [f64::NAN; 20];
+        let mut scratch = [0.0; CHUNK_FRAMES];
+        let mut active = true;
+        let errors = AtomicU64::new(0);
+        fill_interleaved_timed(
+            &mut runtime,
+            &mut consumer,
+            &mut active,
+            &mut whole,
+            1,
+            &mut scratch,
+            &errors,
+        );
+        assert_eq!(errors.load(Ordering::Relaxed), 0);
+        for (frame, sample) in whole.iter().enumerate() {
+            let cycles = if frame < 7 {
+                440.0 * frame as f64
+            } else if frame < 11 {
+                440.0 * 7.0 + 880.0 * (frame - 7) as f64
+            } else {
+                440.0 * 7.0 + 880.0 * 4.0 + 440.0 * (frame - 11) as f64
+            };
+            let velocity = match frame {
+                3..=4 => 64.0 / 127.0,
+                5..=6 | 11..=14 => 32.0 / 127.0,
+                7..=10 => 1.0,
+                _ => 0.0,
+            };
+            let expected = 0.25 * velocity * (std::f64::consts::TAU * cycles / 48_000.0).sin();
+            assert!(
+                (sample - expected).abs() < 1e-12,
+                "frame {frame}: {sample} != {expected}"
+            );
+        }
+
+        let mut split_machine = compile(&graph).unwrap();
+        let (producer, mut split_consumer) = live_note_queue(&split_machine, 0);
+        let mut split_midi = TimedMidiRouter::new(&split_machine, producer, 48_000, 3).unwrap();
+        for (time, message) in messages {
+            assert_eq!(split_midi.dispatch(time, &message), Ok(true));
+        }
+        let mut a = [0.0; 6];
+        let mut b = [0.0; 6];
+        let mut c = [0.0; 8];
+        split_consumer
+            .render_next(&mut split_machine, &mut a)
+            .unwrap();
+        split_consumer
+            .render_next(&mut split_machine, &mut b)
+            .unwrap();
+        split_consumer
+            .render_next(&mut split_machine, &mut c)
+            .unwrap();
+        assert_eq!(whole[..6], a);
+        assert_eq!(whole[6..12], b);
+        assert_eq!(whole[12..], c);
+    }
 }

@@ -39,6 +39,7 @@ pub struct MidiNotes {
     pub channel: u8,
     pub pitch_control_id: String,
     pub gate_control_id: String,
+    pub velocity_control_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]

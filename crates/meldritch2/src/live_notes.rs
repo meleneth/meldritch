@@ -15,8 +15,10 @@ struct Event {
     channel: u8,
     pitch_index: usize,
     gate_index: usize,
+    velocity_index: Option<usize>,
     pitch_hz: f64,
     gate: bool,
+    velocity: f64,
 }
 
 struct Slot {
@@ -24,8 +26,10 @@ struct Slot {
     channel: AtomicU8,
     pitch_index: AtomicUsize,
     gate_index: AtomicUsize,
+    velocity_index: AtomicUsize,
     pitch_bits: AtomicU64,
     gate: AtomicBool,
+    velocity_bits: AtomicU64,
 }
 
 impl Slot {
@@ -35,8 +39,10 @@ impl Slot {
             channel: AtomicU8::new(0),
             pitch_index: AtomicUsize::new(0),
             gate_index: AtomicUsize::new(0),
+            velocity_index: AtomicUsize::new(usize::MAX),
             pitch_bits: AtomicU64::new(0),
             gate: AtomicBool::new(false),
+            velocity_bits: AtomicU64::new(1.0_f64.to_bits()),
         }
     }
 
@@ -45,9 +51,15 @@ impl Slot {
         self.channel.store(event.channel, Ordering::Relaxed);
         self.pitch_index.store(event.pitch_index, Ordering::Relaxed);
         self.gate_index.store(event.gate_index, Ordering::Relaxed);
+        self.velocity_index.store(
+            event.velocity_index.unwrap_or(usize::MAX),
+            Ordering::Relaxed,
+        );
         self.pitch_bits
             .store(event.pitch_hz.to_bits(), Ordering::Relaxed);
         self.gate.store(event.gate, Ordering::Relaxed);
+        self.velocity_bits
+            .store(event.velocity.to_bits(), Ordering::Relaxed);
     }
 
     fn read(&self) -> Event {
@@ -56,8 +68,13 @@ impl Slot {
             channel: self.channel.load(Ordering::Relaxed),
             pitch_index: self.pitch_index.load(Ordering::Relaxed),
             gate_index: self.gate_index.load(Ordering::Relaxed),
+            velocity_index: match self.velocity_index.load(Ordering::Relaxed) {
+                usize::MAX => None,
+                index => Some(index),
+            },
             pitch_hz: f64::from_bits(self.pitch_bits.load(Ordering::Relaxed)),
             gate: self.gate.load(Ordering::Relaxed),
+            velocity: f64::from_bits(self.velocity_bits.load(Ordering::Relaxed)),
         }
     }
 }
@@ -75,6 +92,7 @@ struct Queue {
 pub enum PushError {
     UnmappedChannel,
     InvalidPitch,
+    InvalidVelocity,
     Full,
 }
 
@@ -182,8 +200,17 @@ impl LiveNoteProducer {
         Ok(())
     }
 
-    /// Enqueue in nondecreasing frame order. Stale or reordered frames clamp forward.
+    /// Enqueue with unity velocity. Stale or reordered frames clamp forward.
     pub fn try_push(&mut self, state: TimedNoteState) -> Result<PushOutcome, PushError> {
+        self.try_push_velocity(state, 1.0)
+    }
+
+    /// Velocity is a unit-interval note state; unwired voices ignore it in DSP.
+    pub fn try_push_velocity(
+        &mut self,
+        state: TimedNoteState,
+        velocity: f64,
+    ) -> Result<PushOutcome, PushError> {
         let target = self
             .targets
             .get(usize::from(state.channel).wrapping_sub(1))
@@ -194,6 +221,9 @@ impl LiveNoteProducer {
             || state.pitch_hz > target.max_pitch
         {
             return Err(PushError::InvalidPitch);
+        }
+        if !velocity.is_finite() || !(0.0..=1.0).contains(&velocity) {
+            return Err(PushError::InvalidVelocity);
         }
         let tail = self.queue.tail.load(Ordering::Relaxed);
         let head = self.queue.head.load(Ordering::Acquire);
@@ -209,8 +239,10 @@ impl LiveNoteProducer {
             channel: state.channel,
             pitch_index: target.pitch_index,
             gate_index: target.gate_index,
+            velocity_index: target.velocity_index,
             pitch_hz: state.pitch_hz,
             gate: state.gate,
+            velocity,
         });
         self.queue
             .tail
@@ -283,6 +315,7 @@ impl LiveNoteConsumer {
                 event.pitch_hz,
                 event.gate,
             );
+            machine.apply_timed_velocity(event.velocity_index, event.velocity);
         }
         let mut rendered = 0;
         let mut report = RenderReport::default();
@@ -315,6 +348,7 @@ impl LiveNoteConsumer {
                 event.pitch_hz,
                 event.gate,
             );
+            machine.apply_timed_velocity(event.velocity_index, event.velocity);
             self.active[usize::from(event.channel - 1)] = Some(event);
             report.applied += 1;
             report.late += usize::from(event.frame < self.cursor || offset > requested);

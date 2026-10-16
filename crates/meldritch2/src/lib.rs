@@ -1291,6 +1291,47 @@ mod tests {
     }
 
     #[test]
+    fn immediate_midi_velocity_shares_note_snapshot_and_held_fallback() {
+        let graph = lua::read(include_str!("../examples/50-midi-velocity.lua")).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let router = MidiRouter::from_machine(&machine);
+        let state = machine.midi_note_state(1).unwrap();
+        let pitch = machine
+            .parameter_handle(&ParameterId::new("pitch_hz", "value"))
+            .unwrap();
+        let gate = machine
+            .parameter_handle(&ParameterId::new("gate", "value"))
+            .unwrap();
+        let velocity = machine
+            .parameter_handle(&ParameterId::new("velocity", "value"))
+            .unwrap();
+        state.begin_update();
+        pitch.publish(Some(880.0)).unwrap();
+        velocity.publish(Some(0.5)).unwrap();
+        gate.publish(Some(1.0)).unwrap();
+        let mut before = [f64::NAN; 4];
+        machine.process(&mut before);
+        assert_eq!(before, [0.0; 4]);
+        state.end_update();
+        let mut after = [f64::NAN; 2];
+        machine.process(&mut after);
+        let expected = 0.25 * 0.5 * (std::f64::consts::TAU * 440.0 * 4.0 / 48_000.0).sin();
+        assert!((after[0] - expected).abs() < 1e-12);
+        assert!(router.dispatch(&[0x90, 69, 64]));
+        machine.process(&mut after);
+        assert_eq!(velocity.override_value(), Some(64.0 / 127.0));
+        assert!(router.dispatch(&[0x90, 81, 127]));
+        machine.process(&mut after);
+        assert_eq!(velocity.override_value(), Some(1.0));
+        assert!(router.dispatch(&[0x80, 81, 0]));
+        machine.process(&mut after);
+        assert_eq!(velocity.override_value(), Some(64.0 / 127.0));
+        assert!(router.dispatch(&[0x90, 69, 32]));
+        machine.process(&mut after);
+        assert_eq!(velocity.override_value(), Some(32.0 / 127.0));
+    }
+
+    #[test]
     fn shared_midi_note_targets_reject_without_replacing_machine() {
         let mut host = Host::default();
         host.submit(&lua::read(CABLED_MIDI_NOTE_PAIR).unwrap())
@@ -1810,6 +1851,58 @@ mod tests {
         );
         assert_eq!(midi.first_unrendered_frame(), 9);
         assert_eq!(midi.dispatch(66, &[0x80, 69, 0]), Ok(false));
+    }
+
+    #[test]
+    fn invalid_velocity_bindings_and_values_preserve_accepted_voice() {
+        let valid = lua::read(include_str!("../examples/50-midi-velocity.lua")).unwrap();
+        let invalid = lua::read(include_str!("../examples/51-midi-velocity-invalid.lua")).unwrap();
+        let mut host = Host::default();
+        host.submit(&valid).unwrap();
+        assert!(
+            host.submit(&invalid)
+                .unwrap_err()
+                .contains("must cover 0..1")
+        );
+        let mut shared = valid.clone();
+        shared.midi_notes[0].velocity_control_id = Some("pitch".into());
+        assert!(
+            host.submit(&shared)
+                .unwrap_err()
+                .contains("distinct parameter")
+        );
+        let mut missing = valid.clone();
+        missing.midi_notes[0].velocity_control_id = Some("missing".into());
+        assert!(
+            host.submit(&missing)
+                .unwrap_err()
+                .contains("unknown velocity control")
+        );
+
+        let machine = host.accepted().unwrap();
+        assert_eq!(
+            machine.midi_notes()[0].velocity_control_id.as_deref(),
+            Some("velocity")
+        );
+        let (mut producer, mut consumer) = live_note_queue(machine, 0);
+        let state = TimedNoteState {
+            frame: 0,
+            channel: 1,
+            pitch_hz: 440.0,
+            gate: true,
+        };
+        assert_eq!(
+            producer.try_push_velocity(state, f64::NAN),
+            Err(PushError::InvalidVelocity)
+        );
+        assert_eq!(
+            producer.try_push_velocity(state, 1.1),
+            Err(PushError::InvalidVelocity)
+        );
+        assert_eq!(producer.try_push_velocity(state, 0.5).unwrap().frame, 0);
+        let mut pcm = [0.0; 4];
+        assert_eq!(consumer.render_next(machine, &mut pcm).unwrap().applied, 1);
+        assert!(pcm[1].abs() > 0.0);
     }
 
     #[test]
