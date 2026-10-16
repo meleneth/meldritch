@@ -149,10 +149,14 @@ fn main() {
         }
         let result = load_graph(&path).and_then(|graph| open_output(&graph, device_arg));
         match result {
-            Ok(output) => {
+            Ok(mut output) => {
                 let midi_session = match midi_index {
                     Some(index) => {
-                        match MidiInputSession::open_index(index, output.midi_router()) {
+                        let opened = match output.take_timed_midi_router() {
+                            Some(router) => MidiInputSession::open_timed_index(index, router),
+                            None => MidiInputSession::open_index(index, output.midi_router()),
+                        };
+                        match opened {
                             Ok(session) => Some(session),
                             Err(error) => {
                                 eprintln!("{error}");
@@ -162,12 +166,9 @@ fn main() {
                     }
                     None => None,
                 };
-                let midi_port = midi_session
-                    .as_ref()
-                    .map(|session| session.port_name.as_str());
                 if let Err(error) = output
                     .start()
-                    .and_then(|_| tui::perform(&output, midi_port))
+                    .and_then(|_| tui::perform(&output, midi_session.as_ref()))
                 {
                     eprintln!("{error}");
                     process::exit(1);
@@ -179,6 +180,22 @@ fn main() {
                         output.first_stream_error().unwrap_or("unknown error")
                     );
                     process::exit(1);
+                }
+                if output.timed_note_errors() > 0 {
+                    eprintln!(
+                        "timed note output reported {} errors",
+                        output.timed_note_errors()
+                    );
+                    process::exit(1);
+                }
+                if let Some(session) = &midi_session {
+                    if session.note_errors() > 0 {
+                        eprintln!(
+                            "MIDI note input reported {} timing or queue errors",
+                            session.note_errors()
+                        );
+                        process::exit(1);
+                    }
                 }
                 drop(midi_session);
             }

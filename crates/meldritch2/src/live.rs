@@ -68,6 +68,10 @@ impl LiveRuntime {
     pub fn current(&self) -> &Machine {
         &self.current
     }
+
+    pub(crate) fn current_mut(&mut self) -> &mut Machine {
+        &mut self.current
+    }
 }
 
 impl LiveControl {

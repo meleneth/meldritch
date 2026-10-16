@@ -45,8 +45,9 @@ the audio callback makes one bounded pair read at buffer entry. If a note
 write overlaps that read, it reuses the prior complete pitch/gate pair for
 that buffer. Note writers serialize on their bounded held-key state lock; the
 audio path reads only atomics and its own cached pair. Other control gestures
-on those parameters remain independent publications. MIDI device timestamp
-mapping and velocity remain open.
+on those parameters remain independent publications. This immediate router
+still serves direct/headless callers; `perform` now uses the timed queue for
+declared notes. Velocity remains open.
 
 `TimedNotePlan` is a separate prepared timeline for absolute `u64` frame
 positions. The control side resolves at most 64 typed channel/pitch/gate
@@ -71,8 +72,16 @@ frames through atomic slots. Its consumer applies available states at sample
 boundaries through the existing machine kernel, keeps per-channel held state
 across buffers, and publishes its first unrendered frame. Events that arrive
 after a block has passed their frame apply at the next block start. A producer
-can pass that cursor to `MidiFrameClock`; the live device callback is not yet
-wired to either adapter.
+passes that cursor to `MidiFrameClock` in the MIDI callback. The callback
+keeps a fixed held-key priority stack per mapped channel and commits its
+state only after a note event enters the queue. CC messages still publish
+named controls. `DeviceOutput` renders queued notes through its bounded 256
+frame scratch chunks with one parameter snapshot per host callback. A new
+graph revision disables the old queue and continues ordinary rendering until
+the output is reopened; the audio callback retains the old queue allocation.
+The MIDI session shows clock/queue failures in the terminal and reports them
+after exit.
+Physical latency, disconnect cleanup, and listening remain open.
 
 Lua's `meldritch.graph()` API constructs a candidate graph. `graph:module(id,
 type, values)` returns handles with contract-derived ports; `graph:connect(src,

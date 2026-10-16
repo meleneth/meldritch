@@ -23,6 +23,7 @@ pub enum ClockError {
 
 /// Maps connection-relative microsecond timestamps to absolute audio frames.
 /// The caller supplies the first frame that audio has not rendered yet.
+#[derive(Clone)]
 pub struct MidiFrameClock {
     sample_rate: u32,
     lead_frames: u32,

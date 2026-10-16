@@ -21,7 +21,7 @@ mod tests {
         live::LiveRuntime,
         live_notes::{PushError, live_note_queue},
         lua,
-        midi::MidiRouter,
+        midi::{MidiRouter, TimedMidiError, TimedMidiRouter},
         midi_clock::{ClockError, ClockStatus, FrameStamp, MidiFrameClock},
         model::ParameterId,
         timed::{
@@ -1769,6 +1769,47 @@ mod tests {
                 .frame,
             16
         );
+    }
+
+    #[test]
+    fn timed_midi_overflow_keeps_held_priority_and_clock_retryable() {
+        let graph = lua::read(include_str!("../examples/47-device-timed-midi.lua")).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        assert_eq!(midi.dispatch(100, &[0xB0, 7, 127]), Ok(true));
+        assert_eq!(midi.dispatch(100, &[0x90, 69]), Ok(false));
+        assert_eq!(midi.dispatch(100, &[0x91, 69, 100]), Ok(false));
+        assert_eq!(midi.dispatch(100, &[0x80, 69, 0]), Ok(false));
+        for time in 0..MAX_EVENTS as u64 {
+            let note = if time % 2 == 0 { 69 } else { 81 };
+            assert_eq!(midi.dispatch(time, &[0x90, note, 100]), Ok(true));
+        }
+        assert_eq!(
+            midi.dispatch(64, &[0x90, 69, 100]),
+            Err(TimedMidiError::Queue(PushError::Full))
+        );
+        assert_eq!(midi.first_unrendered_frame(), 0);
+        let mut drained = [0.0; 8];
+        assert_eq!(
+            consumer
+                .render_next(&mut machine, &mut drained)
+                .unwrap()
+                .applied,
+            MAX_EVENTS
+        );
+        assert_eq!(midi.dispatch(64, &[0x90, 69, 100]), Ok(true));
+        assert_eq!(midi.dispatch(65, &[0x80, 69, 0]), Ok(true));
+        let mut next = [0.0; 1];
+        assert_eq!(
+            consumer
+                .render_next(&mut machine, &mut next)
+                .unwrap()
+                .applied,
+            2
+        );
+        assert_eq!(midi.first_unrendered_frame(), 9);
+        assert_eq!(midi.dispatch(66, &[0x80, 69, 0]), Ok(false));
     }
 
     #[test]

@@ -193,6 +193,24 @@ impl LiveNoteConsumer {
         machine: &mut Machine,
         buffer: &mut [f64],
     ) -> Result<RenderReport, TimedRenderError> {
+        self.render_inner(machine, buffer, true)
+    }
+
+    /// Render after the enclosing device callback has prepared its one snapshot.
+    pub(crate) fn render_prepared(
+        &mut self,
+        machine: &mut Machine,
+        buffer: &mut [f64],
+    ) -> Result<RenderReport, TimedRenderError> {
+        self.render_inner(machine, buffer, false)
+    }
+
+    fn render_inner(
+        &mut self,
+        machine: &mut Machine,
+        buffer: &mut [f64],
+        prepare: bool,
+    ) -> Result<RenderReport, TimedRenderError> {
         if !machine.is_revision(&self.revision) {
             return Err(TimedRenderError::WrongMachine);
         }
@@ -203,7 +221,9 @@ impl LiveNoteConsumer {
             .cursor
             .checked_add(buffer.len() as u64)
             .ok_or(TimedRenderError::FrameOverflow)?;
-        machine.prepare_buffer();
+        if prepare {
+            machine.prepare_buffer();
+        }
         for event in self.active.iter().flatten() {
             machine.apply_timed_note(
                 event.pitch_index,

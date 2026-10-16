@@ -13,6 +13,7 @@ use crossterm::{
 
 use crate::{
     device::DeviceOutput,
+    midi_device::MidiInputSession,
     panel::{Gesture, Panel},
 };
 
@@ -36,7 +37,11 @@ impl Drop for Terminal {
     }
 }
 
-fn draw(panel: &Panel, output: &DeviceOutput, midi_port: Option<&str>) -> Result<(), String> {
+fn draw(
+    panel: &Panel,
+    output: &DeviceOutput,
+    midi_session: Option<&MidiInputSession>,
+) -> Result<(), String> {
     let mut out = stdout();
     queue!(
         out,
@@ -45,7 +50,7 @@ fn draw(panel: &Panel, output: &DeviceOutput, midi_port: Option<&str>) -> Result
         Print("Meldritch 2 | "),
         Print(&output.device_name),
         Print(" | MIDI: "),
-        Print(midi_port.unwrap_or("none")),
+        Print(midi_session.map_or("none", |session| session.port_name.as_str())),
         Print(" | q: quit\r\n"),
         Print("Up/Down: select  Left/Right: adjust  Home/End: bounds\r\n\r\n")
     )
@@ -77,19 +82,27 @@ fn draw(panel: &Panel, output: &DeviceOutput, midi_port: Option<&str>) -> Result
     }
     queue!(
         out,
-        Print(format!("\r\nStream errors: {}\r\n", output.stream_errors()))
+        Print(format!(
+            "\r\nStream errors: {} | Timed output errors: {} | MIDI input errors: {}\r\n",
+            output.stream_errors(),
+            output.timed_note_errors(),
+            midi_session.map_or(0, MidiInputSession::note_errors),
+        ))
     )
     .map_err(|error| error.to_string())?;
     out.flush().map_err(|error| error.to_string())
 }
 
-pub fn perform(output: &DeviceOutput, midi_port: Option<&str>) -> Result<(), String> {
+pub fn perform(
+    output: &DeviceOutput,
+    midi_session: Option<&MidiInputSession>,
+) -> Result<(), String> {
     let mut panel = Panel::new(output.controls());
     let _terminal = Terminal::enter()?;
-    draw(&panel, output, midi_port)?;
+    draw(&panel, output, midi_session)?;
     loop {
         if !event::poll(Duration::from_millis(100)).map_err(|error| error.to_string())? {
-            draw(&panel, output, midi_port)?;
+            draw(&panel, output, midi_session)?;
             continue;
         }
         let Event::Key(key) = event::read().map_err(|error| error.to_string())? else {
@@ -111,7 +124,7 @@ pub fn perform(output: &DeviceOutput, midi_port: Option<&str>) -> Result<(), Str
         };
         if let Some(gesture) = gesture {
             panel.apply(gesture)?;
-            draw(&panel, output, midi_port)?;
+            draw(&panel, output, midi_session)?;
         }
     }
     Ok(())

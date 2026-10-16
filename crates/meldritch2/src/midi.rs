@@ -4,6 +4,11 @@ use std::sync::{
 };
 
 use crate::compiler::{ControlHandle, Machine};
+use crate::{
+    live_notes::{LiveNoteProducer, PushError},
+    midi_clock::{ClockError, MidiFrameClock},
+    timed::TimedNoteState,
+};
 
 #[derive(Clone)]
 struct NoteRoute {
@@ -13,10 +18,101 @@ struct NoteRoute {
     frequencies: [f64; 128],
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 struct HeldNotes {
     keys: [u8; 128],
     len: usize,
+}
+
+struct TimedNoteRoute {
+    held: HeldNotes,
+    frequencies: [f64; 128],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TimedMidiError {
+    Clock(ClockError),
+    Queue(PushError),
+}
+
+/// MIDI callback adapter: CCs publish controls, note changes enter the frame queue.
+pub struct TimedMidiRouter {
+    controls: MidiRouter,
+    notes: [Option<TimedNoteRoute>; 16],
+    producer: LiveNoteProducer,
+    clock: MidiFrameClock,
+}
+
+impl TimedMidiRouter {
+    pub(crate) fn new(
+        machine: &Machine,
+        producer: LiveNoteProducer,
+        sample_rate: u32,
+        lead_frames: u32,
+    ) -> Result<Self, ClockError> {
+        let mut notes = std::array::from_fn(|_| None);
+        for mapping in machine.midi_notes() {
+            notes[usize::from(mapping.channel - 1)] = Some(TimedNoteRoute {
+                held: HeldNotes::new(),
+                frequencies: std::array::from_fn(|note| {
+                    440.0 * 2.0_f64.powf((note as f64 - 69.0) / 12.0)
+                }),
+            });
+        }
+        Ok(Self {
+            controls: MidiRouter::from_machine(machine),
+            notes,
+            producer,
+            clock: MidiFrameClock::new(sample_rate, lead_frames)?,
+        })
+    }
+
+    pub fn first_unrendered_frame(&self) -> u64 {
+        self.producer.first_unrendered_frame()
+    }
+
+    pub fn dispatch(&mut self, midi_us: u64, message: &[u8]) -> Result<bool, TimedMidiError> {
+        if message.len() != 3 || message[1] > 127 || message[2] > 127 {
+            return Ok(false);
+        }
+        if message[0] & 0xF0 == 0xB0 {
+            return Ok(self.controls.dispatch(message));
+        }
+        if !matches!(message[0] & 0xF0, 0x80 | 0x90) {
+            return Ok(false);
+        }
+        let channel = usize::from(message[0] & 0x0F);
+        let Some(route) = &mut self.notes[channel] else {
+            return Ok(false);
+        };
+        let mut proposed = route.held;
+        let previous = route.held.latest();
+        if message[0] & 0xF0 == 0x90 && message[2] != 0 {
+            proposed.press(message[1]);
+        } else if !proposed.remove(message[1]) {
+            return Ok(false);
+        }
+        let current = proposed.latest();
+        if current != previous {
+            let mut clock = self.clock.clone();
+            let frame = clock
+                .map(midi_us, self.producer.first_unrendered_frame())
+                .map_err(TimedMidiError::Clock)?
+                .frame;
+            let note = current.or(previous).expect("note state changed");
+            self.producer
+                .try_push(TimedNoteState {
+                    frame,
+                    channel: channel as u8 + 1,
+                    pitch_hz: route.frequencies[usize::from(note)],
+                    gate: current.is_some(),
+                })
+                .map_err(TimedMidiError::Queue)?;
+            self.clock = clock;
+        }
+        route.held = proposed;
+        Ok(true)
+    }
 }
 
 #[derive(Debug)]

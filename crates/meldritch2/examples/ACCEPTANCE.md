@@ -398,3 +398,22 @@ invalid buffer lengths, and frame overflow reject without mutating DSP state.
 Producer validation and target resolution happen outside the audio path; the
 consumer uses only fixed slots, atomics, and compiled indices. Device callback
 wiring, physical MIDI timing, and listening remain open.
+
+## Timestamped MIDI through device output
+
+`47-device-timed-midi.lua` declares channel-1 mono pitch/gate and CC 7 level.
+With a three-frame lead at 48 kHz, note-on 69 at 0 microseconds, note-on 81
+at 5,355, note-off 81 at 5,980, and note-off 69 at 6,300 map to frames 3,
+260, 290, and 305. The last-key priority restores 440 Hz at frame 290 while
+the gate remains open. A 300-frame stereo device callback spans a 256-frame
+scratch chunk and must match the prepared timeline sample for sample on both
+channels. The callback snapshots controls once; CC 7 value 127 between calls
+changes the next 16 frames without resetting oscillator phase. A full 64-event
+queue reports failure and retains its held-key/clock state so a retry succeeds.
+Invalid MIDI messages do not enter the queue. Activating a different compiled
+graph disables the old queue in the callback without dropping it there.
+`perform GRAPH.lua --midi=INDEX` uses this timed path when the graph declares
+MIDI notes; CC-only graphs retain their existing control route. The terminal
+shows live timing/queue and output error counts, with diagnostics again on
+exit. Physical MIDI gestures, latency, disconnect cleanup, and listening
+remain unverified.

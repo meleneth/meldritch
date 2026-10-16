@@ -11,7 +11,8 @@ use cpal::{
 use crate::{
     compiler::{ControlHandle, compile_at_rate},
     live::{LiveControl, LiveRuntime},
-    midi::MidiRouter,
+    live_notes::{LiveNoteConsumer, live_note_queue},
+    midi::{MidiRouter, TimedMidiRouter},
     model::Graph,
 };
 
@@ -89,12 +90,52 @@ pub fn fill_interleaved<T: Sample + FromSample<f64>>(
     }
 }
 
+/// Render queued notes through one device callback snapshot, including chunks.
+pub fn fill_interleaved_timed<T: Sample + FromSample<f64>>(
+    runtime: &mut LiveRuntime,
+    consumer: &mut LiveNoteConsumer,
+    active: &mut bool,
+    output: &mut [T],
+    channels: usize,
+    scratch: &mut [f64; CHUNK_FRAMES],
+    errors: &AtomicU64,
+) {
+    if channels == 0 || output.is_empty() {
+        return;
+    }
+    if runtime.begin_buffer() {
+        // This queue is scoped to the original revision. A replacement uses
+        // ordinary rendering until the output and MIDI route are reopened.
+        *active = false;
+    }
+    for chunk in output.chunks_mut(CHUNK_FRAMES * channels) {
+        let frames = chunk.len().div_ceil(channels);
+        if *active {
+            if consumer
+                .render_prepared(runtime.current_mut(), &mut scratch[..frames])
+                .is_err()
+            {
+                *active = false;
+                errors.fetch_add(1, Ordering::Relaxed);
+                runtime.process_prepared(&mut scratch[..frames]);
+            }
+        } else {
+            runtime.process_prepared(&mut scratch[..frames]);
+        }
+        for (frame, value) in chunk.chunks_mut(channels).zip(&scratch[..frames]) {
+            frame.fill(T::from_sample(value.clamp(-1.0, 1.0)));
+        }
+    }
+}
+
 pub struct DeviceOutput {
     stream: cpal::Stream,
     control: LiveControl,
     controls: Vec<(ControlHandle, f64)>,
     midi_router: MidiRouter,
+    timed_midi_router: Option<TimedMidiRouter>,
     errors: Arc<AtomicU64>,
+    timed_note_errors: Arc<AtomicU64>,
     first_error: Arc<AtomicU8>,
     pub device_name: String,
     pub sample_rate: u32,
@@ -161,8 +202,17 @@ impl DeviceOutput {
             })
             .collect();
         let midi_router = MidiRouter::from_machine(&machine);
+        let (timed_midi_router, mut note_consumer) = if machine.midi_notes().is_empty() {
+            (None, None)
+        } else {
+            let (producer, consumer) = live_note_queue(&machine, 0);
+            let router = TimedMidiRouter::new(&machine, producer, config.sample_rate, 256)
+                .map_err(|error| format!("invalid MIDI note clock: {error:?}"))?;
+            (Some(router), Some(consumer))
+        };
         let (runtime, control) = LiveRuntime::new(machine);
         let errors = Arc::new(AtomicU64::new(0));
+        let timed_note_errors = Arc::new(AtomicU64::new(0));
         let first_error = Arc::new(AtomicU8::new(0));
         let channels = usize::from(config.channels);
         macro_rules! build {
@@ -171,10 +221,24 @@ impl DeviceOutput {
                 let mut scratch = [0.0; CHUNK_FRAMES];
                 let errors = Arc::clone(&errors);
                 let first_error = Arc::clone(&first_error);
+                let note_errors = Arc::clone(&timed_note_errors);
+                let mut note_active = true;
                 device.build_output_stream(
                     config,
                     move |output: &mut [$sample], _| {
-                        fill_interleaved(&mut runtime, output, channels, &mut scratch);
+                        if let Some(consumer) = &mut note_consumer {
+                            fill_interleaved_timed(
+                                &mut runtime,
+                                consumer,
+                                &mut note_active,
+                                output,
+                                channels,
+                                &mut scratch,
+                                &note_errors,
+                            );
+                        } else {
+                            fill_interleaved(&mut runtime, output, channels, &mut scratch);
+                        }
                     },
                     move |error| {
                         record_stream_error(error.kind(), &errors, &first_error);
@@ -202,7 +266,9 @@ impl DeviceOutput {
             control,
             controls,
             midi_router,
+            timed_midi_router,
             errors,
+            timed_note_errors,
             first_error,
             device_name,
             sample_rate: config.sample_rate,
@@ -226,6 +292,12 @@ impl DeviceOutput {
     pub fn midi_router(&self) -> MidiRouter {
         self.midi_router.clone()
     }
+    pub fn take_timed_midi_router(&mut self) -> Option<TimedMidiRouter> {
+        self.timed_midi_router.take()
+    }
+    pub fn timed_note_errors(&self) -> u64 {
+        self.timed_note_errors.load(Ordering::Relaxed)
+    }
     pub fn stream_errors(&self) -> u64 {
         self.errors.load(Ordering::Relaxed)
     }
@@ -237,8 +309,18 @@ impl DeviceOutput {
 
 #[cfg(test)]
 mod tests {
-    use super::{CHUNK_FRAMES, fill_interleaved, record_stream_error, stream_error_label};
-    use crate::{compiler::compile, live::LiveRuntime, lua};
+    use super::{
+        CHUNK_FRAMES, fill_interleaved, fill_interleaved_timed, record_stream_error,
+        stream_error_label,
+    };
+    use crate::{
+        compiler::compile,
+        live::LiveRuntime,
+        live_notes::live_note_queue,
+        lua,
+        midi::TimedMidiRouter,
+        timed::{TimedNotePlan, TimedNoteState},
+    };
     use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
     #[test]
@@ -275,5 +357,130 @@ mod tests {
         assert!((i32::from(output[1]) - 8192).abs() <= 1);
         assert_eq!(output[256], 0);
         assert!((i32::from(output[257]) - 8192).abs() <= 1);
+    }
+
+    #[test]
+    fn timestamped_midi_renders_through_real_chunked_output_boundary() {
+        let graph = lua::read(include_str!("../examples/47-device-timed-midi.lua")).unwrap();
+        let machine = compile(&graph).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        for (time, message) in [
+            (0, [0x90, 69, 100]),
+            (5_355, [0x90, 81, 100]),
+            (5_980, [0x80, 81, 0]),
+            (6_300, [0x80, 69, 0]),
+        ] {
+            assert_eq!(midi.dispatch(time, &message), Ok(true));
+        }
+        let (mut runtime, _) = LiveRuntime::new(machine);
+        let mut reference = compile(&graph).unwrap();
+        let mut plan = TimedNotePlan::prepare(
+            &reference,
+            0,
+            &[
+                TimedNoteState {
+                    frame: 3,
+                    channel: 1,
+                    pitch_hz: 440.0,
+                    gate: true,
+                },
+                TimedNoteState {
+                    frame: 260,
+                    channel: 1,
+                    pitch_hz: 880.0,
+                    gate: true,
+                },
+                TimedNoteState {
+                    frame: 290,
+                    channel: 1,
+                    pitch_hz: 440.0,
+                    gate: true,
+                },
+                TimedNoteState {
+                    frame: 305,
+                    channel: 1,
+                    pitch_hz: 440.0,
+                    gate: false,
+                },
+            ],
+        )
+        .unwrap();
+        let mut expected = [0.0; 300];
+        plan.render_next(&mut reference, &mut expected).unwrap();
+        let mut output = [f64::NAN; 600];
+        let mut scratch = [0.0; CHUNK_FRAMES];
+        let mut active = true;
+        let errors = AtomicU64::new(0);
+        fill_interleaved_timed(
+            &mut runtime,
+            &mut consumer,
+            &mut active,
+            &mut output,
+            2,
+            &mut scratch,
+            &errors,
+        );
+        for (frame, pair) in output.chunks_exact(2).enumerate() {
+            assert!((pair[0] - expected[frame]).abs() < 1e-12, "frame {frame}");
+            assert_eq!(pair[0], pair[1]);
+        }
+        assert_eq!(midi.first_unrendered_frame(), 300);
+        assert_eq!(errors.load(Ordering::Relaxed), 0);
+
+        assert_eq!(midi.dispatch(7_000, &[0xB0, 7, 127]), Ok(true));
+        reference
+            .control_handle("level")
+            .unwrap()
+            .publish(1.0)
+            .unwrap();
+        let mut next_expected = [0.0; 16];
+        plan.render_next(&mut reference, &mut next_expected)
+            .unwrap();
+        let mut next = [f64::NAN; 16];
+        fill_interleaved_timed(
+            &mut runtime,
+            &mut consumer,
+            &mut active,
+            &mut next,
+            1,
+            &mut scratch,
+            &errors,
+        );
+        for (frame, actual) in next.iter().enumerate() {
+            assert!(
+                (actual - next_expected[frame]).abs() < 1e-12,
+                "next frame {frame}"
+            );
+        }
+        assert_eq!(midi.first_unrendered_frame(), 316);
+        assert_eq!(errors.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn graph_replacement_disables_old_timed_queue_without_callback_drop() {
+        let graph = lua::read(include_str!("../examples/47-device-timed-midi.lua")).unwrap();
+        let machine = compile(&graph).unwrap();
+        let (_, mut consumer) = live_note_queue(&machine, 0);
+        let (mut runtime, control) = LiveRuntime::new(machine);
+        let replacement = lua::read(include_str!("../examples/01-basic.lua")).unwrap();
+        control.submit(&replacement).unwrap();
+        let mut active = true;
+        let mut scratch = [0.0; CHUNK_FRAMES];
+        let mut output = [f64::NAN; 16];
+        let errors = AtomicU64::new(0);
+        fill_interleaved_timed(
+            &mut runtime,
+            &mut consumer,
+            &mut active,
+            &mut output,
+            1,
+            &mut scratch,
+            &errors,
+        );
+        assert_eq!(output, [0.125; 16]);
+        assert!(!active);
+        assert_eq!(errors.load(Ordering::Relaxed), 0);
+        assert_eq!(consumer.cursor(), 0);
     }
 }
