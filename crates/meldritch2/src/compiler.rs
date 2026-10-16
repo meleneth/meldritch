@@ -147,6 +147,14 @@ pub struct Machine {
     sample_rate: f64,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TimedNoteTarget {
+    pub pitch_index: usize,
+    pub gate_index: usize,
+    pub min_pitch: f64,
+    pub max_pitch: f64,
+}
+
 impl Machine {
     pub fn process(&mut self, buffer: &mut [f64]) {
         self.prepare_buffer();
@@ -231,20 +239,29 @@ impl Machine {
         channel: u8,
         pitch_hz: f64,
     ) -> Result<(usize, usize), String> {
+        let target = self.timed_note_target(channel)?;
+        if !pitch_hz.is_finite() || pitch_hz < target.min_pitch || pitch_hz > target.max_pitch {
+            return Err(format!(
+                "timed note pitch must be finite and within control range for channel {channel}: {}..{}",
+                target.min_pitch, target.max_pitch
+            ));
+        }
+        Ok((target.pitch_index, target.gate_index))
+    }
+    pub(crate) fn timed_note_target(&self, channel: u8) -> Result<TimedNoteTarget, String> {
         let binding = self
             .midi_notes
             .iter()
             .find(|binding| binding.channel == channel)
             .ok_or_else(|| format!("no MIDI note mapping for channel {channel}"))?;
         let pitch = &self.controls[&binding.pitch_control_id];
-        if !pitch_hz.is_finite() || pitch_hz < pitch.min || pitch_hz > pitch.max {
-            return Err(format!(
-                "timed note pitch must be finite and within control '{}' {}..{}",
-                binding.pitch_control_id, pitch.min, pitch.max
-            ));
-        }
         let gate = &self.controls[&binding.gate_control_id];
-        Ok((self.param_ids[&pitch.target], self.param_ids[&gate.target]))
+        Ok(TimedNoteTarget {
+            pitch_index: self.param_ids[&pitch.target],
+            gate_index: self.param_ids[&gate.target],
+            min_pitch: pitch.min,
+            max_pitch: pitch.max,
+        })
     }
     pub(crate) fn apply_timed_note(
         &mut self,

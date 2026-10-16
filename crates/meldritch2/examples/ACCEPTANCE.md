@@ -381,3 +381,20 @@ Regressing audio cursors, zero sample rate, lead beyond one second, and frame
 overflow reject without corrupting the clock. This adapter only computes
 frame positions; capturing a real device's audio cursor, feeding a live event
 queue, and measuring physical latency remain open.
+
+## Bounded live note handoff
+
+`46-live-note-queue.lua` declares the same explicit Hertz and Gate paths with
+a 0.375 output Gain. A single producer resolves channel 1 to compiled targets
+before rendering and enqueues frame 3 on/440 Hz, frame 7 on/880 Hz, and frame
+11 off. A single consumer renders 5+4+7 frames with identical PCM to the
+prepared 16-frame timeline. Each event applies before its sample, including
+events on a buffer boundary. The producer sees the first unrendered absolute
+frame after each completed block. A state submitted behind that cursor clamps
+forward; out-of-order states also clamp forward to preserve queue order.
+The queue holds 64 states and reports full without changing accepted entries.
+Unmapped channels, nonfinite or out-of-range pitch, wrong machine revisions,
+invalid buffer lengths, and frame overflow reject without mutating DSP state.
+Producer validation and target resolution happen outside the audio path; the
+consumer uses only fixed slots, atomics, and compiled indices. Device callback
+wiring, physical MIDI timing, and listening remain open.

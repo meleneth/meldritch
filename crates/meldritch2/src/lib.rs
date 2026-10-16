@@ -2,6 +2,7 @@ pub mod compiler;
 pub mod contract;
 pub mod device;
 pub mod live;
+pub mod live_notes;
 pub mod lua;
 pub mod midi;
 pub mod midi_clock;
@@ -18,6 +19,7 @@ mod tests {
         compiler::{Host, compile, compile_at_rate},
         contract::{self, FanIn, Role},
         live::LiveRuntime,
+        live_notes::{PushError, live_note_queue},
         lua,
         midi::MidiRouter,
         midi_clock::{ClockError, ClockStatus, FrameStamp, MidiFrameClock},
@@ -75,6 +77,7 @@ mod tests {
     const TIMED_NOTE_VOICE: &str = include_str!("../examples/43-timed-note-voice.lua");
     const TIMED_NOTE_NO_BINDING: &str = include_str!("../examples/44-timed-note-no-binding.lua");
     const MIDI_TIME_ANCHOR: &str = include_str!("../examples/45-midi-time-anchor.lua");
+    const LIVE_NOTE_QUEUE: &str = include_str!("../examples/46-live-note-queue.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -1647,6 +1650,201 @@ mod tests {
         let mut far = MidiFrameClock::new(u32::MAX, 0).unwrap();
         assert_eq!(far.map(0, 0).unwrap().frame, 0);
         assert_eq!(far.map(u64::MAX, 0), Err(ClockError::FrameOverflow));
+    }
+
+    #[test]
+    fn live_note_queue_matches_prepared_timeline_across_blocks() {
+        let graph = lua::read(LIVE_NOTE_QUEUE).unwrap();
+        let events = [
+            TimedNoteState {
+                frame: 3,
+                channel: 1,
+                pitch_hz: 440.0,
+                gate: true,
+            },
+            TimedNoteState {
+                frame: 7,
+                channel: 1,
+                pitch_hz: 880.0,
+                gate: true,
+            },
+            TimedNoteState {
+                frame: 11,
+                channel: 1,
+                pitch_hz: 880.0,
+                gate: false,
+            },
+        ];
+        let mut reference = compile(&graph).unwrap();
+        let mut plan = TimedNotePlan::prepare(&reference, 0, &events).unwrap();
+        let mut expected = [0.0; 16];
+        plan.render_next(&mut reference, &mut expected).unwrap();
+
+        let mut machine = compile(&graph).unwrap();
+        let (mut producer, mut consumer) = live_note_queue(&machine, 0);
+        for event in events {
+            assert_eq!(producer.try_push(event).unwrap().frame, event.frame);
+        }
+        let mut a = [0.0; 5];
+        let mut b = [0.0; 4];
+        let mut c = [0.0; 7];
+        assert_eq!(
+            consumer.render_next(&mut machine, &mut a).unwrap().applied,
+            1
+        );
+        assert_eq!(producer.first_unrendered_frame(), 5);
+        assert_eq!(
+            consumer.render_next(&mut machine, &mut b).unwrap().applied,
+            1
+        );
+        assert_eq!(
+            consumer.render_next(&mut machine, &mut c).unwrap().applied,
+            1
+        );
+        assert_eq!(producer.first_unrendered_frame(), 16);
+        assert_eq!(expected[..5], a);
+        assert_eq!(expected[5..9], b);
+        assert_eq!(expected[9..], c);
+    }
+
+    #[test]
+    fn midi_clock_feeds_live_note_queue_using_published_cursor() {
+        let graph = lua::read(LIVE_NOTE_QUEUE).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let (mut producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut clock = MidiFrameClock::new(48_000, 3).unwrap();
+        for (time, pitch_hz, gate) in [
+            (1_000_000, 440.0, true),
+            (1_000_084, 880.0, true),
+            (1_000_167, 880.0, false),
+        ] {
+            let stamp = clock.map(time, producer.first_unrendered_frame()).unwrap();
+            assert!(
+                !producer
+                    .try_push(TimedNoteState {
+                        frame: stamp.frame,
+                        channel: 1,
+                        pitch_hz,
+                        gate,
+                    })
+                    .unwrap()
+                    .clamped
+            );
+        }
+        let mut pcm = [0.0; 16];
+        assert_eq!(
+            consumer
+                .render_next(&mut machine, &mut pcm)
+                .unwrap()
+                .applied,
+            3
+        );
+        for (frame, actual) in pcm.iter().enumerate() {
+            let cycles = if frame < 7 {
+                440.0 * frame as f64
+            } else {
+                440.0 * 7.0 + 880.0 * (frame - 7) as f64
+            };
+            let expected = if (3..11).contains(&frame) {
+                0.375 * (std::f64::consts::TAU * cycles / 48_000.0).sin()
+            } else {
+                0.0
+            };
+            assert!((actual - expected).abs() < 1e-12, "frame {frame}");
+        }
+        assert_eq!(producer.first_unrendered_frame(), 16);
+        let stamp = clock
+            .map(1_000_168, producer.first_unrendered_frame())
+            .unwrap();
+        assert_eq!(stamp.status, ClockStatus::Late);
+        assert_eq!(
+            producer
+                .try_push(TimedNoteState {
+                    frame: stamp.frame,
+                    channel: 1,
+                    pitch_hz: 440.0,
+                    gate: true,
+                })
+                .unwrap()
+                .frame,
+            16
+        );
+    }
+
+    #[test]
+    fn live_note_queue_clamps_late_events_and_preserves_capacity() {
+        let graph = lua::read(LIVE_NOTE_QUEUE).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let (mut producer, mut consumer) = live_note_queue(&machine, 0);
+        let note = |frame, gate| TimedNoteState {
+            frame,
+            channel: 1,
+            pitch_hz: 440.0,
+            gate,
+        };
+        assert_eq!(producer.try_push(note(0, true)).unwrap().frame, 0);
+        let mut initial = [0.0; 4];
+        consumer.render_next(&mut machine, &mut initial).unwrap();
+        assert_eq!(producer.try_push(note(1, false)).unwrap().frame, 4);
+        let mut released = [f64::NAN; 4];
+        assert_eq!(
+            consumer
+                .render_next(&mut machine, &mut released)
+                .unwrap()
+                .late,
+            0
+        );
+        assert_eq!(released, [0.0; 4]);
+
+        let mut old = compile(&graph).unwrap();
+        let (mut producer, mut consumer) = live_note_queue(&machine, 8);
+        assert_eq!(
+            consumer.render_next(&mut old, &mut [0.0; 1]),
+            Err(TimedRenderError::WrongMachine)
+        );
+        assert_eq!(consumer.cursor(), 8);
+        assert_eq!(
+            producer.try_push(TimedNoteState {
+                channel: 2,
+                ..note(8, true)
+            }),
+            Err(PushError::UnmappedChannel)
+        );
+        assert_eq!(
+            producer.try_push(TimedNoteState {
+                pitch_hz: f64::NAN,
+                ..note(8, true)
+            }),
+            Err(PushError::InvalidPitch)
+        );
+        for _ in 0..MAX_EVENTS {
+            producer.try_push(note(8, true)).unwrap();
+        }
+        assert_eq!(producer.try_push(note(8, false)), Err(PushError::Full));
+        let mut one = [0.0; 1];
+        assert_eq!(
+            consumer
+                .render_next(&mut machine, &mut one)
+                .unwrap()
+                .applied,
+            MAX_EVENTS
+        );
+        assert_eq!(producer.try_push(note(9, false)).unwrap().frame, 9);
+        assert_eq!(
+            consumer.render_next(&mut machine, &mut []),
+            Err(TimedRenderError::InvalidBufferSize)
+        );
+        assert_eq!(consumer.cursor(), 9);
+        let (mut overflow_producer, mut overflow_consumer) = live_note_queue(&machine, u64::MAX);
+        assert_eq!(
+            overflow_consumer.render_next(&mut machine, &mut [0.0; 1]),
+            Err(TimedRenderError::FrameOverflow)
+        );
+        assert_eq!(overflow_producer.first_unrendered_frame(), u64::MAX);
+        assert_eq!(
+            overflow_producer.try_push(note(0, true)).unwrap().frame,
+            u64::MAX
+        );
     }
 
     #[test]
