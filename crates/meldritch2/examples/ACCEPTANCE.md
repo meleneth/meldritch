@@ -417,3 +417,27 @@ MIDI notes; CC-only graphs retain their existing control route. The terminal
 shows live timing/queue and output error counts, with diagnostics again on
 exit. Physical MIDI gestures, latency, disconnect cleanup, and listening
 remain unverified.
+
+## Timed MIDI reset and session teardown
+
+`48-midi-reset.lua` has one declared pitch/gate channel and an immediate Gate
+release. After note 69 opens at frame 3, 64 future note changes fill the
+normal queue. A further note-on reports full without changing held priority.
+Channel-1 CC 123 value 0 must then release the active Gate at the next audio
+chunk and discard all 64 earlier queued changes, despite the full queue.
+The next eight frames are silent. Releasing a formerly held key is ignored;
+a new note after the reset still enters at its newly anchored frame. MIDI
+system reset `0xFF` also clears held notes and closes the Gate. Channel-mode
+CC 120 has the same per-channel emergency behavior. The reset marker uses
+separate bounded atomic state so it needs no free event slot, and the audio
+callback neither allocates nor blocks. Closing a timed MIDI session stops its
+input callback, retrieves the router, and publishes the same release markers.
+An unplugged device that supplies no reset or close notification still needs
+a physical detection contract and test.
+
+`49-channel-reset.lua` mixes two independently mapped mono voices. Both open
+at frame 3. Channel 1 queues a pitch change for frame 99 and channel 2 queues
+one for frame 103. Channel-1 CC 123 then closes only its Gate at the next
+chunk, discards its frame-99 event, and leaves channel 2 sounding. The
+remaining 110-frame render must match a prepared timeline with channel 1 off
+at frame 4 and channel 2 changing pitch at frame 103, sample for sample.

@@ -71,11 +71,36 @@ impl TimedMidiRouter {
         self.producer.first_unrendered_frame()
     }
 
+    fn release_channel(&mut self, channel: usize) -> bool {
+        let Some(route) = &mut self.notes[channel] else {
+            return false;
+        };
+        self.producer
+            .emergency_release(channel as u8 + 1)
+            .expect("mapped timed note channel");
+        route.held = HeldNotes::new();
+        true
+    }
+
+    /// Used after the MIDI connection has stopped its callback.
+    pub(crate) fn release_all(&mut self) {
+        for channel in 0..16 {
+            self.release_channel(channel);
+        }
+    }
+
     pub fn dispatch(&mut self, midi_us: u64, message: &[u8]) -> Result<bool, TimedMidiError> {
+        if message == [0xFF] {
+            self.release_all();
+            return Ok(true);
+        }
         if message.len() != 3 || message[1] > 127 || message[2] > 127 {
             return Ok(false);
         }
         if message[0] & 0xF0 == 0xB0 {
+            if matches!(message[1], 120 | 123) && message[2] == 0 {
+                return Ok(self.release_channel(usize::from(message[0] & 0x0F)));
+            }
             return Ok(self.controls.dispatch(message));
         }
         if !matches!(message[0] & 0xF0, 0x80 | 0x90) {

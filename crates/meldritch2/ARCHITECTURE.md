@@ -81,7 +81,14 @@ graph revision disables the old queue and continues ordinary rendering until
 the output is reopened; the audio callback retains the old queue allocation.
 The MIDI session shows clock/queue failures in the terminal and reports them
 after exit.
-Physical latency, disconnect cleanup, and listening remain open.
+Timed MIDI CC 120/123 with value zero releases the addressed channel; MIDI
+system reset releases every mapped channel. The producer publishes a separate
+per-channel reset marker even when the 64-event ring is full. At the next
+chunk the consumer closes its active Gate and skips queued states older than
+that marker. The router clears its held-key stack, and later notes remain
+eligible for scheduling. Closing a MIDI input session first stops its callback,
+then retrieves the router and publishes the same release markers. Physical
+latency, unplug detection, and listening remain open.
 
 Lua's `meldritch.graph()` API constructs a candidate graph. `graph:module(id,
 type, values)` returns handles with contract-derived ports; `graph:connect(src,

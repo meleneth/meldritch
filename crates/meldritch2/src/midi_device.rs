@@ -19,8 +19,13 @@ pub fn input_port_names() -> Result<Vec<String>, String> {
         .collect())
 }
 
+enum InputConnection {
+    Controls(midir::MidiInputConnection<()>),
+    Timed(midir::MidiInputConnection<TimedMidiRouter>),
+}
+
 pub struct MidiInputSession {
-    _connection: midir::MidiInputConnection<()>,
+    connection: Option<InputConnection>,
     note_errors: Arc<AtomicU64>,
     pub port_name: String,
 }
@@ -48,13 +53,13 @@ impl MidiInputSession {
             )
             .map_err(|error| format!("failed to connect MIDI input '{port_name}': {error}"))?;
         Ok(Self {
-            _connection: connection,
+            connection: Some(InputConnection::Controls(connection)),
             note_errors: Arc::new(AtomicU64::new(0)),
             port_name,
         })
     }
 
-    pub fn open_timed_index(index: usize, mut router: TimedMidiRouter) -> Result<Self, String> {
+    pub fn open_timed_index(index: usize, router: TimedMidiRouter) -> Result<Self, String> {
         let mut input = midir::MidiInput::new("meldritch2-timed-notes")
             .map_err(|error| format!("failed to create MIDI input: {error}"))?;
         input.ignore(midir::Ignore::None);
@@ -71,16 +76,16 @@ impl MidiInputSession {
             .connect(
                 port,
                 "meldritch2-timed-note-input",
-                move |timestamp, message, ()| {
+                move |timestamp, message, router: &mut TimedMidiRouter| {
                     if router.dispatch(timestamp, message).is_err() {
                         callback_errors.fetch_add(1, Ordering::Relaxed);
                     }
                 },
-                (),
+                router,
             )
             .map_err(|error| format!("failed to connect MIDI input '{port_name}': {error}"))?;
         Ok(Self {
-            _connection: connection,
+            connection: Some(InputConnection::Timed(connection)),
             note_errors,
             port_name,
         })
@@ -88,5 +93,20 @@ impl MidiInputSession {
 
     pub fn note_errors(&self) -> u64 {
         self.note_errors.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for MidiInputSession {
+    fn drop(&mut self) {
+        match self.connection.take() {
+            Some(InputConnection::Timed(connection)) => {
+                let (_, mut router) = connection.close();
+                router.release_all();
+            }
+            Some(InputConnection::Controls(connection)) => {
+                drop(connection);
+            }
+            None => {}
+        }
     }
 }

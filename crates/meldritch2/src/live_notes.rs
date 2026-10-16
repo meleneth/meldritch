@@ -67,6 +67,8 @@ struct Queue {
     head: AtomicU64,
     tail: AtomicU64,
     cursor: AtomicU64,
+    reset_tail: [AtomicU64; 16],
+    reset_epoch: [AtomicU64; 16],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -86,6 +88,7 @@ pub struct PushOutcome {
 pub struct RenderReport {
     pub applied: usize,
     pub late: usize,
+    pub discarded: usize,
 }
 
 /// The sole writer. Resolve and validate source events before audio processing.
@@ -93,6 +96,7 @@ pub struct LiveNoteProducer {
     queue: Arc<Queue>,
     targets: [Option<TimedNoteTarget>; 16],
     last_frame: u64,
+    discard_before: [u64; 16],
 }
 
 /// The sole reader; owns the sequential DSP cursor and held note state.
@@ -101,6 +105,8 @@ pub struct LiveNoteConsumer {
     revision: Arc<()>,
     cursor: u64,
     active: [Option<Event>; 16],
+    seen_reset: [u64; 16],
+    discard_before: [u64; 16],
 }
 
 pub fn live_note_queue(
@@ -120,18 +126,23 @@ pub fn live_note_queue(
         head: AtomicU64::new(0),
         tail: AtomicU64::new(0),
         cursor: AtomicU64::new(start_frame),
+        reset_tail: array::from_fn(|_| AtomicU64::new(0)),
+        reset_epoch: array::from_fn(|_| AtomicU64::new(0)),
     });
     (
         LiveNoteProducer {
             queue: Arc::clone(&queue),
             targets,
             last_frame: start_frame,
+            discard_before: [0; 16],
         },
         LiveNoteConsumer {
             queue,
             revision: machine.revision_token(),
             cursor: start_frame,
             active: [None; 16],
+            seen_reset: [0; 16],
+            discard_before: [0; 16],
         },
     )
 }
@@ -139,6 +150,36 @@ pub fn live_note_queue(
 impl LiveNoteProducer {
     pub fn first_unrendered_frame(&self) -> u64 {
         self.queue.cursor.load(Ordering::Acquire)
+    }
+
+    /// Invalidate pending states and release the active Gate for one channel.
+    /// This succeeds even if the ordinary queue is full. The same producer
+    /// must own all writes to this queue.
+    pub fn emergency_release(&mut self, channel: u8) -> Result<(), PushError> {
+        let index = usize::from(channel).wrapping_sub(1);
+        if self.targets.get(index).and_then(|target| *target).is_none() {
+            return Err(PushError::UnmappedChannel);
+        }
+        let tail = self.queue.tail.load(Ordering::Relaxed);
+        self.queue.reset_tail[index].store(tail, Ordering::Relaxed);
+        self.queue.reset_epoch[index].fetch_add(1, Ordering::Release);
+        self.discard_before[index] = tail;
+        let head = self.queue.head.load(Ordering::Acquire);
+        let mut last_frame = self.first_unrendered_frame();
+        for offset in 0..tail.wrapping_sub(head).min(MAX_EVENTS as u64) {
+            let sequence = head.wrapping_add(offset);
+            let event = self.queue.slots[(sequence as usize) % MAX_EVENTS].read();
+            let channel = usize::from(event.channel - 1);
+            let cutoff = self.discard_before[channel];
+            let canceled = self.queue.reset_epoch[channel].load(Ordering::Relaxed) != 0
+                && cutoff.wrapping_sub(sequence) > 0
+                && cutoff.wrapping_sub(sequence) <= MAX_EVENTS as u64;
+            if !canceled {
+                last_frame = last_frame.max(event.frame);
+            }
+        }
+        self.last_frame = last_frame;
+        Ok(())
     }
 
     /// Enqueue in nondecreasing frame order. Stale or reordered frames clamp forward.
@@ -224,6 +265,17 @@ impl LiveNoteConsumer {
         if prepare {
             machine.prepare_buffer();
         }
+        for channel in 0..16 {
+            let epoch = self.queue.reset_epoch[channel].load(Ordering::Acquire);
+            if epoch != self.seen_reset[channel] {
+                self.seen_reset[channel] = epoch;
+                self.discard_before[channel] =
+                    self.queue.reset_tail[channel].load(Ordering::Relaxed);
+                if let Some(event) = &mut self.active[channel] {
+                    event.gate = false;
+                }
+            }
+        }
         for event in self.active.iter().flatten() {
             machine.apply_timed_note(
                 event.pitch_index,
@@ -240,6 +292,15 @@ impl LiveNoteConsumer {
                 break;
             }
             let event = self.queue.slots[(head as usize) % MAX_EVENTS].read();
+            let channel = usize::from(event.channel - 1);
+            let before = self.discard_before[channel].wrapping_sub(head);
+            if self.seen_reset[channel] != 0 && before > 0 && before <= MAX_EVENTS as u64 {
+                report.discarded += 1;
+                self.queue
+                    .head
+                    .store(head.wrapping_add(1), Ordering::Release);
+                continue;
+            }
             if event.frame >= end {
                 break;
             }

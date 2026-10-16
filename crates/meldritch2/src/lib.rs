@@ -1813,6 +1813,117 @@ mod tests {
     }
 
     #[test]
+    fn all_notes_off_releases_active_gate_and_discards_full_future_queue() {
+        let graph = lua::read(include_str!("../examples/48-midi-reset.lua")).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        assert_eq!(midi.dispatch(0, &[0x90, 69, 100]), Ok(true));
+        let mut opening = [0.0; 4];
+        consumer.render_next(&mut machine, &mut opening).unwrap();
+        assert!(opening[3].abs() > 0.0);
+        for offset in 0..MAX_EVENTS as u64 {
+            let note = if offset % 2 == 0 { 81 } else { 69 };
+            assert_eq!(
+                midi.dispatch(1_000_000 + offset, &[0x90, note, 100]),
+                Ok(true)
+            );
+        }
+        assert_eq!(
+            midi.dispatch(1_000_064, &[0x90, 81, 100]),
+            Err(TimedMidiError::Queue(PushError::Full))
+        );
+        assert_eq!(midi.dispatch(1_000_065, &[0xB0, 123, 0]), Ok(true));
+        let mut silence = [f64::NAN; 8];
+        let report = consumer.render_next(&mut machine, &mut silence).unwrap();
+        assert_eq!(report.discarded, MAX_EVENTS);
+        assert_eq!(report.applied, 0);
+        assert_eq!(silence, [0.0; 8]);
+        assert_eq!(midi.dispatch(1, &[0x80, 69, 0]), Ok(false));
+        assert_eq!(midi.dispatch(1, &[0x90, 81, 100]), Ok(true));
+        let mut reopened = [0.0; 4];
+        assert_eq!(
+            consumer
+                .render_next(&mut machine, &mut reopened)
+                .unwrap()
+                .applied,
+            1
+        );
+        assert_eq!(reopened[..3], [0.0; 3]);
+        assert!(reopened[3].abs() > 0.0);
+        assert_eq!(midi.dispatch(2, &[0xFF]), Ok(true));
+        let mut ended = [f64::NAN; 4];
+        consumer.render_next(&mut machine, &mut ended).unwrap();
+        assert_eq!(ended, [0.0; 4]);
+        assert_eq!(midi.dispatch(3, &[0x90, 69, 100]), Ok(true));
+        let mut open_again = [0.0; 1];
+        consumer.render_next(&mut machine, &mut open_again).unwrap();
+        assert!(open_again[0].abs() > 0.0);
+        assert_eq!(midi.dispatch(4, &[0xB0, 120, 0]), Ok(true));
+        let mut stopped = [f64::NAN; 1];
+        consumer.render_next(&mut machine, &mut stopped).unwrap();
+        assert_eq!(stopped, [0.0]);
+        midi.release_all();
+    }
+
+    #[test]
+    fn channel_reset_preserves_other_voice_and_its_future_event() {
+        let graph = lua::read(include_str!("../examples/49-channel-reset.lua")).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        assert_eq!(midi.dispatch(0, &[0x90, 69, 100]), Ok(true));
+        assert_eq!(midi.dispatch(0, &[0x91, 69, 100]), Ok(true));
+        let mut first = [0.0; 4];
+        consumer.render_next(&mut machine, &mut first).unwrap();
+        assert_eq!(midi.dispatch(2_000, &[0x90, 81, 100]), Ok(true));
+        assert_eq!(midi.dispatch(2_100, &[0x91, 81, 100]), Ok(true));
+        assert_eq!(midi.dispatch(2_101, &[0xB0, 123, 0]), Ok(true));
+        let mut rest = [0.0; 110];
+        let report = consumer.render_next(&mut machine, &mut rest).unwrap();
+        assert_eq!(report.discarded, 1);
+        assert_eq!(report.applied, 1);
+
+        let mut reference = compile(&graph).unwrap();
+        let mut plan = TimedNotePlan::prepare(
+            &reference,
+            0,
+            &[
+                TimedNoteState {
+                    frame: 3,
+                    channel: 1,
+                    pitch_hz: 440.0,
+                    gate: true,
+                },
+                TimedNoteState {
+                    frame: 3,
+                    channel: 2,
+                    pitch_hz: 440.0,
+                    gate: true,
+                },
+                TimedNoteState {
+                    frame: 4,
+                    channel: 1,
+                    pitch_hz: 440.0,
+                    gate: false,
+                },
+                TimedNoteState {
+                    frame: 103,
+                    channel: 2,
+                    pitch_hz: 880.0,
+                    gate: true,
+                },
+            ],
+        )
+        .unwrap();
+        let mut expected = [0.0; 114];
+        plan.render_next(&mut reference, &mut expected).unwrap();
+        assert_eq!(first, expected[..4]);
+        assert_eq!(rest, expected[4..]);
+        assert!(rest[20].abs() > 0.0);
+    }
+
+    #[test]
     fn live_note_queue_clamps_late_events_and_preserves_capacity() {
         let graph = lua::read(LIVE_NOTE_QUEUE).unwrap();
         let mut machine = compile(&graph).unwrap();
