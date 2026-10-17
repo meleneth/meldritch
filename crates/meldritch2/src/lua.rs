@@ -8,7 +8,7 @@ use crate::model::{Connection, Control, Endpoint, Graph, MidiCc, MidiNotes, Modu
 const API: &str = r#"
 meldritch = {}
 function meldritch.graph()
-  local graph = { modules = {}, connections = {}, controls = {}, midi_ccs = {}, note_bindings = {} }
+  local graph = { modules = {}, connections = {}, normalizations = {}, controls = {}, midi_ccs = {}, note_bindings = {} }
   function graph:module(id, kind, values)
     assert(type(id) == "string" and type(kind) == "string", "module ID and type must be strings")
     local spec = meldritch._contract(kind)
@@ -27,6 +27,11 @@ function meldritch.graph()
     assert(type(source) == "table" and source.direction == "output", "source must be an output port")
     assert(type(destination) == "table" and destination.direction == "input", "destination must be an input port")
     table.insert(self.connections, { from = source, to = destination })
+  end
+  function graph:normalize(source, destination)
+    assert(type(source) == "table" and source.direction == "output", "source must be an output port")
+    assert(type(destination) == "table" and destination.direction == "input", "destination must be an input port")
+    table.insert(self.normalizations, { from = source, to = destination })
   end
   function graph:control(id, module, parameter, range)
     assert(type(id) == "string", "control ID must be a string")
@@ -109,6 +114,16 @@ pub fn read(script: &str) -> Result<Graph, String> {
     for item in connections.sequence_values::<Table>() {
         let item = item.map_err(|e| e.to_string())?;
         graph.connections.push(Connection {
+            from: endpoint(item.get("from").map_err(|e| e.to_string())?)?,
+            to: endpoint(item.get("to").map_err(|e| e.to_string())?)?,
+        });
+    }
+    let normalizations: Table = table
+        .get("normalizations")
+        .map_err(|e| format!("graph.normalizations: {e}"))?;
+    for item in normalizations.sequence_values::<Table>() {
+        let item = item.map_err(|e| e.to_string())?;
+        graph.normalizations.push(Connection {
             from: endpoint(item.get("from").map_err(|e| e.to_string())?)?,
             to: endpoint(item.get("to").map_err(|e| e.to_string())?)?,
         });

@@ -13,7 +13,7 @@ pub struct Module {
     pub values: BTreeMap<String, f64>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Connection {
     pub from: Endpoint,
     pub to: Endpoint,
@@ -46,6 +46,7 @@ pub struct MidiNotes {
 pub struct Graph {
     pub modules: Vec<Module>,
     pub connections: Vec<Connection>,
+    pub normalizations: Vec<Connection>,
     pub controls: Vec<Control>,
     pub midi_ccs: Vec<MidiCc>,
     pub midi_notes: Vec<MidiNotes>,

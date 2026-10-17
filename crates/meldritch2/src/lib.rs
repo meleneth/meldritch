@@ -78,6 +78,7 @@ mod tests {
     const TIMED_NOTE_NO_BINDING: &str = include_str!("../examples/44-timed-note-no-binding.lua");
     const MIDI_TIME_ANCHOR: &str = include_str!("../examples/45-midi-time-anchor.lua");
     const LIVE_NOTE_QUEUE: &str = include_str!("../examples/46-live-note-queue.lua");
+    const NORMALIZED_MODULATION: &str = include_str!("../examples/54-normalized-modulation.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -344,6 +345,203 @@ mod tests {
         second.process(&mut second_samples);
         assert_eq!(first_samples, [0.1875; 8]);
         assert_eq!(first_samples, second_samples);
+    }
+
+    #[test]
+    fn authored_normalization_is_overridden_and_restored_by_graph_revision() {
+        let normalized = lua::read(NORMALIZED_MODULATION).unwrap();
+        let overridden = lua::read(
+            &NORMALIZED_MODULATION
+                .replace("local use_override = false", "local use_override = true"),
+        )
+        .unwrap();
+        assert_eq!(normalized.normalizations.len(), 1);
+        assert_eq!(overridden.normalizations, normalized.normalizations);
+        assert_eq!(normalized.connections.len(), 2);
+        assert_eq!(overridden.connections.len(), 3);
+
+        let mut host = Host::default();
+        host.submit(&normalized).unwrap();
+        let machine = host.accepted().unwrap();
+        assert_eq!(
+            machine.authored_normalizations(),
+            &normalized.normalizations
+        );
+        assert!(
+            machine
+                .effective_connections()
+                .contains(&normalized.normalizations[0])
+        );
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.25; 4]);
+
+        host.submit(&overridden).unwrap();
+        let machine = host.accepted().unwrap();
+        assert_eq!(
+            machine.authored_normalizations(),
+            &normalized.normalizations
+        );
+        assert_eq!(machine.effective_connections(), &overridden.connections);
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.125; 4]);
+
+        host.submit(&normalized).unwrap();
+        let machine = host.accepted().unwrap();
+        assert!(
+            machine
+                .effective_connections()
+                .contains(&normalized.normalizations[0])
+        );
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.25; 4]);
+
+        let mut disconnected = normalized.clone();
+        disconnected.normalizations.clear();
+        host.submit(&disconnected).unwrap();
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.5; 4]);
+    }
+
+    #[test]
+    fn normalization_resolution_uses_port_contracts_across_module_types() {
+        let script = r#"
+local graph = meldritch.graph()
+local normal = graph:module("normal", "constant", { value = 0.5 })
+local override = graph:module("override", "constant", { value = 0.125 })
+local right = graph:module("right", "constant", { value = 0.25 })
+local mix = graph:module("mix", "mix")
+local output = graph:module("output", "output")
+graph:normalize(normal.out, mix.left)
+graph:connect(right.out, mix.right)
+graph:connect(mix.out, output.input)
+return graph
+"#;
+        let graph = lua::read(script).unwrap();
+        let mut normal = compile(&graph).unwrap();
+        let mut samples = [f64::NAN; 4];
+        normal.process(&mut samples);
+        assert_eq!(samples, [0.75; 4]);
+        let mut overridden = graph.clone();
+        overridden.connections.push(crate::model::Connection {
+            from: crate::model::Endpoint {
+                module: "override".into(),
+                port: "out".into(),
+            },
+            to: graph.normalizations[0].to.clone(),
+        });
+        let mut machine = compile(&overridden).unwrap();
+        assert_eq!(machine.effective_connections(), &overridden.connections);
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.375; 4]);
+
+        // A declared Sum input still sums explicit cables; normalization is
+        // suppressed for the entire destination, not added as another source.
+        let mut summed = lua::read(NORMALIZED_MODULATION).unwrap();
+        summed.normalizations[0].to.port = "input".into();
+        summed.connections.push(crate::model::Connection {
+            from: crate::model::Endpoint {
+                module: "override".into(),
+                port: "out".into(),
+            },
+            to: summed.normalizations[0].to.clone(),
+        });
+        let mut machine = compile(&summed).unwrap();
+        assert_eq!(machine.effective_connections(), &summed.connections);
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.75; 4]);
+    }
+
+    #[test]
+    fn invalid_normalizations_reject_candidate_and_preserve_machine() {
+        let base = lua::read(NORMALIZED_MODULATION).unwrap();
+        let overridden = lua::read(
+            &NORMALIZED_MODULATION
+                .replace("local use_override = false", "local use_override = true"),
+        )
+        .unwrap();
+        let mut cases = Vec::new();
+
+        let mut duplicate = overridden.clone();
+        duplicate.normalizations[0].to.port = "input".into();
+        duplicate
+            .normalizations
+            .push(duplicate.normalizations[0].clone());
+        cases.push((duplicate, "ambiguous normalization"));
+
+        let mut unknown = overridden.clone();
+        unknown.normalizations[0].from.module = "missing".into();
+        cases.push((unknown, "unknown source module"));
+
+        let mut unknown_destination = overridden.clone();
+        unknown_destination.normalizations[0].to.module = "missing".into();
+        cases.push((unknown_destination, "unknown destination module"));
+
+        let mut wrong_source_port = overridden.clone();
+        wrong_source_port.normalizations[0].from.port = "input".into();
+        cases.push((wrong_source_port, "invalid output port"));
+
+        let mut wrong_destination_port = overridden.clone();
+        wrong_destination_port.normalizations[0].to.port = "out".into();
+        cases.push((wrong_destination_port, "invalid input port"));
+
+        let mut cycle = base.clone();
+        cycle.normalizations[0].from.module = "gain".into();
+        cycle.normalizations[0].to.port = "input".into();
+        cycle.connections.remove(0);
+        cases.push((cycle, "cycle"));
+
+        let mut disconnected = base.clone();
+        disconnected.connections.remove(0);
+        cases.push((disconnected, "is disconnected"));
+
+        let mut explicit_fan_in = base.clone();
+        explicit_fan_in.connections.push(crate::model::Connection {
+            from: crate::model::Endpoint {
+                module: "override".into(),
+                port: "out".into(),
+            },
+            to: base.normalizations[0].to.clone(),
+        });
+        explicit_fan_in.connections.push(crate::model::Connection {
+            from: crate::model::Endpoint {
+                module: "source".into(),
+                port: "out".into(),
+            },
+            to: base.normalizations[0].to.clone(),
+        });
+        cases.push((explicit_fan_in, "permits one connection"));
+
+        let mut host = Host::default();
+        host.submit(&base).unwrap();
+        for (candidate, expected) in cases {
+            let error = host.submit(&candidate).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+            let machine = host.accepted().unwrap();
+            assert_eq!(machine.authored_normalizations(), &base.normalizations);
+            let mut samples = [f64::NAN; 4];
+            machine.process(&mut samples);
+            assert_eq!(samples, [0.25; 4]);
+        }
+
+        let direction_error = lua::read(&NORMALIZED_MODULATION.replace(
+            "graph:normalize(normal.out, gain.mod)",
+            "graph:normalize(gain.mod, normal.out)",
+        ))
+        .unwrap_err();
+        assert!(direction_error.contains("source must be an output port"));
+        let destination_direction_error = lua::read(&NORMALIZED_MODULATION.replace(
+            "graph:normalize(normal.out, gain.mod)",
+            "graph:normalize(normal.out, gain.out)",
+        ))
+        .unwrap_err();
+        assert!(destination_direction_error.contains("destination must be an input port"));
+
+        // The cycle is harmless while an explicit cable overrides its input.
+        let mut dormant_cycle = base.clone();
+        dormant_cycle.normalizations[0].from.module = "gain".into();
+        dormant_cycle.normalizations[0].to.port = "input".into();
+        assert!(compile(&dormant_cycle).is_ok());
     }
 
     #[test]

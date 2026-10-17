@@ -225,6 +225,20 @@ fn main() {
             let mut samples = [0.0; 8];
             machine.process(&mut samples);
             println!("order: {}", machine.order().join(" -> "));
+            if !machine.authored_normalizations().is_empty() {
+                for edge in machine.authored_normalizations() {
+                    println!(
+                        "normalization: {}.{} -> {}.{}",
+                        edge.from.module, edge.from.port, edge.to.module, edge.to.port
+                    );
+                }
+                for edge in machine.effective_connections() {
+                    println!(
+                        "effective: {}.{} -> {}.{}",
+                        edge.from.module, edge.from.port, edge.to.module, edge.to.port
+                    );
+                }
+            }
             println!("samples: {samples:?}");
             if let Some(update) = update {
                 let result = update.strip_prefix("--set=");

@@ -505,3 +505,26 @@ sample jump at note-on and note-off below 0.02 at 48 kHz, despite a nonzero
 oscillator phase, and decay below 0.001 by frame 4095. The user confirmed the
 reported pops were fixed when listening through direct headphones. Independent
 deadline evidence remains open.
+
+## Authored normalization
+
+`54-normalized-modulation.lua` declares `normal.out -> gain.mod` with
+`graph:normalize`. With `use_override = false`, the normalized source supplies
+the otherwise optional modulation input and the output is 0.25. Setting it to
+`true` adds an explicit cable from `override.out` to the same input; that cable
+alone is effective and the output is 0.125. Submitting the original graph again
+restores the normalized route and 0.25 output. Removing the normalization with
+no explicit cable restores the input contract's neutral value and outputs 0.5.
+The authored normalization remains inspectable even when overridden; compiled
+effective connections expose the selected edges separately. The CLI prints
+both lists when a graph declares a normalization.
+
+Acceptance also applies normalization to `mix.left` using the same compiler,
+and confirms two explicit cables to a summed input remain summed while its
+normalization is suppressed. Duplicate normalizations for one destination,
+including a summed or explicitly cabled destination, reject as ambiguous.
+Unknown modules, invalid source/destination ports, reversed Lua port direction,
+disconnected required inputs, active cycles, and excessive explicit fan-in
+reject without changing an accepted machine. An overridden cycle is dormant:
+only effective edges participate in scheduling. Normalization resolution and
+validation occur at compile time, outside sample processing.

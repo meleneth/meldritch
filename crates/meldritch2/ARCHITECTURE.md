@@ -14,7 +14,14 @@ Input ports declare fan-in and a required or neutral disconnected value;
 output ports declare only a name and signal domain. Their distinct Rust types
 keep input-only policy out of source-port contracts.
 Graph instances have unique string IDs. A port is an instance ID plus a named,
-directional endpoint. Connections are explicit edges. Parameters are identified
+directional endpoint. Graphs retain explicit connections and authored
+normalizations separately. A normalization is a fallback edge selected at
+compile time only when its destination has no explicit cable. Every authored
+normalization is validated, including overridden ones; multiple normalizations
+for one input are ambiguous. Selected edges then use the existing input fan-in,
+required-input, and cycle checks. `Machine` exposes authored normalizations and
+resolved effective connections separately; sample processing sees only compiled
+input slots. Parameters are identified
 by `(instance ID, parameter name)` from the same contract used by Lua discovery,
 validation, and lowering. Authored values live in `Graph`; live overrides are
 published through per-revision `ParameterHandle`s. `Machine::process` snapshots
@@ -113,7 +120,8 @@ latency, unplug detection, and listening remain open.
 
 Lua's `meldritch.graph()` API constructs a candidate graph. `graph:module(id,
 type, values)` returns handles with contract-derived ports; `graph:connect(src,
-dst)` records edges. Rust receives only graph data, validates names, values,
+dst)` records explicit edges and `graph:normalize(src, dst)` records fallback
+edges. Rust receives only graph data, validates names, values,
 fan-in, and cycles, then derives a topological schedule and compiles slots and
 module operations. `Host::submit` replaces the accepted machine only after full
 compilation. A rejected candidate leaves it usable.

@@ -6,7 +6,7 @@ use std::sync::{
 
 use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
-use crate::model::{Graph, MidiCc, MidiNotes, ParameterId};
+use crate::model::{Connection, Graph, MidiCc, MidiNotes, ParameterId};
 
 #[derive(Clone, Debug)]
 struct Op {
@@ -146,6 +146,8 @@ pub struct Machine {
     note_pairs: Vec<NotePair>,
     output_slot: usize,
     order: Vec<String>,
+    authored_normalizations: Vec<Connection>,
+    effective_connections: Vec<Connection>,
     sample_rate: f64,
 }
 
@@ -234,6 +236,12 @@ impl Machine {
 
     pub fn order(&self) -> &[String] {
         &self.order
+    }
+    pub fn authored_normalizations(&self) -> &[Connection] {
+        &self.authored_normalizations
+    }
+    pub fn effective_connections(&self) -> &[Connection] {
+        &self.effective_connections
     }
     pub fn sample_rate(&self) -> f64 {
         self.sample_rate
@@ -399,10 +407,9 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         slot_count += c.outputs.len().max(1);
     }
 
-    let mut input_edges: BTreeMap<(usize, &str), Vec<(usize, usize)>> = BTreeMap::new();
-    let mut dependents = vec![Vec::<usize>::new(); graph.modules.len()];
-    let mut indegree = vec![0usize; graph.modules.len()];
-    for edge in &graph.connections {
+    // Validate both authored edge sets before selecting effective edges. An
+    // overridden normalization is still an authored connection and must be valid.
+    let resolve = |edge: &Connection| -> Result<(usize, usize, usize, FanIn), String> {
         let &src = ids
             .get(edge.from.module.as_str())
             .ok_or_else(|| format!("unknown source module '{}'", edge.from.module))?;
@@ -433,15 +440,48 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 edge.from.module, edge.from.port, edge.to.module, edge.to.port
             ));
         }
+        Ok((src, dst, slot_bases[src] + sp.0, dp.fan_in))
+    };
+    for edge in graph.connections.iter().chain(&graph.normalizations) {
+        resolve(edge)?;
+    }
+    let mut normalized_destinations = BTreeSet::new();
+    for edge in &graph.normalizations {
+        if !normalized_destinations.insert(&edge.to) {
+            return Err(format!(
+                "ambiguous normalization for input '{}.{}'",
+                edge.to.module, edge.to.port
+            ));
+        }
+    }
+    let explicit_destinations: BTreeSet<_> =
+        graph.connections.iter().map(|edge| &edge.to).collect();
+    let effective_connections: Vec<Connection> = graph
+        .connections
+        .iter()
+        .chain(
+            graph
+                .normalizations
+                .iter()
+                .filter(|edge| !explicit_destinations.contains(&edge.to)),
+        )
+        .cloned()
+        .collect();
+
+    let mut input_edges: BTreeMap<(usize, &str), Vec<(usize, usize)>> = BTreeMap::new();
+    let mut dependents = vec![Vec::<usize>::new(); graph.modules.len()];
+    let mut indegree = vec![0usize; graph.modules.len()];
+    for edge in &effective_connections {
+        let (src, dst, source_slot, fan_in) = resolve(edge)?;
         let key = (dst, edge.to.port.as_str());
         let sources = input_edges.entry(key).or_default();
-        if !sources.is_empty() && dp.fan_in == FanIn::One {
+        if !sources.is_empty() && fan_in == FanIn::One {
             return Err(format!(
                 "input '{}.{}' permits one connection",
                 edge.to.module, edge.to.port
             ));
         }
-        sources.push((src, slot_bases[src] + sp.0));
+        sources.push((src, source_slot));
         dependents[src].push(dst);
         indegree[dst] += 1;
     }
@@ -722,6 +762,8 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             .iter()
             .map(|&i| graph.modules[i].id.clone())
             .collect(),
+        authored_normalizations: graph.normalizations.clone(),
+        effective_connections,
         sample_rate,
     })
 }
