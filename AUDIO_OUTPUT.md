@@ -1,5 +1,9 @@
 # Live output startup
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 Native F9 MIDI audition now adds one bounded timed mono PCM lane to the existing
 device callback. The shared mono DSP kernel runs on a named worker in 256-frame
 blocks, normally at most 1024 frames ahead; the ring holds at most 4096 frames.

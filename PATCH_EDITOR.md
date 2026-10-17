@@ -1,5 +1,9 @@
 # Compose a typed patch
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 Native mono patches may declare `{ id = "velocity", signal = "control" }`.
 The inspector identifies `input.velocity` as unit interval; keyboard F9 audition
 supplies strike velocity / 127 independently of pitch and gate. To make amplitude

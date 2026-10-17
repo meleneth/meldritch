@@ -1,5 +1,9 @@
 # Codex Plan-Mode Prompt
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 Paste this into Codex after placing these docs in the repository root.
 
 ```text

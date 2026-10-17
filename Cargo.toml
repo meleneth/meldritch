@@ -10,6 +10,7 @@ members = [
     "crates/meldritch-tui",
     "crates/meldritch2",
 ]
+default-members = ["crates/meldritch2"]
 resolver = "2"
 
 [package]

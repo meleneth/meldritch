@@ -1,5 +1,8 @@
 # Example Capability Matrix
 
+> **Meldritch 1 archive:** These are historical example statuses. Meldritch 2's
+> active examples and acceptance live under `crates/meldritch2/examples/`.
+
 Status values:
 
 - `design` — desired behavior is expressed by readable files

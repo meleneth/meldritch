@@ -1,5 +1,9 @@
 # Edit an existing instrument
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 The first authoring slice edits existing oscillator, ADSR and low-pass parameters
 in a validated `.mlsynth`. Rust owns the song source; keyboard and Lua commands
 both change that source through the same typed validation and existing compiler.

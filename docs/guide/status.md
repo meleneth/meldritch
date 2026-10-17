@@ -1,5 +1,8 @@
 # Nothing is stable yet
 
+> **Meldritch 1 archive:** This page documents completed research. The active
+> project is [Meldritch 2](../meldritch2).
+
 MELDRITCH is in massive development. **Nothing is stable yet:** public APIs,
 project formats, CLI commands, controller mappings, UI layouts, sound and
 persistence behavior may change. There is no production-readiness guarantee.

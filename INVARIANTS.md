@@ -1,5 +1,9 @@
 # Project Invariants
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 These are non-negotiable. If an implementation choice violates one of these, the choice loses.
 
 Authorized Plaits exception: the pinned upstream crate retains its native f32

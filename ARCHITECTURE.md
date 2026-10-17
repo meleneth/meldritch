@@ -1,5 +1,9 @@
 # Architecture
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 ## Architectural direction and status (2026-10-11)
 
 MELDRITCH's next architecture is an evolution of its authoritative Rust model,

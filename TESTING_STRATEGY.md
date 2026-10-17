@@ -1,5 +1,9 @@
 # Testing Strategy
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 Example 36's explicit keyboard velocity tests compare wired gain against an
 unscaled reference, verify unity/zero bounds and held-expression restoration,
 then persist/reconstruct the typed capture and reload the authored graph.

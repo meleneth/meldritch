@@ -1,5 +1,9 @@
 # Lua APC Mini MK2 piano roll
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 Native project MIDI keyboard step entry is also available through
 `meldritch open-project . --midi-keyboard MicroLab`. In construction, open the
 palette pattern with Ctrl-N; note-on inserts at the current cursor with velocity

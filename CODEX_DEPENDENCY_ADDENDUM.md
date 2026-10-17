@@ -1,5 +1,9 @@
 # Codex Dependency Addendum
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 Read this after the main project docs.
 
 The goal is not to collect crates. The goal is to keep MELDRITCH’s architecture sovereign.

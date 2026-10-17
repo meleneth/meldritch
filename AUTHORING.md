@@ -1,5 +1,9 @@
 # Interactive musical authoring investigation
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 ## Current direction (2026-10-11)
 
 The original investigation below is historical. Examples 25–33 now have headless

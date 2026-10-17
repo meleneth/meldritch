@@ -1,4 +1,8 @@
-# Roadmap
+# Meldritch 1 roadmap (archived)
+
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
 
 ## Next architecture: planned vertical slices (2026-10-11)
 

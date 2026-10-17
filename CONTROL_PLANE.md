@@ -1,5 +1,9 @@
 # Lua control plane, API version 1
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 Project architecture now distinguishes construction requests, runtime performance
 requests and explicit promotion; see [ARCHITECTURE.md](ARCHITECTURE.md).
 This guide describes implemented v1 behavior. Assignment faders currently may

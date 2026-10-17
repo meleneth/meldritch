@@ -1,31 +1,27 @@
 ---
 layout: home
 hero:
-  name: MELDRITCH
-  text: Patch a groove. Play the system.
-  tagline: A Rust, TUI-first groovebox exploring modular synthesis, relational DSP and Lua-programmable control. In massive development — nothing is stable yet.
+  name: Meldritch 2
+  text: Compose a musical machine.
+  tagline: The active Rust modular synthesis project. Explicit Lua graphs, bounded realtime execution, and live MIDI performance.
   actions:
     - theme: brand
-      text: Try the APC playground
-      link: /examples/apc-playground
+      text: Get started
+      link: /meldritch2
     - theme: alt
-      text: What actually works
-      link: /examples/capabilities
+      text: Meldritch 1 archive
+      link: /archive/meldritch1
 features:
-  - title: Human-readable projects
-    details: TOML song directories describe typed synth graphs, patterns, sample banks and curated performance controls. Supported examples are executable contracts.
-    link: /ML_FORMATS
-  - title: One authoritative performance
-    details: Controller input and the TUI use typed application commands. A headless Lua slice demonstrates hierarchical pages and coherent simulated surfaces.
-    link: /CONTROL_PLANE
-  - title: Protect the audio boundary
-    details: Rust owns DSP and audio publication. Parsing, Lua execution, UI work and graph compilation stay outside the realtime callback.
-    link: /INVARIANTS
+  - title: Explicit modules and cables
+    details: Rust module contracts define ports, parameters, and processing; Lua graphs compose them without hidden instrument policy.
+    link: /meldritch2/architecture
+  - title: Executable examples
+    details: Small Lua graphs and behavior tests state exactly which features are accepted.
+    link: /meldritch2/examples
+  - title: Research preserved
+    details: Meldritch 1 remains available as completed problem-space research, with its source, examples, documentation, and Git history intact.
+    link: /archive/meldritch1
 ---
 
-::: warning Nothing is stable yet
-MELDRITCH is experimental software in active development. There is no stable
-release or stable public API. Formats, commands, bindings, interfaces and sound
-may change. Check the [development status](./guide/status) and each example's
-acceptance scope before relying on a capability.
-:::
+Meldritch 2 is a new architecture. It has no backward-compatibility obligation
+to Meldritch 1 projects, APIs, sound, or behavior.

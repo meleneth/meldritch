@@ -1,5 +1,8 @@
 # Getting started
 
+> **Meldritch 1 archive:** This page documents completed research. The active
+> project is [Meldritch 2](../meldritch2).
+
 ::: warning Development software
 Nothing is stable yet. Keep backups of authored projects and sessions. Passing
 tests establish specific example behavior, not production or hardware readiness.

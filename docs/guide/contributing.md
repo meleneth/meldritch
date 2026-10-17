@@ -1,5 +1,8 @@
 # Contributing and documentation
 
+> **Meldritch 1 archive:** This page documents completed research. The active
+> project is [Meldritch 2](../meldritch2).
+
 Read `AGENTS.md` and the [invariants](../INVARIANTS) before changing engine code.
 Use the repository's example-first workflow: add a readable example and
 `ACCEPTANCE.md`, negative fixtures, implementation and executable tests together.

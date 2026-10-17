@@ -1,4 +1,8 @@
-# Active TODO
+# Meldritch 1 research queue (archived)
+
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
 
 Immediate priority: graph LFOs and explicit modulation semantics in section 21 and
 [ROADMAP.md](ROADMAP.md). The bounded empty-project and shared-palette workflows

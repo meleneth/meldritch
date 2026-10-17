@@ -1,5 +1,8 @@
 # Controllers
 
+> **Meldritch 1 archive:** This page documents completed research. The active
+> project is [Meldritch 2](../meldritch2).
+
 All controllers request typed application commands. Musical state belongs to the
 application; a controller is an input and presentation surface.
 

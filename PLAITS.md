@@ -1,5 +1,9 @@
 # Plaits module
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 Start the model explorer:
 
 ```sh

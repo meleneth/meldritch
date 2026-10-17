@@ -1,5 +1,9 @@
 # Create, save and return to a musical idea
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 This is the implemented bounded workflow over an existing song base. The next
 [project construction slice](ROADMAP.md) and
 [example 34 contract](songs/examples/34-empty-project-patch/ACCEPTANCE.md) remove

@@ -1,5 +1,9 @@
 # MELDRITCH `.ml*` Formats
 
+> **Meldritch 1 archive:** This document records completed research and its
+> historical plans. Meldritch 2 is the active project; this is not
+> its current architecture, acceptance queue, or compatibility contract.
+
 This document is an index, not an independent specification. The executable
 song trees under `songs/examples/` define the behavior we want to support. The
 format grows only when an accepted example requires it.

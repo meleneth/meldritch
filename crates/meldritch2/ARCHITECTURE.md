@@ -3,6 +3,8 @@
 Meldritch 2 composes musical machines from independently defined Rust modules.
 Its first slices are an offline mono `f64` graph executor, isolated from the
 prototype.
+Meldritch 1 is archived completed research. This crate has no dependency on it
+and no backward-compatibility obligation to its formats, APIs, or behavior.
 
 Each `src/units/*.rs` file owns one module type's ports, parameters, and
 processing function. `contract.rs` defines their shared shape and explicit
@@ -60,8 +62,8 @@ states against one machine revision. Each bounded render call snapshots
 ordinary parameters, reapplies the held timed note states, then renders up to
 1024 frames in segments split at event frames. Events at the same frame apply
 in declaration order before that frame's sample. Rendering makes no source
-lookups, allocations, locks, or retries. It is a headless execution path;
-feeding mapped host events to live device callbacks remains open. A plan owns
+lookups, allocations, locks, or retries. This prepared path is also checked
+headlessly; the live queue and device callback path are described below. A plan owns
 one sequential render; ordinary `Machine::process`
 starts a new parameter snapshot outside that plan.
 The pinned `midir` callback supplies elapsed microseconds from an arbitrary
