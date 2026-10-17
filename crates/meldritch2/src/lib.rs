@@ -1315,7 +1315,10 @@ mod tests {
         state.end_update();
         let mut after = [f64::NAN; 2];
         machine.process(&mut after);
-        let expected = 0.25 * 0.5 * (std::f64::consts::TAU * 440.0 * 4.0 / 48_000.0).sin();
+        let velocity_before = 1.0 - 0.99_f64.powi(4);
+        let velocity_after = velocity_before + 0.01 * (0.5 - velocity_before);
+        let expected =
+            0.25 * 0.01 * velocity_after * (std::f64::consts::TAU * 440.0 * 4.0 / 48_000.0).sin();
         assert!((after[0] - expected).abs() < 1e-12);
         assert!(router.dispatch(&[0x90, 69, 64]));
         machine.process(&mut after);

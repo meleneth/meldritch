@@ -354,6 +354,10 @@ mod tests {
         drop(keyboard);
         let mut released = [f64::NAN; 4];
         consumer.render_next(&mut machine, &mut released).unwrap();
-        assert_eq!(released, [0.0; 4]);
+        assert!(released.iter().any(|sample| sample.abs() > 0.0));
+        let mut tail = [0.0; 1024];
+        consumer.render_next(&mut machine, &mut tail).unwrap();
+        consumer.render_next(&mut machine, &mut tail).unwrap();
+        assert!(tail.iter().all(|sample| sample.abs() < 0.001));
     }
 }

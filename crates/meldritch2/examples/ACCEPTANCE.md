@@ -454,15 +454,20 @@ toward the 64-state cap. A reset also discards a deferred event after more than
 
 `50-midi-velocity.lua` adds a fourth, optional velocity control ID to the
 channel-1 `midi_notes` declaration. The control targets a Constant whose output
-is explicitly multiplied with Envelope before reaching `level.mod`; the
-oscillator, pitch, Gate, and Gain remain separate modules. At 48 kHz with a
-three-frame lead, note 69 at velocity 64 opens at frame 3; repeating it at
-velocity 32 changes amplitude at frame 5 without a Gate retrigger. Note 81 at
+passes through a Lag before being explicitly multiplied with Envelope and
+reaching `level.mod`; the oscillator, pitch, Gate, and Gain remain separate
+modules. At 48 kHz with a three-frame lead, note 69 at velocity 64 opens at
+frame 3; repeating it at velocity 32 changes amplitude at frame 5 without a
+Gate retrigger. Note 81 at
 velocity 127 takes priority at frame 7. Releasing it at frame 11 restores note
 69 and velocity 32 while Gate stays open; releasing note 69 at frame 15 closes
-Gate. The 20-frame device output must match the independent phase/amplitude
-reference and a 6+6+8 split render. The existing immediate MIDI route must
-snapshot pitch, Gate, and velocity together and restore held-key velocity.
+Gate. The playable graph uses Envelope attack 0.01/release 0.005 and velocity
+Lag response 0.01, so Gate closure fades and live velocity changes slew instead
+of cutting the oscillator in one sample. Note-off retains the released key's
+velocity through the envelope tail. The 20-frame device output must match
+independent phase/envelope/Lag recurrences and a 6+6+8 split render. The existing
+immediate MIDI route must snapshot pitch, Gate, and velocity together and restore
+held-key velocity.
 Three-argument `midi_notes` declarations retain their existing output.
 `51-midi-velocity-invalid.lua` rejects a velocity control that fails to cover
 0..1. Unknown or shared velocity targets and invalid queued velocity values
@@ -494,3 +499,9 @@ microseconds render the same 16-frame PCM as a prepared frame-3 on, frame-7
 pitch change, and frame-11 off timeline with a three-frame test lead. The
 production output retains its internal lead. Physical terminal gestures and
 listening remain unverified.
+The playable graph uses the same short envelope attack/release as example 50.
+With a held A4 note released at frame 2403, both playable graphs must keep the
+sample jump at note-on and note-off below 0.02 at 48 kHz, despite a nonzero
+oscillator phase, and decay below 0.001 by frame 4095. The user confirmed the
+reported pops were fixed when listening through direct headphones. Independent
+deadline evidence remains open.

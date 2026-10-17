@@ -1,7 +1,7 @@
 local graph = meldritch.graph()
 local output = graph:module("output", "output")
 local level = graph:module("level", "gain", { gain = 0.25 })
-local envelope = graph:module("envelope", "envelope", { attack = 1.0, release = 1.0 })
+local envelope = graph:module("envelope", "envelope", { attack = 0.01, release = 0.005 })
 local oscillator = graph:module("oscillator", "sine", { frequency = 0.0 })
 local pitch = graph:module("pitch", "constant", { value = 440.0 })
 local gate = graph:module("gate", "constant", { value = 0.0 })

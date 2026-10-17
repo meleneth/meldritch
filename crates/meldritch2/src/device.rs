@@ -515,6 +515,8 @@ mod tests {
             &errors,
         );
         assert_eq!(errors.load(Ordering::Relaxed), 0);
+        let mut envelope = 0.0;
+        let mut slewed_velocity = 0.0;
         for (frame, sample) in whole.iter().enumerate() {
             let cycles = if frame < 7 {
                 440.0 * frame as f64
@@ -523,13 +525,19 @@ mod tests {
             } else {
                 440.0 * 7.0 + 880.0 * 4.0 + 440.0 * (frame - 11) as f64
             };
-            let velocity = match frame {
+            let velocity: f64 = match frame {
+                0..=2 => 1.0,
                 3..=4 => 64.0 / 127.0,
-                5..=6 | 11..=14 => 32.0 / 127.0,
+                5..=6 | 11.. => 32.0 / 127.0,
                 7..=10 => 1.0,
-                _ => 0.0,
             };
-            let expected = 0.25 * velocity * (std::f64::consts::TAU * cycles / 48_000.0).sin();
+            let gate_open = (3..15).contains(&frame);
+            envelope += if gate_open { 0.01 } else { 0.005 } * (f64::from(gate_open) - envelope);
+            slewed_velocity += 0.01 * (velocity - slewed_velocity);
+            let expected = 0.25
+                * envelope
+                * slewed_velocity
+                * (std::f64::consts::TAU * cycles / 48_000.0).sin();
             assert!(
                 (sample - expected).abs() < 1e-12,
                 "frame {frame}: {sample} != {expected}"
@@ -557,5 +565,36 @@ mod tests {
         assert_eq!(whole[..6], a);
         assert_eq!(whole[6..12], b);
         assert_eq!(whole[12..], c);
+    }
+
+    #[test]
+    fn playable_note_edges_do_not_jump_at_gate_changes() {
+        for script in [
+            include_str!("../examples/50-midi-velocity.lua"),
+            include_str!("../examples/53-tui-keys.lua"),
+        ] {
+            let graph = lua::read(script).unwrap();
+            let mut machine = compile(&graph).unwrap();
+            let (producer, mut consumer) = live_note_queue(&machine, 0);
+            let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+            assert_eq!(midi.dispatch(0, &[0x90, 69, 127]), Ok(true));
+            assert_eq!(midi.dispatch(50_000, &[0x80, 69, 0]), Ok(true));
+
+            let mut samples = [0.0; 4096];
+            for chunk in samples.chunks_mut(1024) {
+                consumer.render_next(&mut machine, chunk).unwrap();
+            }
+            let release_frame = 2403;
+            assert!(
+                samples[release_frame - 100..release_frame]
+                    .iter()
+                    .any(|sample| sample.abs() > 0.2)
+            );
+            for edge in [3, release_frame] {
+                let step = (samples[edge] - samples[edge - 1]).abs();
+                assert!(step < 0.02, "frame {edge}: edge jump {step}");
+            }
+            assert!(samples[4095].abs() < 0.001);
+        }
     }
 }
