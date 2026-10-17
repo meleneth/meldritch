@@ -20,6 +20,25 @@ pub struct Connection {
 }
 
 #[derive(Clone, Debug)]
+pub struct ExternalPort {
+    pub name: String,
+    pub endpoint: Endpoint,
+}
+
+#[derive(Clone, Debug)]
+pub struct SubpatchInstance {
+    pub id: String,
+    pub definition: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct Subpatch {
+    pub graph: Graph,
+    pub inputs: Vec<ExternalPort>,
+    pub outputs: Vec<ExternalPort>,
+}
+
+#[derive(Clone, Debug)]
 pub struct Control {
     pub id: String,
     pub target: ParameterId,
@@ -45,6 +64,8 @@ pub struct MidiNotes {
 #[derive(Clone, Debug, Default)]
 pub struct Graph {
     pub modules: Vec<Module>,
+    pub instances: Vec<SubpatchInstance>,
+    pub subpatches: BTreeMap<String, Subpatch>,
     pub connections: Vec<Connection>,
     pub normalizations: Vec<Connection>,
     pub controls: Vec<Control>,

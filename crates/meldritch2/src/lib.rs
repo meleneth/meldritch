@@ -1,6 +1,7 @@
 pub mod compiler;
 pub mod contract;
 pub mod device;
+mod expand;
 pub mod live;
 pub mod live_notes;
 pub mod lua;
@@ -79,6 +80,10 @@ mod tests {
     const MIDI_TIME_ANCHOR: &str = include_str!("../examples/45-midi-time-anchor.lua");
     const LIVE_NOTE_QUEUE: &str = include_str!("../examples/46-live-note-queue.lua");
     const NORMALIZED_MODULATION: &str = include_str!("../examples/54-normalized-modulation.lua");
+    const TWO_SUBPATCH_VOICES: &str = include_str!("../examples/55-two-subpatch-voices.lua");
+    const SUBPATCH_INVALID_ENDPOINT: &str =
+        include_str!("../examples/56-subpatch-invalid-endpoint.lua");
+    const NESTED_SUBPATCH: &str = include_str!("../examples/57-nested-subpatch.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -542,6 +547,179 @@ return graph
         dormant_cycle.normalizations[0].from.module = "gain".into();
         dormant_cycle.normalizations[0].to.port = "input".into();
         assert!(compile(&dormant_cycle).is_ok());
+    }
+
+    #[test]
+    fn two_instances_own_independent_oscillator_and_envelope_state() {
+        let graph = lua::read(TWO_SUBPATCH_VOICES).unwrap();
+        assert_eq!(graph.subpatches.len(), 1);
+        assert_eq!(graph.instances.len(), 2);
+        let mut machine = compile_at_rate(&graph, 48_000.0).unwrap();
+        assert_eq!(machine.authored_normalizations().len(), 2);
+        assert!(
+            machine
+                .effective_connections()
+                .iter()
+                .all(|edge| { !(edge.from.module.ends_with("/closed") && edge.to.port == "gate") })
+        );
+        assert!(
+            machine
+                .parameter_ids()
+                .any(|id| id == &ParameterId::new("left/oscillator", "frequency"))
+        );
+        assert!(
+            machine
+                .parameter_ids()
+                .any(|id| id == &ParameterId::new("right/oscillator", "frequency"))
+        );
+
+        let mut first = [f64::NAN; 4];
+        machine.process(&mut first);
+        let right_gate = machine
+            .parameter_handle(&ParameterId::new("right_gate", "value"))
+            .unwrap();
+        right_gate.publish(Some(1.0)).unwrap();
+        let mut second = [f64::NAN; 4];
+        machine.process(&mut second);
+
+        let mut left_phase: f64 = 0.0;
+        let mut right_phase: f64 = 0.0;
+        let mut left_envelope = 0.0;
+        let mut right_envelope = 0.0;
+        for (frame, actual) in first.into_iter().chain(second).enumerate() {
+            left_envelope += 0.5 * (1.0 - left_envelope);
+            let right_target = if frame < 4 { 0.0 } else { 1.0 };
+            right_envelope += 0.5 * (right_target - right_envelope);
+            let expected = 0.25
+                * ((std::f64::consts::TAU * left_phase).sin() * left_envelope
+                    + (std::f64::consts::TAU * right_phase).sin() * right_envelope);
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "frame {frame}: {actual} != {expected}"
+            );
+            left_phase = (left_phase + 0.25).fract();
+            right_phase = (right_phase + 0.125).fract();
+        }
+
+        // Omitting the right external Gate exposes that instance's authored
+        // closed-Gate normalization without changing the left instance.
+        let mut missing_gate = graph.clone();
+        missing_gate
+            .connections
+            .retain(|edge| edge.to.module != "right" || edge.to.port != "gate");
+        let mut machine = compile(&missing_gate).unwrap();
+        assert!(machine.effective_connections().iter().any(|edge| {
+            edge.from.module == "right/closed" && edge.to.module == "right/envelope"
+        }));
+        machine.process(&mut first);
+        assert_eq!(first[1], 0.1875);
+    }
+
+    #[test]
+    fn nested_subpatches_expand_to_the_same_primitive_compiler() {
+        let graph = lua::read(NESTED_SUBPATCH).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        assert!(machine.order().contains(&"left/inner/gain".to_string()));
+        assert!(machine.order().contains(&"right/inner/gain".to_string()));
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.375; 4]);
+    }
+
+    #[test]
+    fn invalid_subpatch_expansion_preserves_accepted_machine() {
+        use crate::model::{Connection, Endpoint, SubpatchInstance};
+
+        let valid = lua::read(TWO_SUBPATCH_VOICES).unwrap();
+        let invalid_endpoint = lua::read(SUBPATCH_INVALID_ENDPOINT).unwrap();
+        let mut duplicate_id = valid.clone();
+        duplicate_id.instances[1].id = "left".into();
+        let mut recursive = valid.clone();
+        recursive
+            .subpatches
+            .get_mut("gated_oscillator")
+            .unwrap()
+            .graph
+            .instances
+            .push(SubpatchInstance {
+                id: "self".into(),
+                definition: "gated_oscillator".into(),
+            });
+        let mut invalid_cable = valid.clone();
+        invalid_cable
+            .subpatches
+            .get_mut("gated_oscillator")
+            .unwrap()
+            .graph
+            .connections[0]
+            .to
+            .port = "missing".into();
+        let mut missing_definition = valid.clone();
+        missing_definition.instances[0].definition = "missing".into();
+        let mut duplicate_port = valid.clone();
+        let definition = duplicate_port
+            .subpatches
+            .get_mut("gated_oscillator")
+            .unwrap();
+        definition.inputs.push(definition.inputs[0].clone());
+        let mut invalid_input = valid.clone();
+        invalid_input
+            .subpatches
+            .get_mut("gated_oscillator")
+            .unwrap()
+            .inputs[0]
+            .endpoint
+            .port = "out".into();
+        let mut shared_port_name = valid.clone();
+        shared_port_name
+            .subpatches
+            .get_mut("gated_oscillator")
+            .unwrap()
+            .outputs[0]
+            .name = "pitch".into();
+        let mut expanded_cycle = valid.clone();
+        expanded_cycle
+            .subpatches
+            .get_mut("gated_oscillator")
+            .unwrap()
+            .graph
+            .connections
+            .push(Connection {
+                from: Endpoint {
+                    module: "level".into(),
+                    port: "out".into(),
+                },
+                to: Endpoint {
+                    module: "oscillator".into(),
+                    port: "fm_hz".into(),
+                },
+            });
+        expanded_cycle
+            .connections
+            .retain(|edge| edge.to.port != "pitch");
+
+        let mut host = Host::default();
+        host.submit(&valid).unwrap();
+        let mut reference = compile(&valid).unwrap();
+        for (candidate, expected) in [
+            (invalid_endpoint, "invalid output port"),
+            (duplicate_id, "duplicate"),
+            (recursive, "recursive subpatch"),
+            (invalid_cable, "invalid input port"),
+            (missing_definition, "unknown subpatch definition"),
+            (duplicate_port, "duplicate external port"),
+            (invalid_input, "invalid input port"),
+            (shared_port_name, "external input and output share name"),
+            (expanded_cycle, "cycle"),
+        ] {
+            let error = host.submit(&candidate).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+            let mut samples = [f64::NAN; 4];
+            let mut expected_samples = [f64::NAN; 4];
+            host.accepted().unwrap().process(&mut samples);
+            reference.process(&mut expected_samples);
+            assert_eq!(samples, expected_samples);
+        }
     }
 
     #[test]

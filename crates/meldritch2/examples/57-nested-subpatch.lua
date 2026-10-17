@@ -1,0 +1,23 @@
+local leaf = meldritch.subpatch("leaf")
+local gain = leaf:module("gain", "gain", { gain = 1.0 })
+leaf:input("signal", gain.input)
+leaf:output("audio", gain.out)
+
+local wrapper = meldritch.subpatch("wrapper")
+local inner = wrapper:instance("inner", leaf)
+wrapper:input("signal", inner.signal)
+wrapper:output("audio", inner.audio)
+
+local graph = meldritch.graph()
+local left_source = graph:module("left_source", "constant", { value = 0.25 })
+local right_source = graph:module("right_source", "constant", { value = 0.125 })
+local left = graph:instance("left", wrapper)
+local right = graph:instance("right", wrapper)
+local mix = graph:module("mix", "mix")
+local output = graph:module("output", "output")
+graph:connect(left_source.out, left.signal)
+graph:connect(right_source.out, right.signal)
+graph:connect(left.audio, mix.left)
+graph:connect(right.audio, mix.right)
+graph:connect(mix.out, output.input)
+return graph

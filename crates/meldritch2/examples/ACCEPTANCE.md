@@ -528,3 +528,26 @@ disconnected required inputs, active cycles, and excessive explicit fan-in
 reject without changing an accepted machine. An overridden cycle is dormant:
 only effective edges participate in scheduling. Normalization resolution and
 validation occur at compile time, outside sample processing.
+
+## Reusable authored subpatches
+
+`55-two-subpatch-voices.lua` declares one `gated_oscillator` subpatch with
+external `pitch` and `gate` inputs and an `audio` output. Its ordinary Sine,
+Envelope, and Gain modules form the oscillator/envelope/VCA; a normalized
+closed Gate applies when the external Gate has no explicit cable. The parent
+instantiates the definition as `left` and `right`, cables distinct pitch and
+Gate sources into each, and mixes their outputs through ordinary `Mix` and
+`Output` modules. At 48 kHz, the left 12 kHz oscillator sounds while the right
+6 kHz oscillator advances silently. Opening the right Gate at the next buffer
+boundary must match independent per-instance oscillator phases and envelope
+recurrences over both buffers. Removing only the right Gate cable selects only
+that instance's normalized closed Gate.
+
+`57-nested-subpatch.lua` exposes a nested instance's input and output through a
+wrapper definition; two wrapper instances resolve to distinct namespaced Gain
+modules and render 0.375. Expansion produces primitive instances and ordinary
+cables for the existing compiler; it introduces no DSP executor or special
+Voice type. `56-subpatch-invalid-endpoint.lua` must reject its bad exported
+output without replacing an accepted machine. Duplicate instance IDs,
+recursive definitions, missing definitions, duplicate external port names, and
+invalid internal cables must also reject while accepted DSP state continues.

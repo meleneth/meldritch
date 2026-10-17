@@ -125,6 +125,15 @@ edges. Rust receives only graph data, validates names, values,
 fan-in, and cycles, then derives a topological schedule and compiles slots and
 module operations. `Host::submit` replaces the accepted machine only after full
 compilation. A rejected candidate leaves it usable.
+`meldritch.subpatch(name)` defines a reusable graph with explicitly exported
+ports via `subpatch:input(name, destination)` and
+`subpatch:output(name, source)`. `graph:instance(id, definition)` returns port
+handles usable by the same `connect` and `normalize` calls. Compilation first
+expands nested instances into namespaced primitive modules, ordinary cables,
+and per-instance normalizations. The existing compiler then validates and
+schedules that graph. Each expanded primitive owns its own DSP state; the
+callback performs no expansion. Subpatches contain modules, cables, and nested
+instances; parent graphs own controls and MIDI bindings.
 Each declared output port has its own compiled sample slot. A unit's process
 function writes its declared outputs in contract order; cables read the named
 source port's slot. The terminal Output role has a private sample slot but no

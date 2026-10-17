@@ -362,6 +362,8 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
     if !sample_rate.is_finite() || sample_rate < 1.0 {
         return Err("sample rate must be finite and at least 1 Hz".into());
     }
+    let expanded = crate::expand::expand(graph)?;
+    let graph = &expanded;
     let mut ids = BTreeMap::new();
     for (index, module) in graph.modules.iter().enumerate() {
         if module.id.is_empty() {

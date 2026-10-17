@@ -3,12 +3,16 @@ use std::collections::BTreeMap;
 use mlua::{Lua, Table, Value};
 
 use crate::contract;
-use crate::model::{Connection, Control, Endpoint, Graph, MidiCc, MidiNotes, Module, ParameterId};
+use crate::model::{
+    Connection, Control, Endpoint, ExternalPort, Graph, MidiCc, MidiNotes, Module, ParameterId,
+    Subpatch, SubpatchInstance,
+};
 
 const API: &str = r#"
-meldritch = {}
+meldritch = { _subpatches = {} }
 function meldritch.graph()
-  local graph = { modules = {}, connections = {}, normalizations = {}, controls = {}, midi_ccs = {}, note_bindings = {} }
+  local graph = { modules = {}, instances = {}, connections = {}, normalizations = {},
+    controls = {}, midi_ccs = {}, note_bindings = {}, external_inputs = {}, external_outputs = {} }
   function graph:module(id, kind, values)
     assert(type(id) == "string" and type(kind) == "string", "module ID and type must be strings")
     local spec = meldritch._contract(kind)
@@ -33,6 +37,32 @@ function meldritch.graph()
     assert(type(destination) == "table" and destination.direction == "input", "destination must be an input port")
     table.insert(self.normalizations, { from = source, to = destination })
   end
+  function graph:input(name, destination)
+    assert(self.is_subpatch, "external ports belong to subpatch definitions")
+    assert(type(name) == "string", "external input name must be a string")
+    assert(type(destination) == "table" and destination.direction == "input", "external input must target an input port")
+    table.insert(self.external_inputs, { name = name, endpoint = destination })
+  end
+  function graph:output(name, source)
+    assert(self.is_subpatch, "external ports belong to subpatch definitions")
+    assert(type(name) == "string", "external output name must be a string")
+    assert(type(source) == "table" and source.direction == "output", "external output must target an output port")
+    table.insert(self.external_outputs, { name = name, endpoint = source })
+  end
+  function graph:instance(id, definition)
+    assert(type(id) == "string", "instance ID must be a string")
+    assert(type(definition) == "table" and definition.is_subpatch and
+      meldritch._subpatches[definition.name] == definition, "instance requires a registered subpatch")
+    local handle = { id = id }
+    for _, port in ipairs(definition.external_inputs) do
+      handle[port.name] = { module = id, port = port.name, direction = "input" }
+    end
+    for _, port in ipairs(definition.external_outputs) do
+      handle[port.name] = { module = id, port = port.name, direction = "output" }
+    end
+    table.insert(self.instances, { id = id, definition = definition.name })
+    return handle
+  end
   function graph:control(id, module, parameter, range)
     assert(type(id) == "string", "control ID must be a string")
     assert(type(module) == "table" and type(module.id) == "string", "control target must be a module")
@@ -54,6 +84,15 @@ function meldritch.graph()
       pitch_control_id = pitch_control_id, gate_control_id = gate_control_id,
       velocity_control_id = velocity_control_id })
   end
+  return graph
+end
+function meldritch.subpatch(name)
+  assert(type(name) == "string" and name ~= "", "subpatch name must be a nonempty string")
+  assert(not meldritch._subpatches[name], "duplicate subpatch definition: " .. name)
+  local graph = meldritch.graph()
+  graph.name = name
+  graph.is_subpatch = true
+  meldritch._subpatches[name] = graph
   return graph
 end
 "#;
@@ -90,6 +129,41 @@ pub fn read(script: &str) -> Result<Graph, String> {
         .set("_contract", discover)
         .map_err(|e| e.to_string())?;
     let table: Table = lua.load(script).eval().map_err(|e| e.to_string())?;
+    let mut graph = graph_from_table(table)?;
+    let definitions: Table = meldritch
+        .get("_subpatches")
+        .map_err(|e| format!("subpatch definitions: {e}"))?;
+    for pair in definitions.pairs::<String, Table>() {
+        let (name, definition) = pair.map_err(|e| e.to_string())?;
+        let inputs = external_ports(&definition, "external_inputs")?;
+        let outputs = external_ports(&definition, "external_outputs")?;
+        graph.subpatches.insert(
+            name,
+            Subpatch {
+                graph: graph_from_table(definition)?,
+                inputs,
+                outputs,
+            },
+        );
+    }
+    Ok(graph)
+}
+
+fn external_ports(table: &Table, field: &str) -> Result<Vec<ExternalPort>, String> {
+    let ports: Table = table.get(field).map_err(|e| format!("{field}: {e}"))?;
+    ports
+        .sequence_values::<Table>()
+        .map(|item| {
+            let item = item.map_err(|e| e.to_string())?;
+            Ok(ExternalPort {
+                name: item.get("name").map_err(|e| e.to_string())?,
+                endpoint: endpoint(item.get("endpoint").map_err(|e| e.to_string())?)?,
+            })
+        })
+        .collect()
+}
+
+fn graph_from_table(table: Table) -> Result<Graph, String> {
     let mut graph = Graph::default();
     let modules: Table = table
         .get("modules")
@@ -106,6 +180,16 @@ pub fn read(script: &str) -> Result<Graph, String> {
             id: item.get("id").map_err(|e| e.to_string())?,
             kind: item.get("kind").map_err(|e| e.to_string())?,
             values: params,
+        });
+    }
+    let instances: Table = table
+        .get("instances")
+        .map_err(|e| format!("graph.instances: {e}"))?;
+    for item in instances.sequence_values::<Table>() {
+        let item = item.map_err(|e| e.to_string())?;
+        graph.instances.push(SubpatchInstance {
+            id: item.get("id").map_err(|e| e.to_string())?,
+            definition: item.get("definition").map_err(|e| e.to_string())?,
         });
     }
     let connections: Table = table
