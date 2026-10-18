@@ -32,16 +32,29 @@ struct TimedNoteRoute {
     velocity_mapped: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct PolyHeld {
+    key: u8,
+    velocity: u8,
+}
+
+struct TimedPolyRoute {
+    held: [Option<PolyHeld>; 2],
+    frequencies: [f64; 128],
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TimedMidiError {
     Clock(ClockError),
     Queue(PushError),
+    NoFreeVoice,
 }
 
 /// MIDI callback adapter: CCs publish controls, note changes enter the frame queue.
 pub struct TimedMidiRouter {
     controls: MidiRouter,
     notes: [Option<TimedNoteRoute>; 16],
+    poly: [Option<TimedPolyRoute>; 16],
     producer: LiveNoteProducer,
     clock: MidiFrameClock,
 }
@@ -63,9 +76,19 @@ impl TimedMidiRouter {
                 velocity_mapped: mapping.velocity_control_id.is_some(),
             });
         }
+        let mut poly = std::array::from_fn(|_| None);
+        for channel in machine.poly_note_channels() {
+            poly[usize::from(channel - 1)] = Some(TimedPolyRoute {
+                held: [None; 2],
+                frequencies: std::array::from_fn(|note| {
+                    440.0 * 2.0_f64.powf((note as f64 - 69.0) / 12.0)
+                }),
+            });
+        }
         Ok(Self {
             controls: MidiRouter::from_machine(machine),
             notes,
+            poly,
             producer,
             clock: MidiFrameClock::new(sample_rate, lead_frames)?,
         })
@@ -76,20 +99,24 @@ impl TimedMidiRouter {
     }
 
     pub(crate) fn first_mapped_channel(&self) -> Option<u8> {
-        self.notes
-            .iter()
-            .position(Option::is_some)
+        (0..16)
+            .find(|&index| self.notes[index].is_some() || self.poly[index].is_some())
             .map(|index| index as u8 + 1)
     }
 
     fn release_channel(&mut self, channel: usize) -> bool {
-        let Some(route) = &mut self.notes[channel] else {
+        if self.notes[channel].is_none() && self.poly[channel].is_none() {
             return false;
-        };
+        }
         self.producer
             .emergency_release(channel as u8 + 1)
             .expect("mapped timed note channel");
-        route.held = HeldNotes::new();
+        if let Some(route) = &mut self.notes[channel] {
+            route.held = HeldNotes::new();
+        }
+        if let Some(route) = &mut self.poly[channel] {
+            route.held = [None; 2];
+        }
         true
     }
 
@@ -118,6 +145,9 @@ impl TimedMidiRouter {
             return Ok(false);
         }
         let channel = usize::from(message[0] & 0x0F);
+        if self.poly[channel].is_some() {
+            return self.dispatch_poly(midi_us, message, channel);
+        }
         let Some(route) = &mut self.notes[channel] else {
             return Ok(false);
         };
@@ -153,6 +183,62 @@ impl TimedMidiRouter {
             self.clock = clock;
         }
         route.held = proposed;
+        Ok(true)
+    }
+
+    fn dispatch_poly(
+        &mut self,
+        midi_us: u64,
+        message: &[u8],
+        channel: usize,
+    ) -> Result<bool, TimedMidiError> {
+        let route = self.poly[channel]
+            .as_mut()
+            .expect("mapped polyphonic channel");
+        let key = message[1];
+        let mut proposed = route.held;
+        let (voice, held, gate) = if message[0] & 0xF0 == 0x90 && message[2] != 0 {
+            let voice = proposed
+                .iter()
+                .position(|held| held.is_some_and(|held| held.key == key))
+                .or_else(|| proposed.iter().position(Option::is_none))
+                .ok_or(TimedMidiError::NoFreeVoice)?;
+            let held = PolyHeld {
+                key,
+                velocity: message[2],
+            };
+            proposed[voice] = Some(held);
+            (voice, held, true)
+        } else {
+            let Some(voice) = proposed
+                .iter()
+                .position(|held| held.is_some_and(|held| held.key == key))
+            else {
+                return Ok(false);
+            };
+            let held = proposed[voice].expect("matched held voice");
+            proposed[voice] = None;
+            (voice, held, false)
+        };
+        let mut clock = self.clock.clone();
+        let frame = clock
+            .map(midi_us, self.producer.first_unrendered_frame())
+            .map_err(TimedMidiError::Clock)?
+            .frame;
+        self.producer
+            .try_push_poly(
+                TimedNoteState {
+                    frame,
+                    channel: channel as u8 + 1,
+                    pitch_hz: route.frequencies[usize::from(held.key)],
+                    gate,
+                },
+                f64::from(held.velocity) / 127.0,
+                voice,
+            )
+            .map_err(TimedMidiError::Queue)?;
+        route.held = proposed;
+        self.clock = clock;
         Ok(true)
     }
 

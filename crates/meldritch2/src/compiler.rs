@@ -306,6 +306,12 @@ impl Machine {
             .map(|mapping| mapping.voices)
             .ok_or_else(|| format!("no polyphonic MIDI mapping for channel {channel}"))
     }
+    pub(crate) fn poly_note_channels(&self) -> impl Iterator<Item = u8> + '_ {
+        self.poly_notes.iter().map(|mapping| mapping.channel)
+    }
+    pub fn has_poly_notes(&self) -> bool {
+        !self.poly_notes.is_empty()
+    }
     pub(crate) fn apply_timed_note(
         &mut self,
         pitch_index: usize,

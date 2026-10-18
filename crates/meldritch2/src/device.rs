@@ -202,14 +202,15 @@ impl DeviceOutput {
             })
             .collect();
         let midi_router = MidiRouter::from_machine(&machine);
-        let (timed_midi_router, mut note_consumer) = if machine.midi_notes().is_empty() {
-            (None, None)
-        } else {
-            let (producer, consumer) = live_note_queue(&machine, 0);
-            let router = TimedMidiRouter::new(&machine, producer, config.sample_rate, 256)
-                .map_err(|error| format!("invalid MIDI note clock: {error:?}"))?;
-            (Some(router), Some(consumer))
-        };
+        let (timed_midi_router, mut note_consumer) =
+            if machine.midi_notes().is_empty() && !machine.has_poly_notes() {
+                (None, None)
+            } else {
+                let (producer, consumer) = live_note_queue(&machine, 0);
+                let router = TimedMidiRouter::new(&machine, producer, config.sample_rate, 256)
+                    .map_err(|error| format!("invalid MIDI note clock: {error:?}"))?;
+                (Some(router), Some(consumer))
+            };
         let (runtime, control) = LiveRuntime::new(machine);
         let errors = Arc::new(AtomicU64::new(0));
         let timed_note_errors = Arc::new(AtomicU64::new(0));

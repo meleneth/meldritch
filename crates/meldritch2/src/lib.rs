@@ -1050,6 +1050,241 @@ return graph
     }
 
     #[test]
+    fn timed_midi_poly_matches_prepared_two_voice_timeline() {
+        let graph = lua::read(TWO_VOICE_POLY).unwrap();
+        let events = [
+            PolyNoteEvent::On {
+                frame: 3,
+                channel: 1,
+                key: 69,
+                velocity: 64,
+            },
+            PolyNoteEvent::On {
+                frame: 4,
+                channel: 1,
+                key: 69,
+                velocity: 32,
+            },
+            PolyNoteEvent::On {
+                frame: 5,
+                channel: 1,
+                key: 81,
+                velocity: 127,
+            },
+            PolyNoteEvent::Off {
+                frame: 7,
+                channel: 1,
+                key: 69,
+            },
+            PolyNoteEvent::On {
+                frame: 9,
+                channel: 1,
+                key: 72,
+                velocity: 32,
+            },
+            PolyNoteEvent::Off {
+                frame: 11,
+                channel: 1,
+                key: 81,
+            },
+            PolyNoteEvent::Off {
+                frame: 13,
+                channel: 1,
+                key: 72,
+            },
+        ];
+        let mut reference = compile_at_rate(&graph, 48_000.0).unwrap();
+        let mut plan = PolyNotePlan::prepare(&reference, 0, &events).unwrap();
+        let mut expected = [f64::NAN; 20];
+        plan.render_next(&mut reference, &mut expected).unwrap();
+
+        let mut machine = compile_at_rate(&graph, 48_000.0).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        assert_eq!(midi.first_mapped_channel(), Some(1));
+        for (time, message) in [
+            (0, [0x90, 69, 64]),
+            (21, [0x90, 69, 32]),
+            (42, [0x90, 81, 127]),
+            (84, [0x80, 69, 0]),
+            (125, [0x90, 72, 32]),
+            (167, [0x90, 81, 0]),
+            (209, [0x80, 72, 0]),
+        ] {
+            assert_eq!(midi.dispatch(time, &message), Ok(true));
+        }
+        let mut actual = [f64::NAN; 20];
+        consumer
+            .render_next(&mut machine, &mut actual[..6])
+            .unwrap();
+        consumer
+            .render_next(&mut machine, &mut actual[6..12])
+            .unwrap();
+        consumer
+            .render_next(&mut machine, &mut actual[12..])
+            .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn timed_midi_poly_full_bank_keeps_held_notes_retryable() {
+        let graph = lua::read(TWO_VOICE_POLY).unwrap();
+        let mut machine = compile_at_rate(&graph, 48_000.0).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        assert_eq!(midi.dispatch(0, &[0x90, 69, 64]), Ok(true));
+        assert_eq!(midi.dispatch(42, &[0x90, 81, 127]), Ok(true));
+        assert_eq!(
+            midi.dispatch(63, &[0x90, 72, 32]),
+            Err(TimedMidiError::NoFreeVoice)
+        );
+        assert_eq!(midi.dispatch(84, &[0x80, 69, 0]), Ok(true));
+        assert_eq!(midi.dispatch(125, &[0x90, 72, 32]), Ok(true));
+        let mut samples = [f64::NAN; 16];
+        assert_eq!(
+            consumer
+                .render_next(&mut machine, &mut samples)
+                .unwrap()
+                .applied,
+            4
+        );
+        assert!(samples.iter().any(|sample| sample.abs() > 0.0));
+    }
+
+    #[test]
+    fn timed_midi_poly_reset_releases_both_voices_and_discards_future_states() {
+        let graph = lua::read(TWO_VOICE_POLY).unwrap();
+        let mut reference = compile_at_rate(&graph, 48_000.0).unwrap();
+        let events = [
+            PolyNoteEvent::On {
+                frame: 3,
+                channel: 1,
+                key: 69,
+                velocity: 64,
+            },
+            PolyNoteEvent::On {
+                frame: 5,
+                channel: 1,
+                key: 81,
+                velocity: 127,
+            },
+            PolyNoteEvent::Off {
+                frame: 6,
+                channel: 1,
+                key: 69,
+            },
+            PolyNoteEvent::Off {
+                frame: 6,
+                channel: 1,
+                key: 81,
+            },
+            PolyNoteEvent::On {
+                frame: 9,
+                channel: 1,
+                key: 72,
+                velocity: 32,
+            },
+        ];
+        let mut plan = PolyNotePlan::prepare(&reference, 0, &events).unwrap();
+        let mut expected = [f64::NAN; 20];
+        plan.render_next(&mut reference, &mut expected).unwrap();
+
+        let mut machine = compile_at_rate(&graph, 48_000.0).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        midi.dispatch(0, &[0x90, 69, 64]).unwrap();
+        midi.dispatch(42, &[0x90, 81, 127]).unwrap();
+        let mut actual = [f64::NAN; 20];
+        consumer
+            .render_next(&mut machine, &mut actual[..6])
+            .unwrap();
+        midi.dispatch(1_000, &[0x90, 69, 100]).unwrap();
+        assert_eq!(midi.dispatch(1_001, &[0xB0, 123, 0]), Ok(true));
+        midi.dispatch(1, &[0x90, 72, 32]).unwrap();
+        let report = consumer
+            .render_next(&mut machine, &mut actual[6..])
+            .unwrap();
+        assert_eq!(report.discarded, 1);
+        assert_eq!(report.applied, 1);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn timed_midi_poly_overflow_releases_both_voices() {
+        let graph = lua::read(TWO_VOICE_POLY).unwrap();
+        let mut reference = compile_at_rate(&graph, 48_000.0).unwrap();
+        let events = [
+            PolyNoteEvent::On {
+                frame: 3,
+                channel: 1,
+                key: 69,
+                velocity: 100,
+            },
+            PolyNoteEvent::On {
+                frame: 5,
+                channel: 1,
+                key: 81,
+                velocity: 100,
+            },
+            PolyNoteEvent::Off {
+                frame: 6,
+                channel: 1,
+                key: 69,
+            },
+            PolyNoteEvent::Off {
+                frame: 6,
+                channel: 1,
+                key: 81,
+            },
+            PolyNoteEvent::On {
+                frame: 17,
+                channel: 1,
+                key: 72,
+                velocity: 100,
+            },
+        ];
+        let mut plan = PolyNotePlan::prepare(&reference, 0, &events).unwrap();
+        let mut expected = [f64::NAN; 18];
+        plan.render_next(&mut reference, &mut expected).unwrap();
+        let mut machine = compile_at_rate(&graph, 48_000.0).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        midi.dispatch_recovering(0, &[0x90, 69, 100]).unwrap();
+        midi.dispatch_recovering(42, &[0x90, 81, 100]).unwrap();
+        let mut opening = [0.0; 6];
+        consumer.render_next(&mut machine, &mut opening).unwrap();
+        assert_eq!(opening, expected[..6]);
+
+        for offset in 0..MAX_EVENTS as u64 {
+            assert_eq!(
+                midi.dispatch_recovering(1_000_000 + offset, &[0x90, 69, 100]),
+                Ok(true)
+            );
+        }
+        assert_eq!(
+            midi.dispatch_recovering(1_000_064, &[0x80, 81, 0]),
+            Err(TimedMidiError::Queue(PushError::Full))
+        );
+        let mut released = [f64::NAN; 8];
+        let report = consumer.render_next(&mut machine, &mut released).unwrap();
+        assert_eq!(report.discarded, MAX_EVENTS);
+        assert_eq!(report.applied, 0);
+        assert_eq!(released, expected[6..14]);
+        assert_eq!(midi.dispatch_recovering(1, &[0x80, 69, 0]), Ok(false));
+        assert_eq!(midi.dispatch_recovering(1, &[0x80, 81, 0]), Ok(false));
+        assert_eq!(midi.dispatch_recovering(1, &[0x90, 72, 100]), Ok(true));
+        let mut fresh = [0.0; 4];
+        assert_eq!(
+            consumer
+                .render_next(&mut machine, &mut fresh)
+                .unwrap()
+                .applied,
+            1
+        );
+        assert_eq!(fresh, expected[14..]);
+    }
+
+    #[test]
     fn poly_plan_full_bank_and_invalid_bindings_preserve_machine() {
         let graph = lua::read(TWO_VOICE_POLY).unwrap();
         let mut host = Host::default();

@@ -621,5 +621,10 @@ frame 7 frees the left voice; C5 takes it at frame 9 while A5 continues on
 the right. Later releases close only their matching Gates. Twenty samples
 must match independent oscillator phases, envelope recurrences, and velocity
 values across whole and split renders. Invalid voice bindings and a third
-simultaneous note reject without changing an accepted machine. Live MIDI
-device routing and voice stealing are later checkpoints.
+simultaneous note reject without changing an accepted machine. Raw timed MIDI
+messages on this graph must produce the same 20 samples across split buffers,
+including repeated-key velocity, two simultaneous notes, and reuse of the
+lowest freed voice. A third held key reports no free voice while the first two
+remain retryable. CC 123 closes both voices and discards queued older changes;
+queue overflow in the device recovery route does the same, after which a fresh
+key can sound. Voice stealing and physical listening remain later checkpoints.
