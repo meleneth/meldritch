@@ -83,13 +83,17 @@ with named pitch, Gate, and velocity controls. `PolyNotePlan` prepares raw
 note-on/off events on that channel into resolved per-voice states. It assigns
 the lowest free voice, updates a repeated held key on its existing voice,
 and releases only the matching key. Note-on with zero velocity is a release.
-A key beyond the declared voice count rejects the candidate plan before rendering; voice
-stealing remains a separate policy decision. The plan reapplies held voice
+A key beyond the declared voice count rejects the candidate plan before
+rendering by default. An explicit `"steal_oldest"` third argument replaces
+the voice whose held key had the earliest last note-on. A repeated note-on
+refreshes that key's age; a later note-off for a stolen key is ignored.
+The plan reapplies held voice
 states after each buffer snapshot and uses the existing bounded sample path.
 The timed MIDI router also assigns incoming notes to those voices and
 publishes their resolved pitch, Gate, and velocity through the bounded live
-queue. Repeated keys update their existing voice; a full bank reports an
-error without changing held notes or the frame clock. Channel reset, session
+queue. Repeated keys update their existing voice. With the default policy,
+a full bank reports an error without changing held notes or the frame clock.
+Channel reset, session
 teardown, and queue-overflow recovery close all mapped Gates and discard older
 queued states. `perform` opens this path for a polyphonic graph. Four-voice
 physical listening remains unverified.

@@ -4,6 +4,7 @@ use std::sync::{
 };
 
 use crate::compiler::{ControlHandle, MAX_POLY_VOICES, Machine};
+use crate::model::PolyOverflow;
 use crate::{
     live_notes::{LiveNoteProducer, PushError},
     midi_clock::{ClockError, MidiFrameClock},
@@ -40,6 +41,9 @@ struct PolyHeld {
 
 struct TimedPolyRoute {
     held: [Option<PolyHeld>; MAX_POLY_VOICES],
+    ages: [u64; MAX_POLY_VOICES],
+    next_age: u64,
+    overflow: PolyOverflow,
     voice_count: usize,
     frequencies: [f64; 128],
 }
@@ -87,6 +91,11 @@ impl TimedMidiRouter {
                 .count();
             poly[usize::from(channel - 1)] = Some(TimedPolyRoute {
                 held: [None; MAX_POLY_VOICES],
+                ages: [0; MAX_POLY_VOICES],
+                next_age: 0,
+                overflow: machine
+                    .poly_note_overflow(channel)
+                    .expect("validated polyphonic mapping"),
                 voice_count,
                 frequencies: std::array::from_fn(|note| {
                     440.0 * 2.0_f64.powf((note as f64 - 69.0) / 12.0)
@@ -124,6 +133,8 @@ impl TimedMidiRouter {
         }
         if let Some(route) = &mut self.poly[channel] {
             route.held = [None; MAX_POLY_VOICES];
+            route.ages = [0; MAX_POLY_VOICES];
+            route.next_age = 0;
         }
         true
     }
@@ -214,6 +225,13 @@ impl TimedMidiRouter {
                         .iter()
                         .position(Option::is_none)
                 })
+                .or_else(|| {
+                    (route.overflow == PolyOverflow::StealOldest).then(|| {
+                        (0..route.voice_count)
+                            .min_by_key(|&index| route.ages[index])
+                            .expect("validated polyphonic voices")
+                    })
+                })
                 .ok_or(TimedMidiError::NoFreeVoice)?;
             let held = PolyHeld {
                 key,
@@ -250,6 +268,10 @@ impl TimedMidiRouter {
             )
             .map_err(TimedMidiError::Queue)?;
         route.held = proposed;
+        if gate {
+            route.next_age = route.next_age.saturating_add(1);
+            route.ages[voice] = route.next_age;
+        }
         self.clock = clock;
         Ok(true)
     }

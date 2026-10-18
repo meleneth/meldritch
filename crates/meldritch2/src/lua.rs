@@ -5,7 +5,8 @@ use mlua::{Lua, Table, Value};
 use crate::contract;
 use crate::model::{
     Connection, Control, Endpoint, ExternalInput, ExternalParameter, ExternalPort, Graph, MidiCc,
-    MidiNotes, MidiPoly, MidiPolyVoice, Module, ParameterId, Subpatch, SubpatchInstance,
+    MidiNotes, MidiPoly, MidiPolyVoice, Module, ParameterId, PolyOverflow, Subpatch,
+    SubpatchInstance,
 };
 
 const API: &str = r#"
@@ -98,9 +99,9 @@ function meldritch.graph()
       pitch_control_id = pitch_control_id, gate_control_id = gate_control_id,
       velocity_control_id = velocity_control_id })
   end
-  function graph:midi_poly(channel, voices)
+  function graph:midi_poly(channel, voices, overflow)
     assert(type(voices) == "table", "MIDI poly voices must be a table")
-    table.insert(self.poly_bindings, { channel = channel, voices = voices })
+    table.insert(self.poly_bindings, { channel = channel, voices = voices, overflow = overflow })
   end
   return graph
 end
@@ -330,6 +331,15 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
         graph.midi_poly.push(MidiPoly {
             channel: item.get("channel").map_err(|e| e.to_string())?,
             voices: parsed,
+            overflow: match item
+                .get::<Option<String>>("overflow")
+                .map_err(|e| e.to_string())?
+                .as_deref()
+            {
+                None => PolyOverflow::Reject,
+                Some("steal_oldest") => PolyOverflow::StealOldest,
+                Some(other) => return Err(format!("unknown polyphonic overflow policy '{other}'")),
+            },
         });
     }
     Ok(graph)

@@ -86,6 +86,14 @@ pub struct MidiPolyVoice {
 pub struct MidiPoly {
     pub channel: u8,
     pub voices: Vec<MidiPolyVoice>,
+    pub overflow: PolyOverflow,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PolyOverflow {
+    #[default]
+    Reject,
+    StealOldest,
 }
 
 #[derive(Clone, Debug, Default)]

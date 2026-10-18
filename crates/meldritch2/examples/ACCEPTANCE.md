@@ -627,7 +627,7 @@ including repeated-key velocity, two simultaneous notes, and reuse of the
 lowest freed voice. A third held key reports no free voice while the first two
 remain retryable. CC 123 closes both voices and discards queued older changes;
 queue overflow in the device recovery route does the same, after which a fresh
-key can sound. Voice stealing and physical listening remain later checkpoints.
+key can sound. Physical listening remains a later checkpoint.
 
 ## Four-voice polyphony
 
@@ -640,3 +640,14 @@ voices. The 24-frame live render across three buffers matches the prepared
 timeline sample for sample; the fourth note changes the output compared with
 the first three alone. CC 123 closes every voice, and a later key reuses the
 bank. A fifth declared binding rejects without replacing an accepted graph.
+
+## Opt-in oldest-voice stealing
+
+`65-four-voice-steal-oldest.lua` uses the same four voices with
+`graph:midi_poly(1, bindings, "steal_oldest")`. With four held keys, a
+repeated C4 at frame 7 refreshes its age. E5 at frame 8 replaces the older
+E4 voice; a later E4 note-off is ignored. Once E5 is released, G5 reuses
+that free voice. Raw timed MIDI and the prepared plan must render the same
+18 samples across split buffers. The default graph in example 64 continues
+to reject a fifth held key. Unknown overflow policies reject during Lua
+reading.
