@@ -588,3 +588,14 @@ must match independent oscillator phases and envelope recurrences (attack
 0.01, release 0.005), whether rendered as one buffer or split across three
 buffers. A candidate that binds a control to an
 unexported parameter rejects while the accepted voice still responds to MIDI.
+
+## Prepared note velocity
+
+`61-prepared-velocity.lua` cables a velocity Constant through a Gain controlled
+by the Gate Constant. `TimedNotePlan::prepare_with_velocity` opens the Gate at
+frame 2 with velocity 0.25, changes velocity to 0.75 at frame 4 without closing
+Gate, and closes Gate at frame 6. Eight frames render as
+`[0, 0, 0.25, 0.25, 0.75, 0.75, 0, 0]`, matching the live note queue across
+split buffers. The existing `prepare` path uses unity velocity and renders 1
+while Gate is open. Nonfinite or out-of-range velocities reject before
+rendering and leave machine state unchanged.

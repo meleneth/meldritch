@@ -14,14 +14,23 @@ pub struct TimedNoteState {
     pub gate: bool,
 }
 
+/// A prepared note state with an explicit unit-interval velocity.
+#[derive(Clone, Copy, Debug)]
+pub struct TimedVelocityState {
+    pub note: TimedNoteState,
+    pub velocity: f64,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct ResolvedEvent {
     frame: u64,
     channel: u8,
     pitch_index: usize,
     gate_index: usize,
+    velocity_index: Option<usize>,
     pitch_hz: f64,
     gate: bool,
+    velocity: f64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,6 +56,30 @@ impl TimedNotePlan {
         start_frame: u64,
         events: &[TimedNoteState],
     ) -> Result<Self, String> {
+        Self::prepare_events(
+            machine,
+            start_frame,
+            events.iter().copied().map(|note| (note, 1.0)),
+        )
+    }
+
+    pub fn prepare_with_velocity(
+        machine: &Machine,
+        start_frame: u64,
+        events: &[TimedVelocityState],
+    ) -> Result<Self, String> {
+        Self::prepare_events(
+            machine,
+            start_frame,
+            events.iter().map(|event| (event.note, event.velocity)),
+        )
+    }
+
+    fn prepare_events(
+        machine: &Machine,
+        start_frame: u64,
+        events: impl ExactSizeIterator<Item = (TimedNoteState, f64)>,
+    ) -> Result<Self, String> {
         if events.len() > MAX_EVENTS {
             return Err(format!(
                 "timed note plan permits at most {MAX_EVENTS} events"
@@ -54,19 +87,25 @@ impl TimedNotePlan {
         }
         let mut previous = start_frame;
         let mut resolved = Vec::with_capacity(events.len());
-        for event in events {
+        for (event, velocity) in events {
             if event.frame < previous {
                 return Err("timed note frames must be nondecreasing and at or after start".into());
             }
+            if !velocity.is_finite() || !(0.0..=1.0).contains(&velocity) {
+                return Err("timed note velocity must be finite and within 0..1".into());
+            }
             let (pitch_index, gate_index) =
                 machine.resolve_timed_note(event.channel, event.pitch_hz)?;
+            let velocity_index = machine.timed_note_target(event.channel)?.velocity_index;
             resolved.push(ResolvedEvent {
                 frame: event.frame,
                 channel: event.channel,
                 pitch_index,
                 gate_index,
+                velocity_index,
                 pitch_hz: event.pitch_hz,
                 gate: event.gate,
+                velocity,
             });
             previous = event.frame;
         }
@@ -107,6 +146,7 @@ impl TimedNotePlan {
                 event.pitch_hz,
                 event.gate,
             );
+            machine.apply_timed_velocity(event.velocity_index, event.velocity);
         }
         let mut rendered = 0;
         while let Some(event) = self.events.get(self.next_event) {
@@ -121,6 +161,7 @@ impl TimedNotePlan {
                 event.pitch_hz,
                 event.gate,
             );
+            machine.apply_timed_velocity(event.velocity_index, event.velocity);
             self.active[usize::from(event.channel - 1)] = Some(*event);
             rendered = offset;
             self.next_event += 1;

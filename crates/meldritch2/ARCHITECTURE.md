@@ -73,6 +73,11 @@ lookups, allocations, locks, or retries. This prepared path is also checked
 headlessly; the live queue and device callback path are described below. A plan owns
 one sequential render; ordinary `Machine::process`
 starts a new parameter snapshot outside that plan.
+`TimedNotePlan::prepare_with_velocity` accepts explicit unit-interval velocity
+alongside each note state. It resolves the optional velocity target once and
+reapplies held pitch, Gate, and velocity at every render boundary. The original
+`prepare` API supplies unity velocity. Both prepared paths validate before
+rendering and share the same bounded sample path.
 The pinned `midir` callback supplies elapsed microseconds from an arbitrary
 origin fixed for one input connection. `MidiFrameClock` maps that timestamp to
 absolute audio frames using a caller-provided first-unrendered frame and a

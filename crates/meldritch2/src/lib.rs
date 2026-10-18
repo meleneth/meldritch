@@ -27,6 +27,7 @@ mod tests {
         model::ParameterId,
         timed::{
             MAX_EVENTS, MAX_FRAMES_PER_RENDER, TimedNotePlan, TimedNoteState, TimedRenderError,
+            TimedVelocityState,
         },
     };
 
@@ -89,6 +90,7 @@ mod tests {
         include_str!("../examples/59-subpatch-instance-values.lua");
     const TWO_MIDI_SUBPATCH_VOICES: &str =
         include_str!("../examples/60-two-midi-subpatch-voices.lua");
+    const PREPARED_VELOCITY: &str = include_str!("../examples/61-prepared-velocity.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -1960,6 +1962,90 @@ return graph
         let mut samples = [f64::NAN; 2];
         machine.process(&mut samples);
         assert_eq!(samples, [0.0; 2]);
+    }
+
+    #[test]
+    fn prepared_velocity_matches_live_queue_across_buffers() {
+        let graph = lua::read(PREPARED_VELOCITY).unwrap();
+        let events = [
+            TimedVelocityState {
+                note: TimedNoteState {
+                    frame: 2,
+                    channel: 1,
+                    pitch_hz: 440.0,
+                    gate: true,
+                },
+                velocity: 0.25,
+            },
+            TimedVelocityState {
+                note: TimedNoteState {
+                    frame: 4,
+                    channel: 1,
+                    pitch_hz: 440.0,
+                    gate: true,
+                },
+                velocity: 0.75,
+            },
+            TimedVelocityState {
+                note: TimedNoteState {
+                    frame: 6,
+                    channel: 1,
+                    pitch_hz: 440.0,
+                    gate: false,
+                },
+                velocity: 0.75,
+            },
+        ];
+        let mut machine = compile(&graph).unwrap();
+        let mut plan = TimedNotePlan::prepare_with_velocity(&machine, 0, &events).unwrap();
+        let mut actual = [f64::NAN; 8];
+        plan.render_next(&mut machine, &mut actual).unwrap();
+        assert_eq!(actual, [0.0, 0.0, 0.25, 0.25, 0.75, 0.75, 0.0, 0.0]);
+
+        let mut live = compile(&graph).unwrap();
+        let (mut producer, mut consumer) = live_note_queue(&live, 0);
+        for event in events {
+            producer
+                .try_push_velocity(event.note, event.velocity)
+                .unwrap();
+        }
+        let mut split = [f64::NAN; 8];
+        consumer.render_next(&mut live, &mut split[..3]).unwrap();
+        consumer.render_next(&mut live, &mut split[3..5]).unwrap();
+        consumer.render_next(&mut live, &mut split[5..]).unwrap();
+        assert_eq!(actual, split);
+
+        let mut unity = compile(&graph).unwrap();
+        let mut unity_plan = TimedNotePlan::prepare(&unity, 0, &[events[0].note]).unwrap();
+        unity_plan.render_next(&mut unity, &mut actual).unwrap();
+        assert_eq!(actual, [0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn invalid_prepared_velocity_rejects_without_changing_machine() {
+        let graph = lua::read(PREPARED_VELOCITY).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let note = TimedNoteState {
+            frame: 2,
+            channel: 1,
+            pitch_hz: 440.0,
+            gate: true,
+        };
+        for velocity in [f64::NAN, -0.1, 1.1] {
+            let error = TimedNotePlan::prepare_with_velocity(
+                &machine,
+                0,
+                &[TimedVelocityState { note, velocity }],
+            )
+            .unwrap_err();
+            assert!(
+                error.contains("velocity must be finite and within 0..1"),
+                "{error}"
+            );
+        }
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.0; 4]);
     }
 
     #[test]
