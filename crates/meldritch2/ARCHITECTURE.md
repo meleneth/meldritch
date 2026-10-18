@@ -78,6 +78,16 @@ alongside each note state. It resolves the optional velocity target once and
 reapplies held pitch, Gate, and velocity at every render boundary. The original
 `prepare` API supplies unity velocity. Both prepared paths validate before
 rendering and share the same bounded sample path.
+`graph:midi_poly(channel, voices)` declares two ordered voice bindings, each
+with named pitch, Gate, and velocity controls. `PolyNotePlan` prepares raw
+note-on/off events on that channel into resolved per-voice states. It assigns
+the lowest free voice, updates a repeated held key on its existing voice,
+and releases only the matching key. Note-on with zero velocity is a release.
+A third simultaneous key rejects the candidate plan before rendering; voice
+stealing remains a separate policy decision. The plan reapplies held voice
+states after each buffer snapshot and uses the existing bounded sample path.
+This first polyphonic route is headless and prepared; the live MIDI device
+callback still uses the mono note queue.
 The pinned `midir` callback supplies elapsed microseconds from an arbitrary
 origin fixed for one input connection. `MidiFrameClock` maps that timestamp to
 absolute audio frames using a caller-provided first-unrendered frame and a

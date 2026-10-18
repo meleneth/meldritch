@@ -5,14 +5,14 @@ use mlua::{Lua, Table, Value};
 use crate::contract;
 use crate::model::{
     Connection, Control, Endpoint, ExternalInput, ExternalParameter, ExternalPort, Graph, MidiCc,
-    MidiNotes, Module, ParameterId, Subpatch, SubpatchInstance,
+    MidiNotes, MidiPoly, MidiPolyVoice, Module, ParameterId, Subpatch, SubpatchInstance,
 };
 
 const API: &str = r#"
 meldritch = { _subpatches = {} }
 function meldritch.graph()
   local graph = { modules = {}, instances = {}, connections = {}, normalizations = {},
-    controls = {}, midi_ccs = {}, note_bindings = {}, external_inputs = {}, external_outputs = {},
+    controls = {}, midi_ccs = {}, note_bindings = {}, poly_bindings = {}, external_inputs = {}, external_outputs = {},
     external_parameters = {} }
   function graph:module(id, kind, values)
     assert(type(id) == "string" and type(kind) == "string", "module ID and type must be strings")
@@ -97,6 +97,10 @@ function meldritch.graph()
     table.insert(self.note_bindings, { channel = channel,
       pitch_control_id = pitch_control_id, gate_control_id = gate_control_id,
       velocity_control_id = velocity_control_id })
+  end
+  function graph:midi_poly(channel, voices)
+    assert(type(voices) == "table", "MIDI poly voices must be a table")
+    table.insert(self.poly_bindings, { channel = channel, voices = voices })
   end
   return graph
 end
@@ -308,6 +312,24 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
             pitch_control_id: item.get("pitch_control_id").map_err(|e| e.to_string())?,
             gate_control_id: item.get("gate_control_id").map_err(|e| e.to_string())?,
             velocity_control_id: item.get("velocity_control_id").map_err(|e| e.to_string())?,
+        });
+    }
+    let midi_poly: Table = table.get("poly_bindings").map_err(|e| e.to_string())?;
+    for item in midi_poly.sequence_values::<Table>() {
+        let item = item.map_err(|e| e.to_string())?;
+        let voices: Table = item.get("voices").map_err(|e| e.to_string())?;
+        let mut parsed = Vec::new();
+        for voice in voices.sequence_values::<Table>() {
+            let voice = voice.map_err(|e| e.to_string())?;
+            parsed.push(MidiPolyVoice {
+                pitch_control_id: voice.get("pitch").map_err(|e| e.to_string())?,
+                gate_control_id: voice.get("gate").map_err(|e| e.to_string())?,
+                velocity_control_id: voice.get("velocity").map_err(|e| e.to_string())?,
+            });
+        }
+        graph.midi_poly.push(MidiPoly {
+            channel: item.get("channel").map_err(|e| e.to_string())?,
+            voices: parsed,
         });
     }
     Ok(graph)

@@ -75,6 +75,19 @@ pub struct MidiNotes {
     pub velocity_control_id: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct MidiPolyVoice {
+    pub pitch_control_id: String,
+    pub gate_control_id: String,
+    pub velocity_control_id: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct MidiPoly {
+    pub channel: u8,
+    pub voices: Vec<MidiPolyVoice>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Graph {
     pub modules: Vec<Module>,
@@ -85,6 +98,7 @@ pub struct Graph {
     pub controls: Vec<Control>,
     pub midi_ccs: Vec<MidiCc>,
     pub midi_notes: Vec<MidiNotes>,
+    pub midi_poly: Vec<MidiPoly>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]

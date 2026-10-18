@@ -10,6 +10,7 @@ pub mod midi_clock;
 pub mod midi_device;
 pub mod model;
 pub mod panel;
+pub mod poly;
 pub mod timed;
 pub mod tui;
 mod units;
@@ -25,6 +26,7 @@ mod tests {
         midi::{MidiRouter, TimedMidiError, TimedMidiRouter},
         midi_clock::{ClockError, ClockStatus, FrameStamp, MidiFrameClock},
         model::ParameterId,
+        poly::{PolyNoteEvent, PolyNotePlan},
         timed::{
             MAX_EVENTS, MAX_FRAMES_PER_RENDER, TimedNotePlan, TimedNoteState, TimedRenderError,
             TimedVelocityState,
@@ -92,6 +94,7 @@ mod tests {
         include_str!("../examples/60-two-midi-subpatch-voices.lua");
     const PREPARED_VELOCITY: &str = include_str!("../examples/61-prepared-velocity.lua");
     const SUBPATCH_INPUT_FANOUT: &str = include_str!("../examples/62-subpatch-input-fanout.lua");
+    const TWO_VOICE_POLY: &str = include_str!("../examples/63-two-voice-poly.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -935,6 +938,213 @@ return graph
             host.accepted().unwrap().process(&mut samples);
             assert!(samples.iter().all(|sample| (sample - 0.45).abs() < 1e-12));
         }
+    }
+
+    #[test]
+    fn two_voice_poly_plan_assigns_releases_and_reuses_voices() {
+        let graph = lua::read(TWO_VOICE_POLY).unwrap();
+        let events = [
+            PolyNoteEvent::Off {
+                frame: 1,
+                channel: 1,
+                key: 60,
+            },
+            PolyNoteEvent::On {
+                frame: 3,
+                channel: 1,
+                key: 69,
+                velocity: 64,
+            },
+            PolyNoteEvent::On {
+                frame: 4,
+                channel: 1,
+                key: 69,
+                velocity: 32,
+            },
+            PolyNoteEvent::On {
+                frame: 5,
+                channel: 1,
+                key: 81,
+                velocity: 127,
+            },
+            PolyNoteEvent::Off {
+                frame: 7,
+                channel: 1,
+                key: 69,
+            },
+            PolyNoteEvent::On {
+                frame: 9,
+                channel: 1,
+                key: 72,
+                velocity: 32,
+            },
+            PolyNoteEvent::On {
+                frame: 11,
+                channel: 1,
+                key: 81,
+                velocity: 0,
+            },
+            PolyNoteEvent::Off {
+                frame: 13,
+                channel: 1,
+                key: 72,
+            },
+        ];
+        let mut whole = compile_at_rate(&graph, 48_000.0).unwrap();
+        let mut plan = PolyNotePlan::prepare(&whole, 0, &events).unwrap();
+        let mut actual = [f64::NAN; 20];
+        plan.render_next(&mut whole, &mut actual).unwrap();
+        assert_eq!(plan.cursor(), 20);
+
+        let mut left_phase = 0.0_f64;
+        let mut right_phase = 0.0_f64;
+        let mut left_envelope = 0.0_f64;
+        let mut right_envelope = 0.0_f64;
+        let note72 = 440.0 * 2.0_f64.powf((72.0 - 69.0) / 12.0);
+        for (frame, sample) in actual.iter().enumerate() {
+            let left_pitch = if frame >= 9 {
+                note72
+            } else if frame >= 3 {
+                440.0
+            } else {
+                0.0
+            };
+            let right_pitch = if frame >= 5 { 880.0 } else { 0.0 };
+            let left_gate = (3..7).contains(&frame) || (9..13).contains(&frame);
+            let right_gate = (5..11).contains(&frame);
+            left_envelope +=
+                if left_gate { 0.01 } else { 0.005 } * (f64::from(left_gate) - left_envelope);
+            right_envelope +=
+                if right_gate { 0.01 } else { 0.005 } * (f64::from(right_gate) - right_envelope);
+            let left_velocity = if frame >= 4 {
+                32.0 / 127.0
+            } else if frame >= 3 {
+                64.0 / 127.0
+            } else {
+                1.0
+            };
+            let expected =
+                0.25 * left_envelope * left_velocity * (std::f64::consts::TAU * left_phase).sin()
+                    + 0.125 * right_envelope * (std::f64::consts::TAU * right_phase).sin();
+            assert!(
+                (sample - expected).abs() < 1e-12,
+                "frame {frame}: {sample} != {expected}"
+            );
+            left_phase = (left_phase + left_pitch / 48_000.0).fract();
+            right_phase = (right_phase + right_pitch / 48_000.0).fract();
+        }
+
+        let mut split = compile_at_rate(&graph, 48_000.0).unwrap();
+        let mut split_plan = PolyNotePlan::prepare(&split, 0, &events).unwrap();
+        let mut partitioned = [f64::NAN; 20];
+        split_plan
+            .render_next(&mut split, &mut partitioned[..6])
+            .unwrap();
+        split_plan
+            .render_next(&mut split, &mut partitioned[6..12])
+            .unwrap();
+        split_plan
+            .render_next(&mut split, &mut partitioned[12..])
+            .unwrap();
+        assert_eq!(actual, partitioned);
+    }
+
+    #[test]
+    fn poly_plan_full_bank_and_invalid_bindings_preserve_machine() {
+        let graph = lua::read(TWO_VOICE_POLY).unwrap();
+        let mut host = Host::default();
+        host.submit(&graph).unwrap();
+        let mut duplicate = graph.clone();
+        duplicate.midi_poly[0].voices[1].gate_control_id = "left-gate".into();
+        let mut missing = graph.clone();
+        missing.midi_poly[0].voices[1].velocity_control_id = "missing".into();
+        let mut narrow = graph.clone();
+        narrow
+            .controls
+            .iter_mut()
+            .find(|control| control.id == "right-pitch")
+            .unwrap()
+            .max = 1000.0;
+        let mut wrong_count = graph.clone();
+        wrong_count.midi_poly[0].voices.pop();
+        for (candidate, expected) in [
+            (duplicate, "distinct parameter targets"),
+            (missing, "unknown control"),
+            (narrow, "cover all MIDI note frequencies"),
+            (wrong_count, "exactly two voices"),
+        ] {
+            let error = host.submit(&candidate).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+        }
+        let machine = host.accepted().unwrap();
+        let full = [
+            PolyNoteEvent::On {
+                frame: 1,
+                channel: 1,
+                key: 60,
+                velocity: 100,
+            },
+            PolyNoteEvent::On {
+                frame: 2,
+                channel: 1,
+                key: 64,
+                velocity: 100,
+            },
+            PolyNoteEvent::On {
+                frame: 3,
+                channel: 1,
+                key: 67,
+                velocity: 100,
+            },
+        ];
+        assert!(
+            PolyNotePlan::prepare(machine, 0, &full)
+                .unwrap_err()
+                .contains("no free voice")
+        );
+        for invalid in [
+            PolyNoteEvent::On {
+                frame: 1,
+                channel: 1,
+                key: 128,
+                velocity: 100,
+            },
+            PolyNoteEvent::On {
+                frame: 1,
+                channel: 1,
+                key: 60,
+                velocity: 128,
+            },
+        ] {
+            assert!(
+                PolyNotePlan::prepare(machine, 0, &[invalid])
+                    .unwrap_err()
+                    .contains("MIDI byte")
+            );
+        }
+        assert!(
+            PolyNotePlan::prepare(
+                machine,
+                0,
+                &[PolyNoteEvent::Off {
+                    frame: 0,
+                    channel: 2,
+                    key: 60
+                }]
+            )
+            .unwrap_err()
+            .contains("no polyphonic MIDI mapping")
+        );
+        let mut plan = PolyNotePlan::prepare(machine, 0, &full[..2]).unwrap();
+        let mut other = compile(&graph).unwrap();
+        assert_eq!(
+            plan.render_next(&mut other, &mut [f64::NAN; 4]),
+            Err(TimedRenderError::WrongMachine)
+        );
+        assert_eq!(plan.cursor(), 0);
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.0; 4]);
     }
 
     #[test]

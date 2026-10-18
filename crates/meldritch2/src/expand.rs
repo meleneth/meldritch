@@ -46,6 +46,7 @@ pub fn expand(graph: &Graph) -> Result<Graph, String> {
         controls: graph.controls.clone(),
         midi_ccs: graph.midi_ccs.clone(),
         midi_notes: graph.midi_notes.clone(),
+        midi_poly: graph.midi_poly.clone(),
         ..Graph::default()
     };
     let mut ids = BTreeSet::new();
@@ -215,7 +216,8 @@ fn expand_scope(
     if !prefix.is_empty()
         && (!scope.controls.is_empty()
             || !scope.midi_ccs.is_empty()
-            || !scope.midi_notes.is_empty())
+            || !scope.midi_notes.is_empty()
+            || !scope.midi_poly.is_empty())
     {
         return Err("controls and MIDI bindings belong to the parent graph".into());
     }

@@ -147,7 +147,14 @@ fn main() {
                 process::exit(2);
             }
         }
-        let result = load_graph(&path).and_then(|graph| open_output(&graph, device_arg));
+        let result = load_graph(&path).and_then(|graph| {
+            if !graph.midi_poly.is_empty() {
+                return Err(
+                    "polyphonic MIDI graphs currently support prepared rendering only".into(),
+                );
+            }
+            open_output(&graph, device_arg)
+        });
         match result {
             Ok(mut output) => {
                 let midi_session = match midi_index {

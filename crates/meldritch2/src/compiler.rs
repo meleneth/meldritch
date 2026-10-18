@@ -143,6 +143,7 @@ pub struct Machine {
     controls: BTreeMap<String, ControlBinding>,
     midi_ccs: Vec<MidiCc>,
     midi_notes: Vec<MidiNotes>,
+    poly_notes: Vec<PolyMapping>,
     note_pairs: Vec<NotePair>,
     output_slot: usize,
     order: Vec<String>,
@@ -158,6 +159,19 @@ pub(crate) struct TimedNoteTarget {
     pub velocity_index: Option<usize>,
     pub min_pitch: f64,
     pub max_pitch: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PolyVoiceTarget {
+    pub pitch_index: usize,
+    pub gate_index: usize,
+    pub velocity_index: usize,
+}
+
+#[derive(Debug)]
+struct PolyMapping {
+    channel: u8,
+    voices: [PolyVoiceTarget; 2],
 }
 
 impl Machine {
@@ -284,6 +298,13 @@ impl Machine {
             min_pitch: pitch.min,
             max_pitch: pitch.max,
         })
+    }
+    pub(crate) fn poly_note_targets(&self, channel: u8) -> Result<[PolyVoiceTarget; 2], String> {
+        self.poly_notes
+            .iter()
+            .find(|mapping| mapping.channel == channel)
+            .map(|mapping| mapping.voices)
+            .ok_or_else(|| format!("no polyphonic MIDI mapping for channel {channel}"))
     }
     pub(crate) fn apply_timed_note(
         &mut self,
@@ -660,6 +681,72 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             }
         }
     }
+    let mut poly_notes = Vec::new();
+    for binding in &graph.midi_poly {
+        if !(1..=16).contains(&binding.channel) {
+            return Err(format!(
+                "polyphonic MIDI mapping requires channel 1..16, got {}",
+                binding.channel
+            ));
+        }
+        if !mapped_note_channels.insert(binding.channel) {
+            return Err(format!(
+                "duplicate MIDI note mapping for channel {}",
+                binding.channel
+            ));
+        }
+        if binding.voices.len() != 2 {
+            return Err("polyphonic MIDI mapping requires exactly two voices".into());
+        }
+        let mut voices = Vec::with_capacity(2);
+        for (number, voice) in binding.voices.iter().enumerate() {
+            let resolve = |id: &str| {
+                controls.get(id).ok_or_else(|| {
+                    format!(
+                        "polyphonic voice {} targets unknown control '{id}'",
+                        number + 1
+                    )
+                })
+            };
+            let pitch = resolve(&voice.pitch_control_id)?;
+            let gate = resolve(&voice.gate_control_id)?;
+            let velocity = resolve(&voice.velocity_control_id)?;
+            for target in [&pitch.target, &gate.target, &velocity.target] {
+                if !mapped_note_targets.insert(target) {
+                    return Err("polyphonic MIDI voices must use distinct parameter targets".into());
+                }
+            }
+            let lowest_hz = 440.0 * 2.0_f64.powf((0.0 - 69.0) / 12.0);
+            let highest_hz = 440.0 * 2.0_f64.powf((127.0 - 69.0) / 12.0);
+            if pitch.min > lowest_hz || pitch.max < highest_hz {
+                return Err(format!(
+                    "polyphonic pitch control '{}' must cover all MIDI note frequencies",
+                    voice.pitch_control_id
+                ));
+            }
+            if gate.min > 0.0 || gate.max < 1.0 {
+                return Err(format!(
+                    "polyphonic gate control '{}' must cover 0..1",
+                    voice.gate_control_id
+                ));
+            }
+            if velocity.min > 0.0 || velocity.max < 1.0 {
+                return Err(format!(
+                    "polyphonic velocity control '{}' must cover 0..1",
+                    voice.velocity_control_id
+                ));
+            }
+            voices.push(PolyVoiceTarget {
+                pitch_index: param_ids[&pitch.target],
+                gate_index: param_ids[&gate.target],
+                velocity_index: param_ids[&velocity.target],
+            });
+        }
+        poly_notes.push(PolyMapping {
+            channel: binding.channel,
+            voices: [voices[0], voices[1]],
+        });
+    }
     let note_pairs = graph
         .midi_notes
         .iter()
@@ -758,6 +845,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         controls,
         midi_ccs: graph.midi_ccs.clone(),
         midi_notes: graph.midi_notes.clone(),
+        poly_notes,
         note_pairs,
         output_slot,
         order: schedule

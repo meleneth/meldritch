@@ -609,3 +609,17 @@ normalization from 0.1. Its explicit cable overrides both expanded fallback
 edges. Removing that cable selects both normalizations and renders 0.375.
 Duplicate or invalid destinations, and an empty exported input, reject while
 the accepted machine continues to render 0.45.
+
+## Prepared two-voice polyphony
+
+`63-two-voice-poly.lua` creates two copies of one subpatch, each with its own
+pitch, Gate, velocity, oscillator, and envelope state. One channel binds both
+ordered voices through `graph:midi_poly`. A prepared timeline assigns A4 to
+the left voice at frame 3, updates its velocity at frame 4 without allocating
+another voice, and assigns A5 to the right voice at frame 5. Releasing A4 at
+frame 7 frees the left voice; C5 takes it at frame 9 while A5 continues on
+the right. Later releases close only their matching Gates. Twenty samples
+must match independent oscillator phases, envelope recurrences, and velocity
+values across whole and split renders. Invalid voice bindings and a third
+simultaneous note reject without changing an accepted machine. Live MIDI
+device routing and voice stealing are later checkpoints.
