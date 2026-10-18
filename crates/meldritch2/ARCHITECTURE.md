@@ -139,6 +139,10 @@ and per-instance normalizations. The existing compiler then validates and
 schedules that graph. Each expanded primitive owns its own DSP state; the
 callback performs no expansion. Subpatches contain modules, cables, and nested
 instances; parent graphs own controls and MIDI bindings.
+An exported input may name multiple destinations in one declaration:
+`subpatch:input(name, first, second, ...)`. Each parent cable or normalization
+to that input expands to every destination. Duplicate destinations reject;
+the ordinary destination contracts resolve fan-in and normalizations.
 `subpatch:parameter(name, module_or_instance, parameter)` exports a parameter
 through the subpatch interface. A parent binds it with
 `graph:control(id, instance, exported_name, range)`; nested subpatches may

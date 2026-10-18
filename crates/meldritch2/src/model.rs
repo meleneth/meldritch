@@ -26,6 +26,12 @@ pub struct ExternalPort {
 }
 
 #[derive(Clone, Debug)]
+pub struct ExternalInput {
+    pub name: String,
+    pub destinations: Vec<Endpoint>,
+}
+
+#[derive(Clone, Debug)]
 pub struct ExternalParameter {
     pub name: String,
     pub target: ParameterId,
@@ -41,7 +47,7 @@ pub struct SubpatchInstance {
 #[derive(Clone, Debug)]
 pub struct Subpatch {
     pub graph: Graph,
-    pub inputs: Vec<ExternalPort>,
+    pub inputs: Vec<ExternalInput>,
     pub outputs: Vec<ExternalPort>,
     pub parameters: Vec<ExternalParameter>,
 }

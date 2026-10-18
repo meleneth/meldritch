@@ -4,8 +4,8 @@ use mlua::{Lua, Table, Value};
 
 use crate::contract;
 use crate::model::{
-    Connection, Control, Endpoint, ExternalParameter, ExternalPort, Graph, MidiCc, MidiNotes,
-    Module, ParameterId, Subpatch, SubpatchInstance,
+    Connection, Control, Endpoint, ExternalInput, ExternalParameter, ExternalPort, Graph, MidiCc,
+    MidiNotes, Module, ParameterId, Subpatch, SubpatchInstance,
 };
 
 const API: &str = r#"
@@ -38,11 +38,16 @@ function meldritch.graph()
     assert(type(destination) == "table" and destination.direction == "input", "destination must be an input port")
     table.insert(self.normalizations, { from = source, to = destination })
   end
-  function graph:input(name, destination)
+  function graph:input(name, destination, ...)
     assert(self.is_subpatch, "external ports belong to subpatch definitions")
     assert(type(name) == "string", "external input name must be a string")
     assert(type(destination) == "table" and destination.direction == "input", "external input must target an input port")
-    table.insert(self.external_inputs, { name = name, endpoint = destination })
+    local destinations = { destination, ... }
+    for i = 1, 1 + select('#', ...) do
+      local target = destinations[i]
+      assert(type(target) == "table" and target.direction == "input", "external input must target input ports")
+    end
+    table.insert(self.external_inputs, { name = name, destinations = destinations })
   end
   function graph:output(name, source)
     assert(self.is_subpatch, "external ports belong to subpatch definitions")
@@ -144,7 +149,7 @@ pub fn read(script: &str) -> Result<Graph, String> {
         .map_err(|e| format!("subpatch definitions: {e}"))?;
     for pair in definitions.pairs::<String, Table>() {
         let (name, definition) = pair.map_err(|e| e.to_string())?;
-        let inputs = external_ports(&definition, "external_inputs")?;
+        let inputs = external_inputs(&definition)?;
         let outputs = external_ports(&definition, "external_outputs")?;
         let parameters = external_parameters(&definition)?;
         graph.subpatches.insert(
@@ -158,6 +163,24 @@ pub fn read(script: &str) -> Result<Graph, String> {
         );
     }
     Ok(graph)
+}
+
+fn external_inputs(table: &Table) -> Result<Vec<ExternalInput>, String> {
+    let inputs: Table = table.get("external_inputs").map_err(|e| e.to_string())?;
+    inputs
+        .sequence_values::<Table>()
+        .map(|item| {
+            let item = item.map_err(|e| e.to_string())?;
+            let destinations: Table = item.get("destinations").map_err(|e| e.to_string())?;
+            Ok(ExternalInput {
+                name: item.get("name").map_err(|e| e.to_string())?,
+                destinations: destinations
+                    .sequence_values::<Table>()
+                    .map(|target| endpoint(target.map_err(|e| e.to_string())?))
+                    .collect::<Result<Vec<_>, _>>()?,
+            })
+        })
+        .collect()
 }
 
 fn external_parameters(table: &Table) -> Result<Vec<ExternalParameter>, String> {

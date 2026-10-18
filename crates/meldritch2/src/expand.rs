@@ -5,12 +5,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::compiler::validate_parameter_value;
 use crate::contract::{self, Role};
 use crate::model::{
-    Connection, Endpoint, ExternalParameter, ExternalPort, Graph, ParameterId, Subpatch,
+    Connection, Endpoint, ExternalInput, ExternalParameter, ExternalPort, Graph, ParameterId,
+    Subpatch,
 };
 
 #[derive(Default)]
 struct Ports {
-    inputs: BTreeMap<String, Endpoint>,
+    inputs: BTreeMap<String, Vec<Endpoint>>,
     outputs: BTreeMap<String, Endpoint>,
     parameters: BTreeMap<String, ParameterId>,
 }
@@ -60,18 +61,46 @@ pub fn expand(graph: &Graph) -> Result<Graph, String> {
     Ok(expanded)
 }
 
-fn external_ports(
+fn external_outputs(
     declarations: &[ExternalPort],
     local: &BTreeMap<String, Ports>,
-    input: bool,
 ) -> Result<BTreeMap<String, Endpoint>, String> {
     let mut ports = BTreeMap::new();
     for declaration in declarations {
         if declaration.name.is_empty() {
             return Err("external port name must not be empty".into());
         }
-        let endpoint = resolve(local, &declaration.endpoint, input)?;
+        let endpoint = resolve_output(local, &declaration.endpoint)?;
         if ports.insert(declaration.name.clone(), endpoint).is_some() {
+            return Err(format!("duplicate external port '{}'", declaration.name));
+        }
+    }
+    Ok(ports)
+}
+
+fn external_inputs(
+    declarations: &[ExternalInput],
+    local: &BTreeMap<String, Ports>,
+) -> Result<BTreeMap<String, Vec<Endpoint>>, String> {
+    let mut ports = BTreeMap::new();
+    for declaration in declarations {
+        if declaration.name.is_empty() || declaration.destinations.is_empty() {
+            return Err("external input needs a name and destination".into());
+        }
+        let mut targets = Vec::new();
+        let mut seen = BTreeSet::new();
+        for destination in &declaration.destinations {
+            for endpoint in resolve_input(local, destination)? {
+                if !seen.insert(endpoint.clone()) {
+                    return Err(format!(
+                        "duplicate destination for external input '{}'",
+                        declaration.name
+                    ));
+                }
+                targets.push(endpoint);
+            }
+        }
+        if ports.insert(declaration.name.clone(), targets).is_some() {
             return Err(format!("duplicate external port '{}'", declaration.name));
         }
     }
@@ -137,10 +166,27 @@ fn validate_authored_value(
     validate_parameter_value(&ParameterId::new(&module.id, name), parameter.range, value)
 }
 
-fn resolve(
+fn resolve_input(
     local: &BTreeMap<String, Ports>,
     endpoint: &Endpoint,
-    input: bool,
+) -> Result<Vec<Endpoint>, String> {
+    let ports = local.get(&endpoint.module).ok_or_else(|| {
+        format!(
+            "unknown module '{}' in subpatch connection",
+            endpoint.module
+        )
+    })?;
+    ports.inputs.get(&endpoint.port).cloned().ok_or_else(|| {
+        format!(
+            "invalid input port '{}.{}' in subpatch connection",
+            endpoint.module, endpoint.port
+        )
+    })
+}
+
+fn resolve_output(
+    local: &BTreeMap<String, Ports>,
+    endpoint: &Endpoint,
 ) -> Result<Endpoint, String> {
     let ports = local.get(&endpoint.module).ok_or_else(|| {
         format!(
@@ -148,17 +194,10 @@ fn resolve(
             endpoint.module
         )
     })?;
-    let found = if input {
-        ports.inputs.get(&endpoint.port)
-    } else {
-        ports.outputs.get(&endpoint.port)
-    };
-    found.cloned().ok_or_else(|| {
+    ports.outputs.get(&endpoint.port).cloned().ok_or_else(|| {
         format!(
-            "invalid {} port '{}.{}' in subpatch connection",
-            if input { "input" } else { "output" },
-            endpoint.module,
-            endpoint.port
+            "invalid output port '{}.{}' in subpatch connection",
+            endpoint.module, endpoint.port
         )
     })
 }
@@ -171,7 +210,7 @@ fn expand_scope(
     stack: &mut Vec<String>,
     expanded: &mut Graph,
     ids: &mut BTreeSet<String>,
-    interface: Option<(&[ExternalPort], &[ExternalPort], &[ExternalParameter])>,
+    interface: Option<(&[ExternalInput], &[ExternalPort], &[ExternalParameter])>,
 ) -> Result<Ports, String> {
     if !prefix.is_empty()
         && (!scope.controls.is_empty()
@@ -205,10 +244,10 @@ fn expand_scope(
                 .map(|port| {
                     (
                         port.name.to_owned(),
-                        Endpoint {
+                        vec![Endpoint {
                             module: qualified.clone(),
                             port: port.name.into(),
-                        },
+                        }],
                     )
                 })
                 .collect(),
@@ -292,20 +331,26 @@ fn expand_scope(
         local.insert(instance.id.clone(), ports);
     }
     for edge in &scope.connections {
-        expanded.connections.push(Connection {
-            from: resolve(&local, &edge.from, false)?,
-            to: resolve(&local, &edge.to, true)?,
-        });
+        let from = resolve_output(&local, &edge.from)?;
+        for to in resolve_input(&local, &edge.to)? {
+            expanded.connections.push(Connection {
+                from: from.clone(),
+                to,
+            });
+        }
     }
     for edge in &scope.normalizations {
-        expanded.normalizations.push(Connection {
-            from: resolve(&local, &edge.from, false)?,
-            to: resolve(&local, &edge.to, true)?,
-        });
+        let from = resolve_output(&local, &edge.from)?;
+        for to in resolve_input(&local, &edge.to)? {
+            expanded.normalizations.push(Connection {
+                from: from.clone(),
+                to,
+            });
+        }
     }
     if let Some((inputs, outputs, parameters)) = interface {
-        let inputs = external_ports(inputs, &local, true)?;
-        let outputs = external_ports(outputs, &local, false)?;
+        let inputs = external_inputs(inputs, &local)?;
+        let outputs = external_outputs(outputs, &local)?;
         let parameters = external_parameters(parameters, &local)?;
         if let Some(name) = inputs.keys().find(|name| outputs.contains_key(*name)) {
             return Err(format!("external input and output share name '{name}'"));

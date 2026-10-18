@@ -599,3 +599,13 @@ Gate, and closes Gate at frame 6. Eight frames render as
 split buffers. The existing `prepare` path uses unity velocity and renders 1
 while Gate is open. Nonfinite or out-of-range velocities reject before
 rendering and leave machine state unchanged.
+
+## Exported input fan-out
+
+`62-subpatch-input-fanout.lua` exports one `signal` input to two internal Gain
+inputs. Two instances receive 0.4 and 0.2; the internal Gain values are 0.5
+and 0.25, so Output renders 0.45. The right instance also has a parent
+normalization from 0.1. Its explicit cable overrides both expanded fallback
+edges. Removing that cable selects both normalizations and renders 0.375.
+Duplicate or invalid destinations, and an empty exported input, reject while
+the accepted machine continues to render 0.45.

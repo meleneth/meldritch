@@ -91,6 +91,7 @@ mod tests {
     const TWO_MIDI_SUBPATCH_VOICES: &str =
         include_str!("../examples/60-two-midi-subpatch-voices.lua");
     const PREPARED_VELOCITY: &str = include_str!("../examples/61-prepared-velocity.lua");
+    const SUBPATCH_INPUT_FANOUT: &str = include_str!("../examples/62-subpatch-input-fanout.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -864,6 +865,79 @@ return graph
     }
 
     #[test]
+    fn exported_subpatch_input_fans_out_explicit_and_normalized_edges() {
+        let graph = lua::read(SUBPATCH_INPUT_FANOUT).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        assert_eq!(machine.authored_normalizations().len(), 2);
+        for instance in ["left", "right"] {
+            for destination in ["a", "b"] {
+                assert!(machine.effective_connections().iter().any(|edge| {
+                    edge.to.module == format!("{instance}/{destination}")
+                        && edge.from.module == if instance == "left" { "high" } else { "low" }
+                }));
+            }
+        }
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert!(samples.iter().all(|sample| (sample - 0.45).abs() < 1e-12));
+
+        let mut fallback_graph = graph.clone();
+        fallback_graph
+            .connections
+            .retain(|edge| edge.to.module != "right");
+        let mut fallback = compile(&fallback_graph).unwrap();
+        assert!(
+            fallback
+                .effective_connections()
+                .iter()
+                .filter(|edge| {
+                    edge.from.module == "fallback" && edge.to.module.starts_with("right/")
+                })
+                .count()
+                == 2
+        );
+        fallback.process(&mut samples);
+        assert!(samples.iter().all(|sample| (sample - 0.375).abs() < 1e-12));
+    }
+
+    #[test]
+    fn invalid_subpatch_input_fanout_preserves_accepted_machine() {
+        let valid = lua::read(SUBPATCH_INPUT_FANOUT).unwrap();
+        let mut host = Host::default();
+        host.submit(&valid).unwrap();
+        let mut duplicate_target = valid.clone();
+        let input = &mut duplicate_target
+            .subpatches
+            .get_mut("splitter")
+            .unwrap()
+            .inputs[0];
+        input.destinations.push(input.destinations[0].clone());
+        let mut invalid_target = valid.clone();
+        invalid_target
+            .subpatches
+            .get_mut("splitter")
+            .unwrap()
+            .inputs[0]
+            .destinations[1]
+            .port = "missing".into();
+        let mut empty = valid.clone();
+        empty.subpatches.get_mut("splitter").unwrap().inputs[0]
+            .destinations
+            .clear();
+        for (candidate, expected) in [
+            (duplicate_target, "duplicate destination"),
+            (invalid_target, "invalid input port"),
+            (empty, "needs a name and destination"),
+        ] {
+            let error = host.submit(&candidate).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+            let mut samples = [f64::NAN; 4];
+            host.accepted().unwrap().process(&mut samples);
+            assert!(samples.iter().all(|sample| (sample - 0.45).abs() < 1e-12));
+        }
+    }
+
+    #[test]
     fn invalid_subpatch_expansion_preserves_accepted_machine() {
         use crate::model::{Connection, Endpoint, SubpatchInstance};
 
@@ -906,7 +980,7 @@ return graph
             .get_mut("gated_oscillator")
             .unwrap()
             .inputs[0]
-            .endpoint
+            .destinations[0]
             .port = "out".into();
         let mut shared_port_name = valid.clone();
         shared_port_name
