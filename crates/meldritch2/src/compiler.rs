@@ -226,6 +226,25 @@ fn validate_screens(
                         ));
                     }
                 }
+                Widget::Button {
+                    label,
+                    control_id,
+                    value,
+                } => {
+                    text(label, "widget label")?;
+                    let control = controls.get(control_id).ok_or_else(|| {
+                        format!(
+                            "screen '{}' button references unknown control '{control_id}'",
+                            screen.id
+                        )
+                    })?;
+                    if !value.is_finite() || *value < control.min || *value > control.max {
+                        return Err(format!(
+                            "screen '{}' button value must be in {}..{} for control '{control_id}'",
+                            screen.id, control.min, control.max
+                        ));
+                    }
+                }
             }
         }
     }

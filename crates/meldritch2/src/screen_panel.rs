@@ -8,8 +8,19 @@ use crate::{
 
 pub(crate) enum WidgetView {
     Label(String),
-    Control { label: String, row: ControlRow },
-    Link { label: String, target: usize },
+    Control {
+        label: String,
+        row: ControlRow,
+    },
+    Link {
+        label: String,
+        target: usize,
+    },
+    Button {
+        label: String,
+        row: ControlRow,
+        value: f64,
+    },
 }
 
 impl WidgetView {
@@ -61,6 +72,20 @@ impl ScreenPanel {
                             .get(screen_id.as_str())
                             .ok_or_else(|| format!("unknown screen '{screen_id}'"))?,
                     },
+                    Widget::Button {
+                        label,
+                        control_id,
+                        value,
+                    } => {
+                        let (handle, authored) = controls
+                            .get(control_id)
+                            .ok_or_else(|| format!("unknown control '{control_id}'"))?;
+                        WidgetView::Button {
+                            label: label.clone(),
+                            row: ControlRow::new(handle.clone(), *authored),
+                            value: *value,
+                        }
+                    }
                 });
             }
             let selected = widgets.iter().position(WidgetView::selectable);
@@ -96,13 +121,16 @@ impl ScreenPanel {
         };
     }
 
-    pub fn activate(&mut self) {
+    pub fn activate(&mut self) -> Result<(), String> {
         let Some(selected) = self.current().selected else {
-            return;
+            return Ok(());
         };
-        if let WidgetView::Link { target, .. } = self.current().widgets[selected] {
-            self.active = target;
+        match &self.current().widgets[selected] {
+            WidgetView::Link { target, .. } => self.active = *target,
+            WidgetView::Button { row, value, .. } => row.publish(*value)?,
+            _ => {}
         }
+        Ok(())
     }
 
     pub fn apply(&mut self, gesture: Gesture) -> Result<(), String> {
@@ -156,7 +184,7 @@ mod tests {
         assert_eq!(panel.current().selected, Some(1));
         panel.apply(Gesture::Increase).unwrap();
         panel.apply(Gesture::Next).unwrap();
-        panel.activate();
+        panel.activate().unwrap();
         assert_eq!(panel.current().title, "Source");
         assert_eq!(panel.current().selected, Some(0));
         panel.apply(Gesture::Maximum).unwrap();
@@ -174,5 +202,31 @@ mod tests {
             panel.current().widgets[2],
             WidgetView::Link { .. }
         ));
+    }
+
+    #[test]
+    fn lua_buttons_mute_and_restore_output() {
+        let graph = lua::read(include_str!("../examples/67-screen-buttons.lua")).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let controls = machine
+            .control_ids()
+            .map(|id| {
+                let handle = machine.control_handle(id).unwrap();
+                let authored = machine.effective_value(handle.target()).unwrap();
+                (handle, authored)
+            })
+            .collect();
+        let mut panel = ScreenPanel::new(machine.screens(), controls).unwrap();
+        panel.apply(Gesture::Next).unwrap();
+        assert_eq!(panel.current().selected, Some(2));
+        panel.activate().unwrap();
+        let mut samples = [f64::NAN; 1];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.0]);
+        panel.apply(Gesture::Next).unwrap();
+        assert_eq!(panel.current().selected, Some(3));
+        panel.activate().unwrap();
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.1875]);
     }
 }

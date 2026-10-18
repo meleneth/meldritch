@@ -99,8 +99,19 @@ pub enum PolyOverflow {
 #[derive(Clone, Debug)]
 pub enum Widget {
     Label(String),
-    Control { label: String, control_id: String },
-    Link { label: String, screen_id: String },
+    Control {
+        label: String,
+        control_id: String,
+    },
+    Link {
+        label: String,
+        screen_id: String,
+    },
+    Button {
+        label: String,
+        control_id: String,
+        value: f64,
+    },
 }
 
 #[derive(Clone, Debug)]

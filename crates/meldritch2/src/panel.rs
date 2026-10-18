@@ -34,6 +34,9 @@ impl ControlRow {
     pub fn value(&self) -> f64 {
         self.handle.override_value().unwrap_or(self.authored_value)
     }
+    pub(crate) fn publish(&self, value: f64) -> Result<(), String> {
+        self.handle.publish(value)
+    }
     pub(crate) fn adjust(&mut self, gesture: Gesture) -> Result<(), String> {
         let (min, max) = self.handle.range();
         let step = (max - min) / 100.0;

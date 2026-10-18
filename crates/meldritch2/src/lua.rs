@@ -118,6 +118,11 @@ function meldritch.graph()
       assert(type(label) == "string" and type(screen_id) == "string", "link widget needs a label and screen ID")
       table.insert(self.widgets, { kind = "link", label = label, screen_id = screen_id })
     end
+    function screen:button(label, control_id, value)
+      assert(type(label) == "string" and type(control_id) == "string" and type(value) == "number",
+        "button widget needs a label, control ID, and numeric value")
+      table.insert(self.widgets, { kind = "button", label = label, control_id = control_id, value = value })
+    end
     table.insert(self.screens, screen)
     return screen
   end
@@ -258,6 +263,11 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                 "link" => Widget::Link {
                     label: widget.get("label").map_err(|e| e.to_string())?,
                     screen_id: widget.get("screen_id").map_err(|e| e.to_string())?,
+                },
+                "button" => Widget::Button {
+                    label: widget.get("label").map_err(|e| e.to_string())?,
+                    control_id: widget.get("control_id").map_err(|e| e.to_string())?,
+                    value: widget.get("value").map_err(|e| e.to_string())?,
                 },
                 other => return Err(format!("unknown screen widget '{other}'")),
             });

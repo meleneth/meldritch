@@ -664,3 +664,13 @@ selection. A missing control, missing link target, duplicate screen ID, or
 terminal control character in display text rejects the candidate while the
 accepted machine keeps rendering. Graphs without screens retain the existing
 control list.
+
+## Lua-declared action buttons
+
+`67-screen-buttons.lua` adds Mute and Restore buttons to the Home screen.
+`screen:button("Mute", "level", 0.0)` publishes zero to the declared level
+control on Enter, so the next buffer renders silence. Restore publishes 0.5
+and the next buffer renders 0.1875. Buttons use the same compiled control
+handle as sliders and MIDI CC bindings; the audio callback does not run Lua.
+A missing control, nonfinite value, or value outside the declared control
+range rejects the candidate without changing the accepted machine.

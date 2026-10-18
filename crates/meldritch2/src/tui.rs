@@ -204,6 +204,9 @@ fn draw(
                 WidgetView::Link { label, .. } => {
                     queue!(out, Print(format!("{marker} {label} >\r\n")))
                 }
+                WidgetView::Button { label, .. } => {
+                    queue!(out, Print(format!("{marker} [{label}]\r\n")))
+                }
             }
             .map_err(|error| error.to_string())?;
         }
@@ -322,7 +325,7 @@ pub fn perform(
             match key.code {
                 KeyCode::Tab => screens.switch(1),
                 KeyCode::BackTab => screens.switch(-1),
-                KeyCode::Enter => screens.activate(),
+                KeyCode::Enter => screens.activate()?,
                 _ => {}
             }
             if matches!(key.code, KeyCode::Tab | KeyCode::BackTab | KeyCode::Enter) {

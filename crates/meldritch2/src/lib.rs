@@ -1373,6 +1373,31 @@ return graph
     }
 
     #[test]
+    fn invalid_screen_button_preserves_accepted_machine() {
+        use crate::model::Widget;
+
+        let graph = lua::read(include_str!("../examples/67-screen-buttons.lua")).unwrap();
+        let mut host = Host::default();
+        host.submit(&graph).unwrap();
+        for (control_id, value, expected) in [
+            ("missing", 0.0, "unknown control"),
+            ("level", 2.0, "button value"),
+            ("level", f64::NAN, "button value"),
+        ] {
+            let mut candidate = graph.clone();
+            candidate.screens[0].widgets[2] = Widget::Button {
+                label: "Mute".into(),
+                control_id: control_id.into(),
+                value,
+            };
+            assert!(host.submit(&candidate).unwrap_err().contains(expected));
+        }
+        let mut samples = [0.0; 1];
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.1875]);
+    }
+
+    #[test]
     fn oldest_poly_voice_is_stolen_after_repeated_key_refresh() {
         let graph = lua::read(FOUR_VOICE_STEAL).unwrap();
         let events = [
