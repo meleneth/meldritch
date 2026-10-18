@@ -87,6 +87,8 @@ mod tests {
     const SUBPATCH_PARAMETERS: &str = include_str!("../examples/58-subpatch-parameters.lua");
     const SUBPATCH_INSTANCE_VALUES: &str =
         include_str!("../examples/59-subpatch-instance-values.lua");
+    const TWO_MIDI_SUBPATCH_VOICES: &str =
+        include_str!("../examples/60-two-midi-subpatch-voices.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -758,6 +760,105 @@ return graph
         let mut samples = [f64::NAN; 4];
         host.accepted().unwrap().process(&mut samples);
         assert_eq!(samples, [0.25; 4]);
+    }
+
+    #[test]
+    fn two_subpatch_voices_route_timed_notes_by_channel() {
+        let graph = lua::read(TWO_MIDI_SUBPATCH_VOICES).unwrap();
+        let mut whole = compile_at_rate(&graph, 48_000.0).unwrap();
+        assert_eq!(
+            whole.authored_value(&ParameterId::new("left/level", "gain")),
+            Some(0.25)
+        );
+        assert_eq!(
+            whole.authored_value(&ParameterId::new("right/level", "gain")),
+            Some(0.125)
+        );
+        let events = [
+            TimedNoteState {
+                frame: 2,
+                channel: 1,
+                pitch_hz: 12_000.0,
+                gate: true,
+            },
+            TimedNoteState {
+                frame: 4,
+                channel: 2,
+                pitch_hz: 6_000.0,
+                gate: true,
+            },
+            TimedNoteState {
+                frame: 6,
+                channel: 1,
+                pitch_hz: 12_000.0,
+                gate: false,
+            },
+            TimedNoteState {
+                frame: 8,
+                channel: 2,
+                pitch_hz: 6_000.0,
+                gate: false,
+            },
+        ];
+        let mut plan = TimedNotePlan::prepare(&whole, 0, &events).unwrap();
+        let mut actual = [f64::NAN; 12];
+        plan.render_next(&mut whole, &mut actual).unwrap();
+
+        let mut left_phase = 0.0_f64;
+        let mut right_phase = 0.0_f64;
+        let mut left_envelope = 0.0_f64;
+        let mut right_envelope = 0.0_f64;
+        for (frame, sample) in actual.iter().enumerate() {
+            let left_frequency = if frame >= 2 { 12_000.0 } else { 0.0 };
+            let right_frequency = if frame >= 4 { 6_000.0 } else { 0.0 };
+            let left_target = if (2..6).contains(&frame) { 1.0 } else { 0.0 };
+            let right_target = if (4..8).contains(&frame) { 1.0 } else { 0.0 };
+            let left_response = if left_target == 1.0 { 0.01 } else { 0.005 };
+            let right_response = if right_target == 1.0 { 0.01 } else { 0.005 };
+            left_envelope += left_response * (left_target - left_envelope);
+            right_envelope += right_response * (right_target - right_envelope);
+            let expected = 0.25 * (std::f64::consts::TAU * left_phase).sin() * left_envelope
+                + 0.125 * (std::f64::consts::TAU * right_phase).sin() * right_envelope;
+            assert!(
+                (sample - expected).abs() < 1e-12,
+                "frame {frame}: {sample} != {expected}"
+            );
+            left_phase = (left_phase + left_frequency / 48_000.0).fract();
+            right_phase = (right_phase + right_frequency / 48_000.0).fract();
+        }
+
+        let mut split = compile_at_rate(&graph, 48_000.0).unwrap();
+        let mut split_plan = TimedNotePlan::prepare(&split, 0, &events).unwrap();
+        let mut partitioned = [f64::NAN; 12];
+        split_plan
+            .render_next(&mut split, &mut partitioned[..3])
+            .unwrap();
+        split_plan
+            .render_next(&mut split, &mut partitioned[3..7])
+            .unwrap();
+        split_plan
+            .render_next(&mut split, &mut partitioned[7..])
+            .unwrap();
+        assert_eq!(actual, partitioned);
+    }
+
+    #[test]
+    fn invalid_subpatch_note_binding_preserves_accepted_voice() {
+        let graph = lua::read(TWO_MIDI_SUBPATCH_VOICES).unwrap();
+        let mut host = Host::default();
+        host.submit(&graph).unwrap();
+        let mut invalid = graph.clone();
+        invalid.controls[0].target.name = "frequency".into();
+        assert!(
+            host.submit(&invalid)
+                .unwrap_err()
+                .contains("invalid exported parameter")
+        );
+        let router = MidiRouter::from_machine(host.accepted().unwrap());
+        assert!(router.dispatch(&[0x90, 69, 100]));
+        let mut samples = [f64::NAN; 4];
+        host.accepted().unwrap().process(&mut samples);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.0));
     }
 
     #[test]

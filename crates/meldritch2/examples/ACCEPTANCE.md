@@ -561,8 +561,9 @@ on the two instances. Publishing left level 1 changes the output to 0.375;
 channel-1 CC 7 then publishes right level 0 and returns the output to 0.25.
 Resolved control targets are `left/inner/gain.gain` and
 `right/inner/gain.gain`; the two parameter cells remain independent. Invalid
-or duplicate parameter exports, including two names for one target, and a control targeting a parameter not
-exported by an instance, reject without replacing the accepted machine.
+or duplicate parameter exports, including two names for one target, and a
+control targeting a parameter not exported by an instance, reject without
+replacing the accepted machine.
 
 ## Authored values per subpatch instance
 
@@ -574,3 +575,16 @@ the authored 0.25. Removing the outer left value exposes the wrapper's 0.2 and
 renders 0.2375. Unknown exported names and nonfinite values reject without
 changing the accepted machine. Resolution and validation happen during
 compilation, before sample processing.
+
+## Two MIDI channels through reusable voices
+
+`60-two-midi-subpatch-voices.lua` instantiates one voice definition twice,
+with authored output levels 0.25 and 0.125. Each instance exports pitch and
+Gate parameters to its own named controls. MIDI channel 1 addresses the left
+voice; channel 2 addresses the right. At 48 kHz, prepared events open the left
+at frame 2 with 12 kHz pitch, open the right at frame 4 with 6 kHz pitch,
+close the left at frame 6, and close the right at frame 8. The 12 output frames
+must match independent oscillator phases and envelope recurrences (attack
+0.01, release 0.005), whether rendered as one buffer or split across three
+buffers. A candidate that binds a control to an
+unexported parameter rejects while the accepted voice still responds to MIDI.
