@@ -4,15 +4,16 @@ use mlua::{Lua, Table, Value};
 
 use crate::contract;
 use crate::model::{
-    Connection, Control, Endpoint, ExternalPort, Graph, MidiCc, MidiNotes, Module, ParameterId,
-    Subpatch, SubpatchInstance,
+    Connection, Control, Endpoint, ExternalParameter, ExternalPort, Graph, MidiCc, MidiNotes,
+    Module, ParameterId, Subpatch, SubpatchInstance,
 };
 
 const API: &str = r#"
 meldritch = { _subpatches = {} }
 function meldritch.graph()
   local graph = { modules = {}, instances = {}, connections = {}, normalizations = {},
-    controls = {}, midi_ccs = {}, note_bindings = {}, external_inputs = {}, external_outputs = {} }
+    controls = {}, midi_ccs = {}, note_bindings = {}, external_inputs = {}, external_outputs = {},
+    external_parameters = {} }
   function graph:module(id, kind, values)
     assert(type(id) == "string" and type(kind) == "string", "module ID and type must be strings")
     local spec = meldritch._contract(kind)
@@ -48,6 +49,13 @@ function meldritch.graph()
     assert(type(name) == "string", "external output name must be a string")
     assert(type(source) == "table" and source.direction == "output", "external output must target an output port")
     table.insert(self.external_outputs, { name = name, endpoint = source })
+  end
+  function graph:parameter(name, module, parameter)
+    assert(self.is_subpatch, "external parameters belong to subpatch definitions")
+    assert(type(name) == "string", "external parameter name must be a string")
+    assert(type(module) == "table" and type(module.id) == "string", "external parameter target must be a module or instance")
+    assert(type(parameter) == "string", "external parameter target name must be a string")
+    table.insert(self.external_parameters, { name = name, module = module.id, parameter = parameter })
   end
   function graph:instance(id, definition)
     assert(type(id) == "string", "instance ID must be a string")
@@ -137,16 +145,37 @@ pub fn read(script: &str) -> Result<Graph, String> {
         let (name, definition) = pair.map_err(|e| e.to_string())?;
         let inputs = external_ports(&definition, "external_inputs")?;
         let outputs = external_ports(&definition, "external_outputs")?;
+        let parameters = external_parameters(&definition)?;
         graph.subpatches.insert(
             name,
             Subpatch {
                 graph: graph_from_table(definition)?,
                 inputs,
                 outputs,
+                parameters,
             },
         );
     }
     Ok(graph)
+}
+
+fn external_parameters(table: &Table) -> Result<Vec<ExternalParameter>, String> {
+    let parameters: Table = table
+        .get("external_parameters")
+        .map_err(|e| e.to_string())?;
+    parameters
+        .sequence_values::<Table>()
+        .map(|item| {
+            let item = item.map_err(|e| e.to_string())?;
+            Ok(ExternalParameter {
+                name: item.get("name").map_err(|e| e.to_string())?,
+                target: ParameterId::new(
+                    item.get::<String>("module").map_err(|e| e.to_string())?,
+                    item.get::<String>("parameter").map_err(|e| e.to_string())?,
+                ),
+            })
+        })
+        .collect()
 }
 
 fn external_ports(table: &Table, field: &str) -> Result<Vec<ExternalPort>, String> {

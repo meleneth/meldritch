@@ -134,6 +134,12 @@ and per-instance normalizations. The existing compiler then validates and
 schedules that graph. Each expanded primitive owns its own DSP state; the
 callback performs no expansion. Subpatches contain modules, cables, and nested
 instances; parent graphs own controls and MIDI bindings.
+`subpatch:parameter(name, module_or_instance, parameter)` exports a parameter
+through the subpatch interface. A parent binds it with
+`graph:control(id, instance, exported_name, range)`; nested subpatches may
+forward an exported parameter. Expansion resolves each binding to its
+namespaced primitive parameter before ordinary control and MIDI validation.
+Invalid exports reject a candidate without replacing the accepted machine.
 Each declared output port has its own compiled sample slot. A unit's process
 function writes its declared outputs in contract order; cables read the named
 source port's slot. The terminal Output role has a private sample slot but no

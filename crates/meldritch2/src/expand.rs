@@ -3,12 +3,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::contract::{self, Role};
-use crate::model::{Connection, Endpoint, ExternalPort, Graph, Subpatch};
+use crate::model::{
+    Connection, Endpoint, ExternalParameter, ExternalPort, Graph, ParameterId, Subpatch,
+};
 
 #[derive(Default)]
 struct Ports {
     inputs: BTreeMap<String, Endpoint>,
     outputs: BTreeMap<String, Endpoint>,
+    parameters: BTreeMap<String, ParameterId>,
 }
 
 pub fn expand(graph: &Graph) -> Result<Graph, String> {
@@ -29,7 +32,11 @@ pub fn expand(graph: &Graph) -> Result<Graph, String> {
             &mut stack,
             &mut scratch,
             &mut ids,
-            Some((&definition.inputs, &definition.outputs)),
+            Some((
+                &definition.inputs,
+                &definition.outputs,
+                &definition.parameters,
+            )),
         )?;
     }
 
@@ -70,6 +77,44 @@ fn external_ports(
     Ok(ports)
 }
 
+fn external_parameters(
+    declarations: &[ExternalParameter],
+    local: &BTreeMap<String, Ports>,
+) -> Result<BTreeMap<String, ParameterId>, String> {
+    let mut parameters = BTreeMap::new();
+    for declaration in declarations {
+        if declaration.name.is_empty() {
+            return Err("external parameter name must not be empty".into());
+        }
+        let target = resolve_parameter(local, &declaration.target)?;
+        if parameters
+            .insert(declaration.name.clone(), target)
+            .is_some()
+        {
+            return Err(format!(
+                "duplicate external parameter '{}'",
+                declaration.name
+            ));
+        }
+    }
+    Ok(parameters)
+}
+
+fn resolve_parameter(
+    local: &BTreeMap<String, Ports>,
+    target: &ParameterId,
+) -> Result<ParameterId, String> {
+    let ports = local
+        .get(&target.module)
+        .ok_or_else(|| format!("unknown module '{}' in subpatch parameter", target.module))?;
+    ports.parameters.get(&target.name).cloned().ok_or_else(|| {
+        format!(
+            "invalid parameter '{}.{}' in subpatch",
+            target.module, target.name
+        )
+    })
+}
+
 fn resolve(
     local: &BTreeMap<String, Ports>,
     endpoint: &Endpoint,
@@ -104,7 +149,7 @@ fn expand_scope(
     stack: &mut Vec<String>,
     expanded: &mut Graph,
     ids: &mut BTreeSet<String>,
-    interface: Option<(&[ExternalPort], &[ExternalPort])>,
+    interface: Option<(&[ExternalPort], &[ExternalPort], &[ExternalParameter])>,
 ) -> Result<Ports, String> {
     if !prefix.is_empty()
         && (!scope.controls.is_empty()
@@ -158,6 +203,16 @@ fn expand_scope(
                     )
                 })
                 .collect(),
+            parameters: contract
+                .params
+                .iter()
+                .map(|parameter| {
+                    (
+                        parameter.name.to_owned(),
+                        ParameterId::new(&qualified, parameter.name),
+                    )
+                })
+                .collect(),
         };
         let mut module = module.clone();
         module.id = qualified;
@@ -185,7 +240,11 @@ fn expand_scope(
             stack,
             expanded,
             ids,
-            Some((&definition.inputs, &definition.outputs)),
+            Some((
+                &definition.inputs,
+                &definition.outputs,
+                &definition.parameters,
+            )),
         )?;
         stack.pop();
         local.insert(instance.id.clone(), ports);
@@ -202,14 +261,33 @@ fn expand_scope(
             to: resolve(&local, &edge.to, true)?,
         });
     }
-    if let Some((inputs, outputs)) = interface {
+    if let Some((inputs, outputs, parameters)) = interface {
         let inputs = external_ports(inputs, &local, true)?;
         let outputs = external_ports(outputs, &local, false)?;
+        let parameters = external_parameters(parameters, &local)?;
         if let Some(name) = inputs.keys().find(|name| outputs.contains_key(*name)) {
             return Err(format!("external input and output share name '{name}'"));
         }
-        Ok(Ports { inputs, outputs })
+        Ok(Ports {
+            inputs,
+            outputs,
+            parameters,
+        })
     } else {
+        for control in &mut expanded.controls {
+            if let Some(instance) = scope
+                .instances
+                .iter()
+                .find(|instance| instance.id == control.target.module)
+            {
+                control.target = resolve_parameter(&local, &control.target).map_err(|_| {
+                    format!(
+                        "invalid exported parameter '{}.{}' for instance '{}'",
+                        instance.id, control.target.name, instance.id
+                    )
+                })?;
+            }
+        }
         Ok(Ports::default())
     }
 }

@@ -84,6 +84,7 @@ mod tests {
     const SUBPATCH_INVALID_ENDPOINT: &str =
         include_str!("../examples/56-subpatch-invalid-endpoint.lua");
     const NESTED_SUBPATCH: &str = include_str!("../examples/57-nested-subpatch.lua");
+    const SUBPATCH_PARAMETERS: &str = include_str!("../examples/58-subpatch-parameters.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -624,6 +625,59 @@ return graph
         let mut samples = [f64::NAN; 4];
         machine.process(&mut samples);
         assert_eq!(samples, [0.375; 4]);
+    }
+
+    #[test]
+    fn nested_subpatch_parameters_bind_independent_controls() {
+        let graph = lua::read(SUBPATCH_PARAMETERS).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let left = machine.control_handle("left-level").unwrap();
+        let right = machine.control_handle("right-level").unwrap();
+        assert_eq!(left.target(), &ParameterId::new("left/inner/gain", "gain"));
+        assert_eq!(
+            right.target(),
+            &ParameterId::new("right/inner/gain", "gain")
+        );
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.25; 4]);
+        left.publish(1.0).unwrap();
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.375; 4]);
+        assert!(MidiRouter::from_machine(&machine).dispatch(&[0xB0, 7, 0]));
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.25; 4]);
+    }
+
+    #[test]
+    fn invalid_subpatch_parameter_exports_preserve_accepted_machine() {
+        let valid = lua::read(SUBPATCH_PARAMETERS).unwrap();
+        let mut host = Host::default();
+        host.submit(&valid).unwrap();
+        let mut invalid_target = valid.clone();
+        invalid_target
+            .subpatches
+            .get_mut("amplifier")
+            .unwrap()
+            .parameters[0]
+            .target
+            .name = "missing".into();
+        let mut duplicate = valid.clone();
+        let parameters = &mut duplicate.subpatches.get_mut("wrapper").unwrap().parameters;
+        parameters.push(parameters[0].clone());
+        let mut hidden = valid.clone();
+        hidden.controls[0].target.name = "gain".into();
+        for (candidate, expected) in [
+            (invalid_target, "invalid parameter"),
+            (duplicate, "duplicate external parameter"),
+            (hidden, "invalid exported parameter"),
+        ] {
+            let error = host.submit(&candidate).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+            let mut samples = [f64::NAN; 4];
+            host.accepted().unwrap().process(&mut samples);
+            assert_eq!(samples, [0.25; 4]);
+        }
     }
 
     #[test]

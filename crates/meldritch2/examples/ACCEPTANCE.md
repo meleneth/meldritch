@@ -551,3 +551,15 @@ Voice type. `56-subpatch-invalid-endpoint.lua` must reject its bad exported
 output without replacing an accepted machine. Duplicate instance IDs,
 recursive definitions, missing definitions, duplicate external port names, and
 invalid internal cables must also reject while accepted DSP state continues.
+
+## Exported subpatch parameters
+
+`58-subpatch-parameters.lua` exports a Gain parameter as `level`, forwards it
+through a nested wrapper, and instantiates that wrapper twice. Both voices
+start at Gain(0.5), so their sum is 0.25. The parent declares separate controls
+on the two instances. Publishing left level 1 changes the output to 0.375;
+channel-1 CC 7 then publishes right level 0 and returns the output to 0.25.
+Resolved control targets are `left/inner/gain.gain` and
+`right/inner/gain.gain`; the two parameter cells remain independent. Invalid
+or duplicate parameter exports, and a control targeting a parameter not
+exported by an instance, reject without replacing the accepted machine.
