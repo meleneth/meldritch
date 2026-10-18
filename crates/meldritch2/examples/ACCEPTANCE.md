@@ -628,3 +628,15 @@ lowest freed voice. A third held key reports no free voice while the first two
 remain retryable. CC 123 closes both voices and discards queued older changes;
 queue overflow in the device recovery route does the same, after which a fresh
 key can sound. Voice stealing and physical listening remain later checkpoints.
+
+## Four-voice polyphony
+
+`64-four-voice-poly.lua` instantiates four copies of the same voice on MIDI
+channel 1. Prepared and raw timed MIDI events open C4, E4, G4, and C5 at
+frames 3, 4, 5, and 6 with distinct velocities. A fifth held key reports no
+free voice without disturbing those four. Releasing E4 at frame 9 lets E5
+reuse the second voice at frame 11. Later note-offs close only their matching
+voices. The 24-frame live render across three buffers matches the prepared
+timeline sample for sample; the fourth note changes the output compared with
+the first three alone. CC 123 closes every voice, and a later key reuses the
+bank. A fifth declared binding rejects without replacing an accepted graph.

@@ -6,7 +6,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering},
 };
 
-use crate::compiler::{Machine, PolyVoiceTarget, TimedNoteTarget};
+use crate::compiler::{MAX_POLY_VOICES, Machine, PolyVoiceTarget, TimedNoteTarget};
 use crate::timed::{MAX_EVENTS, MAX_FRAMES_PER_RENDER, TimedNoteState, TimedRenderError};
 
 #[derive(Clone, Copy, Debug)]
@@ -134,7 +134,7 @@ pub struct RenderReport {
 pub struct LiveNoteProducer {
     queue: Arc<Queue>,
     targets: [Option<TimedNoteTarget>; 16],
-    poly_targets: [Option<[PolyVoiceTarget; 2]>; 16],
+    poly_targets: [Option<[Option<PolyVoiceTarget>; MAX_POLY_VOICES]>; 16],
     last_frame: [u64; 16],
 }
 
@@ -143,7 +143,7 @@ pub struct LiveNoteConsumer {
     queue: Arc<Queue>,
     revision: Arc<()>,
     cursor: u64,
-    active: [Option<Event>; 48],
+    active: [Option<Event>; 16 * (MAX_POLY_VOICES + 1)],
     seen_reset: [u64; 16],
     pending: [Option<PendingEvent>; MAX_EVENTS],
 }
@@ -187,7 +187,7 @@ pub fn live_note_queue(
             queue,
             revision: machine.revision_token(),
             cursor: start_frame,
-            active: [None; 48],
+            active: [None; 16 * (MAX_POLY_VOICES + 1)],
             seen_reset: [0; 16],
             pending: [None; MAX_EVENTS],
         },
@@ -264,7 +264,7 @@ impl LiveNoteProducer {
             .poly_targets
             .get(channel)
             .and_then(|targets| *targets)
-            .and_then(|targets| targets.get(voice_index).copied())
+            .and_then(|targets| targets.get(voice_index).copied().flatten())
             .ok_or(PushError::UnmappedChannel)?;
         if !state.pitch_hz.is_finite() || state.pitch_hz <= 0.0 {
             return Err(PushError::InvalidPitch);
@@ -278,7 +278,7 @@ impl LiveNoteProducer {
             target.pitch_index,
             target.gate_index,
             Some(target.velocity_index),
-            16 + channel * 2 + voice_index,
+            16 + channel * MAX_POLY_VOICES + voice_index,
         )
     }
 

@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-use crate::compiler::{ControlHandle, Machine};
+use crate::compiler::{ControlHandle, MAX_POLY_VOICES, Machine};
 use crate::{
     live_notes::{LiveNoteProducer, PushError},
     midi_clock::{ClockError, MidiFrameClock},
@@ -39,7 +39,8 @@ struct PolyHeld {
 }
 
 struct TimedPolyRoute {
-    held: [Option<PolyHeld>; 2],
+    held: [Option<PolyHeld>; MAX_POLY_VOICES],
+    voice_count: usize,
     frequencies: [f64; 128],
 }
 
@@ -78,8 +79,15 @@ impl TimedMidiRouter {
         }
         let mut poly = std::array::from_fn(|_| None);
         for channel in machine.poly_note_channels() {
+            let voice_count = machine
+                .poly_note_targets(channel)
+                .expect("validated polyphonic mapping")
+                .iter()
+                .flatten()
+                .count();
             poly[usize::from(channel - 1)] = Some(TimedPolyRoute {
-                held: [None; 2],
+                held: [None; MAX_POLY_VOICES],
+                voice_count,
                 frequencies: std::array::from_fn(|note| {
                     440.0 * 2.0_f64.powf((note as f64 - 69.0) / 12.0)
                 }),
@@ -115,7 +123,7 @@ impl TimedMidiRouter {
             route.held = HeldNotes::new();
         }
         if let Some(route) = &mut self.poly[channel] {
-            route.held = [None; 2];
+            route.held = [None; MAX_POLY_VOICES];
         }
         true
     }
@@ -198,10 +206,14 @@ impl TimedMidiRouter {
         let key = message[1];
         let mut proposed = route.held;
         let (voice, held, gate) = if message[0] & 0xF0 == 0x90 && message[2] != 0 {
-            let voice = proposed
+            let voice = proposed[..route.voice_count]
                 .iter()
                 .position(|held| held.is_some_and(|held| held.key == key))
-                .or_else(|| proposed.iter().position(Option::is_none))
+                .or_else(|| {
+                    proposed[..route.voice_count]
+                        .iter()
+                        .position(Option::is_none)
+                })
                 .ok_or(TimedMidiError::NoFreeVoice)?;
             let held = PolyHeld {
                 key,

@@ -78,21 +78,21 @@ alongside each note state. It resolves the optional velocity target once and
 reapplies held pitch, Gate, and velocity at every render boundary. The original
 `prepare` API supplies unity velocity. Both prepared paths validate before
 rendering and share the same bounded sample path.
-`graph:midi_poly(channel, voices)` declares two ordered voice bindings, each
+`graph:midi_poly(channel, voices)` declares two to four ordered voice bindings, each
 with named pitch, Gate, and velocity controls. `PolyNotePlan` prepares raw
 note-on/off events on that channel into resolved per-voice states. It assigns
 the lowest free voice, updates a repeated held key on its existing voice,
 and releases only the matching key. Note-on with zero velocity is a release.
-A third simultaneous key rejects the candidate plan before rendering; voice
+A key beyond the declared voice count rejects the candidate plan before rendering; voice
 stealing remains a separate policy decision. The plan reapplies held voice
 states after each buffer snapshot and uses the existing bounded sample path.
-The timed MIDI router also assigns incoming notes to those two voices and
+The timed MIDI router also assigns incoming notes to those voices and
 publishes their resolved pitch, Gate, and velocity through the bounded live
 queue. Repeated keys update their existing voice; a full bank reports an
 error without changing held notes or the frame clock. Channel reset, session
-teardown, and queue-overflow recovery close both Gates and discard older
-queued states. `perform` opens this path for a polyphonic graph. Physical
-MIDI gestures and listening remain unverified.
+teardown, and queue-overflow recovery close all mapped Gates and discard older
+queued states. `perform` opens this path for a polyphonic graph. Four-voice
+physical listening remains unverified.
 The pinned `midir` callback supplies elapsed microseconds from an arbitrary
 origin fixed for one input connection. `MidiFrameClock` maps that timestamp to
 absolute audio frames using a caller-provided first-unrendered frame and a

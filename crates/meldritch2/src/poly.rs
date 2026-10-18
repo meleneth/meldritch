@@ -1,8 +1,8 @@
-//! Prepared two-voice note allocation on a single MIDI channel.
+//! Prepared bounded note allocation on a single MIDI channel.
 
 use std::sync::Arc;
 
-use crate::compiler::{Machine, PolyVoiceTarget};
+use crate::compiler::{MAX_POLY_VOICES, Machine, PolyVoiceTarget};
 use crate::timed::{MAX_EVENTS, MAX_FRAMES_PER_RENDER, TimedRenderError};
 
 #[derive(Clone, Copy, Debug)]
@@ -51,7 +51,7 @@ pub struct PolyNotePlan {
     events: Vec<ResolvedEvent>,
     next_event: usize,
     cursor: u64,
-    active: [[Option<ResolvedEvent>; 2]; 16],
+    active: [[Option<ResolvedEvent>; MAX_POLY_VOICES]; 16],
 }
 
 impl PolyNotePlan {
@@ -65,8 +65,8 @@ impl PolyNotePlan {
                 "polyphonic note plan permits at most {MAX_EVENTS} events"
             ));
         }
-        let mut held = [[None; 2]; 16];
-        let mut states = [[None; 2]; 16];
+        let mut held = [[None; MAX_POLY_VOICES]; 16];
+        let mut states = [[None; MAX_POLY_VOICES]; 16];
         let mut resolved = Vec::with_capacity(events.len());
         let mut previous = start_frame;
         for &event in events {
@@ -88,14 +88,19 @@ impl PolyNotePlan {
                     let voice_index = held[channel_index]
                         .iter()
                         .position(|held_key| *held_key == Some(key))
-                        .or_else(|| held[channel_index].iter().position(Option::is_none))
+                        .or_else(|| {
+                            held[channel_index]
+                                .iter()
+                                .zip(targets.iter())
+                                .position(|(held, target)| held.is_none() && target.is_some())
+                        })
                         .ok_or_else(|| format!("polyphonic channel {channel} has no free voice"))?;
                     held[channel_index][voice_index] = Some(key);
                     let state = ResolvedEvent {
                         frame,
                         channel_index,
                         voice_index,
-                        target: targets[voice_index],
+                        target: targets[voice_index].expect("allocated mapped voice"),
                         pitch_hz: 440.0 * 2.0_f64.powf((f64::from(key) - 69.0) / 12.0),
                         gate: true,
                         velocity: f64::from(velocity) / 127.0,
@@ -127,7 +132,7 @@ impl PolyNotePlan {
             events: resolved,
             next_event: 0,
             cursor: start_frame,
-            active: [[None; 2]; 16],
+            active: [[None; MAX_POLY_VOICES]; 16],
         })
     }
 

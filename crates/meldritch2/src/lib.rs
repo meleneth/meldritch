@@ -95,6 +95,7 @@ mod tests {
     const PREPARED_VELOCITY: &str = include_str!("../examples/61-prepared-velocity.lua");
     const SUBPATCH_INPUT_FANOUT: &str = include_str!("../examples/62-subpatch-input-fanout.lua");
     const TWO_VOICE_POLY: &str = include_str!("../examples/63-two-voice-poly.lua");
+    const FOUR_VOICE_POLY: &str = include_str!("../examples/64-four-voice-poly.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -1127,6 +1128,214 @@ return graph
     }
 
     #[test]
+    fn timed_midi_four_voices_hold_and_reuse_lowest_free_voice() {
+        let graph = lua::read(FOUR_VOICE_POLY).unwrap();
+        let events = [
+            PolyNoteEvent::On {
+                frame: 3,
+                channel: 1,
+                key: 60,
+                velocity: 100,
+            },
+            PolyNoteEvent::On {
+                frame: 4,
+                channel: 1,
+                key: 64,
+                velocity: 90,
+            },
+            PolyNoteEvent::On {
+                frame: 5,
+                channel: 1,
+                key: 67,
+                velocity: 80,
+            },
+            PolyNoteEvent::On {
+                frame: 6,
+                channel: 1,
+                key: 72,
+                velocity: 70,
+            },
+            PolyNoteEvent::Off {
+                frame: 9,
+                channel: 1,
+                key: 64,
+            },
+            PolyNoteEvent::On {
+                frame: 11,
+                channel: 1,
+                key: 76,
+                velocity: 60,
+            },
+            PolyNoteEvent::Off {
+                frame: 13,
+                channel: 1,
+                key: 60,
+            },
+            PolyNoteEvent::Off {
+                frame: 14,
+                channel: 1,
+                key: 67,
+            },
+            PolyNoteEvent::Off {
+                frame: 15,
+                channel: 1,
+                key: 72,
+            },
+            PolyNoteEvent::Off {
+                frame: 16,
+                channel: 1,
+                key: 76,
+            },
+        ];
+        let mut reference = compile_at_rate(&graph, 48_000.0).unwrap();
+        let mut plan = PolyNotePlan::prepare(&reference, 0, &events).unwrap();
+        let mut expected = [f64::NAN; 24];
+        plan.render_next(&mut reference, &mut expected).unwrap();
+
+        let mut machine = compile_at_rate(&graph, 48_000.0).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        for (time, message) in [
+            (0, [0x90, 60, 100]),
+            (21, [0x90, 64, 90]),
+            (42, [0x90, 67, 80]),
+            (63, [0x90, 72, 70]),
+        ] {
+            assert_eq!(midi.dispatch(time, &message), Ok(true));
+        }
+        assert_eq!(
+            midi.dispatch(84, &[0x90, 76, 60]),
+            Err(TimedMidiError::NoFreeVoice)
+        );
+        for (time, message) in [
+            (125, [0x80, 64, 0]),
+            (167, [0x90, 76, 60]),
+            (209, [0x80, 60, 0]),
+            (230, [0x80, 67, 0]),
+            (250, [0x80, 72, 0]),
+            (271, [0x80, 76, 0]),
+        ] {
+            assert_eq!(midi.dispatch(time, &message), Ok(true));
+        }
+        let mut actual = [f64::NAN; 24];
+        consumer
+            .render_next(&mut machine, &mut actual[..8])
+            .unwrap();
+        consumer
+            .render_next(&mut machine, &mut actual[8..17])
+            .unwrap();
+        consumer
+            .render_next(&mut machine, &mut actual[17..])
+            .unwrap();
+        assert_eq!(actual, expected);
+
+        let mut three_only = compile_at_rate(&graph, 48_000.0).unwrap();
+        let mut three_plan = PolyNotePlan::prepare(&three_only, 0, &events[..3]).unwrap();
+        let mut three_samples = [0.0; 8];
+        three_plan
+            .render_next(&mut three_only, &mut three_samples)
+            .unwrap();
+        assert_ne!(actual[..8], three_samples);
+    }
+
+    #[test]
+    fn timed_midi_four_voice_reset_closes_every_gate() {
+        let graph = lua::read(FOUR_VOICE_POLY).unwrap();
+        let mut reference = compile_at_rate(&graph, 48_000.0).unwrap();
+        let events = [
+            PolyNoteEvent::On {
+                frame: 3,
+                channel: 1,
+                key: 60,
+                velocity: 100,
+            },
+            PolyNoteEvent::On {
+                frame: 4,
+                channel: 1,
+                key: 64,
+                velocity: 90,
+            },
+            PolyNoteEvent::On {
+                frame: 5,
+                channel: 1,
+                key: 67,
+                velocity: 80,
+            },
+            PolyNoteEvent::On {
+                frame: 6,
+                channel: 1,
+                key: 72,
+                velocity: 70,
+            },
+            PolyNoteEvent::Off {
+                frame: 8,
+                channel: 1,
+                key: 60,
+            },
+            PolyNoteEvent::Off {
+                frame: 8,
+                channel: 1,
+                key: 64,
+            },
+            PolyNoteEvent::Off {
+                frame: 8,
+                channel: 1,
+                key: 67,
+            },
+            PolyNoteEvent::Off {
+                frame: 8,
+                channel: 1,
+                key: 72,
+            },
+            PolyNoteEvent::On {
+                frame: 11,
+                channel: 1,
+                key: 76,
+                velocity: 60,
+            },
+        ];
+        let mut plan = PolyNotePlan::prepare(&reference, 0, &events).unwrap();
+        let mut expected = [f64::NAN; 18];
+        plan.render_next(&mut reference, &mut expected).unwrap();
+
+        let mut machine = compile_at_rate(&graph, 48_000.0).unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        for (time, key, velocity) in [(0, 60, 100), (21, 64, 90), (42, 67, 80), (63, 72, 70)] {
+            midi.dispatch(time, &[0x90, key, velocity]).unwrap();
+        }
+        let mut actual = [f64::NAN; 18];
+        consumer
+            .render_next(&mut machine, &mut actual[..8])
+            .unwrap();
+        assert_eq!(midi.dispatch(84, &[0xB0, 123, 0]), Ok(true));
+        for key in [60, 64, 67, 72] {
+            assert_eq!(midi.dispatch(85, &[0x80, key, 0]), Ok(false));
+        }
+        midi.dispatch(1, &[0x90, 76, 60]).unwrap();
+        consumer
+            .render_next(&mut machine, &mut actual[8..])
+            .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn fifth_poly_binding_rejects_without_replacing_four_voice_machine() {
+        let graph = lua::read(FOUR_VOICE_POLY).unwrap();
+        let mut host = Host::default();
+        host.submit(&graph).unwrap();
+        let mut invalid = graph.clone();
+        let fifth = invalid.midi_poly[0].voices[0].clone();
+        invalid.midi_poly[0].voices.push(fifth);
+        assert!(
+            host.submit(&invalid)
+                .unwrap_err()
+                .contains("two to four voices")
+        );
+        assert!(host.accepted().unwrap().has_poly_notes());
+    }
+
+    #[test]
     fn timed_midi_poly_full_bank_keeps_held_notes_retryable() {
         let graph = lua::read(TWO_VOICE_POLY).unwrap();
         let mut machine = compile_at_rate(&graph, 48_000.0).unwrap();
@@ -1306,7 +1515,7 @@ return graph
             (duplicate, "distinct parameter targets"),
             (missing, "unknown control"),
             (narrow, "cover all MIDI note frequencies"),
-            (wrong_count, "exactly two voices"),
+            (wrong_count, "two to four voices"),
         ] {
             let error = host.submit(&candidate).unwrap_err();
             assert!(error.contains(expected), "{error}");

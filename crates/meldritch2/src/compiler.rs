@@ -168,10 +168,12 @@ pub(crate) struct PolyVoiceTarget {
     pub velocity_index: usize,
 }
 
+pub(crate) const MAX_POLY_VOICES: usize = 4;
+
 #[derive(Debug)]
 struct PolyMapping {
     channel: u8,
-    voices: [PolyVoiceTarget; 2],
+    voices: [Option<PolyVoiceTarget>; MAX_POLY_VOICES],
 }
 
 impl Machine {
@@ -299,7 +301,10 @@ impl Machine {
             max_pitch: pitch.max,
         })
     }
-    pub(crate) fn poly_note_targets(&self, channel: u8) -> Result<[PolyVoiceTarget; 2], String> {
+    pub(crate) fn poly_note_targets(
+        &self,
+        channel: u8,
+    ) -> Result<[Option<PolyVoiceTarget>; MAX_POLY_VOICES], String> {
         self.poly_notes
             .iter()
             .find(|mapping| mapping.channel == channel)
@@ -701,10 +706,10 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 binding.channel
             ));
         }
-        if binding.voices.len() != 2 {
-            return Err("polyphonic MIDI mapping requires exactly two voices".into());
+        if !(2..=MAX_POLY_VOICES).contains(&binding.voices.len()) {
+            return Err("polyphonic MIDI mapping requires two to four voices".into());
         }
-        let mut voices = Vec::with_capacity(2);
+        let mut voices = [None; MAX_POLY_VOICES];
         for (number, voice) in binding.voices.iter().enumerate() {
             let resolve = |id: &str| {
                 controls.get(id).ok_or_else(|| {
@@ -742,7 +747,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                     voice.velocity_control_id
                 ));
             }
-            voices.push(PolyVoiceTarget {
+            voices[number] = Some(PolyVoiceTarget {
                 pitch_index: param_ids[&pitch.target],
                 gate_index: param_ids[&gate.target],
                 velocity_index: param_ids[&velocity.target],
@@ -750,7 +755,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         }
         poly_notes.push(PolyMapping {
             channel: binding.channel,
-            voices: [voices[0], voices[1]],
+            voices,
         });
     }
     let note_pairs = graph
