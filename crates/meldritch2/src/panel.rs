@@ -16,6 +16,12 @@ pub struct ControlRow {
 }
 
 impl ControlRow {
+    pub(crate) fn new(handle: ControlHandle, authored_value: f64) -> Self {
+        Self {
+            handle,
+            authored_value,
+        }
+    }
     pub fn id(&self) -> &str {
         self.handle.id()
     }
@@ -27,6 +33,18 @@ impl ControlRow {
     }
     pub fn value(&self) -> f64 {
         self.handle.override_value().unwrap_or(self.authored_value)
+    }
+    pub(crate) fn adjust(&mut self, gesture: Gesture) -> Result<(), String> {
+        let (min, max) = self.handle.range();
+        let step = (max - min) / 100.0;
+        let value = match gesture {
+            Gesture::Decrease => (self.value() - step).clamp(min, max),
+            Gesture::Increase => (self.value() + step).clamp(min, max),
+            Gesture::Minimum => min,
+            Gesture::Maximum => max,
+            _ => return Ok(()),
+        };
+        self.handle.publish(value)
     }
 }
 
@@ -41,10 +59,7 @@ impl Panel {
         Self {
             rows: controls
                 .into_iter()
-                .map(|(handle, authored_value)| ControlRow {
-                    handle,
-                    authored_value,
-                })
+                .map(|(handle, authored_value)| ControlRow::new(handle, authored_value))
                 .collect(),
             selected: 0,
         }
@@ -65,17 +80,7 @@ impl Panel {
             Gesture::Previous => self.selected = self.selected.saturating_sub(1),
             Gesture::Next => self.selected = (self.selected + 1).min(self.rows.len() - 1),
             Gesture::Decrease | Gesture::Increase | Gesture::Minimum | Gesture::Maximum => {
-                let row = &mut self.rows[self.selected];
-                let (min, max) = row.handle.range();
-                let step = (max - min) / 100.0;
-                let value = match gesture {
-                    Gesture::Decrease => (row.value() - step).clamp(min, max),
-                    Gesture::Increase => (row.value() + step).clamp(min, max),
-                    Gesture::Minimum => min,
-                    Gesture::Maximum => max,
-                    _ => unreachable!(),
-                };
-                row.handle.publish(value)?;
+                self.rows[self.selected].adjust(gesture)?;
             }
         }
         Ok(())

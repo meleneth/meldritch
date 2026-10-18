@@ -16,6 +16,7 @@ use crate::{
     midi::{TimedMidiError, TimedMidiRouter},
     midi_device::MidiInputSession,
     panel::{Gesture, Panel},
+    screen_panel::{ScreenPanel, WidgetView},
 };
 
 const NOTE_KEYS: [(char, u8); 12] = [
@@ -136,6 +137,7 @@ impl Drop for Terminal {
 
 fn draw(
     panel: &Panel,
+    screens: Option<&ScreenPanel>,
     output: &DeviceOutput,
     midi_session: Option<&MidiInputSession>,
     keyboard: Option<&TuiKeyboard>,
@@ -150,7 +152,12 @@ fn draw(
         Print(" | MIDI: "),
         Print(midi_session.map_or("none", |session| session.port_name.as_str())),
         Print(" | q: quit\r\n"),
-        Print("Up/Down: select  Left/Right: adjust  Home/End: bounds\r\n\r\n")
+        Print("Up/Down: select  Left/Right: adjust  Home/End: bounds\r\n"),
+        Print(if screens.is_some() {
+            "Tab/Shift+Tab: switch screens  Enter: open link\r\n\r\n"
+        } else {
+            "\r\n"
+        })
     )
     .map_err(|error| error.to_string())?;
     if let Some(keyboard) = keyboard {
@@ -168,30 +175,64 @@ fn draw(
                 .map_err(|error| error.to_string())?;
         }
     }
-    if panel.rows().is_empty() {
-        queue!(out, Print("This instrument declares no controls.\r\n"))
-            .map_err(|error| error.to_string())?;
-    }
-    for (index, row) in panel.rows().iter().enumerate() {
-        let marker = if panel.selected() == Some(index) {
-            ">"
-        } else {
-            " "
-        };
-        let (min, max) = row.range();
+    if let Some(screens) = screens {
+        let screen = screens.current();
+        let (position, count) = screens.position();
         queue!(
             out,
-            Print(format!(
-                "{marker} {} = {:.4}  [{:.4}, {:.4}]  {}.{}\r\n",
-                row.id(),
-                row.value(),
-                min,
-                max,
-                row.target().module,
-                row.target().name
-            ))
+            Print(format!("{} ({position}/{count})\r\n\r\n", screen.title))
         )
         .map_err(|error| error.to_string())?;
+        for (index, widget) in screen.widgets.iter().enumerate() {
+            let marker = if screen.selected == Some(index) {
+                ">"
+            } else {
+                " "
+            };
+            match widget {
+                WidgetView::Label(text) => queue!(out, Print(format!("  {text}\r\n"))),
+                WidgetView::Control { label, row } => {
+                    let (min, max) = row.range();
+                    queue!(
+                        out,
+                        Print(format!(
+                            "{marker} {label} = {:.4}  [{min:.4}, {max:.4}]\r\n",
+                            row.value()
+                        ))
+                    )
+                }
+                WidgetView::Link { label, .. } => {
+                    queue!(out, Print(format!("{marker} {label} >\r\n")))
+                }
+            }
+            .map_err(|error| error.to_string())?;
+        }
+    } else {
+        if panel.rows().is_empty() {
+            queue!(out, Print("This instrument declares no controls.\r\n"))
+                .map_err(|error| error.to_string())?;
+        }
+        for (index, row) in panel.rows().iter().enumerate() {
+            let marker = if panel.selected() == Some(index) {
+                ">"
+            } else {
+                " "
+            };
+            let (min, max) = row.range();
+            queue!(
+                out,
+                Print(format!(
+                    "{marker} {} = {:.4}  [{:.4}, {:.4}]  {}.{}\r\n",
+                    row.id(),
+                    row.value(),
+                    min,
+                    max,
+                    row.target().module,
+                    row.target().name
+                ))
+            )
+            .map_err(|error| error.to_string())?;
+        }
     }
     queue!(
         out,
@@ -211,12 +252,30 @@ pub fn perform(
     midi_session: Option<&MidiInputSession>,
     mut keyboard: Option<TuiKeyboard>,
 ) -> Result<(), String> {
-    let mut panel = Panel::new(output.controls());
+    let controls = output.controls();
+    let mut screens = if output.screens().is_empty() {
+        None
+    } else {
+        Some(ScreenPanel::new(output.screens(), controls.clone())?)
+    };
+    let mut panel = Panel::new(controls);
     let _terminal = Terminal::enter()?;
-    draw(&panel, output, midi_session, keyboard.as_ref())?;
+    draw(
+        &panel,
+        screens.as_ref(),
+        output,
+        midi_session,
+        keyboard.as_ref(),
+    )?;
     loop {
         if !event::poll(Duration::from_millis(100)).map_err(|error| error.to_string())? {
-            draw(&panel, output, midi_session, keyboard.as_ref())?;
+            draw(
+                &panel,
+                screens.as_ref(),
+                output,
+                midi_session,
+                keyboard.as_ref(),
+            )?;
             continue;
         }
         let Event::Key(key) = event::read().map_err(|error| error.to_string())? else {
@@ -236,15 +295,45 @@ pub fn perform(
             let midi_us = keyboard.elapsed_us();
             match keyboard.handle_key_at(key.code, midi_us) {
                 Ok(true) => {
-                    draw(&panel, output, midi_session, Some(keyboard))?;
+                    draw(
+                        &panel,
+                        screens.as_ref(),
+                        output,
+                        midi_session,
+                        Some(keyboard),
+                    )?;
                     continue;
                 }
                 Err(error) => {
                     keyboard.last_error = Some(format!("{error:?}"));
-                    draw(&panel, output, midi_session, Some(keyboard))?;
+                    draw(
+                        &panel,
+                        screens.as_ref(),
+                        output,
+                        midi_session,
+                        Some(keyboard),
+                    )?;
                     continue;
                 }
                 Ok(false) => {}
+            }
+        }
+        if let Some(screens) = &mut screens {
+            match key.code {
+                KeyCode::Tab => screens.switch(1),
+                KeyCode::BackTab => screens.switch(-1),
+                KeyCode::Enter => screens.activate(),
+                _ => {}
+            }
+            if matches!(key.code, KeyCode::Tab | KeyCode::BackTab | KeyCode::Enter) {
+                draw(
+                    &panel,
+                    Some(screens),
+                    output,
+                    midi_session,
+                    keyboard.as_ref(),
+                )?;
+                continue;
             }
         }
         let gesture = match key.code {
@@ -257,8 +346,18 @@ pub fn perform(
             _ => None,
         };
         if let Some(gesture) = gesture {
-            panel.apply(gesture)?;
-            draw(&panel, output, midi_session, keyboard.as_ref())?;
+            if let Some(screens) = &mut screens {
+                screens.apply(gesture)?;
+            } else {
+                panel.apply(gesture)?;
+            }
+            draw(
+                &panel,
+                screens.as_ref(),
+                output,
+                midi_session,
+                keyboard.as_ref(),
+            )?;
         }
     }
     Ok(())

@@ -47,6 +47,7 @@ pub fn expand(graph: &Graph) -> Result<Graph, String> {
         midi_ccs: graph.midi_ccs.clone(),
         midi_notes: graph.midi_notes.clone(),
         midi_poly: graph.midi_poly.clone(),
+        screens: graph.screens.clone(),
         ..Graph::default()
     };
     let mut ids = BTreeSet::new();
@@ -217,9 +218,10 @@ fn expand_scope(
         && (!scope.controls.is_empty()
             || !scope.midi_ccs.is_empty()
             || !scope.midi_notes.is_empty()
-            || !scope.midi_poly.is_empty())
+            || !scope.midi_poly.is_empty()
+            || !scope.screens.is_empty())
     {
-        return Err("controls and MIDI bindings belong to the parent graph".into());
+        return Err("controls, MIDI bindings, and screens belong to the parent graph".into());
     }
     if !prefix.is_empty() && !scope.subpatches.is_empty() {
         return Err("subpatch definitions must be registered on the root graph".into());

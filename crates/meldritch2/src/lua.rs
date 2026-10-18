@@ -5,8 +5,8 @@ use mlua::{Lua, Table, Value};
 use crate::contract;
 use crate::model::{
     Connection, Control, Endpoint, ExternalInput, ExternalParameter, ExternalPort, Graph, MidiCc,
-    MidiNotes, MidiPoly, MidiPolyVoice, Module, ParameterId, PolyOverflow, Subpatch,
-    SubpatchInstance,
+    MidiNotes, MidiPoly, MidiPolyVoice, Module, ParameterId, PolyOverflow, Screen, Subpatch,
+    SubpatchInstance, Widget,
 };
 
 const API: &str = r#"
@@ -14,7 +14,7 @@ meldritch = { _subpatches = {} }
 function meldritch.graph()
   local graph = { modules = {}, instances = {}, connections = {}, normalizations = {},
     controls = {}, midi_ccs = {}, note_bindings = {}, poly_bindings = {}, external_inputs = {}, external_outputs = {},
-    external_parameters = {} }
+    external_parameters = {}, screens = {} }
   function graph:module(id, kind, values)
     assert(type(id) == "string" and type(kind) == "string", "module ID and type must be strings")
     local spec = meldritch._contract(kind)
@@ -102,6 +102,24 @@ function meldritch.graph()
   function graph:midi_poly(channel, voices, overflow)
     assert(type(voices) == "table", "MIDI poly voices must be a table")
     table.insert(self.poly_bindings, { channel = channel, voices = voices, overflow = overflow })
+  end
+  function graph:screen(id, title)
+    assert(type(id) == "string" and type(title) == "string", "screen ID and title must be strings")
+    local screen = { id = id, title = title, widgets = {} }
+    function screen:label(text)
+      assert(type(text) == "string", "label text must be a string")
+      table.insert(self.widgets, { kind = "label", text = text })
+    end
+    function screen:control(label, control_id)
+      assert(type(label) == "string" and type(control_id) == "string", "control widget needs a label and control ID")
+      table.insert(self.widgets, { kind = "control", label = label, control_id = control_id })
+    end
+    function screen:link(label, screen_id)
+      assert(type(label) == "string" and type(screen_id) == "string", "link widget needs a label and screen ID")
+      table.insert(self.widgets, { kind = "link", label = label, screen_id = screen_id })
+    end
+    table.insert(self.screens, screen)
+    return screen
   end
   return graph
 end
@@ -223,6 +241,33 @@ fn external_ports(table: &Table, field: &str) -> Result<Vec<ExternalPort>, Strin
 
 fn graph_from_table(table: Table) -> Result<Graph, String> {
     let mut graph = Graph::default();
+    let screens: Table = table.get("screens").map_err(|e| e.to_string())?;
+    for screen in screens.sequence_values::<Table>() {
+        let screen = screen.map_err(|e| e.to_string())?;
+        let widgets: Table = screen.get("widgets").map_err(|e| e.to_string())?;
+        let mut parsed = Vec::new();
+        for widget in widgets.sequence_values::<Table>() {
+            let widget = widget.map_err(|e| e.to_string())?;
+            let kind: String = widget.get("kind").map_err(|e| e.to_string())?;
+            parsed.push(match kind.as_str() {
+                "label" => Widget::Label(widget.get("text").map_err(|e| e.to_string())?),
+                "control" => Widget::Control {
+                    label: widget.get("label").map_err(|e| e.to_string())?,
+                    control_id: widget.get("control_id").map_err(|e| e.to_string())?,
+                },
+                "link" => Widget::Link {
+                    label: widget.get("label").map_err(|e| e.to_string())?,
+                    screen_id: widget.get("screen_id").map_err(|e| e.to_string())?,
+                },
+                other => return Err(format!("unknown screen widget '{other}'")),
+            });
+        }
+        graph.screens.push(Screen {
+            id: screen.get("id").map_err(|e| e.to_string())?,
+            title: screen.get("title").map_err(|e| e.to_string())?,
+            widgets: parsed,
+        });
+    }
     let modules: Table = table
         .get("modules")
         .map_err(|e| format!("graph.modules: {e}"))?;

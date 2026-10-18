@@ -11,6 +11,7 @@ pub mod midi_device;
 pub mod model;
 pub mod panel;
 pub mod poly;
+mod screen_panel;
 pub mod timed;
 pub mod tui;
 mod units;
@@ -1334,6 +1335,41 @@ return graph
                 .contains("two to four voices")
         );
         assert!(host.accepted().unwrap().has_poly_notes());
+    }
+
+    #[test]
+    fn invalid_screens_preserve_accepted_machine() {
+        use crate::model::Widget;
+
+        let graph = lua::read(include_str!("../examples/66-screens.lua")).unwrap();
+        let mut host = Host::default();
+        host.submit(&graph).unwrap();
+        let mut unknown_control = graph.clone();
+        unknown_control.screens[0].widgets[1] = Widget::Control {
+            label: "Missing".into(),
+            control_id: "missing".into(),
+        };
+        let mut unknown_link = graph.clone();
+        unknown_link.screens[0].widgets[2] = Widget::Link {
+            label: "Missing".into(),
+            screen_id: "missing".into(),
+        };
+        let mut duplicate = graph.clone();
+        duplicate.screens[1].id = "home".into();
+        let mut unsafe_text = graph.clone();
+        unsafe_text.screens[0].title = "Home\x1b[2J".into();
+        for (candidate, expected) in [
+            (unknown_control, "unknown control"),
+            (unknown_link, "unknown screen"),
+            (duplicate, "duplicate screen ID"),
+            (unsafe_text, "printable text"),
+        ] {
+            assert!(host.submit(&candidate).unwrap_err().contains(expected));
+        }
+        assert_eq!(host.accepted().unwrap().screens().len(), 2);
+        let mut samples = [0.0; 1];
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.1875]);
     }
 
     #[test]

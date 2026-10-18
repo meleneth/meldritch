@@ -13,7 +13,7 @@ use crate::{
     live::{LiveControl, LiveRuntime},
     live_notes::{LiveNoteConsumer, live_note_queue},
     midi::{MidiRouter, TimedMidiRouter},
-    model::Graph,
+    model::{Graph, Screen},
 };
 
 const CHUNK_FRAMES: usize = 256;
@@ -132,6 +132,7 @@ pub struct DeviceOutput {
     stream: cpal::Stream,
     control: LiveControl,
     controls: Vec<(ControlHandle, f64)>,
+    screens: Vec<Screen>,
     midi_router: MidiRouter,
     timed_midi_router: Option<TimedMidiRouter>,
     errors: Arc<AtomicU64>,
@@ -191,6 +192,7 @@ impl DeviceOutput {
             return Err("output device reported zero channels".into());
         }
         let machine = compile_at_rate(graph, f64::from(config.sample_rate))?;
+        let screens = machine.screens().to_vec();
         let controls = machine
             .control_ids()
             .map(|id| {
@@ -266,6 +268,7 @@ impl DeviceOutput {
             stream,
             control,
             controls,
+            screens,
             midi_router,
             timed_midi_router,
             errors,
@@ -289,6 +292,9 @@ impl DeviceOutput {
 
     pub fn controls(&self) -> Vec<(ControlHandle, f64)> {
         self.controls.clone()
+    }
+    pub fn screens(&self) -> &[Screen] {
+        &self.screens
     }
     pub fn midi_router(&self) -> MidiRouter {
         self.midi_router.clone()

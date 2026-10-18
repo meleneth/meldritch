@@ -6,7 +6,7 @@ use std::sync::{
 
 use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
-use crate::model::{Connection, Graph, MidiCc, MidiNotes, ParameterId};
+use crate::model::{Connection, Graph, MidiCc, MidiNotes, ParameterId, Screen, Widget};
 
 #[derive(Clone, Debug)]
 struct Op {
@@ -141,6 +141,7 @@ pub struct Machine {
     param_ranges: Vec<Option<(f64, f64)>>,
     param_ids: BTreeMap<ParameterId, usize>,
     controls: BTreeMap<String, ControlBinding>,
+    screens: Vec<Screen>,
     midi_ccs: Vec<MidiCc>,
     midi_notes: Vec<MidiNotes>,
     poly_notes: Vec<PolyMapping>,
@@ -177,7 +178,64 @@ struct PolyMapping {
     overflow: crate::model::PolyOverflow,
 }
 
+fn validate_screens(
+    screens: &[Screen],
+    controls: &BTreeMap<String, ControlBinding>,
+) -> Result<(), String> {
+    fn text(value: &str, context: &str) -> Result<(), String> {
+        if value.is_empty() || value.len() > 120 || value.chars().any(char::is_control) {
+            return Err(format!(
+                "{context} must be nonempty printable text of at most 120 bytes"
+            ));
+        }
+        Ok(())
+    }
+    if screens.len() > 16 {
+        return Err("graph permits at most 16 screens".into());
+    }
+    let mut ids = BTreeSet::new();
+    for screen in screens {
+        text(&screen.id, "screen ID")?;
+        text(&screen.title, "screen title")?;
+        if !ids.insert(screen.id.as_str()) {
+            return Err(format!("duplicate screen ID '{}'", screen.id));
+        }
+        if screen.widgets.len() > 64 {
+            return Err(format!("screen '{}' permits at most 64 widgets", screen.id));
+        }
+    }
+    for screen in screens {
+        for widget in &screen.widgets {
+            match widget {
+                Widget::Label(value) => text(value, "widget text")?,
+                Widget::Control { label, control_id } => {
+                    text(label, "widget label")?;
+                    if !controls.contains_key(control_id) {
+                        return Err(format!(
+                            "screen '{}' references unknown control '{control_id}'",
+                            screen.id
+                        ));
+                    }
+                }
+                Widget::Link { label, screen_id } => {
+                    text(label, "widget label")?;
+                    if !ids.contains(screen_id.as_str()) {
+                        return Err(format!(
+                            "screen '{}' links to unknown screen '{screen_id}'",
+                            screen.id
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Machine {
+    pub fn screens(&self) -> &[Screen] {
+        &self.screens
+    }
     pub fn process(&mut self, buffer: &mut [f64]) {
         self.prepare_buffer();
         self.process_prepared(buffer);
@@ -766,6 +824,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             overflow: binding.overflow,
         });
     }
+    validate_screens(&graph.screens, &controls)?;
     let note_pairs = graph
         .midi_notes
         .iter()
@@ -862,6 +921,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         param_ranges,
         param_ids,
         controls,
+        screens: graph.screens.clone(),
         midi_ccs: graph.midi_ccs.clone(),
         midi_notes: graph.midi_notes.clone(),
         poly_notes,

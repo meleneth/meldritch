@@ -36,6 +36,16 @@ scoped to one compiled revision.
 `perform` renders those rows in a small terminal view while CPAL runs; it has
 no fixed instrument knobs. This first view tracks the opened graph revision
 and does not refresh itself after a structural graph replacement.
+Lua may declare root-graph screens with `graph:screen(id, title)`. A screen
+collects `screen:label(text)`, `screen:control(label, control_id)`, and
+`screen:link(label, screen_id)` widgets. Compilation validates text, unique
+screen IDs, control references, and link targets before accepting the graph;
+subpatches cannot declare screens. `perform` displays one screen at a time.
+Up/Down selects control or link widgets, Left/Right and Home/End publish through
+the existing control handles, Enter opens a selected link, and Tab/Shift+Tab
+cycles screens. Each screen retains its selection. Graphs without screens keep
+the original control list. Lua constructs the screen model before compilation;
+terminal gestures use only Rust state and compiled control handles.
 Lua may also bind channel 1..16 MIDI CC numbers to a named control. Graph
 validation checks those declarations; `MidiRouter` precomputes a bounded raw
 CC lookup and publishes through `ControlHandle`. DSP modules never see MIDI

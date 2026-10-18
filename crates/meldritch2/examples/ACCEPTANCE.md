@@ -651,3 +651,16 @@ that free voice. Raw timed MIDI and the prepared plan must render the same
 18 samples across split buffers. The default graph in example 64 continues
 to reject a fifth held key. Unknown overflow policies reject during Lua
 reading.
+
+## Lua-declared TUI screens
+
+`66-screens.lua` creates Home and Source screens. Home has a text label, an
+Output level control widget, and a link to Source. Source has a Left signal
+control widget and a link home. Tab and Shift+Tab cycle screens; Up/Down skip
+text and select control or link widgets; Enter opens a selected link. Adjusting
+controls on either screen publishes through the same compiled control handles
+and changes the next audio buffer. Switching screens preserves each screen's
+selection. A missing control, missing link target, duplicate screen ID, or
+terminal control character in display text rejects the candidate while the
+accepted machine keeps rendering. Graphs without screens retain the existing
+control list.

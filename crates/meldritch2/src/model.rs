@@ -96,6 +96,20 @@ pub enum PolyOverflow {
     StealOldest,
 }
 
+#[derive(Clone, Debug)]
+pub enum Widget {
+    Label(String),
+    Control { label: String, control_id: String },
+    Link { label: String, screen_id: String },
+}
+
+#[derive(Clone, Debug)]
+pub struct Screen {
+    pub id: String,
+    pub title: String,
+    pub widgets: Vec<Widget>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Graph {
     pub modules: Vec<Module>,
@@ -107,6 +121,7 @@ pub struct Graph {
     pub midi_ccs: Vec<MidiCc>,
     pub midi_notes: Vec<MidiNotes>,
     pub midi_poly: Vec<MidiPoly>,
+    pub screens: Vec<Screen>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
