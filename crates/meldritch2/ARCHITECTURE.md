@@ -140,6 +140,11 @@ through the subpatch interface. A parent binds it with
 forward an exported parameter. Expansion resolves each binding to its
 namespaced primitive parameter before ordinary control and MIDI validation.
 Invalid exports reject a candidate without replacing the accepted machine.
+`graph:instance(id, definition, values)` may supply authored values keyed by
+exported parameter name. Expansion writes each value to that instance's
+namespaced primitive module; an outer instance value takes precedence over a
+nested definition's value. The ordinary module contract validates the final
+authored value. Live overrides still clear back to that authored value.
 Each declared output port has its own compiled sample slot. A unit's process
 function writes its declared outputs in contract order; cables read the named
 source port's slot. The terminal Output role has a private sample slot but no

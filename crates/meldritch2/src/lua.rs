@@ -57,7 +57,7 @@ function meldritch.graph()
     assert(type(parameter) == "string", "external parameter target name must be a string")
     table.insert(self.external_parameters, { name = name, module = module.id, parameter = parameter })
   end
-  function graph:instance(id, definition)
+  function graph:instance(id, definition, values)
     assert(type(id) == "string", "instance ID must be a string")
     assert(type(definition) == "table" and definition.is_subpatch and
       meldritch._subpatches[definition.name] == definition, "instance requires a registered subpatch")
@@ -68,7 +68,8 @@ function meldritch.graph()
     for _, port in ipairs(definition.external_outputs) do
       handle[port.name] = { module = id, port = port.name, direction = "output" }
     end
-    table.insert(self.instances, { id = id, definition = definition.name })
+    assert(values == nil or type(values) == "table", "instance values must be a table")
+    table.insert(self.instances, { id = id, definition = definition.name, values = values or {} })
     return handle
   end
   function graph:control(id, module, parameter, range)
@@ -216,9 +217,16 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
         .map_err(|e| format!("graph.instances: {e}"))?;
     for item in instances.sequence_values::<Table>() {
         let item = item.map_err(|e| e.to_string())?;
+        let values: Table = item.get("values").map_err(|e| e.to_string())?;
+        let mut params = BTreeMap::new();
+        for pair in values.pairs::<String, f64>() {
+            let (name, value) = pair.map_err(|e| e.to_string())?;
+            params.insert(name, value);
+        }
         graph.instances.push(SubpatchInstance {
             id: item.get("id").map_err(|e| e.to_string())?,
             definition: item.get("definition").map_err(|e| e.to_string())?,
+            values: params,
         });
     }
     let connections: Table = table

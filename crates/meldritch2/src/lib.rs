@@ -85,6 +85,8 @@ mod tests {
         include_str!("../examples/56-subpatch-invalid-endpoint.lua");
     const NESTED_SUBPATCH: &str = include_str!("../examples/57-nested-subpatch.lua");
     const SUBPATCH_PARAMETERS: &str = include_str!("../examples/58-subpatch-parameters.lua");
+    const SUBPATCH_INSTANCE_VALUES: &str =
+        include_str!("../examples/59-subpatch-instance-values.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -665,11 +667,17 @@ return graph
         let mut duplicate = valid.clone();
         let parameters = &mut duplicate.subpatches.get_mut("wrapper").unwrap().parameters;
         parameters.push(parameters[0].clone());
+        let mut alias = valid.clone();
+        let parameters = &mut alias.subpatches.get_mut("wrapper").unwrap().parameters;
+        let mut second = parameters[0].clone();
+        second.name = "other-level".into();
+        parameters.push(second);
         let mut hidden = valid.clone();
         hidden.controls[0].target.name = "gain".into();
         for (candidate, expected) in [
             (invalid_target, "invalid parameter"),
             (duplicate, "duplicate external parameter"),
+            (alias, "duplicate external parameter target"),
             (hidden, "invalid exported parameter"),
         ] {
             let error = host.submit(&candidate).unwrap_err();
@@ -678,6 +686,78 @@ return graph
             host.accepted().unwrap().process(&mut samples);
             assert_eq!(samples, [0.25; 4]);
         }
+    }
+
+    #[test]
+    fn instance_values_override_nested_defaults_independently() {
+        let graph = lua::read(SUBPATCH_INSTANCE_VALUES).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let left = machine.control_handle("left-level").unwrap();
+        assert_eq!(left.target(), &ParameterId::new("left/inner/gain", "gain"));
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.25; 4]);
+        left.publish(1.0).unwrap();
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.4375; 4]);
+        left.clear().unwrap();
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.25; 4]);
+
+        let mut fallback = graph.clone();
+        fallback.instances[0].values.clear();
+        let mut fallback = compile(&fallback).unwrap();
+        fallback.process(&mut samples);
+        assert_eq!(samples, [0.2375; 4]);
+    }
+
+    #[test]
+    fn invalid_instance_values_preserve_accepted_machine() {
+        let valid = lua::read(SUBPATCH_INSTANCE_VALUES).unwrap();
+        let mut host = Host::default();
+        host.submit(&valid).unwrap();
+        for (name, value, expected) in [
+            ("missing", 1.0, "invalid authored parameter"),
+            ("level", f64::NAN, "must be finite"),
+            ("level", f64::INFINITY, "must be finite"),
+        ] {
+            let mut invalid = valid.clone();
+            invalid.instances[0].values.insert(name.into(), value);
+            let error = host.submit(&invalid).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+            let mut samples = [f64::NAN; 4];
+            host.accepted().unwrap().process(&mut samples);
+            assert_eq!(samples, [0.25; 4]);
+        }
+        let mut masked_default = valid.clone();
+        masked_default
+            .subpatches
+            .get_mut("amplifier")
+            .unwrap()
+            .graph
+            .modules[0]
+            .values
+            .insert("gain".into(), f64::NAN);
+        assert!(
+            host.submit(&masked_default)
+                .unwrap_err()
+                .contains("must be finite")
+        );
+
+        let mut bounded = valid.clone();
+        let amplifier = bounded.subpatches.get_mut("amplifier").unwrap();
+        amplifier.graph.modules[0].kind = "lag".into();
+        amplifier.graph.modules[0].values.clear();
+        amplifier.parameters[0].target.name = "response".into();
+        bounded.instances[0].values.insert("level".into(), 1.5);
+        assert!(
+            host.submit(&bounded)
+                .unwrap_err()
+                .contains("must be in 0..1")
+        );
+        let mut samples = [f64::NAN; 4];
+        host.accepted().unwrap().process(&mut samples);
+        assert_eq!(samples, [0.25; 4]);
     }
 
     #[test]
@@ -698,6 +778,7 @@ return graph
             .push(SubpatchInstance {
                 id: "self".into(),
                 definition: "gated_oscillator".into(),
+                values: Default::default(),
             });
         let mut invalid_cable = valid.clone();
         invalid_cable

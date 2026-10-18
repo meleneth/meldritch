@@ -35,6 +35,7 @@ pub struct ExternalParameter {
 pub struct SubpatchInstance {
     pub id: String,
     pub definition: String,
+    pub values: BTreeMap<String, f64>,
 }
 
 #[derive(Clone, Debug)]

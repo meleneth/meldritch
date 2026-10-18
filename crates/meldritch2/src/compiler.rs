@@ -37,7 +37,7 @@ struct NotePair {
 
 const NO_OVERRIDE: u64 = f64::NAN.to_bits();
 
-fn validate_parameter_value(
+pub(crate) fn validate_parameter_value(
     id: &ParameterId,
     range: Option<(f64, f64)>,
     value: f64,

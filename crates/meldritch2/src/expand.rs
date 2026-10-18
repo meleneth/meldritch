@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::compiler::validate_parameter_value;
 use crate::contract::{self, Role};
 use crate::model::{
     Connection, Endpoint, ExternalParameter, ExternalPort, Graph, ParameterId, Subpatch,
@@ -87,6 +88,12 @@ fn external_parameters(
             return Err("external parameter name must not be empty".into());
         }
         let target = resolve_parameter(local, &declaration.target)?;
+        if parameters.values().any(|existing| existing == &target) {
+            return Err(format!(
+                "duplicate external parameter target '{}.{}'",
+                target.module, target.name
+            ));
+        }
         if parameters
             .insert(declaration.name.clone(), target)
             .is_some()
@@ -113,6 +120,21 @@ fn resolve_parameter(
             target.module, target.name
         )
     })
+}
+
+fn validate_authored_value(
+    module: &crate::model::Module,
+    name: &str,
+    value: f64,
+) -> Result<(), String> {
+    let contract = contract::find(&module.kind)
+        .ok_or_else(|| format!("unknown module type '{}'", module.kind))?;
+    let parameter = contract
+        .params
+        .iter()
+        .find(|parameter| parameter.name == name)
+        .ok_or_else(|| format!("{}.{} is not a parameter", module.id, name))?;
+    validate_parameter_value(&ParameterId::new(&module.id, name), parameter.range, value)
 }
 
 fn resolve(
@@ -216,6 +238,9 @@ fn expand_scope(
         };
         let mut module = module.clone();
         module.id = qualified;
+        for (name, value) in &module.values {
+            validate_authored_value(&module, name, *value)?;
+        }
         expanded.modules.push(module);
         local.insert(local_id, ports);
     }
@@ -247,6 +272,23 @@ fn expand_scope(
             )),
         )?;
         stack.pop();
+        for (name, value) in &instance.values {
+            let target = ports.parameters.get(name).ok_or_else(|| {
+                format!(
+                    "invalid authored parameter '{}.{}' for instance",
+                    instance.id, name
+                )
+            })?;
+            let module = expanded
+                .modules
+                .iter_mut()
+                .find(|module| module.id == target.module)
+                .ok_or_else(|| {
+                    format!("unresolved exported parameter '{}.{}'", instance.id, name)
+                })?;
+            validate_authored_value(module, &target.name, *value)?;
+            module.values.insert(target.name.clone(), *value);
+        }
         local.insert(instance.id.clone(), ports);
     }
     for edge in &scope.connections {

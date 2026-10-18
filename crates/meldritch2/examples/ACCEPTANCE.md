@@ -561,5 +561,16 @@ on the two instances. Publishing left level 1 changes the output to 0.375;
 channel-1 CC 7 then publishes right level 0 and returns the output to 0.25.
 Resolved control targets are `left/inner/gain.gain` and
 `right/inner/gain.gain`; the two parameter cells remain independent. Invalid
-or duplicate parameter exports, and a control targeting a parameter not
+or duplicate parameter exports, including two names for one target, and a control targeting a parameter not
 exported by an instance, reject without replacing the accepted machine.
+
+## Authored values per subpatch instance
+
+`59-subpatch-instance-values.lua` gives two wrapper instances independent
+`level` values of 0.25 and 0.75. These override the wrapper's nested 0.2 and
+the amplifier definition's 0.5, rendering 0.25 from their summed outputs.
+Publishing a live left-level value of 1 renders 0.4375; clearing it restores
+the authored 0.25. Removing the outer left value exposes the wrapper's 0.2 and
+renders 0.2375. Unknown exported names and nonfinite values reject without
+changing the accepted machine. Resolution and validation happen during
+compilation, before sample processing.
