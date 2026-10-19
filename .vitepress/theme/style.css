@@ -37,6 +37,6 @@
 .development-banner:focus-visible { outline: 3px solid #83d6b2; outline-offset: -3px; }
 .development-dot { width: 7px; height: 7px; border-radius: 50%; background: #83d6b2; }
 
-@media (max-width: 380px) {
+@media (max-width: 540px) {
   .development-banner { font-size: 11px; gap: 6px; }
 }
