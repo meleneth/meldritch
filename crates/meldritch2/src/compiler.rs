@@ -6,7 +6,9 @@ use std::sync::{
 
 use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
-use crate::model::{Connection, Graph, MidiCc, MidiNotes, ParameterId, Screen, Widget};
+use crate::model::{
+    Connection, ControlScale, Graph, MidiCc, MidiNotes, ParameterId, Screen, Widget,
+};
 
 #[derive(Clone, Debug)]
 struct Op {
@@ -87,17 +89,21 @@ impl ParameterHandle {
 #[derive(Clone, Debug)]
 struct ControlBinding {
     target: ParameterId,
+    additional_targets: Vec<ParameterId>,
     min: f64,
     max: f64,
+    scale: ControlScale,
+    hidden: bool,
 }
 
 /// A named instrument control bound to a parameter in one graph revision.
 #[derive(Clone, Debug)]
 pub struct ControlHandle {
     id: String,
-    parameter: ParameterHandle,
+    parameters: Vec<ParameterHandle>,
     min: f64,
     max: f64,
+    scale: ControlScale,
 }
 
 impl ControlHandle {
@@ -105,13 +111,19 @@ impl ControlHandle {
         &self.id
     }
     pub fn target(&self) -> &ParameterId {
-        self.parameter.id()
+        self.parameters[0].id()
+    }
+    pub fn targets(&self) -> impl Iterator<Item = &ParameterId> {
+        self.parameters.iter().map(ParameterHandle::id)
     }
     pub fn range(&self) -> (f64, f64) {
         (self.min, self.max)
     }
+    pub fn scale(&self) -> ControlScale {
+        self.scale
+    }
     pub fn override_value(&self) -> Option<f64> {
-        self.parameter.override_value()
+        self.parameters[0].override_value()
     }
     pub fn publish(&self, value: f64) -> Result<(), String> {
         if !value.is_finite() || value < self.min || value > self.max {
@@ -120,10 +132,16 @@ impl ControlHandle {
                 self.id, self.min, self.max
             ));
         }
-        self.parameter.publish(Some(value))
+        for parameter in &self.parameters {
+            parameter.publish(Some(value))?;
+        }
+        Ok(())
     }
     pub fn clear(&self) -> Result<(), String> {
-        self.parameter.publish(None)
+        for parameter in &self.parameters {
+            parameter.publish(None)?;
+        }
+        Ok(())
     }
 }
 
@@ -146,7 +164,8 @@ pub struct Machine {
     midi_notes: Vec<MidiNotes>,
     poly_notes: Vec<PolyMapping>,
     note_pairs: Vec<NotePair>,
-    output_slot: usize,
+    output_slots: [usize; 2],
+    stereo: bool,
     order: Vec<String>,
     authored_normalizations: Vec<Connection>,
     effective_connections: Vec<Connection>,
@@ -260,6 +279,11 @@ impl Machine {
         self.process_prepared(buffer);
     }
 
+    pub fn process_stereo(&mut self, left: &mut [f64], right: &mut [f64]) {
+        self.prepare_buffer();
+        self.process_stereo_prepared(left, right);
+    }
+
     pub(crate) fn prepare_buffer(&mut self) {
         // Snapshot all published values once, before processing this buffer.
         for (index, cell) in self.published.iter().enumerate() {
@@ -302,29 +326,42 @@ impl Machine {
 
     pub(crate) fn process_prepared(&mut self, buffer: &mut [f64]) {
         for sample in buffer {
-            for op in &mut self.ops {
-                for (slot, input) in op.inputs.iter().enumerate() {
-                    self.input_scratch[slot] = if input.sources.is_empty() {
-                        input.unconnected
-                    } else {
-                        input
-                            .sources
-                            .iter()
-                            .fold(0.0, |sum, source| sum + self.slots[*source])
-                    };
-                }
-                for (slot, index) in op.params.iter().enumerate() {
-                    self.param_scratch[slot] = self.params[*index];
-                }
-                (op.process)(
-                    &mut op.state,
-                    &self.input_scratch[..op.inputs.len()],
-                    &self.param_scratch[..op.params.len()],
-                    self.sample_rate,
-                    &mut self.slots[op.outputs.clone()],
-                );
+            self.process_one();
+            *sample = self.slots[self.output_slots[0]];
+        }
+    }
+
+    pub(crate) fn process_stereo_prepared(&mut self, left: &mut [f64], right: &mut [f64]) {
+        assert_eq!(left.len(), right.len());
+        for (left, right) in left.iter_mut().zip(right) {
+            self.process_one();
+            *left = self.slots[self.output_slots[0]];
+            *right = self.slots[self.output_slots[1]];
+        }
+    }
+
+    fn process_one(&mut self) {
+        for op in &mut self.ops {
+            for (slot, input) in op.inputs.iter().enumerate() {
+                self.input_scratch[slot] = if input.sources.is_empty() {
+                    input.unconnected
+                } else {
+                    input
+                        .sources
+                        .iter()
+                        .fold(0.0, |sum, source| sum + self.slots[*source])
+                };
             }
-            *sample = self.slots[self.output_slot];
+            for (slot, index) in op.params.iter().enumerate() {
+                self.param_scratch[slot] = self.params[*index];
+            }
+            (op.process)(
+                &mut op.state,
+                &self.input_scratch[..op.inputs.len()],
+                &self.param_scratch[..op.params.len()],
+                self.sample_rate,
+                &mut self.slots[op.outputs.clone()],
+            );
         }
     }
 
@@ -339,6 +376,9 @@ impl Machine {
     }
     pub fn sample_rate(&self) -> f64 {
         self.sample_rate
+    }
+    pub fn is_stereo(&self) -> bool {
+        self.stereo
     }
     pub(crate) fn revision_token(&self) -> Arc<()> {
         Arc::clone(&self.revision)
@@ -389,7 +429,7 @@ impl Machine {
             .map(|mapping| mapping.voices)
             .ok_or_else(|| format!("no polyphonic MIDI mapping for channel {channel}"))
     }
-    pub(crate) fn poly_note_channels(&self) -> impl Iterator<Item = u8> + '_ {
+    pub fn poly_note_channels(&self) -> impl Iterator<Item = u8> + '_ {
         self.poly_notes.iter().map(|mapping| mapping.channel)
     }
     pub(crate) fn poly_note_overflow(&self, channel: u8) -> Option<crate::model::PolyOverflow> {
@@ -440,7 +480,10 @@ impl Machine {
         })
     }
     pub fn control_ids(&self) -> impl Iterator<Item = &str> {
-        self.controls.keys().map(String::as_str)
+        self.controls
+            .iter()
+            .filter(|(_, binding)| !binding.hidden)
+            .map(|(id, _)| id.as_str())
     }
     pub fn midi_ccs(&self) -> &[MidiCc] {
         &self.midi_ccs
@@ -456,11 +499,16 @@ impl Machine {
     }
     pub fn control_handle(&self, id: &str) -> Option<ControlHandle> {
         let binding = self.controls.get(id)?;
+        let parameters = std::iter::once(&binding.target)
+            .chain(&binding.additional_targets)
+            .map(|target| self.parameter_handle(target))
+            .collect::<Option<Vec<_>>>()?;
         Some(ControlHandle {
             id: id.to_owned(),
-            parameter: self.parameter_handle(&binding.target)?,
+            parameters,
             min: binding.min,
             max: binding.max,
+            scale: binding.scale,
         })
     }
     pub fn set_override(&self, id: &ParameterId, value: Option<f64>) -> Result<(), String> {
@@ -504,7 +552,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         .iter()
         .enumerate()
         .filter(|(_, module)| {
-            contract::find(&module.kind).expect("module checked").role == Role::Output
+            contract::find(&module.kind).expect("module checked").role != Role::Processor
         })
         .map(|(index, _)| index)
         .collect();
@@ -515,14 +563,17 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         ));
     }
 
-    // Slots belong to declared output ports. The Output role has no exposed
-    // port, but owns one private slot for the final sample.
+    // Slots belong to declared output ports. Terminal output roles have no
+    // connectable outputs and own one or two private final-sample slots.
     let mut slot_bases = Vec::with_capacity(graph.modules.len());
     let mut slot_count = 0;
     for module in &graph.modules {
         slot_bases.push(slot_count);
         let c = contract::find(&module.kind).expect("module checked");
-        slot_count += c.outputs.len().max(1);
+        slot_count += match c.role {
+            Role::StereoOutput => 2,
+            _ => c.outputs.len().max(1),
+        };
     }
 
     // Validate both authored edge sets before selecting effective edges. An
@@ -663,17 +714,32 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 control.id
             ));
         }
-        let Some(&parameter_index) = param_ids.get(&control.target) else {
+        if control.scale == ControlScale::Logarithmic && control.min <= 0.0 {
             return Err(format!(
-                "control '{}' targets unknown parameter '{}.{}'",
-                control.id, control.target.module, control.target.name
+                "logarithmic control '{}' requires a positive minimum",
+                control.id
             ));
-        };
-        if let Some((min, max)) = param_ranges[parameter_index] {
-            if control.min < min || control.max > max {
+        }
+        let mut unique_targets = BTreeSet::new();
+        for target in std::iter::once(&control.target).chain(&control.additional_targets) {
+            if !unique_targets.insert(target) {
+                return Err(format!(
+                    "control '{}' repeats a parameter target",
+                    control.id
+                ));
+            }
+            let Some(&parameter_index) = param_ids.get(target) else {
+                return Err(format!(
+                    "control '{}' targets unknown parameter '{}.{}'",
+                    control.id, target.module, target.name
+                ));
+            };
+            if let Some((min, max)) = param_ranges[parameter_index]
+                && (control.min < min || control.max > max)
+            {
                 return Err(format!(
                     "control '{}' range must stay within {}.{} {min}..{max}",
-                    control.id, control.target.module, control.target.name
+                    control.id, target.module, target.name
                 ));
             }
         }
@@ -682,8 +748,11 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 control.id.clone(),
                 ControlBinding {
                     target: control.target.clone(),
+                    additional_targets: control.additional_targets.clone(),
                     min: control.min,
                     max: control.max,
+                    scale: control.scale,
+                    hidden: control.hidden,
                 },
             )
             .is_some()
@@ -899,11 +968,20 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             process: c.process,
             state: vec![0.0; c.state_len],
             inputs,
-            outputs: slot_bases[i]..slot_bases[i] + c.outputs.len().max(1),
+            outputs: slot_bases[i]
+                ..slot_bases[i]
+                    + match c.role {
+                        Role::StereoOutput => 2,
+                        _ => c.outputs.len().max(1),
+                    },
             params,
         });
     }
-    let output_slot = slot_bases[output_slots[0]];
+    let output_base = slot_bases[output_slots[0]];
+    let stereo = contract::find(&graph.modules[output_slots[0]].kind)
+        .expect("module checked")
+        .role
+        == Role::StereoOutput;
     Ok(Machine {
         revision: Arc::new(()),
         ops,
@@ -945,7 +1023,11 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         midi_notes: graph.midi_notes.clone(),
         poly_notes,
         note_pairs,
-        output_slot,
+        output_slots: [
+            output_base,
+            if stereo { output_base + 1 } else { output_base },
+        ],
+        stereo,
         order: schedule
             .iter()
             .map(|&i| graph.modules[i].id.clone())

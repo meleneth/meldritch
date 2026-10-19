@@ -56,8 +56,18 @@ pub struct Subpatch {
 pub struct Control {
     pub id: String,
     pub target: ParameterId,
+    pub additional_targets: Vec<ParameterId>,
     pub min: f64,
     pub max: f64,
+    pub scale: ControlScale,
+    pub hidden: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ControlScale {
+    #[default]
+    Linear,
+    Logarithmic,
 }
 
 #[derive(Clone, Debug)]

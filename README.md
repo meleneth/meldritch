@@ -64,6 +64,17 @@ cargo run -p meldritch2 -- perform crates/meldritch2/examples/66-screens.lua
 cargo test -p meldritch2
 ```
 
+The two complete authored instruments can be performed directly:
+
+```sh
+cargo run -p meldritch2 -- perform examples/instruments/subtractive.lua
+cargo run -p meldritch2 -- perform examples/instruments/drone.lua
+```
+
+The subtractive instrument uses MIDI channel 1 when a MIDI input is selected;
+without one, the existing TUI note keys play it. The drone begins sounding as
+soon as its audio stream starts and needs no MIDI input.
+
 Audio and MIDI device commands depend on available host hardware. The active
 repository check is:
 

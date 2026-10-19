@@ -1,4 +1,5 @@
 use crate::compiler::ControlHandle;
+use crate::model::ControlScale;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Gesture {
@@ -39,10 +40,15 @@ impl ControlRow {
     }
     pub(crate) fn adjust(&mut self, gesture: Gesture) -> Result<(), String> {
         let (min, max) = self.handle.range();
-        let step = (max - min) / 100.0;
         let value = match gesture {
-            Gesture::Decrease => (self.value() - step).clamp(min, max),
-            Gesture::Increase => (self.value() + step).clamp(min, max),
+            Gesture::Decrease if self.handle.scale() == ControlScale::Logarithmic => {
+                (self.value() / (max / min).powf(0.01)).clamp(min, max)
+            }
+            Gesture::Increase if self.handle.scale() == ControlScale::Logarithmic => {
+                (self.value() * (max / min).powf(0.01)).clamp(min, max)
+            }
+            Gesture::Decrease => (self.value() - (max - min) / 100.0).clamp(min, max),
+            Gesture::Increase => (self.value() + (max - min) / 100.0).clamp(min, max),
             Gesture::Minimum => min,
             Gesture::Maximum => max,
             _ => return Ok(()),

@@ -13,6 +13,7 @@ pub enum FanIn {
 pub enum Role {
     Processor,
     Output,
+    StereoOutput,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -48,7 +49,7 @@ pub struct Contract {
     pub params: &'static [Param],
 }
 
-const CONTRACTS: [Contract; 12] = [
+const CONTRACTS: [Contract; 19] = [
     crate::units::constant::CONTRACT,
     crate::units::gain::CONTRACT,
     crate::units::output::CONTRACT,
@@ -61,6 +62,13 @@ const CONTRACTS: [Contract; 12] = [
     crate::units::mirror::CONTRACT,
     crate::units::sample_hold::CONTRACT,
     crate::units::envelope::CONTRACT,
+    crate::units::saw::CONTRACT,
+    crate::units::oscillator_sine::CONTRACT,
+    crate::units::lowpass::CONTRACT,
+    crate::units::adsr::CONTRACT,
+    crate::units::vca::CONTRACT,
+    crate::units::stereo_output::CONTRACT,
+    crate::units::mixer2::CONTRACT,
 ];
 
 pub fn all() -> &'static [Contract] {

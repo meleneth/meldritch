@@ -69,12 +69,14 @@ fn record_stream_error(kind: cpal::ErrorKind, errors: &AtomicU64, first_error: &
     errors.fetch_add(1, Ordering::Relaxed);
 }
 
-/// Copy mono graph output to every device channel without allocating.
+/// Copy graph output to device channels without allocating. Mono graphs are
+/// duplicated; stereo graphs alternate left/right on devices with more than two channels.
 pub fn fill_interleaved<T: Sample + FromSample<f64>>(
     runtime: &mut LiveRuntime,
     output: &mut [T],
     channels: usize,
-    scratch: &mut [f64; CHUNK_FRAMES],
+    left: &mut [f64; CHUNK_FRAMES],
+    right: &mut [f64; CHUNK_FRAMES],
 ) {
     if channels == 0 || output.is_empty() {
         return;
@@ -82,10 +84,16 @@ pub fn fill_interleaved<T: Sample + FromSample<f64>>(
     runtime.begin_buffer();
     for chunk in output.chunks_mut(CHUNK_FRAMES * channels) {
         let frames = chunk.len().div_ceil(channels);
-        runtime.process_prepared(&mut scratch[..frames]);
-        for (frame, value) in chunk.chunks_mut(channels).zip(&scratch[..frames]) {
-            let converted = T::from_sample(value.clamp(-1.0, 1.0));
-            frame.fill(converted);
+        runtime.process_stereo_prepared(&mut left[..frames], &mut right[..frames]);
+        for (index, frame) in chunk.chunks_mut(channels).enumerate() {
+            for (channel, sample) in frame.iter_mut().enumerate() {
+                let value = if channel % 2 == 0 {
+                    left[index]
+                } else {
+                    right[index]
+                };
+                *sample = T::from_sample(value.clamp(-1.0, 1.0));
+            }
         }
     }
 }
@@ -222,6 +230,7 @@ impl DeviceOutput {
             ($sample:ty) => {{
                 let mut runtime = runtime;
                 let mut scratch = [0.0; CHUNK_FRAMES];
+                let mut right_scratch = [0.0; CHUNK_FRAMES];
                 let errors = Arc::clone(&errors);
                 let first_error = Arc::clone(&first_error);
                 let note_errors = Arc::clone(&timed_note_errors);
@@ -240,7 +249,13 @@ impl DeviceOutput {
                                 &note_errors,
                             );
                         } else {
-                            fill_interleaved(&mut runtime, output, channels, &mut scratch);
+                            fill_interleaved(
+                                &mut runtime,
+                                output,
+                                channels,
+                                &mut scratch,
+                                &mut right_scratch,
+                            );
                         }
                     },
                     move |error| {
@@ -348,8 +363,9 @@ mod tests {
         let graph = lua::read(include_str!("../examples/01-basic.lua")).unwrap();
         let (mut runtime, _) = LiveRuntime::new(compile(&graph).unwrap());
         let mut scratch = [0.0; CHUNK_FRAMES];
+        let mut right = [0.0; CHUNK_FRAMES];
         let mut output = vec![0.0_f32; 301 * 2];
-        fill_interleaved(&mut runtime, &mut output, 2, &mut scratch);
+        fill_interleaved(&mut runtime, &mut output, 2, &mut scratch, &mut right);
         assert!(output.iter().all(|sample| *sample == 0.125));
     }
 
@@ -358,8 +374,9 @@ mod tests {
         let graph = lua::read(include_str!("../examples/08-sine.lua")).unwrap();
         let (mut runtime, _) = LiveRuntime::new(compile(&graph).unwrap());
         let mut scratch = [0.0; CHUNK_FRAMES];
+        let mut right = [0.0; CHUNK_FRAMES];
         let mut output = vec![0_i16; 260];
-        fill_interleaved(&mut runtime, &mut output, 1, &mut scratch);
+        fill_interleaved(&mut runtime, &mut output, 1, &mut scratch, &mut right);
         assert_eq!(output[0], 0);
         assert!((i32::from(output[1]) - 8192).abs() <= 1);
         assert_eq!(output[256], 0);

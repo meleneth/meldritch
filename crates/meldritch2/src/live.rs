@@ -65,6 +65,10 @@ impl LiveRuntime {
         self.current.process_prepared(buffer);
     }
 
+    pub(crate) fn process_stereo_prepared(&mut self, left: &mut [f64], right: &mut [f64]) {
+        self.current.process_stereo_prepared(left, right);
+    }
+
     pub fn current(&self) -> &Machine {
         &self.current
     }

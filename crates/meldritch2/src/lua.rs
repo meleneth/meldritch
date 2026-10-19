@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
-use mlua::{Lua, Table, Value};
+use mlua::{Function, Lua, Table, Value};
 
 use crate::contract;
 use crate::model::{
-    Connection, Control, Endpoint, ExternalInput, ExternalParameter, ExternalPort, Graph, MidiCc,
-    MidiNotes, MidiPoly, MidiPolyVoice, Module, ParameterId, PolyOverflow, Screen, Subpatch,
-    SubpatchInstance, Widget,
+    Connection, Control, ControlScale, Endpoint, ExternalInput, ExternalParameter, ExternalPort,
+    Graph, MidiCc, MidiNotes, MidiPoly, MidiPolyVoice, Module, ParameterId, PolyOverflow, Screen,
+    Subpatch, SubpatchInstance, Widget,
 };
 
 const API: &str = r#"
@@ -84,7 +84,7 @@ function meldritch.graph()
     assert(type(parameter) == "string", "control parameter must be a string")
     assert(type(range) == "table", "control range must be a table")
     table.insert(self.controls, { id = id, module = module.id, parameter = parameter,
-      min = range.min, max = range.max })
+      min = range.min, max = range.max, scale = range.scale })
   end
   function graph:midi_cc(control_id, channel, number)
     assert(type(control_id) == "string", "MIDI target must be a control ID")
@@ -137,6 +137,230 @@ function meldritch.subpatch(name)
   meldritch._subpatches[name] = graph
   return graph
 end
+
+local instrument_serial = 0
+
+local function parameter(module, name)
+  return { module = module.id, parameter = name, direction = "parameter" }
+end
+
+local function copy_values(values, names)
+  local copied = {}
+  values = values or {}
+  for _, name in ipairs(names) do
+    if values[name] ~= nil then copied[name] = values[name] end
+  end
+  return copied
+end
+
+local function decorate_scope(facade, scope, prefix)
+  facade._scope = scope
+  facade._counts = {}
+  function facade:_id(kind)
+    self._counts[kind] = (self._counts[kind] or 0) + 1
+    return kind .. "_" .. self._counts[kind]
+  end
+  function facade:oscillator(values)
+    values = values or {}
+    local waveform = values.waveform or "sine"
+    assert(waveform == "sine" or waveform == "saw", "oscillator waveform must be 'sine' or 'saw'")
+    local kind = waveform == "saw" and "saw" or "oscillator_sine"
+    local handle = scope:module(self:_id("oscillator"), kind, copy_values(values, { "frequency" }))
+    handle.frequency = parameter(handle, "frequency")
+    return handle
+  end
+  function facade:lfo(values)
+    values = values or {}
+    assert((values.waveform or "sine") == "sine", "LFO currently supports the sine waveform")
+    local handle = scope:module(self:_id("lfo"), "oscillator_sine", copy_values(values, { "frequency" }))
+    handle.frequency = parameter(handle, "frequency")
+    return handle
+  end
+  function facade:lowpass(values)
+    local handle = scope:module(self:_id("lowpass"), "lowpass", copy_values(values, { "cutoff", "resonance" }))
+    handle.cutoff = parameter(handle, "cutoff")
+    handle.resonance = parameter(handle, "resonance")
+    return handle
+  end
+  function facade:adsr(values)
+    local handle = scope:module(self:_id("adsr"), "adsr", copy_values(values,
+      { "attack", "decay", "sustain", "release" }))
+    handle.attack = parameter(handle, "attack")
+    handle.decay = parameter(handle, "decay")
+    handle.sustain = parameter(handle, "sustain")
+    handle.release = parameter(handle, "release")
+    return handle
+  end
+  function facade:vca(values)
+    assert(values == nil or next(values) == nil, "VCA has no authored values")
+    return scope:module(self:_id("vca"), "vca")
+  end
+  function facade:constant(values)
+    local handle = scope:module(self:_id("constant"), "constant", copy_values(values, { "value" }))
+    handle.value = parameter(handle, "value")
+    return handle
+  end
+  function facade:multiply(values)
+    assert(values == nil or next(values) == nil, "multiply has no authored values")
+    local handle = scope:module(self:_id("multiply"), "multiply")
+    handle.a = handle.left
+    handle.b = handle.right
+    return handle
+  end
+  function facade:mixer(values)
+    values = values or {}
+    assert(values.inputs == 2, "mixer currently requires exactly two inputs")
+    local handle = scope:module(self:_id("mixer"), "mixer2")
+    handle.input = { handle.input_1, handle.input_2 }
+    return handle
+  end
+  function facade:connect(source, destination)
+    scope:connect(source, destination)
+  end
+  function facade:subpatch(label)
+    assert(type(label) == "string" and label ~= "", "subpatch label must be nonempty")
+    local id = self:_id("subpatch")
+    local definition_name = prefix .. "_" .. id
+    local definition = meldritch.subpatch(definition_name)
+    table.insert(scope.instances, { id = id, definition = definition_name, values = {} })
+    local composite = { id = id }
+    decorate_scope(composite, definition, definition_name)
+    function composite:expose(name, target)
+      assert(type(name) == "string" and name ~= "", "exposed name must be nonempty")
+      assert(type(target) == "table", "exposed target must be a port or parameter")
+      if target.direction == "output" then
+        definition:output(name, target)
+        self[name] = { module = id, port = name, direction = "output" }
+      elseif target.direction == "parameter" then
+        definition:parameter(name, { id = target.module }, target.parameter)
+        self[name] = { module = id, parameter = name, direction = "parameter" }
+      else
+        error("expose supports output ports and writable parameters")
+      end
+    end
+    return composite
+  end
+end
+
+function meldritch.instrument(name)
+  assert(type(name) == "string" and name ~= "", "instrument name must be nonempty")
+  instrument_serial = instrument_serial + 1
+  local prefix = "instrument_" .. instrument_serial
+  local definition = meldritch.subpatch(prefix)
+  local instrument = {
+    name = name,
+    _definition = definition,
+    _controls = {},
+    _left = nil,
+    _right = nil,
+    _uses_notes = false,
+    note = {
+      pitch = { direction = "note", signal = "pitch" },
+      gate = { direction = "note", signal = "gate" },
+    },
+    output = {
+      left = { direction = "terminal", channel = "left" },
+      right = { direction = "terminal", channel = "right" },
+    },
+  }
+  decorate_scope(instrument, definition, prefix)
+
+  local ordinary_connect = instrument.connect
+  function instrument:connect(source, destination)
+    if destination.direction == "terminal" then
+      assert(source.direction == "output", "instrument output requires a signal output")
+      if destination.channel == "left" then self._left = source else self._right = source end
+      return
+    end
+    if source.direction == "note" then
+      self._uses_notes = true
+      local field = "_note_" .. source.signal
+      if not self[field] then
+        local module = definition:module("note_" .. source.signal, "constant", { value = 0.0 })
+        self[field] = module
+      end
+      definition:connect(self[field].out, destination)
+      return
+    end
+    ordinary_connect(self, source, destination)
+  end
+
+  function instrument:control(label, target, range)
+    assert(type(label) == "string" and label ~= "", "control label must be nonempty")
+    assert(type(target) == "table" and target.direction == "parameter",
+      "instrument control must target a writable parameter")
+    assert(type(range) == "table", "instrument control requires a range")
+    table.insert(self._controls, { label = label, target = target, range = range })
+  end
+
+  function instrument:_finalize()
+    assert(self._left and self._right, "instrument must connect both left and right outputs")
+    definition:output("left", self._left)
+    definition:output("right", self._right)
+
+    local exports = {}
+    for index, control in ipairs(self._controls) do
+      local exported = "control_" .. index
+      definition:parameter(exported, { id = control.target.module }, control.target.parameter)
+      exports[index] = exported
+    end
+
+    local root = meldritch.graph()
+    local terminal = root:module("output", "stereo_output")
+    if self._uses_notes then
+      assert(self._note_pitch and self._note_gate, "note instruments must connect pitch and gate")
+      definition:parameter("note_pitch", self._note_pitch, "value")
+      definition:parameter("note_gate", self._note_gate, "value")
+      local velocity = definition:module("note_velocity", "constant", { value = 1.0 })
+      definition:parameter("note_velocity", velocity, "value")
+
+      local voices = {}
+      local bindings = {}
+      for index = 1, 4 do
+        local id = "voice_" .. index
+        voices[index] = root:instance(id, definition)
+        local pitch = "__" .. id .. "_pitch"
+        local gate = "__" .. id .. "_gate"
+        local velocity_id = "__" .. id .. "_velocity"
+        root:control(pitch, voices[index], "note_pitch", { min = 8.0, max = 13000.0 })
+        root.controls[#root.controls].hidden = true
+        root:control(gate, voices[index], "note_gate", { min = 0.0, max = 1.0 })
+        root.controls[#root.controls].hidden = true
+        root:control(velocity_id, voices[index], "note_velocity", { min = 0.0, max = 1.0 })
+        root.controls[#root.controls].hidden = true
+        bindings[index] = { pitch = pitch, gate = gate, velocity = velocity_id }
+      end
+      local left = root:module("left_sum", "gain", { gain = 0.25 })
+      local right = root:module("right_sum", "gain", { gain = 0.25 })
+      for index = 1, 4 do
+        root:connect(voices[index].left, left.input)
+        root:connect(voices[index].right, right.input)
+      end
+      root:connect(left.out, terminal.left)
+      root:connect(right.out, terminal.right)
+      root:midi_poly(1, bindings)
+      for index, control in ipairs(self._controls) do
+        local targets = {}
+        for voice = 2, 4 do
+          targets[#targets + 1] = { module = voices[voice].id, parameter = exports[index] }
+        end
+        table.insert(root.controls, {
+          id = control.label, module = voices[1].id, parameter = exports[index], targets = targets,
+          min = control.range.min, max = control.range.max, scale = control.range.scale,
+        })
+      end
+    else
+      local instance = root:instance("instrument", definition)
+      root:connect(instance.left, terminal.left)
+      root:connect(instance.right, terminal.right)
+      for index, control in ipairs(self._controls) do
+        root:control(control.label, instance, exports[index], control.range)
+      end
+    end
+    return root
+  end
+  return instrument
+end
 "#;
 
 pub fn read(script: &str) -> Result<Graph, String> {
@@ -170,7 +394,13 @@ pub fn read(script: &str) -> Result<Graph, String> {
     meldritch
         .set("_contract", discover)
         .map_err(|e| e.to_string())?;
-    let table: Table = lua.load(script).eval().map_err(|e| e.to_string())?;
+    let mut table: Table = lua.load(script).eval().map_err(|e| e.to_string())?;
+    if let Some(finalize) = table
+        .get::<Option<Function>>("_finalize")
+        .map_err(|e| e.to_string())?
+    {
+        table = finalize.call(table.clone()).map_err(|e| e.to_string())?;
+    }
     let mut graph = graph_from_table(table)?;
     let definitions: Table = meldritch
         .get("_subpatches")
@@ -343,8 +573,40 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                 item.get::<String>("module").map_err(|e| e.to_string())?,
                 item.get::<String>("parameter").map_err(|e| e.to_string())?,
             ),
+            additional_targets: item
+                .get::<Option<Table>>("targets")
+                .map_err(|e| e.to_string())?
+                .map(|targets| {
+                    targets
+                        .sequence_values::<Table>()
+                        .map(|target| {
+                            let target = target.map_err(|e| e.to_string())?;
+                            Ok(ParameterId::new(
+                                target.get::<String>("module").map_err(|e| e.to_string())?,
+                                target
+                                    .get::<String>("parameter")
+                                    .map_err(|e| e.to_string())?,
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, String>>()
+                })
+                .transpose()?
+                .unwrap_or_default(),
             min: item.get("min").map_err(|e| e.to_string())?,
             max: item.get("max").map_err(|e| e.to_string())?,
+            scale: match item
+                .get::<Option<String>>("scale")
+                .map_err(|e| e.to_string())?
+                .as_deref()
+            {
+                None | Some("linear") => ControlScale::Linear,
+                Some("log") => ControlScale::Logarithmic,
+                Some(other) => return Err(format!("unknown control scale '{other}'")),
+            },
+            hidden: item
+                .get::<Option<bool>>("hidden")
+                .map_err(|e| e.to_string())?
+                .unwrap_or(false),
         });
     }
     let midi_ccs: Table = table

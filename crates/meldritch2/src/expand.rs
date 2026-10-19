@@ -233,7 +233,7 @@ fn expand_scope(
         }
         let contract = contract::find(&module.kind)
             .ok_or_else(|| format!("unknown module type '{}'", module.kind))?;
-        if !prefix.is_empty() && contract.role == Role::Output {
+        if !prefix.is_empty() && contract.role != Role::Processor {
             return Err("subpatches expose output ports rather than Output modules".into());
         }
         let local_id = module.id.clone();
@@ -366,17 +366,21 @@ fn expand_scope(
         })
     } else {
         for control in &mut expanded.controls {
-            if let Some(instance) = scope
-                .instances
-                .iter()
-                .find(|instance| instance.id == control.target.module)
+            for target in
+                std::iter::once(&mut control.target).chain(control.additional_targets.iter_mut())
             {
-                control.target = resolve_parameter(&local, &control.target).map_err(|_| {
-                    format!(
-                        "invalid exported parameter '{}.{}' for instance '{}'",
-                        instance.id, control.target.name, instance.id
-                    )
-                })?;
+                if let Some(instance) = scope
+                    .instances
+                    .iter()
+                    .find(|instance| instance.id == target.module)
+                {
+                    *target = resolve_parameter(&local, target).map_err(|_| {
+                        format!(
+                            "invalid exported parameter '{}.{}' for instance '{}'",
+                            instance.id, target.name, instance.id
+                        )
+                    })?;
+                }
             }
         }
         Ok(Ports::default())

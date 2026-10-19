@@ -96,8 +96,12 @@ determines their identities. Their signal flow and exposed performance intent
 must be inspectable from Lua, and both must execute through the same general
 compiler and runtime.
 
-**Status:** Future acceptance target. Existing compositions provide ingredients
-but have not been selected and validated as this deliberate comparison.
+**Status:** Accepted by `examples/instruments/subtractive.lua` and
+`examples/instruments/drone.lua`. They use the same production Lua lowering,
+contract registry, compiler, executor, control handles, and stereo output path
+to construct a MIDI-played filtered polyphonic instrument and an ungated
+self-running modular instrument. Integration tests load the authored files and
+compare their observable audio and control behavior.
 
 ## Challenge B: Hierarchical composition
 
@@ -125,9 +129,11 @@ the compiled interface to validate references, and the generic TUI to render
 and operate them through semantic handles. The instrument must remain valid
 without a particular hardware controller.
 
-**Status:** Future acceptance target. Current controls and screens establish a
-working foundation, but a purpose-built instrument must be accepted against
-this complete criterion rather than treating widget count as success.
+**Status:** Accepted by the subtractive and drone instruments. Each declares
+four named controls in Lua; the production control mechanism resolves their
+authored targets, and the generic panel exposes exactly those public controls.
+Allocator controls remain internal rather than becoming part of the presented
+instrument.
 
 ## Challenge D: Structural dynamism
 
