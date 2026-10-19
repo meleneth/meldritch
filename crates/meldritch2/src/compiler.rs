@@ -7,16 +7,105 @@ use std::sync::{
 use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
 use crate::model::{
-    Connection, ControlScale, Graph, MidiCc, MidiNotes, ParameterId, Screen, Widget,
+    Connection, ControlScale, Graph, MidiCc, MidiNotes, ModuleRuntime, ParameterId, Screen, Widget,
 };
+use crate::sample::PreparedSample;
+use crate::sequencer::{SequencerControl, SequencerRuntime};
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct Op {
-    process: fn(&mut [f64], &[f64], &[f64], f64, &mut [f64]),
-    state: Vec<f64>,
+    processor: OpProcessor,
     inputs: Vec<InputPlan>,
     outputs: std::ops::Range<usize>,
     params: Vec<usize>,
+}
+
+#[derive(Debug)]
+enum OpProcessor {
+    Contract {
+        process: contract::ProcessFn,
+        state: Vec<f64>,
+    },
+    Sample(SamplePlayerRuntime),
+    SequencerTrack {
+        sequencer: usize,
+        track: usize,
+    },
+    SequencerTempo(Arc<SequencerControl>),
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SampleVoice {
+    position: f64,
+    age: u64,
+    active: bool,
+}
+
+#[derive(Debug)]
+struct SamplePlayerRuntime {
+    sample: Arc<PreparedSample>,
+    voices: [SampleVoice; 8],
+    last_trigger: f64,
+    age: u64,
+}
+
+impl SamplePlayerRuntime {
+    fn new(sample: Arc<PreparedSample>) -> Self {
+        Self {
+            sample,
+            voices: [SampleVoice::default(); 8],
+            last_trigger: 0.0,
+            age: 0,
+        }
+    }
+    fn process(&mut self, trigger: f64, gain: f64, output_rate: f64, out: &mut [f64]) {
+        if trigger > 0.0 && self.last_trigger <= 0.0 {
+            self.age = self.age.wrapping_add(1);
+            let slot = self
+                .voices
+                .iter()
+                .position(|v| !v.active)
+                .unwrap_or_else(|| {
+                    self.voices
+                        .iter()
+                        .enumerate()
+                        .min_by_key(|(_, v)| v.age)
+                        .unwrap()
+                        .0
+                });
+            self.voices[slot] = SampleVoice {
+                position: 0.0,
+                age: self.age,
+                active: true,
+            };
+        }
+        self.last_trigger = trigger;
+        let increment = self.sample.sample_rate as f64 / output_rate;
+        let mut left = 0.0;
+        let mut right = 0.0;
+        for voice in &mut self.voices {
+            if !voice.active {
+                continue;
+            }
+            let index = voice.position.floor() as usize;
+            if index >= self.sample.frames() {
+                voice.active = false;
+                continue;
+            }
+            let fraction = voice.position - index as f64;
+            let next = (index + 1).min(self.sample.frames() - 1);
+            left += self.sample.left[index]
+                + (self.sample.left[next] - self.sample.left[index]) * fraction;
+            right += self.sample.right[index]
+                + (self.sample.right[next] - self.sample.right[index]) * fraction;
+            voice.position += increment;
+            if voice.position >= self.sample.frames() as f64 {
+                voice.active = false;
+            }
+        }
+        out[0] = left * gain;
+        out[1] = right * gain;
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -170,6 +259,8 @@ pub struct Machine {
     authored_normalizations: Vec<Connection>,
     effective_connections: Vec<Connection>,
     sample_rate: f64,
+    sequencers: Vec<SequencerRuntime>,
+    sequencer_controls: Vec<Arc<SequencerControl>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -341,6 +432,9 @@ impl Machine {
     }
 
     fn process_one(&mut self) {
+        for sequencer in &mut self.sequencers {
+            sequencer.begin_frame(self.sample_rate);
+        }
         for op in &mut self.ops {
             for (slot, input) in op.inputs.iter().enumerate() {
                 self.input_scratch[slot] = if input.sources.is_empty() {
@@ -355,13 +449,24 @@ impl Machine {
             for (slot, index) in op.params.iter().enumerate() {
                 self.param_scratch[slot] = self.params[*index];
             }
-            (op.process)(
-                &mut op.state,
-                &self.input_scratch[..op.inputs.len()],
-                &self.param_scratch[..op.params.len()],
-                self.sample_rate,
-                &mut self.slots[op.outputs.clone()],
-            );
+            let inputs = &self.input_scratch[..op.inputs.len()];
+            let params = &self.param_scratch[..op.params.len()];
+            let outputs = &mut self.slots[op.outputs.clone()];
+            match &mut op.processor {
+                OpProcessor::Contract { process, state } => {
+                    process(state, inputs, params, self.sample_rate, outputs)
+                }
+                OpProcessor::Sample(player) => {
+                    player.process(inputs[0], params[0], self.sample_rate, outputs)
+                }
+                OpProcessor::SequencerTrack { sequencer, track } => {
+                    outputs[0] = self.sequencers[*sequencer].trigger(*track)
+                }
+                OpProcessor::SequencerTempo(control) => {
+                    control.bpm.store(params[0].to_bits(), Ordering::Release);
+                    outputs[0] = params[0];
+                }
+            }
         }
     }
 
@@ -515,6 +620,9 @@ impl Machine {
         self.parameter_handle(id)
             .ok_or_else(|| format!("unknown parameter {}.{}", id.module, id.name))?
             .publish(value)
+    }
+    pub fn sequencer_controls(&self) -> &[Arc<SequencerControl>] {
+        &self.sequencer_controls
     }
 }
 
@@ -936,6 +1044,8 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         })
         .collect();
     let mut ops = Vec::with_capacity(schedule.len());
+    let mut sequencer_controls: Vec<Arc<SequencerControl>> = Vec::new();
+    let mut sequencer_indexes = BTreeMap::<usize, usize>::new();
     for &i in &schedule {
         let module = &graph.modules[i];
         let c = contract::find(&module.kind).expect("module checked");
@@ -964,9 +1074,39 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             .iter()
             .map(|p| param_ids[&ParameterId::new(&module.id, p.name)])
             .collect();
+        let processor = match &module.runtime {
+            ModuleRuntime::Contract => OpProcessor::Contract {
+                process: c.process,
+                state: vec![0.0; c.state_len],
+            },
+            ModuleRuntime::Sample(sample) if module.kind == "sample_player" => {
+                OpProcessor::Sample(SamplePlayerRuntime::new(Arc::clone(sample)))
+            }
+            ModuleRuntime::SequencerTrack { sequencer, track }
+                if module.kind == "sequencer_track" =>
+            {
+                let key = Arc::as_ptr(sequencer) as usize;
+                let index = *sequencer_indexes.entry(key).or_insert_with(|| {
+                    sequencer_controls.push(Arc::clone(sequencer));
+                    sequencer_controls.len() - 1
+                });
+                OpProcessor::SequencerTrack {
+                    sequencer: index,
+                    track: *track,
+                }
+            }
+            ModuleRuntime::SequencerTempo(sequencer) if module.kind == "sequencer_tempo" => {
+                OpProcessor::SequencerTempo(Arc::clone(sequencer))
+            }
+            _ => {
+                return Err(format!(
+                    "module '{}' has incompatible runtime data",
+                    module.id
+                ));
+            }
+        };
         ops.push(Op {
-            process: c.process,
-            state: vec![0.0; c.state_len],
+            processor,
             inputs,
             outputs: slot_bases[i]
                 ..slot_bases[i]
@@ -982,6 +1122,11 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         .expect("module checked")
         .role
         == Role::StereoOutput;
+    let sequencers = sequencer_controls
+        .iter()
+        .cloned()
+        .map(SequencerRuntime::new)
+        .collect();
     Ok(Machine {
         revision: Arc::new(()),
         ops,
@@ -1035,6 +1180,8 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         authored_normalizations: graph.normalizations.clone(),
         effective_connections,
         sample_rate,
+        sequencers,
+        sequencer_controls,
     })
 }
 
@@ -1051,5 +1198,49 @@ impl Host {
     }
     pub fn accepted(&mut self) -> Option<&mut Machine> {
         self.accepted.as_mut()
+    }
+}
+
+#[cfg(test)]
+mod sample_player_tests {
+    use super::*;
+    fn sample(rate: u32, left: &[f64], right: &[f64]) -> Arc<PreparedSample> {
+        Arc::new(PreparedSample {
+            identity: "test".into(),
+            source_version: "v1".into(),
+            sample_rate: rate,
+            channels: 2,
+            left: left.to_vec().into(),
+            right: right.to_vec().into(),
+        })
+    }
+    #[test]
+    fn player_outputs_stereo_resamples_and_completes() {
+        let mut player = SamplePlayerRuntime::new(sample(2, &[1.0, 0.5], &[-1.0, -0.5]));
+        let mut out = [0.0; 2];
+        player.process(1.0, 0.5, 4.0, &mut out);
+        assert_eq!(out, [0.5, -0.5]);
+        player.process(0.0, 0.5, 4.0, &mut out);
+        assert_eq!(out, [0.375, -0.375]);
+        for _ in 0..3 {
+            player.process(0.0, 0.5, 4.0, &mut out);
+        }
+        player.process(0.0, 0.5, 4.0, &mut out);
+        assert_eq!(out, [0.0, 0.0]);
+        assert!(out.iter().all(|v| v.is_finite()));
+    }
+    #[test]
+    fn retriggers_overlap_and_ninth_voice_steals_oldest() {
+        let mut player = SamplePlayerRuntime::new(sample(48_000, &[1.0; 32], &[1.0; 32]));
+        let mut out = [0.0; 2];
+        player.process(1.0, 1.0, 48_000.0, &mut out);
+        player.process(0.0, 1.0, 48_000.0, &mut out);
+        player.process(1.0, 1.0, 48_000.0, &mut out);
+        assert_eq!(out, [2.0, 2.0]);
+        for _ in 0..7 {
+            player.process(0.0, 1.0, 48_000.0, &mut out);
+            player.process(1.0, 1.0, 48_000.0, &mut out);
+        }
+        assert_eq!(player.voices.iter().filter(|voice| voice.active).count(), 8);
     }
 }

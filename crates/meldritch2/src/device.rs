@@ -13,7 +13,7 @@ use crate::{
     live::{LiveControl, LiveRuntime},
     live_notes::{LiveNoteConsumer, live_note_queue},
     midi::{MidiRouter, TimedMidiRouter},
-    model::{Graph, Screen},
+    model::{Action, Graph, Performance, Screen},
 };
 
 const CHUNK_FRAMES: usize = 256;
@@ -141,6 +141,9 @@ pub struct DeviceOutput {
     control: LiveControl,
     controls: Vec<(ControlHandle, f64)>,
     screens: Vec<Screen>,
+    performance: Option<Performance>,
+    actions: Vec<Action>,
+    apc_mini: Option<String>,
     midi_router: MidiRouter,
     timed_midi_router: Option<TimedMidiRouter>,
     errors: Arc<AtomicU64>,
@@ -243,6 +246,9 @@ impl DeviceOutput {
         }
         let machine = compile_at_rate(graph, f64::from(config.sample_rate))?;
         let screens = machine.screens().to_vec();
+        let performance = graph.performance.clone();
+        let actions = graph.actions.clone();
+        let apc_mini = graph.devices.apc_mini.clone();
         let controls = machine
             .control_ids()
             .map(|id| {
@@ -326,6 +332,9 @@ impl DeviceOutput {
             control,
             controls,
             screens,
+            performance,
+            actions,
+            apc_mini,
             midi_router,
             timed_midi_router,
             errors,
@@ -352,6 +361,15 @@ impl DeviceOutput {
     }
     pub fn screens(&self) -> &[Screen] {
         &self.screens
+    }
+    pub fn performance(&self) -> Option<&Performance> {
+        self.performance.as_ref()
+    }
+    pub fn actions(&self) -> &[Action] {
+        &self.actions
+    }
+    pub fn apc_mini(&self) -> Option<&str> {
+        self.apc_mini.as_deref()
     }
     pub fn midi_router(&self) -> MidiRouter {
         self.midi_router.clone()

@@ -42,14 +42,16 @@ pub struct Param {
 pub struct Contract {
     pub name: &'static str,
     pub role: Role,
-    pub process: fn(&mut [f64], &[f64], &[f64], f64, &mut [f64]),
+    pub process: ProcessFn,
     pub state_len: usize,
     pub inputs: &'static [InputPort],
     pub outputs: &'static [OutputPort],
     pub params: &'static [Param],
 }
 
-const CONTRACTS: [Contract; 19] = [
+pub type ProcessFn = fn(&mut [f64], &[f64], &[f64], f64, &mut [f64]);
+
+const CONTRACTS: [Contract; 23] = [
     crate::units::constant::CONTRACT,
     crate::units::gain::CONTRACT,
     crate::units::output::CONTRACT,
@@ -69,6 +71,10 @@ const CONTRACTS: [Contract; 19] = [
     crate::units::vca::CONTRACT,
     crate::units::stereo_output::CONTRACT,
     crate::units::mixer2::CONTRACT,
+    crate::units::sample_player::CONTRACT,
+    crate::units::sequencer_track::CONTRACT,
+    crate::units::sequencer_tempo::CONTRACT,
+    crate::units::stereo_mixer8::CONTRACT,
 ];
 
 pub fn all() -> &'static [Contract] {

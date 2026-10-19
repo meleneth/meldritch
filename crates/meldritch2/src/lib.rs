@@ -11,7 +11,9 @@ pub mod midi_device;
 pub mod model;
 pub mod panel;
 pub mod poly;
+pub mod sample;
 mod screen_panel;
+pub mod sequencer;
 pub mod timed;
 pub mod tui;
 mod units;
@@ -110,7 +112,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 19);
+        assert_eq!(contract::all().len(), 23);
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.role, Role::Processor);
         assert_eq!(gain.inputs[0].name, "input");
@@ -4120,3 +4122,4 @@ return graph
         assert_eq!(samples, [0.09375; 4]);
     }
 }
+pub mod apc;

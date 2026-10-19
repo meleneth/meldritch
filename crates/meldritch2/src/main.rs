@@ -10,9 +10,12 @@ use meldritch2::{
 };
 
 fn load_graph(path: &str) -> Result<Graph, String> {
+    let path = std::path::Path::new(path);
     fs::read_to_string(path)
         .map_err(|error| error.to_string())
-        .and_then(|script| lua::read(&script))
+        .and_then(|script| {
+            lua::read_with_root(&script, path.parent().unwrap_or(std::path::Path::new(".")))
+        })
 }
 
 fn open_output(graph: &Graph, device_arg: Option<String>) -> Result<DeviceOutput, String> {
@@ -36,7 +39,7 @@ fn main() {
     let mut args = env::args().skip(1);
     let Some(first) = args.next() else {
         eprintln!(
-            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]\nAudio and MIDI names may instead be configured in the Lua script with graph:devices {{ audio_output = NAME, midi_input = NAME }}."
+            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]\nAudio and controller names may instead be configured in Lua with graph:devices {{ audio_output = NAME, midi_input = NAME, apc_mini = NAME }}."
         );
         process::exit(2);
     };

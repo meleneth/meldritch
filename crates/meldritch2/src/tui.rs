@@ -141,6 +141,7 @@ fn draw(
     output: &DeviceOutput,
     midi_session: Option<&MidiInputSession>,
     keyboard: Option<&TuiKeyboard>,
+    step_grid: Option<(usize, usize)>,
 ) -> Result<(), String> {
     let mut out = stdout();
     queue!(
@@ -160,7 +161,50 @@ fn draw(
         })
     )
     .map_err(|error| error.to_string())?;
-    if let Some(keyboard) = keyboard {
+    if let Some((page, selected_track)) = step_grid {
+        let performance = output.performance().expect("step grid performance");
+        let sequence = &performance.sequencer;
+        let names = sequence.track_names();
+        let pattern = sequence.pattern();
+        let first = page * 8;
+        queue!(out, Print(format!(
+            "{}                 {:.0} BPM    {}\r\nPage {} ({:02}-{:02})                   Step {:02}\r\n\r\n          ",
+            sequence.name, sequence.bpm(), if sequence.playing() { "PLAYING" } else { "STOPPED" },
+            if page == 0 { "A" } else { "B" }, first + 1, first + 8, sequence.current_step() + 1,
+        ))).map_err(|error| error.to_string())?;
+        for step in first..first + 8 {
+            queue!(out, Print(format!("{:02} ", step + 1))).map_err(|e| e.to_string())?;
+        }
+        queue!(out, Print("\r\n")).map_err(|e| e.to_string())?;
+        for (track, name) in names.iter().enumerate() {
+            queue!(
+                out,
+                Print(format!(
+                    "{}{:8} ",
+                    if track == selected_track { ">" } else { " " },
+                    name
+                ))
+            )
+            .map_err(|e| e.to_string())?;
+            for step in first..first + 8 {
+                let glyph = if sequence.current_step() == step && sequence.playing() {
+                    if pattern.velocities[track][step] > 0.0 {
+                        "◆"
+                    } else {
+                        "◇"
+                    }
+                } else if pattern.velocities[track][step] > 0.0 {
+                    "●"
+                } else {
+                    "·"
+                };
+                queue!(out, Print(format!(" {glyph} "))).map_err(|e| e.to_string())?;
+            }
+            queue!(out, Print("\r\n")).map_err(|e| e.to_string())?;
+        }
+        queue!(out, Print("\r\n1-8: toggle  Up/Down: track  Tab: page  Space: play/stop  +/-: BPM  r: restart  Shift-C: clear track\r\n"))
+            .map_err(|e| e.to_string())?;
+    } else if let Some(keyboard) = keyboard {
         queue!(
             out,
             Print(format!(
@@ -175,7 +219,9 @@ fn draw(
                 .map_err(|error| error.to_string())?;
         }
     }
-    if let Some(screens) = screens {
+    if step_grid.is_none()
+        && let Some(screens) = screens
+    {
         let screen = screens.current();
         let (position, count) = screens.position();
         queue!(
@@ -210,7 +256,7 @@ fn draw(
             }
             .map_err(|error| error.to_string())?;
         }
-    } else {
+    } else if step_grid.is_none() {
         if panel.rows().is_empty() {
             queue!(out, Print("This instrument declares no controls.\r\n"))
                 .map_err(|error| error.to_string())?;
@@ -255,7 +301,18 @@ pub fn perform(
     midi_session: Option<&MidiInputSession>,
     mut keyboard: Option<TuiKeyboard>,
 ) -> Result<(), String> {
+    let _apc = match (output.apc_mini(), output.performance()) {
+        (Some(name), Some(performance)) => Some(crate::apc::ApcSession::start(
+            name.to_owned(),
+            std::sync::Arc::clone(&performance.sequencer),
+        )),
+        _ => None,
+    };
     let controls = output.controls();
+    let tempo_control = controls
+        .iter()
+        .find(|(control, _)| control.id() == "Tempo")
+        .map(|(control, _)| control.clone());
     let mut screens = if output.screens().is_empty() {
         None
     } else {
@@ -269,7 +326,10 @@ pub fn perform(
         output,
         midi_session,
         keyboard.as_ref(),
+        output.performance().map(|_| (0, 0)),
     )?;
+    let mut grid_page = 0usize;
+    let mut grid_track = 0usize;
     loop {
         if !event::poll(Duration::from_millis(100)).map_err(|error| error.to_string())? {
             draw(
@@ -278,6 +338,7 @@ pub fn perform(
                 output,
                 midi_session,
                 keyboard.as_ref(),
+                output.performance().map(|_| (grid_page, grid_track)),
             )?;
             continue;
         }
@@ -292,6 +353,44 @@ pub fn perform(
         {
             break;
         }
+        if let Some(performance) = output.performance() {
+            let sequence = &performance.sequencer;
+            match key.code {
+                KeyCode::Tab | KeyCode::BackTab => grid_page = 1 - grid_page,
+                KeyCode::Up => grid_track = grid_track.saturating_sub(1),
+                KeyCode::Down => {
+                    grid_track =
+                        (grid_track + 1).min(sequence.track_names().len().saturating_sub(1))
+                }
+                KeyCode::Char(' ') => sequence.toggle_transport(),
+                KeyCode::Char('+') | KeyCode::Char('=') => {
+                    if let Some(control) = &tempo_control {
+                        control.publish((sequence.bpm() + 1.0).min(control.range().1))?;
+                    }
+                }
+                KeyCode::Char('-') => {
+                    if let Some(control) = &tempo_control {
+                        control.publish((sequence.bpm() - 1.0).max(control.range().0))?;
+                    }
+                }
+                KeyCode::Char('r') => sequence.restart(),
+                KeyCode::Char('C') => sequence.clear_track(grid_track)?,
+                KeyCode::Char(number @ '1'..='8') => {
+                    let column = number as usize - '1' as usize;
+                    sequence.toggle(grid_track, grid_page * 8 + column)?;
+                }
+                _ => {}
+            }
+            draw(
+                &panel,
+                screens.as_ref(),
+                output,
+                midi_session,
+                keyboard.as_ref(),
+                Some((grid_page, grid_track)),
+            )?;
+            continue;
+        }
         if key.modifiers.difference(KeyModifiers::SHIFT).is_empty()
             && let Some(keyboard) = &mut keyboard
         {
@@ -304,6 +403,7 @@ pub fn perform(
                         output,
                         midi_session,
                         Some(keyboard),
+                        None,
                     )?;
                     continue;
                 }
@@ -315,6 +415,7 @@ pub fn perform(
                         output,
                         midi_session,
                         Some(keyboard),
+                        None,
                     )?;
                     continue;
                 }
@@ -335,6 +436,7 @@ pub fn perform(
                     output,
                     midi_session,
                     keyboard.as_ref(),
+                    None,
                 )?;
                 continue;
             }
@@ -360,6 +462,7 @@ pub fn perform(
                 output,
                 midi_session,
                 keyboard.as_ref(),
+                None,
             )?;
         }
     }

@@ -1,4 +1,8 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use crate::sample::PreparedSample;
+use crate::sequencer::SequencerControl;
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Endpoint {
@@ -11,6 +15,19 @@ pub struct Module {
     pub id: String,
     pub kind: String,
     pub values: BTreeMap<String, f64>,
+    pub runtime: ModuleRuntime,
+}
+
+#[derive(Clone, Debug, Default)]
+pub enum ModuleRuntime {
+    #[default]
+    Contract,
+    Sample(Arc<PreparedSample>),
+    SequencerTrack {
+        sequencer: Arc<SequencerControl>,
+        track: usize,
+    },
+    SequencerTempo(Arc<SequencerControl>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -144,12 +161,36 @@ pub struct Graph {
     pub midi_notes: Vec<MidiNotes>,
     pub midi_poly: Vec<MidiPoly>,
     pub screens: Vec<Screen>,
+    pub performance: Option<Performance>,
+    pub actions: Vec<Action>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Performance {
+    pub layout: String,
+    pub sequencer: Arc<SequencerControl>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TransportAction {
+    Toggle,
+    Start,
+    Stop,
+    Restart,
+}
+
+#[derive(Clone, Debug)]
+pub struct Action {
+    pub label: String,
+    pub sequencer: Arc<SequencerControl>,
+    pub action: TransportAction,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DevicePreferences {
     pub audio_output: Option<String>,
     pub midi_input: Option<String>,
+    pub apc_mini: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]

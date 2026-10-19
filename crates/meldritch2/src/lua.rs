@@ -1,20 +1,87 @@
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use mlua::{Function, Lua, Table, Value};
+use mlua::{AnyUserData, Function, Lua, Table, UserData, UserDataMethods, Value};
 
 use crate::contract;
 use crate::model::{
-    Connection, Control, ControlScale, Endpoint, ExternalInput, ExternalParameter, ExternalPort,
-    Graph, MidiCc, MidiNotes, MidiPoly, MidiPolyVoice, Module, ParameterId, PolyOverflow, Screen,
-    Subpatch, SubpatchInstance, Widget,
+    Action, Connection, Control, ControlScale, Endpoint, ExternalInput, ExternalParameter,
+    ExternalPort, Graph, MidiCc, MidiNotes, MidiPoly, MidiPolyVoice, Module, ModuleRuntime,
+    ParameterId, Performance, PolyOverflow, Screen, Subpatch, SubpatchInstance, Widget,
 };
+use crate::sample::{PreparedSample, SampleBank};
+use crate::sequencer::SequencerControl;
+
+#[derive(Clone, Debug)]
+struct LuaSampleBank(SampleBank);
+#[derive(Clone, Debug)]
+struct LuaSample(Arc<PreparedSample>);
+#[derive(Clone, Debug)]
+struct LuaSequencer(Arc<SequencerControl>);
+#[derive(Clone, Debug)]
+struct LuaSequencerTrack {
+    sequencer: Arc<SequencerControl>,
+    track: usize,
+}
+#[derive(Clone, Debug)]
+struct LuaSequencerTempo(Arc<SequencerControl>);
+impl UserData for LuaSample {}
+impl UserData for LuaSequencerTrack {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("borrow_track", |_, this, ()| Ok(this.track));
+    }
+}
+impl UserData for LuaSequencerTempo {}
+impl UserData for LuaSampleBank {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("load", |lua, this, (name, variant): (String, usize)| {
+            lua.create_userdata(LuaSample(
+                this.0.load(&name, variant).map_err(mlua::Error::external)?,
+            ))
+        });
+    }
+}
+impl UserData for LuaSequencer {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("track", |lua, this, name: String| {
+            let track = this.0.add_track(name).map_err(mlua::Error::external)?;
+            lua.create_userdata(LuaSequencerTrack {
+                sequencer: Arc::clone(&this.0),
+                track,
+            })
+        });
+        methods.add_method("set_steps", |_, this, (track, values): (usize, Table)| {
+            let values = values
+                .sequence_values::<f32>()
+                .collect::<mlua::Result<Vec<_>>>()?;
+            this.0
+                .set_steps(track, &values)
+                .map_err(mlua::Error::external)
+        });
+        methods.add_method("start", |_, this, ()| {
+            this.0.start();
+            Ok(())
+        });
+        methods.add_method("stop", |_, this, ()| {
+            this.0.stop();
+            Ok(())
+        });
+        methods.add_method("restart", |_, this, ()| {
+            this.0.restart();
+            Ok(())
+        });
+    }
+}
 
 const API: &str = r#"
 meldritch = { _subpatches = {} }
 function meldritch.graph()
   local graph = { modules = {}, instances = {}, connections = {}, normalizations = {},
     controls = {}, midi_ccs = {}, note_bindings = {}, poly_bindings = {}, external_inputs = {}, external_outputs = {},
-    external_parameters = {}, screens = {}, _devices = {} }
+    external_parameters = {}, screens = {}, actions = {}, performance = nil, _devices = {} }
   function graph:devices(devices)
     assert(type(devices) == "table", "devices must be a table")
     assert(devices.audio_output == nil or
@@ -23,15 +90,19 @@ function meldritch.graph()
     assert(devices.midi_input == nil or
       (type(devices.midi_input) == "string" and devices.midi_input ~= ""),
       "midi_input device name must be a nonempty string")
+    assert(devices.apc_mini == nil or
+      (type(devices.apc_mini) == "string" and devices.apc_mini ~= ""),
+      "apc_mini device name must be a nonempty string")
     for name, _ in pairs(devices) do
-      assert(name == "audio_output" or name == "midi_input", "unknown device role: " .. tostring(name))
+      assert(name == "audio_output" or name == "midi_input" or name == "apc_mini", "unknown device role: " .. tostring(name))
     end
     self._devices = {
       audio_output = devices.audio_output,
       midi_input = devices.midi_input,
+      apc_mini = devices.apc_mini,
     }
   end
-  function graph:module(id, kind, values)
+  function graph:module(id, kind, values, runtime)
     assert(type(id) == "string" and type(kind) == "string", "module ID and type must be strings")
     local spec = meldritch._contract(kind)
     assert(spec, "unknown module type: " .. kind)
@@ -42,7 +113,7 @@ function meldritch.graph()
     for _, name in ipairs(spec.outputs) do
       handle[name] = { module = id, port = name, direction = "output" }
     end
-    table.insert(self.modules, { id = id, kind = kind, values = values or {} })
+    table.insert(self.modules, { id = id, kind = kind, values = values or {}, runtime = runtime })
     return handle
   end
   function graph:connect(source, destination)
@@ -228,12 +299,53 @@ local function decorate_scope(facade, scope, prefix)
   end
   function facade:mixer(values)
     values = values or {}
-    assert(values.inputs == 2, "mixer currently requires exactly two inputs")
+    if values.inputs == 8 then
+      local handle = scope:module(self:_id("mixer"), "stereo_mixer8", { headroom = values.headroom or 0.25 })
+      handle.input = {}
+      for i = 1, 8 do handle.input[i] = { left = handle["left_" .. i], right = handle["right_" .. i], direction = "stereo_input" } end
+      return handle
+    end
+    assert(values.inputs == 2, "mixer requires two mono or eight stereo inputs")
     local handle = scope:module(self:_id("mixer"), "mixer2")
     handle.input = { handle.input_1, handle.input_2 }
     return handle
   end
+  function facade:sample_player(values)
+    assert(type(values) == "table" and values.sample ~= nil, "sample_player requires a prepared sample")
+    local handle = scope:module(self:_id("sample_player"), "sample_player", { gain = values.gain or 1.0 }, values.sample)
+    handle.out = { left = handle.left, right = handle.right, direction = "stereo_output" }
+    return handle
+  end
+  function facade:sequencer(values)
+    assert(type(values) == "table", "sequencer requires settings")
+    local native = meldritch._sequencer(self.name or prefix, values.bpm, values.steps, values.steps_per_beat)
+    local tempo = scope:module(self:_id("sequencer_tempo"), "sequencer_tempo", { bpm = values.bpm }, meldritch._sequencer_tempo(native))
+    local sequence = { _native = native, _tracks = {}, bpm = parameter(tempo, "bpm") }
+    function sequence:track(name)
+      assert(type(name) == "string" and name ~= "", "track name must be nonempty")
+      local runtime = self._native:track(name)
+      local track = runtime:borrow_track()
+      self._tracks[name] = track
+      return scope:module(facade:_id("sequence_track"), "sequencer_track", {}, runtime)
+    end
+    function sequence:steps(name, values)
+      local track = assert(self._tracks[name], "unknown sequencer track: " .. tostring(name))
+      self._native:set_steps(track, values)
+    end
+    local function command(self, kind)
+      if facade._capturing_action then
+        table.insert(facade._actions, { label = facade._capturing_action, native = self._native, action = kind })
+      else self._native[kind](self._native) end
+    end
+    function sequence:start() command(self, "start") end
+    function sequence:stop() command(self, "stop") end
+    function sequence:restart() command(self, "restart") end
+    return sequence
+  end
   function facade:connect(source, destination)
+    if source.direction == "stereo_output" and destination.direction == "stereo_input" then
+      scope:connect(source.left, destination.left); scope:connect(source.right, destination.right); return
+    end
     scope:connect(source, destination)
   end
   function facade:subpatch(label)
@@ -273,6 +385,7 @@ function meldritch.instrument(name)
     _left = nil,
     _right = nil,
     _uses_notes = false,
+    _actions = {},
     note = {
       pitch = { direction = "note", signal = "pitch" },
       gate = { direction = "note", signal = "gate" },
@@ -312,6 +425,15 @@ function meldritch.instrument(name)
     table.insert(self._controls, { label = label, target = target, range = range })
   end
 
+  function instrument:action(label, callback)
+    assert(type(label) == "string" and type(callback) == "function", "action requires a label and callback")
+    self._capturing_action = label; callback(); self._capturing_action = nil
+  end
+  function instrument:performance(spec)
+    assert(type(spec) == "table" and spec.layout == "step_grid" and spec.sequencer, "performance requires a step_grid sequencer")
+    self._performance = { layout = spec.layout, native = spec.sequencer._native }
+  end
+
   function instrument:_finalize()
     assert(self._left and self._right, "instrument must connect both left and right outputs")
     definition:output("left", self._left)
@@ -326,6 +448,8 @@ function meldritch.instrument(name)
 
     local root = meldritch.graph()
     root._devices = definition._devices
+    root.actions = self._actions
+    root.performance = self._performance
     local terminal = root:module("output", "stereo_output")
     if self._uses_notes then
       assert(self._note_pitch and self._note_gate, "note instruments must connect pitch and gate")
@@ -384,6 +508,11 @@ end
 "#;
 
 pub fn read(script: &str) -> Result<Graph, String> {
+    let root = std::env::current_dir().map_err(|error| error.to_string())?;
+    read_with_root(script, &root)
+}
+
+pub fn read_with_root(script: &str, project_root: &Path) -> Result<Graph, String> {
     let lua = Lua::new();
     let discover = lua
         .create_function(|lua, kind: String| {
@@ -413,6 +542,53 @@ pub fn read(script: &str) -> Result<Graph, String> {
     let meldritch: Table = lua.globals().get("meldritch").map_err(|e| e.to_string())?;
     meldritch
         .set("_contract", discover)
+        .map_err(|e| e.to_string())?;
+    let root = project_root.to_path_buf();
+    let samples = lua
+        .create_function(move |lua, spec: Table| {
+            let source: String = spec.get("source")?;
+            let bank: String = spec.get("bank")?;
+            let cache = spec.get::<Option<bool>>("cache")?.unwrap_or(true);
+            let bank = match source.as_str() {
+                "strudel" => SampleBank::strudel(bank, cache, root.clone()),
+                "local" => {
+                    let manifest: String = spec.get("manifest")?;
+                    SampleBank::local(bank, PathBuf::from(manifest), cache, root.clone())
+                }
+                _ => {
+                    return Err(mlua::Error::external(format!(
+                        "unsupported sample source '{source}'"
+                    )));
+                }
+            }
+            .map_err(mlua::Error::external)?;
+            lua.create_userdata(LuaSampleBank(bank))
+        })
+        .map_err(|e| e.to_string())?;
+    meldritch
+        .set("samples", samples)
+        .map_err(|e| e.to_string())?;
+    let sequencer = lua
+        .create_function(
+            |lua, (name, bpm, steps, resolution): (String, f64, usize, u32)| {
+                lua.create_userdata(LuaSequencer(
+                    SequencerControl::new(name, bpm, steps, resolution)
+                        .map_err(mlua::Error::external)?,
+                ))
+            },
+        )
+        .map_err(|e| e.to_string())?;
+    meldritch
+        .set("_sequencer", sequencer)
+        .map_err(|e| e.to_string())?;
+    let tempo = lua
+        .create_function(|lua, native: AnyUserData| {
+            let native = native.borrow::<LuaSequencer>()?;
+            lua.create_userdata(LuaSequencerTempo(Arc::clone(&native.0)))
+        })
+        .map_err(|e| e.to_string())?;
+    meldritch
+        .set("_sequencer_tempo", tempo)
         .map_err(|e| e.to_string())?;
     let mut table: Table = lua.load(script).eval().map_err(|e| e.to_string())?;
     if let Some(finalize) = table
@@ -505,6 +681,37 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
     graph.devices.midi_input = devices
         .get::<Option<String>>("midi_input")
         .map_err(|e| format!("midi_input device: {e}"))?;
+    graph.devices.apc_mini = devices
+        .get::<Option<String>>("apc_mini")
+        .map_err(|e| format!("apc_mini device: {e}"))?;
+    if let Some(performance) = table
+        .get::<Option<Table>>("performance")
+        .map_err(|e| e.to_string())?
+    {
+        let native: AnyUserData = performance.get("native").map_err(|e| e.to_string())?;
+        let native = native.borrow::<LuaSequencer>().map_err(|e| e.to_string())?;
+        graph.performance = Some(Performance {
+            layout: performance.get("layout").map_err(|e| e.to_string())?,
+            sequencer: Arc::clone(&native.0),
+        });
+    }
+    let actions: Table = table.get("actions").map_err(|e| e.to_string())?;
+    for action in actions.sequence_values::<Table>() {
+        let action = action.map_err(|e| e.to_string())?;
+        let native: AnyUserData = action.get("native").map_err(|e| e.to_string())?;
+        let native = native.borrow::<LuaSequencer>().map_err(|e| e.to_string())?;
+        let kind: String = action.get("action").map_err(|e| e.to_string())?;
+        graph.actions.push(Action {
+            label: action.get("label").map_err(|e| e.to_string())?,
+            sequencer: Arc::clone(&native.0),
+            action: match kind.as_str() {
+                "start" => crate::model::TransportAction::Start,
+                "stop" => crate::model::TransportAction::Stop,
+                "restart" => crate::model::TransportAction::Restart,
+                _ => return Err(format!("unknown transport action '{kind}'")),
+            },
+        });
+    }
     let screens: Table = table.get("screens").map_err(|e| e.to_string())?;
     for screen in screens.sequence_values::<Table>() {
         let screen = screen.map_err(|e| e.to_string())?;
@@ -548,10 +755,38 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
             let (name, value) = pair.map_err(|e| e.to_string())?;
             params.insert(name, value);
         }
+        let runtime = match item
+            .get::<Option<AnyUserData>>("runtime")
+            .map_err(|e| e.to_string())?
+        {
+            None => ModuleRuntime::Contract,
+            Some(value) if value.is::<LuaSample>() => ModuleRuntime::Sample(Arc::clone(
+                &value.borrow::<LuaSample>().map_err(|e| e.to_string())?.0,
+            )),
+            Some(value) if value.is::<LuaSequencerTrack>() => {
+                let value = value
+                    .borrow::<LuaSequencerTrack>()
+                    .map_err(|e| e.to_string())?;
+                ModuleRuntime::SequencerTrack {
+                    sequencer: Arc::clone(&value.sequencer),
+                    track: value.track,
+                }
+            }
+            Some(value) if value.is::<LuaSequencerTempo>() => {
+                ModuleRuntime::SequencerTempo(Arc::clone(
+                    &value
+                        .borrow::<LuaSequencerTempo>()
+                        .map_err(|e| e.to_string())?
+                        .0,
+                ))
+            }
+            Some(_) => return Err("unknown module runtime payload".into()),
+        };
         graph.modules.push(Module {
             id: item.get("id").map_err(|e| e.to_string())?,
             kind: item.get("kind").map_err(|e| e.to_string())?,
             values: params,
+            runtime,
         });
     }
     let instances: Table = table
@@ -700,7 +935,9 @@ fn endpoint(table: Table) -> Result<Endpoint, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::read;
+    use super::{read, read_with_root};
+    use crate::compiler::compile_at_rate;
+    use std::{fs, io::Cursor};
 
     #[test]
     fn reads_expected_device_names_from_graph() {
@@ -751,5 +988,69 @@ mod tests {
             graph.devices.midi_input.as_deref(),
             Some("MicroLab mk3:MicroLab mk3")
         );
+    }
+
+    #[test]
+    fn production_tr909_example_composes_and_renders_with_local_fixture() {
+        let root = std::env::temp_dir().join(format!("meldritch-tr909-lua-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let mut wav = Cursor::new(Vec::new());
+        {
+            let mut writer = hound::WavWriter::new(
+                &mut wav,
+                hound::WavSpec {
+                    channels: 2,
+                    sample_rate: 800,
+                    bits_per_sample: 16,
+                    sample_format: hound::SampleFormat::Int,
+                },
+            )
+            .unwrap();
+            for frame in 0..64 {
+                writer
+                    .write_sample::<i16>(if frame == 0 { 24_000 } else { 4_000 })
+                    .unwrap();
+                writer
+                    .write_sample::<i16>(if frame == 0 { -24_000 } else { -4_000 })
+                    .unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+        fs::write(root.join("fixture.wav"), wav.into_inner()).unwrap();
+        fs::write(
+            root.join("strudel.json"),
+            r#"{
+          "RolandTR909_bd":"fixture.wav", "RolandTR909_sd":"fixture.wav",
+          "RolandTR909_cp":"fixture.wav", "RolandTR909_hh":"fixture.wav",
+          "RolandTR909_oh":"fixture.wav", "RolandTR909_lt":"fixture.wav",
+          "RolandTR909_ht":"fixture.wav", "RolandTR909_rd":"fixture.wav"
+        }"#,
+        )
+        .unwrap();
+        let source = include_str!("../../../examples/instruments/tr909.lua").replace(
+            "source = \"strudel\",",
+            "source = \"local\", manifest = \"strudel.json\",",
+        );
+        let graph = read_with_root(&source, &root).unwrap();
+        assert_eq!(graph.devices.audio_output, None);
+        assert!(graph.performance.is_some());
+        assert_eq!(graph.actions.len(), 3);
+        let mut machine = compile_at_rate(&graph, 800.0).unwrap();
+        assert_eq!(
+            machine
+                .order()
+                .iter()
+                .filter(|id| id.contains("sample_player"))
+                .count(),
+            8
+        );
+        assert_eq!(machine.sequencer_controls()[0].track_names().len(), 8);
+        let mut left = vec![0.0; 800];
+        let mut right = vec![0.0; 800];
+        machine.process_stereo(&mut left, &mut right);
+        assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
+        assert!(left.iter().any(|sample| sample.abs() > 0.001));
+        assert!(right.iter().any(|sample| sample.abs() > 0.001));
     }
 }

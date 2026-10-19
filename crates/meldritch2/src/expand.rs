@@ -49,6 +49,8 @@ pub fn expand(graph: &Graph) -> Result<Graph, String> {
         midi_notes: graph.midi_notes.clone(),
         midi_poly: graph.midi_poly.clone(),
         screens: graph.screens.clone(),
+        performance: graph.performance.clone(),
+        actions: graph.actions.clone(),
         ..Graph::default()
     };
     let mut ids = BTreeSet::new();
