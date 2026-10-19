@@ -89,6 +89,9 @@ The APC mini mk2 Session-mode mapping is generic to the `step_grid` layout:
 - pad rows are tracks and columns are the visible eight steps;
 - Track Button 1 (note 100) and Track Button 2 (101) select Page A (steps 1–8)
   and Page B (9–16);
+- the APC's Up/Down arrow buttons (Track Buttons 5–6, notes 104–105) select a
+  track, while Left/Right (Track Buttons 7–8, notes 106–107) move the cursor
+  across all 16 steps and switch pages at the boundary;
 - Scene Launch 1 (note 112) toggles Play/Stop and Scene Launch 2 (113)
   restarts at step 1;
 - Scene Launch 3 (note 114) clears the last-touched track only after a deliberate double

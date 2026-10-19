@@ -14,6 +14,10 @@ use std::{
 
 pub const PAGE_A_NOTE: u8 = 100;
 pub const PAGE_B_NOTE: u8 = 101;
+pub const UP_NOTE: u8 = 104;
+pub const DOWN_NOTE: u8 = 105;
+pub const LEFT_NOTE: u8 = 106;
+pub const RIGHT_NOTE: u8 = 107;
 pub const PLAY_STOP_NOTE: u8 = 112;
 pub const RESTART_NOTE: u8 = 113;
 pub const CLEAR_NOTE: u8 = 114;
@@ -30,9 +34,8 @@ fn decode(bytes: &[u8]) -> Option<Input> {
     }
     match bytes[1] {
         cell @ 0..=63 => Some(Input::Grid(cell)),
-        note @ (PAGE_A_NOTE | PAGE_B_NOTE | PLAY_STOP_NOTE | RESTART_NOTE | CLEAR_NOTE) => {
-            Some(Input::Button(note))
-        }
+        note @ (PAGE_A_NOTE | PAGE_B_NOTE | UP_NOTE | DOWN_NOTE | LEFT_NOTE | RIGHT_NOTE
+        | PLAY_STOP_NOTE | RESTART_NOTE | CLEAR_NOTE) => Some(Input::Button(note)),
         _ => None,
     }
 }
@@ -65,14 +68,16 @@ pub fn apc_rgb(cell: u8, rgb: [u8; 3]) -> Result<[u8; 16], String> {
 struct GridController {
     page: usize,
     selected_track: usize,
+    selected_step: usize,
     clear_armed: Option<Instant>,
-    sent: Option<([[u8; 3]; 64], [bool; 5])>,
+    sent: Option<([[u8; 3]; 64], [bool; 9])>,
 }
 impl GridController {
     fn new() -> Self {
         Self {
             page: 0,
             selected_track: 0,
+            selected_step: 0,
             clear_armed: None,
             sent: None,
         }
@@ -88,14 +93,35 @@ impl GridController {
                 let track = 7 - usize::from(cell / 8);
                 let column = usize::from(cell % 8);
                 self.selected_track = track;
+                self.selected_step = self.page * 8 + column;
                 sequence.toggle(track, self.page * 8 + column)
             }
             Input::Button(PAGE_A_NOTE) => {
                 self.page = 0;
+                self.selected_step %= 8;
                 Ok(())
             }
             Input::Button(PAGE_B_NOTE) => {
                 self.page = 1;
+                self.selected_step = 8 + self.selected_step % 8;
+                Ok(())
+            }
+            Input::Button(UP_NOTE) => {
+                self.selected_track = self.selected_track.saturating_sub(1);
+                Ok(())
+            }
+            Input::Button(DOWN_NOTE) => {
+                self.selected_track = (self.selected_track + 1).min(7);
+                Ok(())
+            }
+            Input::Button(LEFT_NOTE) => {
+                self.selected_step = self.selected_step.saturating_sub(1);
+                self.page = self.selected_step / 8;
+                Ok(())
+            }
+            Input::Button(RIGHT_NOTE) => {
+                self.selected_step = (self.selected_step + 1).min(sequence.steps - 1);
+                self.page = self.selected_step / 8;
                 Ok(())
             }
             Input::Button(PLAY_STOP_NOTE) => {
@@ -175,7 +201,7 @@ fn connect(
     Ok((connection, output))
 }
 
-fn led_frame(sequence: &SequencerControl, state: &GridController) -> ([[u8; 3]; 64], [bool; 5]) {
+fn led_frame(sequence: &SequencerControl, state: &GridController) -> ([[u8; 3]; 64], [bool; 9]) {
     let pattern = sequence.pattern();
     let first = state.page * 8;
     let playing = sequence.playing();
@@ -185,8 +211,17 @@ fn led_frame(sequence: &SequencerControl, state: &GridController) -> ([[u8; 3]; 
         for column in 0..8 {
             let step = first + column;
             let active = pattern.velocities[track][step] > 0.0;
-            let rgb = if playing && current == step {
+            let selected = state.selected_track == track && state.selected_step == step;
+            let rgb = if playing && current == step && selected {
+                if active {
+                    [127, 127, 127]
+                } else {
+                    [0, 90, 127]
+                }
+            } else if playing && current == step {
                 if active { [127, 127, 0] } else { [0, 30, 127] }
+            } else if selected {
+                if active { [127, 30, 127] } else { [30, 0, 60] }
             } else if active {
                 [0, 127, 0]
             } else {
@@ -199,6 +234,10 @@ fn led_frame(sequence: &SequencerControl, state: &GridController) -> ([[u8; 3]; 
     let buttons = [
         state.page == 0,
         state.page == 1,
+        state.selected_track > 0,
+        state.selected_track < 7,
+        state.selected_step > 0,
+        state.selected_step + 1 < sequence.steps,
         playing,
         false,
         state.clear_armed.is_some(),
@@ -221,6 +260,10 @@ fn refresh(
     for (index, note) in [
         PAGE_A_NOTE,
         PAGE_B_NOTE,
+        UP_NOTE,
+        DOWN_NOTE,
+        LEFT_NOTE,
+        RIGHT_NOTE,
         PLAY_STOP_NOTE,
         RESTART_NOTE,
         CLEAR_NOTE,
@@ -329,6 +372,30 @@ mod tests {
         assert_eq!(m[15], 0xf7);
     }
     #[test]
+    fn arrow_buttons_navigate_tracks_and_all_sixteen_steps() {
+        let sequence = SequencerControl::new("test".into(), 120.0, 16, 4).unwrap();
+        for n in 0..8 {
+            sequence.add_track(format!("T{n}")).unwrap();
+        }
+        let mut grid = GridController::new();
+        let now = Instant::now();
+        grid.apply(Input::Button(DOWN_NOTE), &sequence, now)
+            .unwrap();
+        for _ in 0..8 {
+            grid.apply(Input::Button(RIGHT_NOTE), &sequence, now)
+                .unwrap();
+        }
+        assert_eq!(grid.selected_track, 1);
+        assert_eq!(grid.selected_step, 8);
+        assert_eq!(grid.page, 1);
+        grid.apply(Input::Button(LEFT_NOTE), &sequence, now)
+            .unwrap();
+        assert_eq!(grid.selected_step, 7);
+        assert_eq!(grid.page, 0);
+        grid.apply(Input::Button(UP_NOTE), &sequence, now).unwrap();
+        assert_eq!(grid.selected_track, 0);
+    }
+    #[test]
     fn external_edits_and_playhead_are_reflected_in_led_frame() {
         let sequence = SequencerControl::new("test".into(), 120.0, 16, 4).unwrap();
         for n in 0..8 {
@@ -339,8 +406,8 @@ mod tests {
         runtime.begin_frame(48_000.0);
         let state = GridController::new();
         let (leds, buttons) = led_frame(&sequence, &state);
-        assert_eq!(leds[56], [127, 127, 0]);
+        assert_eq!(leds[56], [127, 127, 127]);
         assert!(buttons[0]);
-        assert!(buttons[2]);
+        assert!(buttons[6]);
     }
 }
