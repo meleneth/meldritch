@@ -43,6 +43,7 @@ pub fn expand(graph: &Graph) -> Result<Graph, String> {
     }
 
     let mut expanded = Graph {
+        devices: graph.devices.clone(),
         controls: graph.controls.clone(),
         midi_ccs: graph.midi_ccs.clone(),
         midi_notes: graph.midi_notes.clone(),

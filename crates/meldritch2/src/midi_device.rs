@@ -31,6 +31,11 @@ pub struct MidiInputSession {
 }
 
 impl MidiInputSession {
+    pub fn open_name(name: &str, router: MidiRouter) -> Result<Self, String> {
+        let index = crate::device::unique_name_match(&input_port_names()?, name, "MIDI input")?;
+        Self::open_index(index, router)
+    }
+
     pub fn open_index(index: usize, router: MidiRouter) -> Result<Self, String> {
         let mut input = midir::MidiInput::new("meldritch2-control")
             .map_err(|error| format!("failed to create MIDI input: {error}"))?;
@@ -89,6 +94,11 @@ impl MidiInputSession {
             note_errors,
             port_name,
         })
+    }
+
+    pub fn open_timed_name(name: &str, router: TimedMidiRouter) -> Result<Self, String> {
+        let index = crate::device::unique_name_match(&input_port_names()?, name, "MIDI input")?;
+        Self::open_timed_index(index, router)
     }
 
     pub fn note_errors(&self) -> u64 {

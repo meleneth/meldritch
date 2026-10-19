@@ -14,7 +14,23 @@ meldritch = { _subpatches = {} }
 function meldritch.graph()
   local graph = { modules = {}, instances = {}, connections = {}, normalizations = {},
     controls = {}, midi_ccs = {}, note_bindings = {}, poly_bindings = {}, external_inputs = {}, external_outputs = {},
-    external_parameters = {}, screens = {} }
+    external_parameters = {}, screens = {}, _devices = {} }
+  function graph:devices(devices)
+    assert(type(devices) == "table", "devices must be a table")
+    assert(devices.audio_output == nil or
+      (type(devices.audio_output) == "string" and devices.audio_output ~= ""),
+      "audio_output device name must be a nonempty string")
+    assert(devices.midi_input == nil or
+      (type(devices.midi_input) == "string" and devices.midi_input ~= ""),
+      "midi_input device name must be a nonempty string")
+    for name, _ in pairs(devices) do
+      assert(name == "audio_output" or name == "midi_input", "unknown device role: " .. tostring(name))
+    end
+    self._devices = {
+      audio_output = devices.audio_output,
+      midi_input = devices.midi_input,
+    }
+  end
   function graph:module(id, kind, values)
     assert(type(id) == "string" and type(kind) == "string", "module ID and type must be strings")
     local spec = meldritch._contract(kind)
@@ -156,6 +172,9 @@ end
 local function decorate_scope(facade, scope, prefix)
   facade._scope = scope
   facade._counts = {}
+  function facade:devices(devices)
+    scope:devices(devices)
+  end
   function facade:_id(kind)
     self._counts[kind] = (self._counts[kind] or 0) + 1
     return kind .. "_" .. self._counts[kind]
@@ -306,6 +325,7 @@ function meldritch.instrument(name)
     end
 
     local root = meldritch.graph()
+    root._devices = definition._devices
     local terminal = root:module("output", "stereo_output")
     if self._uses_notes then
       assert(self._note_pitch and self._note_gate, "note instruments must connect pitch and gate")
@@ -476,6 +496,15 @@ fn external_ports(table: &Table, field: &str) -> Result<Vec<ExternalPort>, Strin
 
 fn graph_from_table(table: Table) -> Result<Graph, String> {
     let mut graph = Graph::default();
+    let devices: Table = table
+        .get("_devices")
+        .map_err(|e| format!("graph devices: {e}"))?;
+    graph.devices.audio_output = devices
+        .get::<Option<String>>("audio_output")
+        .map_err(|e| format!("audio_output device: {e}"))?;
+    graph.devices.midi_input = devices
+        .get::<Option<String>>("midi_input")
+        .map_err(|e| format!("midi_input device: {e}"))?;
     let screens: Table = table.get("screens").map_err(|e| e.to_string())?;
     for screen in screens.sequence_values::<Table>() {
         let screen = screen.map_err(|e| e.to_string())?;
@@ -667,4 +696,60 @@ fn endpoint(table: Table) -> Result<Endpoint, String> {
         module: table.get("module").map_err(|e| e.to_string())?,
         port: table.get("port").map_err(|e| e.to_string())?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read;
+
+    #[test]
+    fn reads_expected_device_names_from_graph() {
+        let graph = read(
+            r#"
+            local graph = meldritch.graph()
+            graph:devices {
+              audio_output = "Output Alpha",
+              midi_input = "Input Beta",
+            }
+            return graph
+            "#,
+        )
+        .unwrap();
+        assert_eq!(graph.devices.audio_output.as_deref(), Some("Output Alpha"));
+        assert_eq!(graph.devices.midi_input.as_deref(), Some("Input Beta"));
+    }
+
+    #[test]
+    fn rejects_unknown_or_empty_device_preferences() {
+        let unknown = read(
+            r#"
+            local graph = meldritch.graph()
+            graph:devices { controller = "MicroLab" }
+            return graph
+            "#,
+        )
+        .unwrap_err();
+        assert!(unknown.contains("unknown device role"));
+
+        let empty = read(
+            r#"
+            local graph = meldritch.graph()
+            graph:devices { midi_input = "" }
+            return graph
+            "#,
+        )
+        .unwrap_err();
+        assert!(empty.contains("must be a nonempty string"));
+    }
+
+    #[test]
+    fn instrument_finalization_keeps_device_preferences() {
+        let source = include_str!("../../../examples/instruments/subtractive.lua");
+        let graph = read(source).unwrap();
+        assert_eq!(graph.devices.audio_output, None);
+        assert_eq!(
+            graph.devices.midi_input.as_deref(),
+            Some("MicroLab mk3:MicroLab mk3")
+        );
+    }
 }

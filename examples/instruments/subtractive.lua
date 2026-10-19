@@ -4,6 +4,10 @@
 -- instances and routes MIDI channel 1 through the generic voice allocator.
 local synth = meldritch.instrument("Subtractive")
 
+synth:devices {
+  midi_input = "MicroLab mk3:MicroLab mk3",
+}
+
 local osc = synth:oscillator {
   waveform = "saw",
   frequency = 440,

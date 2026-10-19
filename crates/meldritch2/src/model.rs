@@ -133,6 +133,7 @@ pub struct Screen {
 
 #[derive(Clone, Debug, Default)]
 pub struct Graph {
+    pub devices: DevicePreferences,
     pub modules: Vec<Module>,
     pub instances: Vec<SubpatchInstance>,
     pub subpatches: BTreeMap<String, Subpatch>,
@@ -143,6 +144,12 @@ pub struct Graph {
     pub midi_notes: Vec<MidiNotes>,
     pub midi_poly: Vec<MidiPoly>,
     pub screens: Vec<Screen>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DevicePreferences {
+    pub audio_output: Option<String>,
+    pub midi_input: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]

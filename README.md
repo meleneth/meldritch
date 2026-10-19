@@ -75,6 +75,21 @@ The subtractive instrument uses MIDI channel 1 when a MIDI input is selected;
 without one, the existing TUI note keys play it. The drone begins sounding as
 soon as its audio stream starts and needs no MIDI input.
 
+Expected hardware can be selected by name in the Lua instrument, so normal
+launches do not depend on device-list indices. Only declare hardware the
+instrument actually expects; omitted roles keep their normal system default:
+
+```lua
+synth:devices {
+  midi_input = "MicroLab mk3:MicroLab mk3",
+}
+```
+
+Names are case-insensitive unique substrings of the names printed by
+`meldritch2 devices` and `meldritch2 midi-ports`. The `--device=INDEX` and
+`--midi=INDEX` options remain available as one-run overrides. With no
+`audio_output` declaration, playback follows the current system default.
+
 Audio and MIDI device commands depend on available host hardware. The active
 repository check is:
 

@@ -17,7 +17,10 @@ fn load_graph(path: &str) -> Result<Graph, String> {
 
 fn open_output(graph: &Graph, device_arg: Option<String>) -> Result<DeviceOutput, String> {
     match device_arg {
-        None => DeviceOutput::open_default(graph),
+        None => match graph.devices.audio_output.as_deref() {
+            Some(name) => DeviceOutput::open_name(graph, name),
+            None => DeviceOutput::open_default(graph),
+        },
         Some(argument) => {
             let index = argument
                 .strip_prefix("--device=")
@@ -33,7 +36,7 @@ fn main() {
     let mut args = env::args().skip(1);
     let Some(first) = args.next() else {
         eprintln!(
-            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]"
+            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]\nAudio and MIDI names may instead be configured in the Lua script with graph:devices {{ audio_output = NAME, midi_input = NAME }}."
         );
         process::exit(2);
     };
@@ -147,11 +150,14 @@ fn main() {
                 process::exit(2);
             }
         }
-        let result = load_graph(&path).and_then(|graph| open_output(&graph, device_arg));
+        let result = load_graph(&path).and_then(|graph| {
+            let configured_midi = graph.devices.midi_input.clone();
+            open_output(&graph, device_arg).map(|output| (output, configured_midi))
+        });
         match result {
-            Ok(mut output) => {
-                let midi_session = match midi_index {
-                    Some(index) => {
+            Ok((mut output, configured_midi)) => {
+                let midi_session = match (midi_index, configured_midi) {
+                    (Some(index), _) => {
                         let opened = match output.take_timed_midi_router() {
                             Some(router) => MidiInputSession::open_timed_index(index, router),
                             None => MidiInputSession::open_index(index, output.midi_router()),
@@ -164,7 +170,20 @@ fn main() {
                             }
                         }
                     }
-                    None => None,
+                    (None, Some(name)) => {
+                        let opened = match output.take_timed_midi_router() {
+                            Some(router) => MidiInputSession::open_timed_name(&name, router),
+                            None => MidiInputSession::open_name(&name, output.midi_router()),
+                        };
+                        match opened {
+                            Ok(session) => Some(session),
+                            Err(error) => {
+                                eprintln!("{error}");
+                                process::exit(1);
+                            }
+                        }
+                    }
+                    (None, None) => None,
                 };
                 let keyboard = if midi_session.is_none() {
                     output

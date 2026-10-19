@@ -166,6 +166,43 @@ pub fn output_device_names() -> Result<Vec<String>, String> {
         .collect())
 }
 
+pub(crate) fn unique_name_match(
+    names: &[String],
+    requested: &str,
+    device_kind: &str,
+) -> Result<usize, String> {
+    let requested = requested.trim();
+    if requested.is_empty() {
+        return Err(format!("{device_kind} device name must not be empty"));
+    }
+    let folded = requested.to_lowercase();
+    let exact = names
+        .iter()
+        .enumerate()
+        .filter(|(_, name)| name.to_lowercase() == folded)
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let matches = if exact.is_empty() {
+        names
+            .iter()
+            .enumerate()
+            .filter(|(_, name)| name.to_lowercase().contains(&folded))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>()
+    } else {
+        exact
+    };
+    match matches.as_slice() {
+        [index] => Ok(*index),
+        [] => Err(format!(
+            "configured {device_kind} device '{requested}' was not found"
+        )),
+        _ => Err(format!(
+            "configured {device_kind} device name '{requested}' is ambiguous; use a more specific name"
+        )),
+    }
+}
+
 impl DeviceOutput {
     pub fn open_default(graph: &Graph) -> Result<Self, String> {
         Self::open(graph, None)
@@ -173,6 +210,11 @@ impl DeviceOutput {
 
     pub fn open_index(graph: &Graph, index: usize) -> Result<Self, String> {
         Self::open(graph, Some(index))
+    }
+
+    pub fn open_name(graph: &Graph, name: &str) -> Result<Self, String> {
+        let index = unique_name_match(&output_device_names()?, name, "audio output")?;
+        Self::open_index(graph, index)
     }
 
     fn open(graph: &Graph, index: Option<usize>) -> Result<Self, String> {
@@ -333,7 +375,7 @@ impl DeviceOutput {
 mod tests {
     use super::{
         CHUNK_FRAMES, fill_interleaved, fill_interleaved_timed, record_stream_error,
-        stream_error_label,
+        stream_error_label, unique_name_match,
     };
     use crate::{
         compiler::compile,
@@ -344,6 +386,33 @@ mod tests {
         timed::{TimedNotePlan, TimedNoteState},
     };
     use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+
+    #[test]
+    fn configured_device_names_prefer_exact_and_require_unique_matches() {
+        let names = vec![
+            "Built-in Audio".to_owned(),
+            "Output Alpha Analog Stereo".to_owned(),
+            "Output Alpha Pro Audio".to_owned(),
+        ];
+        assert_eq!(
+            unique_name_match(&names, "built-IN AUDIO", "audio output"),
+            Ok(0)
+        );
+        assert_eq!(
+            unique_name_match(&names, "Analog Stereo", "audio output"),
+            Ok(1)
+        );
+        assert!(
+            unique_name_match(&names, "Output Alpha", "audio output")
+                .unwrap_err()
+                .contains("ambiguous")
+        );
+        assert!(
+            unique_name_match(&names, "missing", "audio output")
+                .unwrap_err()
+                .contains("was not found")
+        );
+    }
 
     #[test]
     fn stream_error_recording_keeps_first_kind_without_formatting() {
