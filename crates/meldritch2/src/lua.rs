@@ -10,8 +10,8 @@ use crate::contract;
 use crate::model::{
     Action, Connection, Control, ControlScale, Endpoint, ExternalInput, ExternalParameter,
     ExternalPort, Graph, MidiButton, MidiButtonEdge, MidiButtonMessage, MidiCc, MidiNotes,
-    MidiPoly, MidiPolyVoice, Module, ModuleRuntime, ParameterId, Performance, PolyOverflow, Screen,
-    Subpatch, SubpatchInstance, Widget,
+    MidiPacket, MidiPoly, MidiPolyVoice, Module, ModuleRuntime, ParameterId, Performance,
+    PolyOverflow, Screen, Subpatch, SubpatchInstance, Widget,
 };
 use crate::sample::{PreparedSample, SampleBank};
 use crate::sequencer::SequencerControl;
@@ -82,7 +82,7 @@ meldritch = { _subpatches = {} }
 function meldritch.graph()
   local graph = { modules = {}, instances = {}, connections = {}, normalizations = {},
     controls = {}, midi_ccs = {}, note_bindings = {}, poly_bindings = {}, external_inputs = {}, external_outputs = {},
-    external_parameters = {}, screens = {}, actions = {}, midi_buttons = {}, performance = nil, _devices = {} }
+    external_parameters = {}, screens = {}, actions = {}, midi_buttons = {}, midi_packets = {}, performance = nil, _devices = {} }
   function graph:devices(devices)
     assert(type(devices) == "table", "devices must be a table")
     assert(devices.audio_output == nil or
@@ -395,6 +395,7 @@ function meldritch.instrument(name)
     _uses_notes = false,
     _actions = {},
     _midi_buttons = {},
+    _midi_packets = {},
     note = {
       pitch = { direction = "note", signal = "pitch" },
       gate = { direction = "note", signal = "gate" },
@@ -457,6 +458,22 @@ function meldritch.instrument(name)
       number = spec.number, edge = edge, action_label = spec.name,
     })
   end
+  function instrument:on_midi_packet(spec, callback)
+    assert(type(spec) == "table", "raw MIDI hook requires a specification")
+    assert(type(spec.name) == "string" and spec.name ~= "", "raw MIDI hook requires a name")
+    assert(type(spec.bytes) == "table" and #spec.bytes > 0, "raw MIDI hook requires packet bytes")
+    for _, byte in ipairs(spec.bytes) do
+      assert(type(byte) == "number" and byte % 1 == 0 and byte >= 0 and byte <= 255,
+        "raw MIDI packet bytes must be integers in 0..255")
+    end
+    local before = #self._actions
+    self:action(spec.name, callback)
+    assert(#self._actions == before + 1,
+      "raw MIDI callback must perform exactly one supported authored action")
+    table.insert(self._midi_packets, {
+      name = spec.name, bytes = spec.bytes, action_label = spec.name,
+    })
+  end
   function instrument:performance(spec)
     assert(type(spec) == "table" and spec.layout == "step_grid" and spec.sequencer, "performance requires a step_grid sequencer")
     self._performance = { layout = spec.layout, native = spec.sequencer._native }
@@ -478,6 +495,7 @@ function meldritch.instrument(name)
     root._devices = definition._devices
     root.actions = self._actions
     root.midi_buttons = self._midi_buttons
+    root.midi_packets = self._midi_packets
     root.performance = self._performance
     local terminal = root:module("output", "stereo_output")
     if self._uses_notes then
@@ -774,6 +792,19 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
             action_label: button.get("action_label").map_err(|e| e.to_string())?,
         });
     }
+    let midi_packets: Table = table.get("midi_packets").map_err(|e| e.to_string())?;
+    for packet in midi_packets.sequence_values::<Table>() {
+        let packet = packet.map_err(|e| e.to_string())?;
+        let bytes: Table = packet.get("bytes").map_err(|e| e.to_string())?;
+        graph.midi_packets.push(MidiPacket {
+            name: packet.get("name").map_err(|e| e.to_string())?,
+            bytes: bytes
+                .sequence_values::<u8>()
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("raw MIDI packet bytes: {e}"))?,
+            action_label: packet.get("action_label").map_err(|e| e.to_string())?,
+        });
+    }
     let screens: Table = table.get("screens").map_err(|e| e.to_string())?;
     for screen in screens.sequence_values::<Table>() {
         let screen = screen.map_err(|e| e.to_string())?;
@@ -1068,13 +1099,18 @@ mod tests {
     #[test]
     fn instrument_authors_note_cc_and_program_button_hooks() {
         let graph = read(include_str!("../examples/68-midi-buttons.lua")).unwrap();
-        assert_eq!(graph.actions.len(), 3);
+        assert_eq!(graph.actions.len(), 4);
         assert_eq!(graph.midi_buttons.len(), 3);
+        assert_eq!(graph.midi_packets.len(), 1);
         assert_eq!(graph.midi_buttons[0].message, MidiButtonMessage::Note);
         assert_eq!(graph.midi_buttons[1].edge, MidiButtonEdge::Release);
         assert_eq!(
             graph.midi_buttons[2].message,
             MidiButtonMessage::ProgramChange
+        );
+        assert_eq!(
+            graph.midi_packets[0].bytes,
+            [0xf0, 0x7d, 0x4d, 0x32, 0x01, 0xf7]
         );
     }
 

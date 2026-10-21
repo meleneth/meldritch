@@ -1,10 +1,17 @@
-use std::{env, fs, process, thread, time::Duration};
+use std::{
+    env, fs,
+    io::{self, Write},
+    process,
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
 
 use meldritch2::{
     compiler::compile,
     device::{DeviceOutput, output_device_names},
     lua,
-    midi_device::{MidiInputSession, input_port_names},
+    midi_device::{MidiInputSession, MidiMonitorSession, describe_message, input_port_names},
     model::{Graph, ParameterId},
     tui,
 };
@@ -35,11 +42,44 @@ fn open_output(graph: &Graph, device_arg: Option<String>) -> Result<DeviceOutput
     }
 }
 
+fn midi_sniff(port: &str, seconds: f64) -> Result<(), String> {
+    if !seconds.is_finite() || seconds <= 0.0 || seconds > 3600.0 {
+        return Err("midi-sniff seconds must be finite and between 0 and 3600".into());
+    }
+    let (sender, receiver) = mpsc::channel();
+    let session = match port.parse::<usize>() {
+        Ok(index) => MidiMonitorSession::open_index(index, sender)?,
+        Err(_) => MidiMonitorSession::open_name(port, sender)?,
+    };
+    println!(
+        "capturing '{}' for {seconds:.1}s; press and release one control at a time",
+        session.port_name
+    );
+    io::stdout().flush().map_err(|error| error.to_string())?;
+    let started = Instant::now();
+    let duration = Duration::from_secs_f64(seconds);
+    while let Some(remaining) = duration.checked_sub(started.elapsed()) {
+        match receiver.recv_timeout(remaining) {
+            Ok(message) => println!(
+                "{:>12} us  {}",
+                message.timestamp_us,
+                describe_message(&message.bytes)
+            ),
+            Err(mpsc::RecvTimeoutError::Timeout) => break,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("MIDI monitor disconnected unexpectedly".into());
+            }
+        }
+    }
+    drop(session);
+    Ok(())
+}
+
 fn main() {
     let mut args = env::args().skip(1);
     let Some(first) = args.next() else {
         eprintln!(
-            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]\nAudio and controller names may instead be configured in Lua with graph:devices {{ audio_output = NAME, midi_input = NAME, midi_controls = {{ NAME, ... }}, apc_mini = NAME }}."
+            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 midi-sniff PORT [SECONDS] | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]\nAudio and controller names may instead be configured in Lua with graph:devices {{ audio_output = NAME, midi_input = NAME, midi_controls = {{ NAME, ... }}, apc_mini = NAME }}."
         );
         process::exit(2);
     };
@@ -76,6 +116,30 @@ fn main() {
                 eprintln!("{error}");
                 process::exit(1);
             }
+        }
+        return;
+    }
+    if first == "midi-sniff" {
+        let Some(port) = args.next() else {
+            eprintln!("midi-sniff requires a port index or unique name");
+            process::exit(2);
+        };
+        let seconds = args
+            .next()
+            .map(|value| value.parse::<f64>())
+            .transpose()
+            .unwrap_or_else(|_| {
+                eprintln!("midi-sniff seconds must be a number");
+                process::exit(2);
+            })
+            .unwrap_or(30.0);
+        if args.next().is_some() {
+            eprintln!("midi-sniff accepts only PORT and optional SECONDS");
+            process::exit(2);
+        }
+        if let Err(error) = midi_sniff(&port, seconds) {
+            eprintln!("{error}");
+            process::exit(1);
         }
         return;
     }

@@ -35,4 +35,13 @@ instrument:on_midi_button({
   sequence:restart()
 end)
 
+-- Replace these deliberately synthetic bytes with one complete packet copied
+-- from `meldritch2 midi-sniff`; exact matching also covers SysEx messages.
+instrument:on_midi_packet({
+  name = "Vendor packet stop",
+  bytes = { 0xf0, 0x7d, 0x4d, 0x32, 0x01, 0xf7 },
+}, function()
+  sequence:stop()
+end)
+
 return instrument

@@ -7,8 +7,8 @@ use std::sync::{
 use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
 use crate::model::{
-    Action, Connection, ControlScale, Graph, MidiButton, MidiCc, MidiNotes, ModuleRuntime,
-    ParameterId, Screen, Widget,
+    Action, Connection, ControlScale, Graph, MidiButton, MidiCc, MidiNotes, MidiPacket,
+    ModuleRuntime, ParameterId, Screen, Widget,
 };
 use crate::sample::PreparedSample;
 use crate::sequencer::{SequencerControl, SequencerRuntime};
@@ -253,6 +253,7 @@ pub struct Machine {
     midi_ccs: Vec<MidiCc>,
     midi_notes: Vec<MidiNotes>,
     midi_buttons: Vec<MidiButton>,
+    midi_packets: Vec<MidiPacket>,
     actions: Vec<Action>,
     poly_notes: Vec<PolyMapping>,
     note_pairs: Vec<NotePair>,
@@ -602,6 +603,9 @@ impl Machine {
     pub fn midi_buttons(&self) -> &[MidiButton] {
         &self.midi_buttons
     }
+    pub fn midi_packets(&self) -> &[MidiPacket] {
+        &self.midi_packets
+    }
     pub fn actions(&self) -> &[Action] {
         &self.actions
     }
@@ -941,6 +945,24 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             return Err(format!("duplicate MIDI button edge for '{}'", button.name));
         }
     }
+    let mut mapped_packets = BTreeSet::new();
+    for packet in &graph.midi_packets {
+        if packet.name.is_empty() || packet.bytes.is_empty() {
+            return Err("raw MIDI packet hooks require a name and at least one byte".into());
+        }
+        if !action_labels.contains(packet.action_label.as_str()) {
+            return Err(format!(
+                "raw MIDI hook '{}' references unknown action '{}'",
+                packet.name, packet.action_label
+            ));
+        }
+        if !mapped_packets.insert(packet.bytes.as_slice()) {
+            return Err(format!(
+                "duplicate raw MIDI packet hook for '{}'",
+                packet.name
+            ));
+        }
+    }
     let mut mapped_note_channels = BTreeSet::new();
     let mut mapped_note_targets = BTreeSet::new();
     for binding in &graph.midi_notes {
@@ -1219,6 +1241,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         midi_ccs: graph.midi_ccs.clone(),
         midi_notes: graph.midi_notes.clone(),
         midi_buttons: graph.midi_buttons.clone(),
+        midi_packets: graph.midi_packets.clone(),
         actions: graph.actions.clone(),
         poly_notes,
         note_pairs,

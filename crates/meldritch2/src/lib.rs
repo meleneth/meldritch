@@ -4145,6 +4145,10 @@ return graph
         assert!(router.dispatch(&[0xC0, 3]));
         machine.process(&mut samples);
         assert_eq!(sequence.current_step(), 0);
+
+        assert!(router.dispatch(&[0xf0, 0x7d, 0x4d, 0x32, 0x01, 0xf7]));
+        machine.process(&mut samples);
+        assert!(!sequence.playing());
     }
 }
 pub mod apc;

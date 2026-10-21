@@ -363,6 +363,7 @@ pub struct MidiRouter {
     routes: Vec<Option<ControlHandle>>,
     notes: Vec<Option<NoteRoute>>,
     buttons: Vec<ButtonRoute>,
+    packets: Vec<PacketRoute>,
 }
 
 #[derive(Clone)]
@@ -371,6 +372,12 @@ struct ButtonRoute {
     channel: u8,
     number: u8,
     edge: MidiButtonEdge,
+    action: Action,
+}
+
+#[derive(Clone)]
+struct PacketRoute {
+    bytes: Vec<u8>,
     action: Action,
 }
 
@@ -419,10 +426,24 @@ impl MidiRouter {
                     .clone(),
             })
             .collect();
+        let packets = machine
+            .midi_packets()
+            .iter()
+            .map(|packet| PacketRoute {
+                bytes: packet.bytes.clone(),
+                action: machine
+                    .actions()
+                    .iter()
+                    .find(|action| action.label == packet.action_label)
+                    .expect("validated raw MIDI action")
+                    .clone(),
+            })
+            .collect();
         Self {
             routes,
             notes,
             buttons,
+            packets,
         }
     }
 
@@ -454,6 +475,10 @@ impl MidiRouter {
     }
 
     fn dispatch_button(&self, message: &[u8]) -> bool {
+        if let Some(route) = self.packets.iter().find(|route| route.bytes == message) {
+            route.action.invoke();
+            return true;
+        }
         let Some(status) = message.first().copied() else {
             return false;
         };

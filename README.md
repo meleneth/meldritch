@@ -158,6 +158,54 @@ controller's own state without emitting an addressable MIDI event. No software
 hook can observe such a press; the resulting notes and other emitted messages
 remain available normally.
 
+### Capturing controller button protocols
+
+Use the raw monitor before assigning unknown controller buttons. It requests no
+exclusive access, retains complete SysEx and system messages, and accepts either
+a port index or a case-insensitive unique name from `midi-ports`:
+
+```sh
+cargo run -p meldritch2 -- midi-ports
+cargo run -p meldritch2 -- midi-sniff "MicroLab" 30
+cargo run -p meldritch2 -- midi-sniff "MPK mini" 30
+```
+
+Press and release one control at a time, including modified combinations such
+as Shift+Octave. Each line contains the device timestamp, exact hexadecimal
+bytes, packet length, and a best-effort description. Exact bytes remain the
+authority when a packet is vendor-specific.
+
+If a control produces no MIDI-level output, capture beneath ALSA with Linux
+`usbmon`. Find the bus and device numbers with `lsusb`, then capture only that
+device (USB addresses can change after reconnecting):
+
+```sh
+sudo modprobe usbmon
+sudo mount -t debugfs none /sys/kernel/debug  # only if debugfs is not mounted
+sudo bash tools/usb-button-capture.sh BUS DEVICE 30 \
+  > /tmp/microlab-buttons.usbmon
+```
+
+Repeat for the MPK mini and keep a written sequence of the tested controls so
+packets can be correlated with presses. The helper neither detaches a kernel
+driver nor writes to the device. A button with no MIDI message and no USB IN
+traffic is firmware-local; host software cannot directly hook that press.
+
+Once `midi-sniff` identifies a complete vendor or SysEx packet, bind its exact
+bytes without adding device-specific Rust code:
+
+```lua
+instrument:on_midi_packet({
+  name = "Captured vendor action",
+  bytes = { 0xf0, 0x7d, 0x4d, 0x32, 0x01, 0xf7 }, -- example only
+}, function()
+  sequence:stop()
+end)
+```
+
+Raw hooks compare the complete packet. Do not copy the example bytes; use the
+bytes observed from the actual controller and firmware revision.
+
 Audio and MIDI device commands depend on available host hardware. The active
 repository check is:
 

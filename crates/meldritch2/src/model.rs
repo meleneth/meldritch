@@ -160,6 +160,7 @@ pub struct Graph {
     pub midi_ccs: Vec<MidiCc>,
     pub midi_notes: Vec<MidiNotes>,
     pub midi_buttons: Vec<MidiButton>,
+    pub midi_packets: Vec<MidiPacket>,
     pub midi_poly: Vec<MidiPoly>,
     pub screens: Vec<Screen>,
     pub performance: Option<Performance>,
@@ -208,6 +209,14 @@ pub struct MidiButton {
     pub channel: u8,
     pub number: u8,
     pub edge: MidiButtonEdge,
+    pub action_label: String,
+}
+
+/// An exact raw MIDI packet, including SysEx and system messages, authored in Lua.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MidiPacket {
+    pub name: String,
+    pub bytes: Vec<u8>,
     pub action_label: String,
 }
 
