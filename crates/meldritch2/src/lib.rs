@@ -9,6 +9,7 @@ pub mod midi;
 pub mod midi_clock;
 pub mod midi_device;
 pub mod model;
+mod navigation;
 pub mod panel;
 pub mod poly;
 pub mod sample;

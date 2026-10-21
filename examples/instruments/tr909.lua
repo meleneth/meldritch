@@ -56,4 +56,24 @@ drums:action("Stop", function() sequence:stop() end)
 drums:action("Restart", function() sequence:restart() end)
 drums:performance { sequencer = sequence, layout = "step_grid" }
 
+local performance = drums:screen("performance", "Performance")
+performance:performance_controls()
+performance:performance_status()
+
+local sequencer = drums:screen("sequencer", "909 Sequencer")
+sequencer:pattern_grid()
+sequencer:transport_status()
+
+-- This is the configuration consumed by the vendored Lua state machine on the
+-- UI thread. Rust delivers key names and renders the screen selected by Lua.
+local ui = drums:navigation {
+  initial = "performance",
+  events = {
+    { name = "performance", from = "*", to = "performance" },
+    { name = "sequencer", from = "*", to = "sequencer" },
+  },
+}
+ui:bind("F1", "performance")
+ui:bind("F2", "sequencer")
+
 return drums

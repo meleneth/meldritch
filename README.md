@@ -84,6 +84,14 @@ only the eight required WAV files and stores pinned, hash-checked entries under
 current system default; the instrument selects the connected APC mini mk2 by
 name.
 
+Its terminal interface starts on the Lua-authored Performance screen. Press
+F2 for the live 909 pattern grid and F1 to return; playback and pattern state
+continue unchanged while either screen is visible. Screen registration,
+wildcard transitions, and key bindings live beside the instrument in
+`examples/instruments/tr909.lua`. A third screen is added with
+`drums:screen(...)`, another navigation event targeting its ID, and a key bound
+to that event; Rust does not need a new screen variant or navigation branch.
+
 The APC mini mk2 Session-mode mapping is generic to the `step_grid` layout:
 
 - pad rows are tracks and columns are the visible eight steps;

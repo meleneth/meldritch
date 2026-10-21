@@ -10,8 +10,9 @@ use crate::contract;
 use crate::model::{
     Action, Connection, Control, ControlScale, Endpoint, ExternalInput, ExternalParameter,
     ExternalPort, Graph, MidiButton, MidiButtonEdge, MidiButtonMessage, MidiCc, MidiNotes,
-    MidiPacket, MidiPoly, MidiPolyVoice, Module, ModuleRuntime, ParameterId, Performance,
-    PolyOverflow, Screen, Subpatch, SubpatchInstance, Widget,
+    MidiPacket, MidiPoly, MidiPolyVoice, Module, ModuleRuntime, Navigation, NavigationBinding,
+    NavigationEvent, ParameterId, Performance, PolyOverflow, Screen, Subpatch, SubpatchInstance,
+    Widget,
 };
 use crate::sample::{PreparedSample, SampleBank};
 use crate::sequencer::SequencerControl;
@@ -82,7 +83,8 @@ meldritch = { _subpatches = {} }
 function meldritch.graph()
   local graph = { modules = {}, instances = {}, connections = {}, normalizations = {},
     controls = {}, midi_ccs = {}, note_bindings = {}, poly_bindings = {}, external_inputs = {}, external_outputs = {},
-    external_parameters = {}, screens = {}, actions = {}, midi_buttons = {}, midi_packets = {}, performance = nil, _devices = {} }
+    external_parameters = {}, screens = {}, actions = {}, midi_buttons = {}, midi_packets = {},
+    performance = nil, _navigation = nil, _devices = {} }
   function graph:devices(devices)
     assert(type(devices) == "table", "devices must be a table")
     assert(devices.audio_output == nil or
@@ -218,8 +220,34 @@ function meldritch.graph()
         "button widget needs a label, control ID, and numeric value")
       table.insert(self.widgets, { kind = "button", label = label, control_id = control_id, value = value })
     end
+    function screen:performance_controls()
+      table.insert(self.widgets, { kind = "performance_controls" })
+    end
+    function screen:performance_status()
+      table.insert(self.widgets, { kind = "performance_status" })
+    end
+    function screen:pattern_grid()
+      table.insert(self.widgets, { kind = "pattern_grid" })
+    end
+    function screen:transport_status()
+      table.insert(self.widgets, { kind = "transport_status" })
+    end
     table.insert(self.screens, screen)
     return screen
+  end
+  function graph:navigation(spec)
+    assert(self._navigation == nil, "navigation may be declared only once")
+    assert(type(spec) == "table" and type(spec.initial) == "string",
+      "navigation requires an initial screen")
+    assert(type(spec.events) == "table", "navigation requires events")
+    local navigation = { initial = spec.initial, events = spec.events, bindings = {} }
+    function navigation:bind(key, event)
+      assert(type(key) == "string" and type(event) == "string",
+        "navigation binding requires key and event names")
+      table.insert(self.bindings, { key = key, event = event })
+    end
+    self._navigation = navigation
+    return navigation
   end
   return graph
 end
@@ -396,6 +424,8 @@ function meldritch.instrument(name)
     _actions = {},
     _midi_buttons = {},
     _midi_packets = {},
+    _screens = {},
+    _navigation = nil,
     note = {
       pitch = { direction = "note", signal = "pitch" },
       gate = { direction = "note", signal = "gate" },
@@ -433,6 +463,21 @@ function meldritch.instrument(name)
       "instrument control must target a writable parameter")
     assert(type(range) == "table", "instrument control requires a range")
     table.insert(self._controls, { label = label, target = target, range = range })
+  end
+
+  function instrument:screen(id, title)
+    local screen = definition:screen(id, title)
+    table.remove(definition.screens)
+    table.insert(self._screens, screen)
+    return screen
+  end
+
+  function instrument:navigation(spec)
+    assert(self._navigation == nil, "navigation may be declared only once")
+    local navigation = definition:navigation(spec)
+    definition._navigation = nil
+    self._navigation = navigation
+    return navigation
   end
 
   function instrument:action(label, callback)
@@ -497,6 +542,8 @@ function meldritch.instrument(name)
     root.midi_buttons = self._midi_buttons
     root.midi_packets = self._midi_packets
     root.performance = self._performance
+    root.screens = self._screens
+    root._navigation = self._navigation
     local terminal = root:module("output", "stereo_output")
     if self._uses_notes then
       assert(self._note_pitch and self._note_gate, "note instruments must connect pitch and gate")
@@ -828,6 +875,10 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                     control_id: widget.get("control_id").map_err(|e| e.to_string())?,
                     value: widget.get("value").map_err(|e| e.to_string())?,
                 },
+                "performance_controls" => Widget::PerformanceControls,
+                "performance_status" => Widget::PerformanceStatus,
+                "pattern_grid" => Widget::PatternGrid,
+                "transport_status" => Widget::TransportStatus,
                 other => return Err(format!("unknown screen widget '{other}'")),
             });
         }
@@ -835,6 +886,39 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
             id: screen.get("id").map_err(|e| e.to_string())?,
             title: screen.get("title").map_err(|e| e.to_string())?,
             widgets: parsed,
+        });
+    }
+    if let Some(navigation) = table
+        .get::<Option<Table>>("_navigation")
+        .map_err(|e| e.to_string())?
+    {
+        let events: Table = navigation.get("events").map_err(|e| e.to_string())?;
+        let events = events
+            .sequence_values::<Table>()
+            .map(|event| {
+                let event = event.map_err(|e| e.to_string())?;
+                Ok(NavigationEvent {
+                    name: event.get("name").map_err(|e| e.to_string())?,
+                    from: event.get("from").map_err(|e| e.to_string())?,
+                    to: event.get("to").map_err(|e| e.to_string())?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let bindings: Table = navigation.get("bindings").map_err(|e| e.to_string())?;
+        let bindings = bindings
+            .sequence_values::<Table>()
+            .map(|binding| {
+                let binding = binding.map_err(|e| e.to_string())?;
+                Ok(NavigationBinding {
+                    key: binding.get("key").map_err(|e| e.to_string())?,
+                    event: binding.get("event").map_err(|e| e.to_string())?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        graph.navigation = Some(Navigation {
+            initial: navigation.get("initial").map_err(|e| e.to_string())?,
+            events,
+            bindings,
         });
     }
     let modules: Table = table
@@ -1160,6 +1244,18 @@ mod tests {
         assert_eq!(graph.devices.audio_output, None);
         assert!(graph.performance.is_some());
         assert_eq!(graph.actions.len(), 3);
+        assert_eq!(
+            graph
+                .screens
+                .iter()
+                .map(|screen| screen.id.as_str())
+                .collect::<Vec<_>>(),
+            ["performance", "sequencer"]
+        );
+        let navigation = graph.navigation.as_ref().unwrap();
+        assert_eq!(navigation.initial, "performance");
+        assert_eq!(navigation.bindings[0].key, "F1");
+        assert_eq!(navigation.bindings[1].key, "F2");
         let mut machine = compile_at_rate(&graph, 800.0).unwrap();
         assert_eq!(
             machine

@@ -21,11 +21,18 @@ pub(crate) enum WidgetView {
         row: ControlRow,
         value: f64,
     },
+    PerformanceControls,
+    PerformanceStatus,
+    PatternGrid,
+    TransportStatus,
 }
 
 impl WidgetView {
     fn selectable(&self) -> bool {
-        !matches!(self, Self::Label(_))
+        matches!(
+            self,
+            Self::Control { .. } | Self::Link { .. } | Self::Button { .. }
+        )
     }
 }
 
@@ -37,6 +44,7 @@ pub(crate) struct ScreenView {
 
 pub(crate) struct ScreenPanel {
     screens: Vec<ScreenView>,
+    ids: BTreeMap<String, usize>,
     active: usize,
 }
 
@@ -86,6 +94,10 @@ impl ScreenPanel {
                             value: *value,
                         }
                     }
+                    Widget::PerformanceControls => WidgetView::PerformanceControls,
+                    Widget::PerformanceStatus => WidgetView::PerformanceStatus,
+                    Widget::PatternGrid => WidgetView::PatternGrid,
+                    Widget::TransportStatus => WidgetView::TransportStatus,
                 });
             }
             let selected = widgets.iter().position(WidgetView::selectable);
@@ -100,6 +112,10 @@ impl ScreenPanel {
         }
         Ok(Self {
             screens: views,
+            ids: ids
+                .into_iter()
+                .map(|(id, index)| (id.to_owned(), index))
+                .collect(),
             active: 0,
         })
     }
@@ -110,6 +126,28 @@ impl ScreenPanel {
 
     pub fn position(&self) -> (usize, usize) {
         (self.active + 1, self.screens.len())
+    }
+
+    pub fn activate_screen(&mut self, id: &str) -> Result<(), String> {
+        self.active = *self
+            .ids
+            .get(id)
+            .ok_or_else(|| format!("unknown screen '{id}'"))?;
+        Ok(())
+    }
+
+    pub fn has_pattern_grid(&self) -> bool {
+        self.current()
+            .widgets
+            .iter()
+            .any(|widget| matches!(widget, WidgetView::PatternGrid))
+    }
+
+    pub fn has_performance_controls(&self) -> bool {
+        self.current()
+            .widgets
+            .iter()
+            .any(|widget| matches!(widget, WidgetView::PerformanceControls))
     }
 
     pub fn switch(&mut self, direction: i32) {
@@ -165,7 +203,37 @@ impl ScreenPanel {
 #[cfg(test)]
 mod tests {
     use super::{ScreenPanel, WidgetView};
-    use crate::{compiler::compile, lua, panel::Gesture};
+    use crate::{compiler::compile, lua, navigation::NavigationRuntime, panel::Gesture};
+
+    const NAVIGATED_INSTRUMENT: &str = r#"
+        local instrument = meldritch.instrument("Navigation test")
+        local tone = instrument:oscillator { waveform = "sine", frequency = 110 }
+        instrument:connect(tone.out, instrument.output.left)
+        instrument:connect(tone.out, instrument.output.right)
+        local sequence = instrument:sequencer {
+          bpm = 120, steps = 16, steps_per_beat = 4,
+        }
+        sequence:track("Pulse")
+        sequence:steps("Pulse", { 1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0 })
+        instrument:control("Tempo", sequence.bpm, { min = 60, max = 220 })
+        instrument:performance { sequencer = sequence, layout = "step_grid" }
+        local alpha = instrument:screen("alpha", "Alpha")
+        alpha:performance_controls()
+        alpha:performance_status()
+        local beta = instrument:screen("beta", "Beta")
+        beta:pattern_grid()
+        beta:transport_status()
+        local navigation = instrument:navigation {
+          initial = "alpha",
+          events = {
+            { name = "show_alpha", from = "*", to = "alpha" },
+            { name = "show_beta", from = "*", to = "beta" },
+          },
+        }
+        navigation:bind("F1", "show_alpha")
+        navigation:bind("F2", "show_beta")
+        return instrument
+    "#;
 
     #[test]
     fn lua_screens_switch_and_adjust_only_visible_control() {
@@ -228,5 +296,51 @@ mod tests {
         panel.activate().unwrap();
         machine.process(&mut samples);
         assert_eq!(samples, [0.1875]);
+    }
+
+    #[test]
+    fn lua_navigation_switches_screens_without_changing_music() {
+        let graph = lua::read(NAVIGATED_INSTRUMENT).unwrap();
+        let navigation = NavigationRuntime::new(graph.navigation.as_ref().unwrap()).unwrap();
+        let sequence = graph.performance.as_ref().unwrap().sequencer.clone();
+        let authored_pattern = sequence.pattern().velocities[0];
+        let mut machine = compile(&graph).unwrap();
+        machine.process(&mut [0.0]);
+        let controls = machine
+            .control_ids()
+            .map(|id| {
+                let handle = machine.control_handle(id).unwrap();
+                let authored = machine.effective_value(handle.target()).unwrap();
+                (handle, authored)
+            })
+            .collect();
+        let mut panel = ScreenPanel::new(machine.screens(), controls).unwrap();
+        panel.activate_screen(navigation.initial_screen()).unwrap();
+        assert_eq!(panel.current().title, "Alpha");
+
+        sequence.stop();
+        machine.process(&mut [0.0]);
+        assert!(!sequence.playing());
+        let target = navigation.dispatch("F2").unwrap().unwrap();
+        panel.activate_screen(&target).unwrap();
+        assert_eq!(panel.current().title, "Beta");
+        assert_eq!(sequence.pattern().velocities[0], authored_pattern);
+        assert!(!sequence.playing());
+
+        assert_eq!(navigation.dispatch("unrelated").unwrap(), None);
+        let target = navigation.dispatch("F1").unwrap().unwrap();
+        panel.activate_screen(&target).unwrap();
+        assert_eq!(panel.current().title, "Alpha");
+        let target = navigation.dispatch("F1").unwrap().unwrap();
+        panel.activate_screen(&target).unwrap();
+        assert_eq!(panel.current().title, "Alpha");
+        assert!(
+            panel
+                .activate_screen("missing")
+                .unwrap_err()
+                .contains("unknown screen")
+        );
+        assert_eq!(sequence.pattern().velocities[0], authored_pattern);
+        assert!(!sequence.playing());
     }
 }

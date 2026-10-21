@@ -15,6 +15,7 @@ use crate::{
     device::DeviceOutput,
     midi::{TimedMidiError, TimedMidiRouter},
     midi_device::MidiInputSession,
+    navigation::NavigationRuntime,
     panel::{Gesture, Panel},
     screen_panel::{ScreenPanel, WidgetView},
 };
@@ -128,6 +129,66 @@ impl Terminal {
     }
 }
 
+fn draw_pattern_grid(
+    out: &mut impl Write,
+    output: &DeviceOutput,
+    page: usize,
+    selected_track: usize,
+) -> Result<(), String> {
+    let performance = output
+        .performance()
+        .ok_or("pattern grid requires a sequencer")?;
+    let sequence = &performance.sequencer;
+    let names = sequence.track_names();
+    let pattern = sequence.pattern();
+    let first = page * 8;
+    queue!(out, Print("          ")).map_err(|error| error.to_string())?;
+    for step in first..(first + 8).min(sequence.steps) {
+        queue!(out, Print(format!("{:02} ", step + 1))).map_err(|e| e.to_string())?;
+    }
+    queue!(out, Print("\r\n")).map_err(|e| e.to_string())?;
+    for (track, name) in names.iter().enumerate() {
+        queue!(
+            out,
+            Print(format!(
+                "{}{:8} ",
+                if track == selected_track { ">" } else { " " },
+                name
+            ))
+        )
+        .map_err(|e| e.to_string())?;
+        for step in first..(first + 8).min(sequence.steps) {
+            let glyph = if sequence.current_step() == step && sequence.playing() {
+                if pattern.velocities[track][step] > 0.0 {
+                    "◆"
+                } else {
+                    "◇"
+                }
+            } else if pattern.velocities[track][step] > 0.0 {
+                "●"
+            } else {
+                "·"
+            };
+            queue!(out, Print(format!(" {glyph} "))).map_err(|e| e.to_string())?;
+        }
+        queue!(out, Print("\r\n")).map_err(|e| e.to_string())?;
+    }
+    queue!(
+        out,
+        Print("\r\n1-8: toggle  Up/Down: track  Tab: page  Space: play/stop  +/-: BPM  r: restart  Shift-C: clear track\r\n")
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn navigation_key(code: KeyCode) -> Option<String> {
+    match code {
+        KeyCode::F(number) => Some(format!("F{number}")),
+        KeyCode::Char(character) => Some(character.to_string()),
+        _ => None,
+    }
+}
+
 impl Drop for Terminal {
     fn drop(&mut self) {
         let _ = execute!(stdout(), Show, LeaveAlternateScreen);
@@ -155,13 +216,15 @@ fn draw(
         Print(" | q: quit\r\n"),
         Print("Up/Down: select  Left/Right: adjust  Home/End: bounds\r\n"),
         Print(if screens.is_some() {
-            "Tab/Shift+Tab: switch screens  Enter: open link\r\n\r\n"
+            "Lua navigation keys switch screens  Enter: activate\r\n\r\n"
         } else {
             "\r\n"
         })
     )
     .map_err(|error| error.to_string())?;
-    if let Some((page, selected_track)) = step_grid {
+    if screens.is_none()
+        && let Some((page, selected_track)) = step_grid
+    {
         let performance = output.performance().expect("step grid performance");
         let sequence = &performance.sequencer;
         let names = sequence.track_names();
@@ -219,9 +282,7 @@ fn draw(
                 .map_err(|error| error.to_string())?;
         }
     }
-    if step_grid.is_none()
-        && let Some(screens) = screens
-    {
+    if let Some(screens) = screens {
         let screen = screens.current();
         let (position, count) = screens.position();
         queue!(
@@ -236,7 +297,9 @@ fn draw(
                 " "
             };
             match widget {
-                WidgetView::Label(text) => queue!(out, Print(format!("  {text}\r\n"))),
+                WidgetView::Label(text) => {
+                    queue!(out, Print(format!("  {text}\r\n"))).map_err(|error| error.to_string())
+                }
                 WidgetView::Control { label, row } => {
                     let (min, max) = row.range();
                     queue!(
@@ -246,15 +309,90 @@ fn draw(
                             row.value()
                         ))
                     )
+                    .map_err(|error| error.to_string())
                 }
                 WidgetView::Link { label, .. } => {
                     queue!(out, Print(format!("{marker} {label} >\r\n")))
+                        .map_err(|error| error.to_string())
                 }
                 WidgetView::Button { label, .. } => {
                     queue!(out, Print(format!("{marker} [{label}]\r\n")))
+                        .map_err(|error| error.to_string())
                 }
-            }
-            .map_err(|error| error.to_string())?;
+                WidgetView::PerformanceControls => {
+                    queue!(out, Print("  Live controls\r\n")).map_err(|error| error.to_string())?;
+                    for (control_index, row) in panel.rows().iter().enumerate() {
+                        let selected = if panel.selected() == Some(control_index) {
+                            ">"
+                        } else {
+                            " "
+                        };
+                        let (min, max) = row.range();
+                        queue!(
+                            out,
+                            Print(format!(
+                                "{selected} {} = {:.4}  [{min:.4}, {max:.4}]\r\n",
+                                row.id(),
+                                row.value()
+                            ))
+                        )
+                        .map_err(|error| error.to_string())?;
+                    }
+                    Ok(())
+                }
+                WidgetView::PerformanceStatus => {
+                    if let Some(performance) = output.performance() {
+                        let sequence = &performance.sequencer;
+                        queue!(
+                            out,
+                            Print(format!(
+                                "  {} | {:.0} BPM | {} | step {:02}\r\n",
+                                sequence.name,
+                                sequence.bpm(),
+                                if sequence.playing() {
+                                    "PLAYING"
+                                } else {
+                                    "STOPPED"
+                                },
+                                sequence.current_step() + 1
+                            ))
+                        )
+                        .map_err(|error| error.to_string())
+                    } else {
+                        queue!(out, Print("  Performance status unavailable\r\n"))
+                            .map_err(|error| error.to_string())
+                    }
+                }
+                WidgetView::PatternGrid => {
+                    draw_pattern_grid(
+                        &mut out,
+                        output,
+                        step_grid.unwrap_or((0, 0)).0,
+                        step_grid.unwrap_or((0, 0)).1,
+                    )?;
+                    Ok(())
+                }
+                WidgetView::TransportStatus => {
+                    let sequence = &output
+                        .performance()
+                        .ok_or("transport status requires a sequencer")?
+                        .sequencer;
+                    queue!(
+                        out,
+                        Print(format!(
+                            "  {:.0} BPM | {} | current step {:02}\r\n",
+                            sequence.bpm(),
+                            if sequence.playing() {
+                                "PLAYING"
+                            } else {
+                                "STOPPED"
+                            },
+                            sequence.current_step() + 1
+                        ))
+                    )
+                    .map_err(|error| error.to_string())
+                }
+            }?;
         }
     } else if step_grid.is_none() {
         if panel.rows().is_empty() {
@@ -318,6 +456,16 @@ pub fn perform(
     } else {
         Some(ScreenPanel::new(output.screens(), controls.clone())?)
     };
+    let navigation = output
+        .navigation()
+        .map(NavigationRuntime::new)
+        .transpose()?;
+    if let Some(navigation) = &navigation {
+        screens
+            .as_mut()
+            .ok_or("Lua navigation requires at least one screen")?
+            .activate_screen(navigation.initial_screen())?;
+    }
     let mut panel = Panel::new(controls);
     let _terminal = Terminal::enter()?;
     draw(
@@ -353,7 +501,26 @@ pub fn perform(
         {
             break;
         }
-        if let Some(performance) = output.performance() {
+        if let (Some(navigation), Some(key_name), Some(screens)) =
+            (&navigation, navigation_key(key.code), &mut screens)
+            && let Some(screen) = navigation.dispatch(&key_name)?
+        {
+            screens.activate_screen(&screen)?;
+            draw(
+                &panel,
+                Some(screens),
+                output,
+                midi_session,
+                keyboard.as_ref(),
+                output.performance().map(|_| (grid_page, grid_track)),
+            )?;
+            continue;
+        }
+        let grid_active = screens.as_ref().map_or(
+            output.performance().is_some(),
+            ScreenPanel::has_pattern_grid,
+        );
+        if grid_active && let Some(performance) = output.performance() {
             let sequence = &performance.sequencer;
             match key.code {
                 KeyCode::Tab | KeyCode::BackTab => grid_page = 1 - grid_page,
@@ -424,12 +591,14 @@ pub fn perform(
         }
         if let Some(screens) = &mut screens {
             match key.code {
-                KeyCode::Tab => screens.switch(1),
-                KeyCode::BackTab => screens.switch(-1),
+                KeyCode::Tab if navigation.is_none() => screens.switch(1),
+                KeyCode::BackTab if navigation.is_none() => screens.switch(-1),
                 KeyCode::Enter => screens.activate()?,
                 _ => {}
             }
-            if matches!(key.code, KeyCode::Tab | KeyCode::BackTab | KeyCode::Enter) {
+            if (navigation.is_none() && matches!(key.code, KeyCode::Tab | KeyCode::BackTab))
+                || key.code == KeyCode::Enter
+            {
                 draw(
                     &panel,
                     Some(screens),
@@ -451,7 +620,12 @@ pub fn perform(
             _ => None,
         };
         if let Some(gesture) = gesture {
-            if let Some(screens) = &mut screens {
+            if screens
+                .as_ref()
+                .is_some_and(ScreenPanel::has_performance_controls)
+            {
+                panel.apply(gesture)?;
+            } else if let Some(screens) = &mut screens {
                 screens.apply(gesture)?;
             } else {
                 panel.apply(gesture)?;
@@ -473,7 +647,7 @@ pub fn perform(
 mod tests {
     use crossterm::event::KeyCode;
 
-    use super::TuiKeyboard;
+    use super::{TuiKeyboard, navigation_key};
     use crate::{
         compiler::compile,
         live_notes::live_note_queue,
@@ -481,6 +655,13 @@ mod tests {
         midi::TimedMidiRouter,
         timed::{TimedNotePlan, TimedNoteState},
     };
+
+    #[test]
+    fn function_keys_are_delivered_as_authored_navigation_names() {
+        assert_eq!(navigation_key(KeyCode::F(1)).as_deref(), Some("F1"));
+        assert_eq!(navigation_key(KeyCode::F(2)).as_deref(), Some("F2"));
+        assert_eq!(navigation_key(KeyCode::Left), None);
+    }
 
     #[test]
     fn tui_keys_select_pitch_and_space_releases_the_gate() {

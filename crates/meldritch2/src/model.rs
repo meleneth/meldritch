@@ -139,6 +139,10 @@ pub enum Widget {
         control_id: String,
         value: f64,
     },
+    PerformanceControls,
+    PerformanceStatus,
+    PatternGrid,
+    TransportStatus,
 }
 
 #[derive(Clone, Debug)]
@@ -146,6 +150,27 @@ pub struct Screen {
     pub id: String,
     pub title: String,
     pub widgets: Vec<Widget>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NavigationEvent {
+    pub name: String,
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NavigationBinding {
+    pub key: String,
+    pub event: String,
+}
+
+/// Lua-authored UI navigation executed by the UI-thread Lua FSM runtime.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Navigation {
+    pub initial: String,
+    pub events: Vec<NavigationEvent>,
+    pub bindings: Vec<NavigationBinding>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -163,6 +188,7 @@ pub struct Graph {
     pub midi_packets: Vec<MidiPacket>,
     pub midi_poly: Vec<MidiPoly>,
     pub screens: Vec<Screen>,
+    pub navigation: Option<Navigation>,
     pub performance: Option<Performance>,
     pub actions: Vec<Action>,
 }

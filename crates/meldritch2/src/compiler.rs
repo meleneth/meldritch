@@ -8,7 +8,7 @@ use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
 use crate::model::{
     Action, Connection, ControlScale, Graph, MidiButton, MidiCc, MidiNotes, MidiPacket,
-    ModuleRuntime, ParameterId, Screen, Widget,
+    ModuleRuntime, Navigation, ParameterId, Screen, Widget,
 };
 use crate::sample::PreparedSample;
 use crate::sequencer::{SequencerControl, SequencerRuntime};
@@ -295,6 +295,7 @@ struct PolyMapping {
 fn validate_screens(
     screens: &[Screen],
     controls: &BTreeMap<String, ControlBinding>,
+    has_performance: bool,
 ) -> Result<(), String> {
     fn text(value: &str, context: &str) -> Result<(), String> {
         if value.is_empty() || value.len() > 120 || value.chars().any(char::is_control) {
@@ -359,7 +360,64 @@ fn validate_screens(
                         ));
                     }
                 }
+                Widget::PerformanceControls => {}
+                Widget::PerformanceStatus | Widget::PatternGrid | Widget::TransportStatus => {
+                    if !has_performance {
+                        return Err(format!(
+                            "screen '{}' uses a sequencer widget without a performance sequencer",
+                            screen.id
+                        ));
+                    }
+                }
             }
+        }
+    }
+    Ok(())
+}
+
+fn validate_navigation(navigation: &Navigation, screens: &[Screen]) -> Result<(), String> {
+    let screen_ids = screens
+        .iter()
+        .map(|screen| screen.id.as_str())
+        .collect::<BTreeSet<_>>();
+    if !screen_ids.contains(navigation.initial.as_str()) {
+        return Err(format!(
+            "navigation initial screen '{}' is unknown",
+            navigation.initial
+        ));
+    }
+    let mut event_names = BTreeSet::new();
+    for event in &navigation.events {
+        if event.name.is_empty() {
+            return Err("navigation event name must be nonempty".into());
+        }
+        event_names.insert(event.name.as_str());
+        if event.from != "*" && !screen_ids.contains(event.from.as_str()) {
+            return Err(format!(
+                "navigation event '{}' has unknown source screen '{}'",
+                event.name, event.from
+            ));
+        }
+        if !screen_ids.contains(event.to.as_str()) {
+            return Err(format!(
+                "navigation event '{}' has unknown target screen '{}'",
+                event.name, event.to
+            ));
+        }
+    }
+    let mut keys = BTreeSet::new();
+    for binding in &navigation.bindings {
+        if binding.key.is_empty() || !keys.insert(binding.key.as_str()) {
+            return Err(format!(
+                "navigation key '{}' must be nonempty and unique",
+                binding.key
+            ));
+        }
+        if !event_names.contains(binding.event.as_str()) {
+            return Err(format!(
+                "navigation key '{}' references unknown event '{}'",
+                binding.key, binding.event
+            ));
         }
     }
     Ok(())
@@ -1094,7 +1152,10 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             overflow: binding.overflow,
         });
     }
-    validate_screens(&graph.screens, &controls)?;
+    validate_screens(&graph.screens, &controls, graph.performance.is_some())?;
+    if let Some(navigation) = &graph.navigation {
+        validate_navigation(navigation, &graph.screens)?;
+    }
     let note_pairs = graph
         .midi_notes
         .iter()

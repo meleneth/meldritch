@@ -13,7 +13,7 @@ use crate::{
     live::{LiveControl, LiveRuntime},
     live_notes::{LiveNoteConsumer, live_note_queue},
     midi::{MidiRouter, TimedMidiRouter},
-    model::{Action, Graph, Performance, Screen},
+    model::{Action, Graph, Navigation, Performance, Screen},
 };
 
 const CHUNK_FRAMES: usize = 256;
@@ -141,6 +141,7 @@ pub struct DeviceOutput {
     control: LiveControl,
     controls: Vec<(ControlHandle, f64)>,
     screens: Vec<Screen>,
+    navigation: Option<Navigation>,
     performance: Option<Performance>,
     actions: Vec<Action>,
     apc_mini: Option<String>,
@@ -246,6 +247,7 @@ impl DeviceOutput {
         }
         let machine = compile_at_rate(graph, f64::from(config.sample_rate))?;
         let screens = machine.screens().to_vec();
+        let navigation = graph.navigation.clone();
         let performance = graph.performance.clone();
         let actions = graph.actions.clone();
         let apc_mini = graph.devices.apc_mini.clone();
@@ -332,6 +334,7 @@ impl DeviceOutput {
             control,
             controls,
             screens,
+            navigation,
             performance,
             actions,
             apc_mini,
@@ -361,6 +364,9 @@ impl DeviceOutput {
     }
     pub fn screens(&self) -> &[Screen] {
         &self.screens
+    }
+    pub fn navigation(&self) -> Option<&Navigation> {
+        self.navigation.as_ref()
     }
     pub fn performance(&self) -> Option<&Performance> {
         self.performance.as_ref()
