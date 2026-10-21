@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use crate::compiler::{ControlHandle, MAX_POLY_VOICES, Machine};
-use crate::model::PolyOverflow;
+use crate::model::{Action, MidiButtonEdge, MidiButtonMessage, PolyOverflow};
 use crate::{
     live_notes::{LiveNoteProducer, PushError},
     midi_clock::{ClockError, MidiFrameClock},
@@ -149,6 +149,9 @@ impl TimedMidiRouter {
     pub fn dispatch(&mut self, midi_us: u64, message: &[u8]) -> Result<bool, TimedMidiError> {
         if message == [0xFF] {
             self.release_all();
+            return Ok(true);
+        }
+        if self.controls.dispatch_button(message) {
             return Ok(true);
         }
         if message.len() != 3 || message[1] > 127 || message[2] > 127 {
@@ -359,6 +362,16 @@ impl HeldNotes {
 pub struct MidiRouter {
     routes: Vec<Option<ControlHandle>>,
     notes: Vec<Option<NoteRoute>>,
+    buttons: Vec<ButtonRoute>,
+}
+
+#[derive(Clone)]
+struct ButtonRoute {
+    message: MidiButtonMessage,
+    channel: u8,
+    number: u8,
+    edge: MidiButtonEdge,
+    action: Action,
 }
 
 impl MidiRouter {
@@ -390,11 +403,34 @@ impl MidiRouter {
                 }),
             });
         }
-        Self { routes, notes }
+        let buttons = machine
+            .midi_buttons()
+            .iter()
+            .map(|button| ButtonRoute {
+                message: button.message,
+                channel: button.channel,
+                number: button.number,
+                edge: button.edge,
+                action: machine
+                    .actions()
+                    .iter()
+                    .find(|action| action.label == button.action_label)
+                    .expect("validated MIDI button action")
+                    .clone(),
+            })
+            .collect();
+        Self {
+            routes,
+            notes,
+            buttons,
+        }
     }
 
     /// Returns true only for a mapped, valid three-byte CC or note message.
     pub fn dispatch(&self, message: &[u8]) -> bool {
+        if self.dispatch_button(message) {
+            return true;
+        }
         if message.len() != 3 || message[1] > 127 || message[2] > 127 {
             return false;
         }
@@ -415,6 +451,51 @@ impl MidiRouter {
             min + (max - min) * f64::from(message[2]) / 127.0
         };
         handle.publish(value.clamp(min, max)).is_ok()
+    }
+
+    fn dispatch_button(&self, message: &[u8]) -> bool {
+        let Some(status) = message.first().copied() else {
+            return false;
+        };
+        let kind = match status & 0xF0 {
+            0x80 | 0x90 => MidiButtonMessage::Note,
+            0xB0 => MidiButtonMessage::ControlChange,
+            0xC0 => MidiButtonMessage::ProgramChange,
+            _ => return false,
+        };
+        let channel = (status & 0x0F) + 1;
+        let Some(number) = message.get(1).copied().filter(|number| *number <= 127) else {
+            return false;
+        };
+        let valid = match kind {
+            MidiButtonMessage::ProgramChange => message.len() == 2,
+            MidiButtonMessage::Note | MidiButtonMessage::ControlChange => {
+                message.len() == 3 && message[2] <= 127
+            }
+        };
+        if !valid {
+            return false;
+        }
+        let pressed = match kind {
+            MidiButtonMessage::ProgramChange => true,
+            MidiButtonMessage::Note => status & 0xF0 == 0x90 && message[2] > 0,
+            MidiButtonMessage::ControlChange => message[2] > 0,
+        };
+        let edge = if pressed {
+            MidiButtonEdge::Press
+        } else {
+            MidiButtonEdge::Release
+        };
+        let Some(route) = self.buttons.iter().find(|route| {
+            route.message == kind
+                && route.channel == channel
+                && route.number == number
+                && route.edge == edge
+        }) else {
+            return false;
+        };
+        route.action.invoke();
+        true
     }
 
     fn dispatch_note(&self, message: &[u8]) -> bool {

@@ -7,7 +7,8 @@ use std::sync::{
 use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
 use crate::model::{
-    Connection, ControlScale, Graph, MidiCc, MidiNotes, ModuleRuntime, ParameterId, Screen, Widget,
+    Action, Connection, ControlScale, Graph, MidiButton, MidiCc, MidiNotes, ModuleRuntime,
+    ParameterId, Screen, Widget,
 };
 use crate::sample::PreparedSample;
 use crate::sequencer::{SequencerControl, SequencerRuntime};
@@ -251,6 +252,8 @@ pub struct Machine {
     screens: Vec<Screen>,
     midi_ccs: Vec<MidiCc>,
     midi_notes: Vec<MidiNotes>,
+    midi_buttons: Vec<MidiButton>,
+    actions: Vec<Action>,
     poly_notes: Vec<PolyMapping>,
     note_pairs: Vec<NotePair>,
     output_slots: [usize; 2],
@@ -596,6 +599,12 @@ impl Machine {
     pub fn midi_notes(&self) -> &[MidiNotes] {
         &self.midi_notes
     }
+    pub fn midi_buttons(&self) -> &[MidiButton] {
+        &self.midi_buttons
+    }
+    pub fn actions(&self) -> &[Action] {
+        &self.actions
+    }
     pub(crate) fn midi_note_state(&self, channel: u8) -> Option<Arc<NoteState>> {
         self.note_pairs
             .iter()
@@ -889,6 +898,49 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             ));
         }
     }
+    let action_labels = graph
+        .actions
+        .iter()
+        .map(|action| action.label.as_str())
+        .collect::<BTreeSet<_>>();
+    if action_labels.len() != graph.actions.len() {
+        return Err("action labels must be unique".into());
+    }
+    let mut mapped_buttons = BTreeSet::new();
+    for button in &graph.midi_buttons {
+        if button.name.is_empty() || !(1..=16).contains(&button.channel) || button.number > 127 {
+            return Err(format!(
+                "MIDI button '{}' requires a name, channel 1..16, and number 0..127",
+                button.name
+            ));
+        }
+        if !action_labels.contains(button.action_label.as_str()) {
+            return Err(format!(
+                "MIDI button '{}' references unknown action '{}'",
+                button.name, button.action_label
+            ));
+        }
+        if button.message == crate::model::MidiButtonMessage::ProgramChange
+            && button.edge == crate::model::MidiButtonEdge::Release
+        {
+            return Err(format!(
+                "MIDI Program Change button '{}' has no release edge",
+                button.name
+            ));
+        }
+        let message = match button.message {
+            crate::model::MidiButtonMessage::Note => 0u8,
+            crate::model::MidiButtonMessage::ControlChange => 1,
+            crate::model::MidiButtonMessage::ProgramChange => 2,
+        };
+        let edge = match button.edge {
+            crate::model::MidiButtonEdge::Press => 0u8,
+            crate::model::MidiButtonEdge::Release => 1,
+        };
+        if !mapped_buttons.insert((message, button.channel, button.number, edge)) {
+            return Err(format!("duplicate MIDI button edge for '{}'", button.name));
+        }
+    }
     let mut mapped_note_channels = BTreeSet::new();
     let mut mapped_note_targets = BTreeSet::new();
     for binding in &graph.midi_notes {
@@ -1166,6 +1218,8 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         screens: graph.screens.clone(),
         midi_ccs: graph.midi_ccs.clone(),
         midi_notes: graph.midi_notes.clone(),
+        midi_buttons: graph.midi_buttons.clone(),
+        actions: graph.actions.clone(),
         poly_notes,
         note_pairs,
         output_slots: [

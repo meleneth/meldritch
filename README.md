@@ -126,6 +126,35 @@ Names are case-insensitive unique substrings of the names printed by
 `--midi=INDEX` options remain available as one-run overrides. With no
 `audio_output` declaration, playback follows the current system default.
 
+MIDI buttons are connected to authored behavior in Lua, not assigned a fixed
+meaning by the Rust device layer. `on_midi_button` accepts Note, CC, and Program
+Change buttons and can distinguish press from release:
+
+```lua
+instrument:on_midi_button({
+  name = "Stop", message = "note", channel = 10, number = 36,
+}, function()
+  sequence:stop()
+end)
+
+instrument:on_midi_button({
+  name = "Start", message = "cc", channel = 1, number = 64,
+  edge = "release",
+}, function()
+  sequence:start()
+end)
+```
+
+See `crates/meldritch2/examples/68-midi-buttons.lua` for all three supported
+message forms. A matching Note binding is consumed before note allocation, so
+a pad used as an action does not also play a voice. This covers every control
+on a MicroLab or MPK mini that actually emits one of those MIDI messages,
+including MPK pads in Note, CC, and Program Change modes. Hardware-local mode
+buttons are different: for example, octave and shift controls may change the
+controller's own state without emitting an addressable MIDI event. No software
+hook can observe such a press; the resulting notes and other emitted messages
+remain available normally.
+
 Audio and MIDI device commands depend on available host hardware. The active
 repository check is:
 

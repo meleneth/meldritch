@@ -9,8 +9,9 @@ use mlua::{AnyUserData, Function, Lua, Table, UserData, UserDataMethods, Value};
 use crate::contract;
 use crate::model::{
     Action, Connection, Control, ControlScale, Endpoint, ExternalInput, ExternalParameter,
-    ExternalPort, Graph, MidiCc, MidiNotes, MidiPoly, MidiPolyVoice, Module, ModuleRuntime,
-    ParameterId, Performance, PolyOverflow, Screen, Subpatch, SubpatchInstance, Widget,
+    ExternalPort, Graph, MidiButton, MidiButtonEdge, MidiButtonMessage, MidiCc, MidiNotes,
+    MidiPoly, MidiPolyVoice, Module, ModuleRuntime, ParameterId, Performance, PolyOverflow, Screen,
+    Subpatch, SubpatchInstance, Widget,
 };
 use crate::sample::{PreparedSample, SampleBank};
 use crate::sequencer::SequencerControl;
@@ -81,7 +82,7 @@ meldritch = { _subpatches = {} }
 function meldritch.graph()
   local graph = { modules = {}, instances = {}, connections = {}, normalizations = {},
     controls = {}, midi_ccs = {}, note_bindings = {}, poly_bindings = {}, external_inputs = {}, external_outputs = {},
-    external_parameters = {}, screens = {}, actions = {}, performance = nil, _devices = {} }
+    external_parameters = {}, screens = {}, actions = {}, midi_buttons = {}, performance = nil, _devices = {} }
   function graph:devices(devices)
     assert(type(devices) == "table", "devices must be a table")
     assert(devices.audio_output == nil or
@@ -386,6 +387,7 @@ function meldritch.instrument(name)
     _right = nil,
     _uses_notes = false,
     _actions = {},
+    _midi_buttons = {},
     note = {
       pitch = { direction = "note", signal = "pitch" },
       gate = { direction = "note", signal = "gate" },
@@ -428,6 +430,25 @@ function meldritch.instrument(name)
   function instrument:action(label, callback)
     assert(type(label) == "string" and type(callback) == "function", "action requires a label and callback")
     self._capturing_action = label; callback(); self._capturing_action = nil
+    return label
+  end
+  function instrument:on_midi_button(spec, callback)
+    assert(type(spec) == "table", "MIDI button requires a specification")
+    assert(type(spec.name) == "string" and spec.name ~= "", "MIDI button requires a name")
+    assert(spec.message == "note" or spec.message == "cc" or spec.message == "program",
+      "MIDI button message must be note, cc, or program")
+    assert(type(spec.channel) == "number" and type(spec.number) == "number",
+      "MIDI button requires channel and number")
+    local edge = spec.edge or "press"
+    assert(edge == "press" or edge == "release", "MIDI button edge must be press or release")
+    local before = #self._actions
+    self:action(spec.name, callback)
+    assert(#self._actions == before + 1,
+      "MIDI button callback must perform exactly one supported authored action")
+    table.insert(self._midi_buttons, {
+      name = spec.name, message = spec.message, channel = spec.channel,
+      number = spec.number, edge = edge, action_label = spec.name,
+    })
   end
   function instrument:performance(spec)
     assert(type(spec) == "table" and spec.layout == "step_grid" and spec.sequencer, "performance requires a step_grid sequencer")
@@ -449,6 +470,7 @@ function meldritch.instrument(name)
     local root = meldritch.graph()
     root._devices = definition._devices
     root.actions = self._actions
+    root.midi_buttons = self._midi_buttons
     root.performance = self._performance
     local terminal = root:module("output", "stereo_output")
     if self._uses_notes then
@@ -712,6 +734,29 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
             },
         });
     }
+    let midi_buttons: Table = table.get("midi_buttons").map_err(|e| e.to_string())?;
+    for button in midi_buttons.sequence_values::<Table>() {
+        let button = button.map_err(|e| e.to_string())?;
+        let message: String = button.get("message").map_err(|e| e.to_string())?;
+        let edge: String = button.get("edge").map_err(|e| e.to_string())?;
+        graph.midi_buttons.push(MidiButton {
+            name: button.get("name").map_err(|e| e.to_string())?,
+            message: match message.as_str() {
+                "note" => MidiButtonMessage::Note,
+                "cc" => MidiButtonMessage::ControlChange,
+                "program" => MidiButtonMessage::ProgramChange,
+                _ => return Err(format!("unknown MIDI button message '{message}'")),
+            },
+            channel: button.get("channel").map_err(|e| e.to_string())?,
+            number: button.get("number").map_err(|e| e.to_string())?,
+            edge: match edge.as_str() {
+                "press" => MidiButtonEdge::Press,
+                "release" => MidiButtonEdge::Release,
+                _ => return Err(format!("unknown MIDI button edge '{edge}'")),
+            },
+            action_label: button.get("action_label").map_err(|e| e.to_string())?,
+        });
+    }
     let screens: Table = table.get("screens").map_err(|e| e.to_string())?;
     for screen in screens.sequence_values::<Table>() {
         let screen = screen.map_err(|e| e.to_string())?;
@@ -937,6 +982,7 @@ fn endpoint(table: Table) -> Result<Endpoint, String> {
 mod tests {
     use super::{read, read_with_root};
     use crate::compiler::compile_at_rate;
+    use crate::model::{MidiButtonEdge, MidiButtonMessage};
     use std::{fs, io::Cursor};
 
     #[test]
@@ -987,6 +1033,19 @@ mod tests {
         assert_eq!(
             graph.devices.midi_input.as_deref(),
             Some("MicroLab mk3:MicroLab mk3")
+        );
+    }
+
+    #[test]
+    fn instrument_authors_note_cc_and_program_button_hooks() {
+        let graph = read(include_str!("../examples/68-midi-buttons.lua")).unwrap();
+        assert_eq!(graph.actions.len(), 3);
+        assert_eq!(graph.midi_buttons.len(), 3);
+        assert_eq!(graph.midi_buttons[0].message, MidiButtonMessage::Note);
+        assert_eq!(graph.midi_buttons[1].edge, MidiButtonEdge::Release);
+        assert_eq!(
+            graph.midi_buttons[2].message,
+            MidiButtonMessage::ProgramChange
         );
     }
 

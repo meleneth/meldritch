@@ -4121,5 +4121,30 @@ return graph
         host.accepted().unwrap().process(&mut samples);
         assert_eq!(samples, [0.09375; 4]);
     }
+
+    #[test]
+    fn lua_midi_button_hooks_invoke_authored_actions_and_consume_edges() {
+        let graph = lua::read(include_str!("../examples/68-midi-buttons.lua")).unwrap();
+        let sequence = graph.actions[0].sequencer.clone();
+        let mut machine = compile(&graph).unwrap();
+        let router = MidiRouter::from_machine(&machine);
+        let mut samples = [0.0; 8];
+        machine.process(&mut samples);
+        assert!(sequence.playing());
+
+        assert!(router.dispatch(&[0x99, 36, 100]));
+        machine.process(&mut samples);
+        assert!(!sequence.playing());
+        assert!(!router.dispatch(&[0x99, 37, 100]));
+
+        assert!(!router.dispatch(&[0xB0, 64, 127]));
+        assert!(router.dispatch(&[0xB0, 64, 0]));
+        machine.process(&mut samples);
+        assert!(sequence.playing());
+
+        assert!(router.dispatch(&[0xC0, 3]));
+        machine.process(&mut samples);
+        assert_eq!(sequence.current_step(), 0);
+    }
 }
 pub mod apc;

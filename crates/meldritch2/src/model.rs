@@ -159,6 +159,7 @@ pub struct Graph {
     pub controls: Vec<Control>,
     pub midi_ccs: Vec<MidiCc>,
     pub midi_notes: Vec<MidiNotes>,
+    pub midi_buttons: Vec<MidiButton>,
     pub midi_poly: Vec<MidiPoly>,
     pub screens: Vec<Screen>,
     pub performance: Option<Performance>,
@@ -184,6 +185,41 @@ pub struct Action {
     pub label: String,
     pub sequencer: Arc<SequencerControl>,
     pub action: TransportAction,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MidiButtonMessage {
+    Note,
+    ControlChange,
+    ProgramChange,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MidiButtonEdge {
+    Press,
+    Release,
+}
+
+/// A device-specific MIDI edge authored in Lua and connected to an action.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MidiButton {
+    pub name: String,
+    pub message: MidiButtonMessage,
+    pub channel: u8,
+    pub number: u8,
+    pub edge: MidiButtonEdge,
+    pub action_label: String,
+}
+
+impl Action {
+    pub fn invoke(&self) {
+        match self.action {
+            TransportAction::Toggle => self.sequencer.toggle_transport(),
+            TransportAction::Start => self.sequencer.start(),
+            TransportAction::Stop => self.sequencer.stop(),
+            TransportAction::Restart => self.sequencer.restart(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
