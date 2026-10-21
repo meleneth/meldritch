@@ -38,61 +38,56 @@ enum OpProcessor {
 #[derive(Clone, Copy, Debug, Default)]
 struct SampleVoice {
     position: f64,
-    age: u64,
-    active: bool,
 }
 
 #[derive(Debug)]
 struct SamplePlayerRuntime {
     sample: Arc<PreparedSample>,
-    voices: [SampleVoice; 8],
+    voices: Vec<SampleVoice>,
+    max_voices: usize,
     last_trigger: f64,
-    age: u64,
 }
 
 impl SamplePlayerRuntime {
-    fn new(sample: Arc<PreparedSample>) -> Self {
-        Self {
-            sample,
-            voices: [SampleVoice::default(); 8],
-            last_trigger: 0.0,
-            age: 0,
+    fn new(sample: Arc<PreparedSample>, output_rate: f64) -> Result<Self, String> {
+        let rendered_frames =
+            (sample.frames() as f64 * output_rate / f64::from(sample.sample_rate)).ceil();
+        if !rendered_frames.is_finite() || rendered_frames > usize::MAX as f64 {
+            return Err("sample is too long to prepare its overlap storage".into());
         }
+        // A new rising edge requires at least one nonpositive frame between
+        // triggers. Preallocate every overlap that can exist during this
+        // sample's rendered lifetime, so the audio callback never allocates.
+        let max_voices = (rendered_frames as usize).div_ceil(2).max(1);
+        let mut voices = Vec::new();
+        voices.try_reserve_exact(max_voices).map_err(|_| {
+            format!(
+                "not enough memory to prepare {max_voices} overlapping voices for sample '{}'",
+                sample.identity
+            )
+        })?;
+        Ok(Self {
+            sample,
+            voices,
+            max_voices,
+            last_trigger: 0.0,
+        })
     }
     fn process(&mut self, trigger: f64, gain: f64, output_rate: f64, out: &mut [f64]) {
         if trigger > 0.0 && self.last_trigger <= 0.0 {
-            self.age = self.age.wrapping_add(1);
-            let slot = self
-                .voices
-                .iter()
-                .position(|v| !v.active)
-                .unwrap_or_else(|| {
-                    self.voices
-                        .iter()
-                        .enumerate()
-                        .min_by_key(|(_, v)| v.age)
-                        .unwrap()
-                        .0
-                });
-            self.voices[slot] = SampleVoice {
-                position: 0.0,
-                age: self.age,
-                active: true,
-            };
+            assert!(
+                self.voices.len() < self.max_voices,
+                "prepared sample overlap bound must cover every possible trigger"
+            );
+            self.voices.push(SampleVoice { position: 0.0 });
         }
         self.last_trigger = trigger;
         let increment = self.sample.sample_rate as f64 / output_rate;
         let mut left = 0.0;
         let mut right = 0.0;
         for voice in &mut self.voices {
-            if !voice.active {
-                continue;
-            }
             let index = voice.position.floor() as usize;
-            if index >= self.sample.frames() {
-                voice.active = false;
-                continue;
-            }
+            debug_assert!(index < self.sample.frames());
             let fraction = voice.position - index as f64;
             let next = (index + 1).min(self.sample.frames() - 1);
             left += self.sample.left[index]
@@ -100,10 +95,9 @@ impl SamplePlayerRuntime {
             right += self.sample.right[index]
                 + (self.sample.right[next] - self.sample.right[index]) * fraction;
             voice.position += increment;
-            if voice.position >= self.sample.frames() as f64 {
-                voice.active = false;
-            }
         }
+        self.voices
+            .retain(|voice| voice.position < self.sample.frames() as f64);
         out[0] = left * gain;
         out[1] = right * gain;
     }
@@ -1215,7 +1209,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 state: vec![0.0; c.state_len],
             },
             ModuleRuntime::Sample(sample) if module.kind == "sample_player" => {
-                OpProcessor::Sample(SamplePlayerRuntime::new(Arc::clone(sample)))
+                OpProcessor::Sample(SamplePlayerRuntime::new(Arc::clone(sample), sample_rate)?)
             }
             ModuleRuntime::SequencerTrack { sequencer, track }
                 if module.kind == "sequencer_track" =>
@@ -1354,7 +1348,8 @@ mod sample_player_tests {
     }
     #[test]
     fn player_outputs_stereo_resamples_and_completes() {
-        let mut player = SamplePlayerRuntime::new(sample(2, &[1.0, 0.5], &[-1.0, -0.5]));
+        let mut player =
+            SamplePlayerRuntime::new(sample(2, &[1.0, 0.5], &[-1.0, -0.5]), 4.0).unwrap();
         let mut out = [0.0; 2];
         player.process(1.0, 0.5, 4.0, &mut out);
         assert_eq!(out, [0.5, -0.5]);
@@ -1368,17 +1363,16 @@ mod sample_player_tests {
         assert!(out.iter().all(|v| v.is_finite()));
     }
     #[test]
-    fn retriggers_overlap_and_ninth_voice_steals_oldest() {
-        let mut player = SamplePlayerRuntime::new(sample(48_000, &[1.0; 32], &[1.0; 32]));
+    fn retriggers_are_limited_by_sample_lifetime_instead_of_a_voice_cap() {
+        let mut player =
+            SamplePlayerRuntime::new(sample(48_000, &[1.0; 64], &[1.0; 64]), 48_000.0).unwrap();
         let mut out = [0.0; 2];
-        player.process(1.0, 1.0, 48_000.0, &mut out);
-        player.process(0.0, 1.0, 48_000.0, &mut out);
-        player.process(1.0, 1.0, 48_000.0, &mut out);
-        assert_eq!(out, [2.0, 2.0]);
-        for _ in 0..7 {
-            player.process(0.0, 1.0, 48_000.0, &mut out);
+        for overlap in 1..=20 {
             player.process(1.0, 1.0, 48_000.0, &mut out);
+            assert_eq!(out, [f64::from(overlap), f64::from(overlap)]);
+            player.process(0.0, 1.0, 48_000.0, &mut out);
         }
-        assert_eq!(player.voices.iter().filter(|voice| voice.active).count(), 8);
+        assert_eq!(player.voices.len(), 20);
+        assert_eq!(player.max_voices, 32);
     }
 }
