@@ -8,13 +8,44 @@ use std::{
 };
 
 use meldritch2::{
-    compiler::compile,
+    compiler::{compile, compile_at_rate},
     device::{DeviceOutput, output_device_names},
     lua,
     midi_device::{MidiInputSession, MidiMonitorSession, describe_message, input_port_names},
     model::{Graph, ParameterId},
     tui,
 };
+
+fn render_wav(graph: &Graph, path: &str, seconds: f64) -> Result<(), String> {
+    const RATE: u32 = 48_000;
+    let frames = (seconds * f64::from(RATE)).ceil() as usize;
+    let mut machine = compile_at_rate(graph, f64::from(RATE))?;
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: RATE,
+        bits_per_sample: 24,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).map_err(|e| e.to_string())?;
+    let mut left = vec![0.0; 1024];
+    let mut right = vec![0.0; 1024];
+    let mut remaining = frames;
+    while remaining > 0 {
+        let count = remaining.min(left.len());
+        machine.process_stereo(&mut left[..count], &mut right[..count]);
+        for (&l, &r) in left[..count].iter().zip(&right[..count]) {
+            let scale = 8_388_607.0;
+            writer
+                .write_sample((l.clamp(-1.0, 1.0) * scale).round() as i32)
+                .map_err(|e| e.to_string())?;
+            writer
+                .write_sample((r.clamp(-1.0, 1.0) * scale).round() as i32)
+                .map_err(|e| e.to_string())?;
+        }
+        remaining -= count;
+    }
+    writer.finalize().map_err(|e| e.to_string())
+}
 
 fn load_graph(path: &str) -> Result<Graph, String> {
     let path = std::path::Path::new(path);
@@ -79,7 +110,7 @@ fn main() {
     let mut args = env::args().skip(1);
     let Some(first) = args.next() else {
         eprintln!(
-            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 midi-sniff PORT [SECONDS] | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]\nAudio and controller names may instead be configured in Lua with graph:devices {{ audio_output = NAME, midi_input = NAME, midi_controls = {{ NAME, ... }}, apc_mini = NAME }}."
+            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 midi-sniff PORT [SECONDS] | meldritch2 render GRAPH.lua OUTPUT.wav SECONDS | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]\nAudio and controller names may instead be configured in Lua with graph:devices {{ audio_output = NAME, midi_input = NAME, midi_controls = {{ NAME, ... }}, apc_mini = NAME }}."
         );
         process::exit(2);
     };
@@ -183,6 +214,32 @@ fn main() {
                     process::exit(1);
                 }
             }
+            Err(error) => {
+                eprintln!("{error}");
+                process::exit(1);
+            }
+        }
+        return;
+    }
+    if first == "render" {
+        let Some(source) = args.next() else {
+            eprintln!("render requires GRAPH.lua");
+            process::exit(2)
+        };
+        let Some(output) = args.next() else {
+            eprintln!("render requires OUTPUT.wav");
+            process::exit(2)
+        };
+        let seconds = args
+            .next()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        if args.next().is_some() || !seconds.is_finite() || seconds <= 0.0 || seconds > 3600.0 {
+            eprintln!("render requires finite SECONDS between 0 and 3600");
+            process::exit(2);
+        }
+        match load_graph(&source).and_then(|graph| render_wav(&graph, &output, seconds)) {
+            Ok(()) => println!("rendered {seconds:.3}s to {output}"),
             Err(error) => {
                 eprintln!("{error}");
                 process::exit(1);

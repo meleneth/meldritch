@@ -30,6 +30,8 @@ struct LuaSequencerTrack {
 }
 #[derive(Clone, Debug)]
 struct LuaSequencerTempo(Arc<SequencerControl>);
+#[derive(Clone, Copy, Debug)]
+struct LuaPlaitsModel(crate::plaits::PlaitsModel);
 impl UserData for LuaSample {}
 impl UserData for LuaSequencerTrack {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
@@ -37,6 +39,7 @@ impl UserData for LuaSequencerTrack {
     }
 }
 impl UserData for LuaSequencerTempo {}
+impl UserData for LuaPlaitsModel {}
 impl UserData for LuaSampleBank {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("load", |lua, this, (name, variant): (String, usize)| {
@@ -180,7 +183,7 @@ function meldritch.graph()
     assert(type(module) == "table" and type(module.id) == "string", "control target must be a module")
     assert(type(parameter) == "string", "control parameter must be a string")
     assert(type(range) == "table", "control range must be a table")
-    table.insert(self.controls, { id = id, module = module.id, parameter = parameter,
+    table.insert(self.controls, { id = id, label = range.label or id, module = module.id, parameter = parameter,
       min = range.min, max = range.max, scale = range.scale })
   end
   function graph:midi_cc(control_id, channel, number)
@@ -286,20 +289,43 @@ local function decorate_scope(facade, scope, prefix)
     self._counts[kind] = (self._counts[kind] or 0) + 1
     return kind .. "_" .. self._counts[kind]
   end
+  local function modulatable(handle, destinations)
+    handle._modulation = destinations
+    function handle:modulate(name, source, options)
+      options = options or {}
+      local destination = assert(self._modulation[name], "parameter is not signal-modulatable: " .. tostring(name))
+      if source.direction ~= "output" then source = assert(source.out, "modulation source must be a module or output") end
+      local scale = scope:module(facade:_id("modulation"), "affine", {
+        scale = options.depth or 1.0, offset = 0.0,
+      })
+      scope:connect(source, scale.input)
+      scope:connect(scale.out, destination)
+      return scale
+    end
+    return handle
+  end
   function facade:oscillator(values)
     values = values or {}
     local waveform = values.waveform or "sine"
-    assert(waveform == "sine" or waveform == "saw", "oscillator waveform must be 'sine' or 'saw'")
-    local kind = waveform == "saw" and "saw" or "oscillator_sine"
-    local handle = scope:module(self:_id("oscillator"), kind, copy_values(values, { "frequency" }))
+    local kinds = { sine = "oscillator_sine", saw = "saw", triangle = "triangle", square = "square", pulse = "pulse" }
+    local kind = assert(kinds[waveform], "oscillator waveform must be sine, saw, triangle, square, or pulse")
+    local authored = copy_values(values, { "frequency" })
+    if waveform == "pulse" and values.pulse_width ~= nil then authored.pulse_width = values.pulse_width end
+    local handle = scope:module(self:_id("oscillator"), kind, authored)
     handle.frequency = parameter(handle, "frequency")
-    return handle
+    if waveform == "pulse" then handle.pulse_width = parameter(handle, "pulse_width") end
+    return modulatable(handle, { frequency = handle.fm, pulse_width = handle.pwm })
   end
   function facade:lfo(values)
     values = values or {}
     assert((values.waveform or "sine") == "sine", "LFO currently supports the sine waveform")
     local handle = scope:module(self:_id("lfo"), "oscillator_sine", copy_values(values, { "frequency" }))
     handle.frequency = parameter(handle, "frequency")
+    return modulatable(handle, { frequency = handle.fm })
+  end
+  function facade:noise(values)
+    local handle = scope:module(self:_id("noise"), "noise", copy_values(values, { "amplitude" }))
+    handle.amplitude = parameter(handle, "amplitude")
     return handle
   end
   function facade:lowpass(values)
@@ -307,6 +333,57 @@ local function decorate_scope(facade, scope, prefix)
     handle.cutoff = parameter(handle, "cutoff")
     handle.resonance = parameter(handle, "resonance")
     return handle
+  end
+  function facade:svf(values)
+    local handle = scope:module(self:_id("svf"), "svf", copy_values(values, { "cutoff", "resonance" }))
+    handle.cutoff = parameter(handle, "cutoff")
+    handle.resonance = parameter(handle, "resonance")
+    handle.out = handle.lowpass
+    return modulatable(handle, { cutoff = handle.cutoff_mod, resonance = handle.resonance_mod })
+  end
+  function facade:drive(values)
+    local handle = scope:module(self:_id("drive"), "drive", copy_values(values, { "amount", "output_gain" }))
+    handle.amount = parameter(handle, "amount")
+    handle.output_gain = parameter(handle, "output_gain")
+    return handle
+  end
+  function facade:delay(values)
+    local handle = scope:module(self:_id("delay"), "delay", copy_values(values, { "time", "feedback", "mix" }))
+    handle.time = parameter(handle, "time")
+    handle.feedback = parameter(handle, "feedback")
+    handle.mix = parameter(handle, "mix")
+    return modulatable(handle, { time = handle.time_mod, feedback = handle.feedback_mod, mix = handle.mix_mod })
+  end
+  function facade:envelope_follower(values)
+    local handle = scope:module(self:_id("envelope_follower"), "envelope_follower", copy_values(values, { "attack", "release" }))
+    handle.attack = parameter(handle, "attack")
+    handle.release = parameter(handle, "release")
+    return handle
+  end
+  function facade:compressor(values)
+    local handle = scope:module(self:_id("compressor"), "compressor", copy_values(values,
+      { "threshold", "ratio", "attack", "release", "makeup_gain" }))
+    handle.threshold = parameter(handle, "threshold")
+    handle.ratio = parameter(handle, "ratio")
+    handle.attack = parameter(handle, "attack")
+    handle.release = parameter(handle, "release")
+    handle.makeup_gain = parameter(handle, "makeup_gain")
+    return handle
+  end
+  function facade:plaits(values)
+    values = values or {}
+    local runtime = meldritch._plaits_model(values.model or "fm")
+    local handle = scope:module(self:_id("plaits"), "plaits", copy_values(values,
+      { "frequency", "harmonics", "timbre", "morph" }), runtime)
+    handle.frequency = parameter(handle, "frequency")
+    handle.harmonics = parameter(handle, "harmonics")
+    handle.timbre = parameter(handle, "timbre")
+    handle.morph = parameter(handle, "morph")
+    handle.out = handle.main
+    return modulatable(handle, {
+      frequency = handle.pitch, harmonics = handle.harmonics_mod,
+      timbre = handle.timbre_mod, morph = handle.morph_mod,
+    })
   end
   function facade:adsr(values)
     local handle = scope:module(self:_id("adsr"), "adsr", copy_values(values,
@@ -331,6 +408,11 @@ local function decorate_scope(facade, scope, prefix)
     local handle = scope:module(self:_id("multiply"), "multiply")
     handle.a = handle.left
     handle.b = handle.right
+    return handle
+  end
+  function facade:affine(values)
+    local handle = scope:module(self:_id("affine"), "affine", copy_values(values, { "scale", "offset" }))
+    handle.scale = parameter(handle, "scale"); handle.offset = parameter(handle, "offset")
     return handle
   end
   function facade:mixer(values)
@@ -429,6 +511,7 @@ function meldritch.instrument(name)
     note = {
       pitch = { direction = "note", signal = "pitch" },
       gate = { direction = "note", signal = "gate" },
+      velocity = { direction = "note", signal = "velocity" },
     },
     output = {
       left = { direction = "terminal", channel = "left" },
@@ -458,11 +541,22 @@ function meldritch.instrument(name)
   end
 
   function instrument:control(label, target, range)
+    if type(label) == "table" then
+      local spec = label
+      assert(type(spec.id) == "string" and spec.id ~= "", "control ID must be nonempty")
+      assert(type(spec.label) == "string" and spec.label ~= "", "control label must be nonempty")
+      assert(type(spec.target) == "table" and spec.target.direction == "parameter",
+        "instrument control must target a writable parameter")
+      assert(type(spec.range) == "table" and #spec.range == 2, "control range must contain two values")
+      table.insert(self._controls, { id = spec.id, label = spec.label, target = spec.target,
+        range = { min = spec.range[1], max = spec.range[2], scale = spec.curve } })
+      return
+    end
     assert(type(label) == "string" and label ~= "", "control label must be nonempty")
     assert(type(target) == "table" and target.direction == "parameter",
       "instrument control must target a writable parameter")
     assert(type(range) == "table", "instrument control requires a range")
-    table.insert(self._controls, { label = label, target = target, range = range })
+    table.insert(self._controls, { id = label, label = label, target = target, range = range })
   end
 
   function instrument:screen(id, title)
@@ -549,7 +643,7 @@ function meldritch.instrument(name)
       assert(self._note_pitch and self._note_gate, "note instruments must connect pitch and gate")
       definition:parameter("note_pitch", self._note_pitch, "value")
       definition:parameter("note_gate", self._note_gate, "value")
-      local velocity = definition:module("note_velocity", "constant", { value = 1.0 })
+      local velocity = self._note_velocity or definition:module("note_velocity", "constant", { value = 1.0 })
       definition:parameter("note_velocity", velocity, "value")
 
       local voices = {}
@@ -583,7 +677,7 @@ function meldritch.instrument(name)
           targets[#targets + 1] = { module = voices[voice].id, parameter = exports[index] }
         end
         table.insert(root.controls, {
-          id = control.label, module = voices[1].id, parameter = exports[index], targets = targets,
+          id = control.id, label = control.label, module = voices[1].id, parameter = exports[index], targets = targets,
           min = control.range.min, max = control.range.max, scale = control.range.scale,
         })
       end
@@ -592,7 +686,8 @@ function meldritch.instrument(name)
       root:connect(instance.left, terminal.left)
       root:connect(instance.right, terminal.right)
       for index, control in ipairs(self._controls) do
-        root:control(control.label, instance, exports[index], control.range)
+        control.range.label = control.label
+        root:control(control.id, instance, exports[index], control.range)
       end
     end
     return root
@@ -661,6 +756,15 @@ pub fn read_with_root(script: &str, project_root: &Path) -> Result<Graph, String
         .map_err(|e| e.to_string())?;
     meldritch
         .set("samples", samples)
+        .map_err(|e| e.to_string())?;
+    let plaits_model = lua
+        .create_function(|lua, name: String| {
+            let model = crate::plaits::PlaitsModel::parse(&name).map_err(mlua::Error::external)?;
+            lua.create_userdata(LuaPlaitsModel(model))
+        })
+        .map_err(|e| e.to_string())?;
+    meldritch
+        .set("_plaits_model", plaits_model)
         .map_err(|e| e.to_string())?;
     let sequencer = lua
         .create_function(
@@ -957,6 +1061,12 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                         .0,
                 ))
             }
+            Some(value) if value.is::<LuaPlaitsModel>() => ModuleRuntime::Plaits(
+                value
+                    .borrow::<LuaPlaitsModel>()
+                    .map_err(|e| e.to_string())?
+                    .0,
+            ),
             Some(_) => return Err("unknown module runtime payload".into()),
         };
         graph.modules.push(Module {
@@ -1010,6 +1120,7 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
         let item = item.map_err(|e| e.to_string())?;
         graph.controls.push(Control {
             id: item.get("id").map_err(|e| e.to_string())?,
+            label: item.get("label").map_err(|e| e.to_string())?,
             target: ParameterId::new(
                 item.get::<String>("module").map_err(|e| e.to_string())?,
                 item.get::<String>("parameter").map_err(|e| e.to_string())?,

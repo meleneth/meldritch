@@ -23,6 +23,7 @@ pub enum ModuleRuntime {
     #[default]
     Contract,
     Sample(Arc<PreparedSample>),
+    Plaits(crate::plaits::PlaitsModel),
     SequencerTrack {
         sequencer: Arc<SequencerControl>,
         track: usize,
@@ -72,6 +73,7 @@ pub struct Subpatch {
 #[derive(Clone, Debug)]
 pub struct Control {
     pub id: String,
+    pub label: String,
     pub target: ParameterId,
     pub additional_targets: Vec<ParameterId>,
     pub min: f64,

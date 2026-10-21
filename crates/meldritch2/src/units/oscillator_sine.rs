@@ -8,8 +8,14 @@ fn process(
     outputs: &mut [f64],
 ) {
     outputs[0] = (std::f64::consts::TAU * state[0]).sin();
-    let base = if input[0] > 0.0 { input[0] } else { params[0] };
-    state[0] = (state[0] + (base + input[1]) / sample_rate).rem_euclid(1.0);
+    let base = if input[0].is_finite() && input[0] > 0.0 {
+        input[0]
+    } else {
+        params[0]
+    };
+    let fm = if input[1].is_finite() { input[1] } else { 0.0 };
+    let frequency = (base + fm).clamp(0.0, sample_rate * 0.49);
+    state[0] = (state[0] + frequency / sample_rate).rem_euclid(1.0);
 }
 
 pub const CONTRACT: Contract = Contract {
@@ -27,7 +33,7 @@ pub const CONTRACT: Contract = Contract {
         InputPort {
             name: "fm",
             domain: Domain::MonoAudio,
-            fan_in: FanIn::One,
+            fan_in: FanIn::Sum,
             unconnected: Some(0.0),
         },
     ],

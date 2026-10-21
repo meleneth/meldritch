@@ -332,7 +332,7 @@ fn draw(
                             out,
                             Print(format!(
                                 "{selected} {} = {:.4}  [{min:.4}, {max:.4}]\r\n",
-                                row.id(),
+                                row.label(),
                                 row.value()
                             ))
                         )

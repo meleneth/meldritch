@@ -26,6 +26,9 @@ impl ControlRow {
     pub fn id(&self) -> &str {
         self.handle.id()
     }
+    pub fn label(&self) -> &str {
+        self.handle.label()
+    }
     pub fn target(&self) -> &crate::model::ParameterId {
         self.handle.target()
     }

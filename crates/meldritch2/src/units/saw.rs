@@ -7,9 +7,31 @@ fn process(
     sample_rate: f64,
     outputs: &mut [f64],
 ) {
-    outputs[0] = state[0] * 2.0 - 1.0;
-    let base = if input[0] > 0.0 { input[0] } else { params[0] };
-    state[0] = (state[0] + (base + input[1]) / sample_rate).rem_euclid(1.0);
+    let base = if input[0].is_finite() && input[0] > 0.0 {
+        input[0]
+    } else {
+        params[0]
+    };
+    let fm = if input[1].is_finite() { input[1] } else { 0.0 };
+    let frequency = (base + fm).clamp(0.0, sample_rate * 0.49);
+    let dt = frequency / sample_rate;
+    let phase = state[0];
+    outputs[0] = 2.0 * phase - 1.0 - poly_blep(phase, dt);
+    state[0] = (phase + dt).rem_euclid(1.0);
+}
+
+pub(crate) fn poly_blep(t: f64, dt: f64) -> f64 {
+    if dt <= 0.0 {
+        0.0
+    } else if t < dt {
+        let x = t / dt;
+        x + x - x * x - 1.0
+    } else if t > 1.0 - dt {
+        let x = (t - 1.0) / dt;
+        x * x + x + x + 1.0
+    } else {
+        0.0
+    }
 }
 
 pub const CONTRACT: Contract = Contract {
@@ -27,7 +49,7 @@ pub const CONTRACT: Contract = Contract {
         InputPort {
             name: "fm",
             domain: Domain::MonoAudio,
-            fan_in: FanIn::One,
+            fan_in: FanIn::Sum,
             unconnected: Some(0.0),
         },
     ],

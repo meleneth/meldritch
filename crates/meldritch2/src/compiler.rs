@@ -10,6 +10,7 @@ use crate::model::{
     Action, Connection, ControlScale, Graph, MidiButton, MidiCc, MidiNotes, MidiPacket,
     ModuleRuntime, Navigation, ParameterId, Screen, Widget,
 };
+use crate::plaits::PlaitsRuntime;
 use crate::sample::PreparedSample;
 use crate::sequencer::{SequencerControl, SequencerRuntime};
 
@@ -28,11 +29,93 @@ enum OpProcessor {
         state: Vec<f64>,
     },
     Sample(SamplePlayerRuntime),
+    Delay(DelayRuntime),
+    Plaits(Box<PlaitsRuntime>),
     SequencerTrack {
         sequencer: usize,
         track: usize,
     },
     SequencerTempo(Arc<SequencerControl>),
+}
+
+#[derive(Debug)]
+struct DelayRuntime {
+    line: Vec<f64>,
+    write: usize,
+}
+
+impl DelayRuntime {
+    fn new(sample_rate: f64) -> Result<Self, String> {
+        let frames = (sample_rate * 4.0).ceil() as usize + 2;
+        let mut line = Vec::new();
+        line.try_reserve_exact(frames)
+            .map_err(|_| "not enough memory to prepare four-second delay line".to_string())?;
+        line.resize(frames, 0.0);
+        Ok(Self { line, write: 0 })
+    }
+
+    fn process(&mut self, input: &[f64], params: &[f64], sample_rate: f64, out: &mut [f64]) {
+        let dry = if input[0].is_finite() { input[0] } else { 0.0 };
+        let modulation = |value: f64| if value.is_finite() { value } else { 0.0 };
+        let time = (params[0] + modulation(input[1])).clamp(1.0 / sample_rate, 4.0);
+        let feedback = (params[1] + modulation(input[2])).clamp(-0.99, 0.99);
+        let mix = (params[2] + modulation(input[3])).clamp(0.0, 1.0);
+        let delay = time * sample_rate;
+        let read = (self.write as f64 - delay).rem_euclid(self.line.len() as f64);
+        let first = read.floor() as usize;
+        let second = (first + 1) % self.line.len();
+        let fraction = read - first as f64;
+        let wet = self.line[first] + (self.line[second] - self.line[first]) * fraction;
+        self.line[self.write] = dry + wet * feedback;
+        self.write = (self.write + 1) % self.line.len();
+        out[0] = dry * (1.0 - mix) + wet * mix;
+    }
+}
+
+#[cfg(test)]
+mod delay_runtime_tests {
+    use super::DelayRuntime;
+
+    #[test]
+    fn impulse_repeats_at_requested_time_with_bounded_feedback_and_reset() {
+        let mut delay = DelayRuntime::new(100.0).unwrap();
+        let params = [0.1, 0.5, 1.0];
+        let mut rendered = Vec::new();
+        for frame in 0..31 {
+            let mut out = [0.0];
+            delay.process(
+                &[f64::from(frame == 0), 0.0, 0.0, 0.0],
+                &params,
+                100.0,
+                &mut out,
+            );
+            rendered.push(out[0]);
+        }
+        assert_eq!(rendered[0], 0.0);
+        assert!((rendered[10] - 1.0).abs() < 1e-12);
+        assert!((rendered[20] - 0.5).abs() < 1e-12);
+        assert!((rendered[30] - 0.25).abs() < 1e-12);
+        let mut reset = DelayRuntime::new(100.0).unwrap();
+        let mut out = [f64::NAN];
+        reset.process(&[0.0, 0.0, 9.0, 0.0], &params, 100.0, &mut out);
+        assert_eq!(out[0], 0.0);
+    }
+
+    #[test]
+    fn fractional_and_changing_times_remain_finite() {
+        let mut delay = DelayRuntime::new(44_100.0).unwrap();
+        for frame in 0..20_000 {
+            let mut out = [0.0];
+            let modulation = (frame as f64 / 101.0).sin() * 0.02;
+            delay.process(
+                &[if frame == 0 { 1.0 } else { 0.0 }, modulation, 0.0, 0.0],
+                &[0.1, 0.98, 0.75],
+                44_100.0,
+                &mut out,
+            );
+            assert!(out[0].is_finite());
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -172,6 +255,7 @@ impl ParameterHandle {
 
 #[derive(Clone, Debug)]
 struct ControlBinding {
+    label: String,
     target: ParameterId,
     additional_targets: Vec<ParameterId>,
     min: f64,
@@ -184,6 +268,7 @@ struct ControlBinding {
 #[derive(Clone, Debug)]
 pub struct ControlHandle {
     id: String,
+    label: String,
     parameters: Vec<ParameterHandle>,
     min: f64,
     max: f64,
@@ -193,6 +278,9 @@ pub struct ControlHandle {
 impl ControlHandle {
     pub fn id(&self) -> &str {
         &self.id
+    }
+    pub fn label(&self) -> &str {
+        &self.label
     }
     pub fn target(&self) -> &ParameterId {
         self.parameters[0].id()
@@ -515,6 +603,10 @@ impl Machine {
                 OpProcessor::Sample(player) => {
                     player.process(inputs[0], params[0], self.sample_rate, outputs)
                 }
+                OpProcessor::Delay(delay) => {
+                    delay.process(inputs, params, self.sample_rate, outputs)
+                }
+                OpProcessor::Plaits(plaits) => plaits.process(inputs, params, outputs),
                 OpProcessor::SequencerTrack { sequencer, track } => {
                     outputs[0] = self.sequencers[*sequencer].trigger(*track)
                 }
@@ -675,6 +767,7 @@ impl Machine {
             .collect::<Option<Vec<_>>>()?;
         Some(ControlHandle {
             id: id.to_owned(),
+            label: binding.label.clone(),
             parameters,
             min: binding.min,
             max: binding.max,
@@ -877,6 +970,12 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         if control.id.is_empty() {
             return Err("control ID must not be empty".into());
         }
+        if control.label.is_empty() || control.label.chars().any(char::is_control) {
+            return Err(format!(
+                "control '{}' requires a printable label",
+                control.id
+            ));
+        }
         if !control.min.is_finite()
             || !control.max.is_finite()
             || control.min >= control.max
@@ -920,6 +1019,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             .insert(
                 control.id.clone(),
                 ControlBinding {
+                    label: control.label.clone(),
                     target: control.target.clone(),
                     additional_targets: control.additional_targets.clone(),
                     min: control.min,
@@ -1203,35 +1303,44 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             .iter()
             .map(|p| param_ids[&ParameterId::new(&module.id, p.name)])
             .collect();
-        let processor = match &module.runtime {
-            ModuleRuntime::Contract => OpProcessor::Contract {
-                process: c.process,
-                state: vec![0.0; c.state_len],
-            },
-            ModuleRuntime::Sample(sample) if module.kind == "sample_player" => {
-                OpProcessor::Sample(SamplePlayerRuntime::new(Arc::clone(sample), sample_rate)?)
-            }
-            ModuleRuntime::SequencerTrack { sequencer, track }
-                if module.kind == "sequencer_track" =>
-            {
-                let key = Arc::as_ptr(sequencer) as usize;
-                let index = *sequencer_indexes.entry(key).or_insert_with(|| {
-                    sequencer_controls.push(Arc::clone(sequencer));
-                    sequencer_controls.len() - 1
-                });
-                OpProcessor::SequencerTrack {
-                    sequencer: index,
-                    track: *track,
+        let processor = if module.kind == "delay"
+            && matches!(module.runtime, ModuleRuntime::Contract)
+        {
+            OpProcessor::Delay(DelayRuntime::new(sample_rate)?)
+        } else {
+            match &module.runtime {
+                ModuleRuntime::Contract => OpProcessor::Contract {
+                    process: c.process,
+                    state: vec![0.0; c.state_len],
+                },
+                ModuleRuntime::Sample(sample) if module.kind == "sample_player" => {
+                    OpProcessor::Sample(SamplePlayerRuntime::new(Arc::clone(sample), sample_rate)?)
                 }
-            }
-            ModuleRuntime::SequencerTempo(sequencer) if module.kind == "sequencer_tempo" => {
-                OpProcessor::SequencerTempo(Arc::clone(sequencer))
-            }
-            _ => {
-                return Err(format!(
-                    "module '{}' has incompatible runtime data",
-                    module.id
-                ));
+                ModuleRuntime::Plaits(model) if module.kind == "plaits" => {
+                    OpProcessor::Plaits(Box::new(PlaitsRuntime::new(*model, sample_rate)))
+                }
+                ModuleRuntime::SequencerTrack { sequencer, track }
+                    if module.kind == "sequencer_track" =>
+                {
+                    let key = Arc::as_ptr(sequencer) as usize;
+                    let index = *sequencer_indexes.entry(key).or_insert_with(|| {
+                        sequencer_controls.push(Arc::clone(sequencer));
+                        sequencer_controls.len() - 1
+                    });
+                    OpProcessor::SequencerTrack {
+                        sequencer: index,
+                        track: *track,
+                    }
+                }
+                ModuleRuntime::SequencerTempo(sequencer) if module.kind == "sequencer_tempo" => {
+                    OpProcessor::SequencerTempo(Arc::clone(sequencer))
+                }
+                _ => {
+                    return Err(format!(
+                        "module '{}' has incompatible runtime data",
+                        module.id
+                    ));
+                }
             }
         };
         ops.push(Op {
