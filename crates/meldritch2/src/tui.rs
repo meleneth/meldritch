@@ -200,7 +200,7 @@ fn draw_pattern_grid(
     }
     queue!(
         out,
-        Print("\r\n1-8 toggle | [ ] bank | Up/Down track | F1-F4 pattern | Space transport\r\nm mute | o solo | c copy | +/- velocity | p/P pitch | g/G gate | C clear | S save\r\n")
+        Print("\r\n1-8 toggle | [ ] bank | Up/Down track | F1-F4 pattern | Space transport\r\nm mute | o solo | c copy | j/k control | h/l adjust | +/- velocity | p/P pitch | g/G gate | C clear | S save\r\n")
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -232,6 +232,7 @@ fn performance_key(code: KeyCode) -> Option<String> {
 fn dispatch_performance_binding(
     performance: &crate::model::Performance,
     key_name: &str,
+    panel: Option<&mut Panel>,
 ) -> Result<bool, String> {
     let Some(binding) = performance
         .key_bindings
@@ -240,7 +241,17 @@ fn dispatch_performance_binding(
     else {
         return Ok(false);
     };
-    if binding.command == "save" {
+    if let Some(gesture) = match binding.command.as_str() {
+        "control:previous" => Some(Gesture::Previous),
+        "control:next" => Some(Gesture::Next),
+        "control:decrease" => Some(Gesture::Decrease),
+        "control:increase" => Some(Gesture::Increase),
+        _ => None,
+    } {
+        panel
+            .ok_or("control navigation requires a performance control panel")?
+            .apply(gesture)?;
+    } else if binding.command == "save" {
         let path = performance
             .project_file
             .as_ref()
@@ -599,7 +610,7 @@ pub fn perform(
         if grid_active
             && let Some(performance) = output.performance()
             && let Some(key_name) = performance_key(key.code)
-            && dispatch_performance_binding(performance, &key_name)?
+            && dispatch_performance_binding(performance, &key_name, Some(&mut panel))?
         {
             grid_page = performance.sequencer.step_bank();
             grid_track = performance.sequencer.selected_track();
@@ -761,21 +772,28 @@ mod tests {
         let graph = lua::read(
             r#"
             local i=meldritch.instrument("keys")
-            local o=i:constant {value=0}
+            local o=i:constant {value=.5}
             i:connect(o.out,i.output.left);i:connect(o.out,i.output.right)
+            i:control {id="level",label="Level",target=o.value,range={0,1}}
             local q=i:sequencer {bpm=120,steps=16,steps_per_beat=4}
             q:track("One")
-            i:performance {layout="step_grid",sequencer=q,keys={m="mute",["1"]="toggle:1"}}
+            i:performance {layout="step_grid",sequencer=q,keys={m="mute",l="control:increase",["1"]="toggle:1"}}
             return i
             "#,
         )
         .unwrap();
         let performance = graph.performance.as_ref().unwrap();
-        assert!(!dispatch_performance_binding(performance, "x").unwrap());
-        assert!(dispatch_performance_binding(performance, "m").unwrap());
+        assert!(!dispatch_performance_binding(performance, "x", None).unwrap());
+        assert!(dispatch_performance_binding(performance, "m", None).unwrap());
         assert!(performance.sequencer.muted(0));
-        assert!(dispatch_performance_binding(performance, "1").unwrap());
+        assert!(dispatch_performance_binding(performance, "1", None).unwrap());
         assert_eq!(performance.sequencer.pattern().velocities[0][0], 1.0);
+        let machine = compile(&graph).unwrap();
+        let handle = machine.control_handle("level").unwrap();
+        let value = machine.effective_value(handle.target()).unwrap();
+        let mut panel = crate::panel::Panel::new(vec![(handle, value)]);
+        assert!(dispatch_performance_binding(performance, "l", Some(&mut panel)).unwrap());
+        assert!((panel.rows()[0].value() - 0.51).abs() < 1e-12);
     }
 
     #[test]

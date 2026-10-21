@@ -28,7 +28,9 @@ that bank. `m` and `o` toggle mute and solo. `+`/`-` change the selected event's
 velocity, `p`/`P` transpose it by a semitone, and `g`/`G` change its gate.
 `c` copies the active pattern over the following pattern; `C` clears the
 selected track. `S` deliberately saves the editable project to
-`groovebox-project.json`; shipped Lua is never overwritten. `q` exits.
+`groovebox-project.json`; shipped Lua is never overwritten. `j`/`k` move
+through the declared track, voice, tempo, and master controls; `h`/`l` adjust
+the selected control. `q` exits.
 
 The screen shows active and queued patterns, transport, playhead, mute/solo
 flags, track selection, status messages, the step grid, and all declared voice,
