@@ -91,15 +91,22 @@ function meldritch.graph()
     assert(devices.midi_input == nil or
       (type(devices.midi_input) == "string" and devices.midi_input ~= ""),
       "midi_input device name must be a nonempty string")
+    assert(devices.midi_controls == nil or type(devices.midi_controls) == "table",
+      "midi_controls must be a list of device names")
+    for _, name in ipairs(devices.midi_controls or {}) do
+      assert(type(name) == "string" and name ~= "",
+        "midi_controls device names must be nonempty strings")
+    end
     assert(devices.apc_mini == nil or
       (type(devices.apc_mini) == "string" and devices.apc_mini ~= ""),
       "apc_mini device name must be a nonempty string")
     for name, _ in pairs(devices) do
-      assert(name == "audio_output" or name == "midi_input" or name == "apc_mini", "unknown device role: " .. tostring(name))
+      assert(name == "audio_output" or name == "midi_input" or name == "midi_controls" or name == "apc_mini", "unknown device role: " .. tostring(name))
     end
     self._devices = {
       audio_output = devices.audio_output,
       midi_input = devices.midi_input,
+      midi_controls = devices.midi_controls or {},
       apc_mini = devices.apc_mini,
     }
   end
@@ -703,6 +710,16 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
     graph.devices.midi_input = devices
         .get::<Option<String>>("midi_input")
         .map_err(|e| format!("midi_input device: {e}"))?;
+    let midi_controls: Option<Table> = devices
+        .get("midi_controls")
+        .map_err(|e| format!("midi_controls devices: {e}"))?;
+    graph.devices.midi_controls = match midi_controls {
+        Some(controls) => controls
+            .sequence_values::<String>()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("midi_controls devices: {e}"))?,
+        None => Vec::new(),
+    };
     graph.devices.apc_mini = devices
         .get::<Option<String>>("apc_mini")
         .map_err(|e| format!("apc_mini device: {e}"))?;
@@ -993,6 +1010,7 @@ mod tests {
             graph:devices {
               audio_output = "Output Alpha",
               midi_input = "Input Beta",
+              midi_controls = { "MicroLab", "MPK mini" },
             }
             return graph
             "#,
@@ -1000,6 +1018,7 @@ mod tests {
         .unwrap();
         assert_eq!(graph.devices.audio_output.as_deref(), Some("Output Alpha"));
         assert_eq!(graph.devices.midi_input.as_deref(), Some("Input Beta"));
+        assert_eq!(graph.devices.midi_controls, ["MicroLab", "MPK mini"]);
     }
 
     #[test]
@@ -1023,6 +1042,16 @@ mod tests {
         )
         .unwrap_err();
         assert!(empty.contains("must be a nonempty string"));
+
+        let empty_control = read(
+            r#"
+            local graph = meldritch.graph()
+            graph:devices { midi_controls = { "MPK mini", "" } }
+            return graph
+            "#,
+        )
+        .unwrap_err();
+        assert!(empty_control.contains("must be nonempty strings"));
     }
 
     #[test]

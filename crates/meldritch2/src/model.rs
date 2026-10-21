@@ -226,6 +226,7 @@ impl Action {
 pub struct DevicePreferences {
     pub audio_output: Option<String>,
     pub midi_input: Option<String>,
+    pub midi_controls: Vec<String>,
     pub apc_mini: Option<String>,
 }
 

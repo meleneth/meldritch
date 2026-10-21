@@ -118,6 +118,9 @@ instrument actually expects; omitted roles keep their normal system default:
 ```lua
 synth:devices {
   midi_input = "MicroLab mk3:MicroLab mk3",
+  -- Extra inputs dispatch controls and Lua button hooks without owning the
+  -- instrument's sample-timed note allocation.
+  midi_controls = { "MPK mini" },
 }
 ```
 

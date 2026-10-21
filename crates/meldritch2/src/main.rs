@@ -39,7 +39,7 @@ fn main() {
     let mut args = env::args().skip(1);
     let Some(first) = args.next() else {
         eprintln!(
-            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]\nAudio and controller names may instead be configured in Lua with graph:devices {{ audio_output = NAME, midi_input = NAME, apc_mini = NAME }}."
+            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]\nAudio and controller names may instead be configured in Lua with graph:devices {{ audio_output = NAME, midi_input = NAME, midi_controls = {{ NAME, ... }}, apc_mini = NAME }}."
         );
         process::exit(2);
     };
@@ -155,10 +155,12 @@ fn main() {
         }
         let result = load_graph(&path).and_then(|graph| {
             let configured_midi = graph.devices.midi_input.clone();
-            open_output(&graph, device_arg).map(|output| (output, configured_midi))
+            let configured_controls = graph.devices.midi_controls.clone();
+            open_output(&graph, device_arg)
+                .map(|output| (output, configured_midi, configured_controls))
         });
         match result {
-            Ok((mut output, configured_midi)) => {
+            Ok((mut output, configured_midi, configured_controls)) => {
                 let midi_session = match (midi_index, configured_midi) {
                     (Some(index), _) => {
                         let opened = match output.take_timed_midi_router() {
@@ -188,6 +190,16 @@ fn main() {
                     }
                     (None, None) => None,
                 };
+                let mut control_sessions = Vec::new();
+                for name in configured_controls {
+                    match MidiInputSession::open_name(&name, output.midi_router()) {
+                        Ok(session) => control_sessions.push(session),
+                        Err(error) => {
+                            eprintln!("{error}");
+                            process::exit(1);
+                        }
+                    }
+                }
                 let keyboard = if midi_session.is_none() {
                     output
                         .take_timed_midi_router()
@@ -221,6 +233,16 @@ fn main() {
                     if session.note_errors() > 0 {
                         eprintln!(
                             "MIDI note input reported {} timing or queue errors",
+                            session.note_errors()
+                        );
+                        process::exit(1);
+                    }
+                }
+                for session in &control_sessions {
+                    if session.note_errors() > 0 {
+                        eprintln!(
+                            "MIDI control input '{}' reported {} errors",
+                            session.port_name,
                             session.note_errors()
                         );
                         process::exit(1);
