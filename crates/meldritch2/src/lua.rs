@@ -66,6 +66,32 @@ impl UserData for LuaSequencer {
                 .set_steps(track, &values)
                 .map_err(mlua::Error::external)
         });
+        methods.add_method("define_pattern", |_, this, name: String| {
+            this.0.define_pattern(name).map_err(mlua::Error::external)
+        });
+        methods.add_method(
+            "set_pattern_steps",
+            |_, this, (pattern, track, values): (usize, usize, Table)| {
+                let values = values
+                    .sequence_values::<f32>()
+                    .collect::<mlua::Result<Vec<_>>>()?;
+                this.0
+                    .set_pattern_steps(pattern, track, &values)
+                    .map_err(mlua::Error::external)
+            },
+        );
+        methods.add_method("set_pattern_notes", |_, this, (pattern, track, pitches, gates, velocities): (usize, usize, Table, Table, Table)| {
+            let pitches=pitches.sequence_values::<f32>().collect::<mlua::Result<Vec<_>>>()?;
+            let gates=gates.sequence_values::<f32>().collect::<mlua::Result<Vec<_>>>()?;
+            let velocities=velocities.sequence_values::<f32>().collect::<mlua::Result<Vec<_>>>()?;
+            this.0.set_pattern_notes(pattern,track,&pitches,&gates,&velocities).map_err(mlua::Error::external)
+        });
+        methods.add_method("queue_pattern", |_, this, pattern: usize| {
+            this.0.queue_pattern(pattern).map_err(mlua::Error::external)
+        });
+        methods.add_method("copy_pattern", |_, this, (from, to): (usize, usize)| {
+            this.0.copy_pattern(from, to).map_err(mlua::Error::external)
+        });
         methods.add_method("start", |_, this, ()| {
             this.0.start();
             Ok(())
@@ -438,7 +464,8 @@ local function decorate_scope(facade, scope, prefix)
     assert(type(values) == "table", "sequencer requires settings")
     local native = meldritch._sequencer(self.name or prefix, values.bpm, values.steps, values.steps_per_beat)
     local tempo = scope:module(self:_id("sequencer_tempo"), "sequencer_tempo", { bpm = values.bpm }, meldritch._sequencer_tempo(native))
-    local sequence = { _native = native, _tracks = {}, bpm = parameter(tempo, "bpm") }
+    local sequence = { _native = native, _tracks = {}, _patterns = {}, _steps = values.steps,
+      bpm = parameter(tempo, "bpm") }
     function sequence:track(name)
       assert(type(name) == "string" and name ~= "", "track name must be nonempty")
       local runtime = self._native:track(name)
@@ -449,6 +476,35 @@ local function decorate_scope(facade, scope, prefix)
     function sequence:steps(name, values)
       local track = assert(self._tracks[name], "unknown sequencer track: " .. tostring(name))
       self._native:set_steps(track, values)
+    end
+    function sequence:pattern(name)
+      assert(type(name)=="string" and name~="", "pattern name must be nonempty")
+      local index=self._native:define_pattern(name)
+      self._patterns[name]=index
+      local pattern={ name=name, index=index }
+      function pattern:steps(track_name, values)
+        local track=assert(sequence._tracks[track_name],"unknown sequencer track: "..tostring(track_name))
+        sequence._native:set_pattern_steps(self.index,track,values)
+      end
+      function pattern:notes(track_name, events)
+        local track=assert(sequence._tracks[track_name],"unknown sequencer track: "..tostring(track_name))
+        local pitches, gates, velocities = {}, {}, {}
+        for step=1,sequence._steps do pitches[step]=440;gates[step]=0.5;velocities[step]=0 end
+        for _,event in ipairs(events) do
+          assert(type(event.step)=="number" and event.step>=1 and event.step<=sequence._steps,"note step is out of range")
+          local pitch=event.frequency
+          if not pitch then assert(type(event.note)=="number","note event requires note or frequency");pitch=440*2^((event.note-69)/12) end
+          pitches[event.step]=pitch;gates[event.step]=event.gate or 0.5;velocities[event.step]=event.velocity or 1.0
+        end
+        sequence._native:set_pattern_notes(self.index,track,pitches,gates,velocities)
+      end
+      return pattern
+    end
+    function sequence:switch_pattern(name)
+      self._native:queue_pattern(assert(self._patterns[name],"unknown pattern: "..tostring(name)))
+    end
+    function sequence:copy_pattern(from,to)
+      self._native:copy_pattern(assert(self._patterns[from],"unknown pattern"),assert(self._patterns[to],"unknown pattern"))
     end
     local function command(self, kind)
       if facade._capturing_action then

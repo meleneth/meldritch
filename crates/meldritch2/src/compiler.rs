@@ -608,7 +608,12 @@ impl Machine {
                 }
                 OpProcessor::Plaits(plaits) => plaits.process(inputs, params, outputs),
                 OpProcessor::SequencerTrack { sequencer, track } => {
-                    outputs[0] = self.sequencers[*sequencer].trigger(*track)
+                    let runtime = &self.sequencers[*sequencer];
+                    outputs[0] = runtime.trigger(*track);
+                    outputs[1] = runtime.pitch(*track);
+                    outputs[2] = runtime.gate(*track);
+                    outputs[3] = runtime.velocity(*track);
+                    outputs[4] = runtime.enabled(*track);
                 }
                 OpProcessor::SequencerTempo(control) => {
                     control.bpm.store(params[0].to_bits(), Ordering::Release);
