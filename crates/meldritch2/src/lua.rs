@@ -92,6 +92,21 @@ impl UserData for LuaSequencer {
         methods.add_method("copy_pattern", |_, this, (from, to): (usize, usize)| {
             this.0.copy_pattern(from, to).map_err(mlua::Error::external)
         });
+        methods.add_method("load_project", |_, this, path: String| {
+            this.0
+                .load_project(std::path::Path::new(&path))
+                .map_err(mlua::Error::external)
+        });
+        methods.add_method("set_arrangement", |_, this, sections: Table| {
+            let mut parsed = Vec::new();
+            for item in sections.sequence_values::<Table>() {
+                let item = item?;
+                parsed.push((item.get::<usize>(1)?, item.get::<u32>(2)?));
+            }
+            this.0
+                .set_arrangement(&parsed)
+                .map_err(mlua::Error::external)
+        });
         methods.add_method("start", |_, this, ()| {
             this.0.start();
             Ok(())
@@ -441,10 +456,15 @@ local function decorate_scope(facade, scope, prefix)
     handle.scale = parameter(handle, "scale"); handle.offset = parameter(handle, "offset")
     return handle
   end
+  function facade:gain(values)
+    local handle=scope:module(self:_id("gain"),"gain",copy_values(values,{"gain"}))
+    handle.gain=parameter(handle,"gain");return handle
+  end
   function facade:mixer(values)
     values = values or {}
     if values.inputs == 8 then
       local handle = scope:module(self:_id("mixer"), "stereo_mixer8", { headroom = values.headroom or 0.25 })
+      handle.headroom = parameter(handle, "headroom")
       handle.input = {}
       for i = 1, 8 do handle.input[i] = { left = handle["left_" .. i], right = handle["right_" .. i], direction = "stereo_input" } end
       return handle
@@ -505,6 +525,11 @@ local function decorate_scope(facade, scope, prefix)
     end
     function sequence:copy_pattern(from,to)
       self._native:copy_pattern(assert(self._patterns[from],"unknown pattern"),assert(self._patterns[to],"unknown pattern"))
+    end
+    function sequence:load_project(path) self._native:load_project(path) end
+    function sequence:arrangement(sections)
+      local resolved={};for _,section in ipairs(sections) do resolved[#resolved+1]={assert(self._patterns[section.pattern],"unknown pattern"),section.repeats or 1} end
+      self._native:set_arrangement(resolved)
     end
     local function command(self, kind)
       if facade._capturing_action then
@@ -671,7 +696,8 @@ function meldritch.instrument(name)
   end
   function instrument:performance(spec)
     assert(type(spec) == "table" and spec.layout == "step_grid" and spec.sequencer, "performance requires a step_grid sequencer")
-    self._performance = { layout = spec.layout, native = spec.sequencer._native }
+    self._performance = { layout = spec.layout, native = spec.sequencer._native,
+      keys = spec.keys or {}, apc = spec.apc, project_file = spec.project_file }
   end
 
   function instrument:_finalize()
@@ -759,6 +785,32 @@ pub fn read(script: &str) -> Result<Graph, String> {
 
 pub fn read_with_root(script: &str, project_root: &Path) -> Result<Graph, String> {
     let lua = Lua::new();
+    let include_root = project_root.canonicalize().map_err(|e| e.to_string())?;
+    let include = lua
+        .create_function(move |lua, path: String| {
+            let relative = std::path::Path::new(&path);
+            if relative.is_absolute()
+                || relative
+                    .components()
+                    .any(|part| matches!(part, std::path::Component::ParentDir))
+            {
+                return Err(mlua::Error::external(
+                    "included Lua path must stay within the project root",
+                ));
+            }
+            let resolved = include_root
+                .join(relative)
+                .canonicalize()
+                .map_err(mlua::Error::external)?;
+            if !resolved.starts_with(&include_root) {
+                return Err(mlua::Error::external(
+                    "included Lua path must stay within the project root",
+                ));
+            }
+            let source = std::fs::read_to_string(resolved).map_err(mlua::Error::external)?;
+            lua.load(&source).set_name(path).eval::<Value>()
+        })
+        .map_err(|e| e.to_string())?;
     let discover = lua
         .create_function(|lua, kind: String| {
             let Some(c) = contract::find(&kind) else {
@@ -787,6 +839,9 @@ pub fn read_with_root(script: &str, project_root: &Path) -> Result<Graph, String
     let meldritch: Table = lua.globals().get("meldritch").map_err(|e| e.to_string())?;
     meldritch
         .set("_contract", discover)
+        .map_err(|e| e.to_string())?;
+    meldritch
+        .set("include", include)
         .map_err(|e| e.to_string())?;
     let root = project_root.to_path_buf();
     let samples = lua
@@ -957,6 +1012,44 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
         graph.performance = Some(Performance {
             layout: performance.get("layout").map_err(|e| e.to_string())?,
             sequencer: Arc::clone(&native.0),
+            key_bindings: performance
+                .get::<Table>("keys")
+                .map_err(|e| e.to_string())?
+                .pairs::<String, String>()
+                .map(|pair| {
+                    pair.map(|(key, command)| crate::model::PerformanceBinding { key, command })
+                        .map_err(|e| e.to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            apc: performance
+                .get::<Option<Table>>("apc")
+                .map_err(|e| e.to_string())?
+                .map(|apc| {
+                    let array = |field: &str, count: usize| -> Result<Vec<String>, String> {
+                        apc.get::<Table>(field)
+                            .map_err(|e| e.to_string())?
+                            .sequence_values::<String>()
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(|e| e.to_string())
+                            .and_then(|v| {
+                                if v.len() == count {
+                                    Ok(v)
+                                } else {
+                                    Err(format!("APC {field} requires {count} entries"))
+                                }
+                            })
+                    };
+                    let pages = array("pages", 2)?;
+                    let rows = array("performance_rows", 8)?;
+                    let faders = array("faders", 9)?;
+                    Ok::<_, String>(crate::model::ApcMapping {
+                        pages: pages.try_into().unwrap(),
+                        performance_rows: rows.try_into().unwrap(),
+                        fader_controls: faders.try_into().unwrap(),
+                    })
+                })
+                .transpose()?,
+            project_file: performance.get("project_file").map_err(|e| e.to_string())?,
         });
     }
     let actions: Table = table.get("actions").map_err(|e| e.to_string())?;

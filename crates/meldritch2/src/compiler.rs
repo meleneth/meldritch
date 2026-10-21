@@ -1252,6 +1252,28 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         });
     }
     validate_screens(&graph.screens, &controls, graph.performance.is_some())?;
+    if let Some(apc) = graph
+        .performance
+        .as_ref()
+        .and_then(|value| value.apc.as_ref())
+    {
+        if apc.pages.iter().any(String::is_empty) {
+            return Err("APC page names must be nonempty".into());
+        }
+        for role in &apc.performance_rows {
+            if !matches!(
+                role.as_str(),
+                "" | "pattern" | "mute" | "solo" | "track" | "restart"
+            ) {
+                return Err(format!("unknown APC performance row role '{role}'"));
+            }
+        }
+        for id in &apc.fader_controls {
+            if !controls.contains_key(id) {
+                return Err(format!("APC fader targets unknown control '{id}'"));
+            }
+        }
+    }
     if let Some(navigation) = &graph.navigation {
         validate_navigation(navigation, &graph.screens)?;
     }

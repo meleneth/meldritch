@@ -1,7 +1,11 @@
 //! APC mini mk2 adapter for the semantic `step_grid` performance surface.
 
-use crate::{device::unique_name_match, sequencer::SequencerControl};
+use crate::{
+    compiler::ControlHandle, device::unique_name_match, model::Performance,
+    sequencer::SequencerControl,
+};
 use midir::{Ignore, MidiInput, MidiOutput, MidiOutputConnection};
+use std::collections::BTreeMap;
 use std::{
     sync::{
         Arc,
@@ -26,9 +30,13 @@ pub const CLEAR_NOTE: u8 = 114;
 enum Input {
     Grid(u8),
     Button(u8),
+    Fader(u8, u8),
 }
 
 fn decode(bytes: &[u8]) -> Option<Input> {
+    if bytes.len() >= 3 && bytes[0] & 0xf0 == 0xb0 && (48..=56).contains(&bytes[1]) {
+        return Some(Input::Fader(bytes[1] - 48, bytes[2]));
+    }
     if bytes.len() < 3 || bytes[2] == 0 || bytes[0] & 0xf0 != 0x90 || bytes[0] & 0x0f != 0 {
         return None;
     }
@@ -145,6 +153,7 @@ impl GridController {
                 }
             }
             Input::Button(_) => Ok(()),
+            Input::Fader(_, _) => Ok(()),
         }
     }
 }
@@ -244,12 +253,84 @@ fn led_frame(sequence: &SequencerControl, state: &GridController) -> ([[u8; 3]; 
     ];
     (leds, buttons)
 }
+fn authored_led_frame(
+    sequence: &SequencerControl,
+    state: &GridController,
+    mapping: &crate::model::ApcMapping,
+) -> ([[u8; 3]; 64], [bool; 9]) {
+    if mapping.pages[state.page] == "steps" {
+        let mut view = GridController::new();
+        view.page = sequence.step_bank();
+        view.selected_track = sequence.selected_track();
+        view.selected_step = sequence.selected_step();
+        return led_frame(sequence, &view);
+    }
+    let mut leds = [[2u8; 3]; 64];
+    for row in 0..8 {
+        let role = &mapping.performance_rows[row];
+        for column in 0..8 {
+            let rgb = match role.as_str() {
+                "pattern" => {
+                    if sequence.active_pattern() == column {
+                        [0, 127, 0]
+                    } else if sequence.queued_pattern() == Some(column) {
+                        [127, 90, 0]
+                    } else {
+                        [2, 2, 2]
+                    }
+                }
+                "mute" => {
+                    if sequence.muted(column) {
+                        [127, 0, 0]
+                    } else {
+                        [3, 1, 1]
+                    }
+                }
+                "solo" => {
+                    if sequence.soloed(column) {
+                        [127, 127, 0]
+                    } else {
+                        [2, 2, 0]
+                    }
+                }
+                "track" => {
+                    if sequence.selected_track() == column {
+                        [0, 80, 127]
+                    } else {
+                        [1, 2, 3]
+                    }
+                }
+                "restart" => [40, 0, 80],
+                _ => [0, 0, 0],
+            };
+            leds[(7 - row) * 8 + column] = rgb;
+        }
+    }
+    (
+        leds,
+        [
+            state.page == 0,
+            state.page == 1,
+            true,
+            true,
+            true,
+            true,
+            sequence.playing(),
+            false,
+            false,
+        ],
+    )
+}
 fn refresh(
     output: &mut MidiOutputConnection,
     sequence: &SequencerControl,
     state: &mut GridController,
+    mapping: Option<&crate::model::ApcMapping>,
 ) -> Result<(), String> {
-    let (leds, buttons) = led_frame(sequence, state);
+    let (leds, buttons) = mapping.map_or_else(
+        || led_frame(sequence, state),
+        |mapping| authored_led_frame(sequence, state, mapping),
+    );
     for (cell, rgb) in leds.iter().enumerate() {
         if state.sent.as_ref().is_none_or(|sent| sent.0[cell] != *rgb) {
             output
@@ -290,11 +371,20 @@ pub struct ApcSession {
     thread: Option<thread::JoinHandle<()>>,
 }
 impl ApcSession {
-    pub fn start(name: String, sequence: Arc<SequencerControl>) -> Self {
+    pub fn start(
+        name: String,
+        performance: Performance,
+        controls: Vec<(ControlHandle, f64)>,
+    ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
         let thread = thread::spawn(move || {
             let mut state = GridController::new();
+            let sequence = Arc::clone(&performance.sequencer);
+            let handles = controls
+                .into_iter()
+                .map(|(handle, _)| (handle.id().to_owned(), handle))
+                .collect::<BTreeMap<_, _>>();
             while !worker_stop.load(Ordering::Acquire) {
                 let (tx, rx): (SyncSender<Input>, Receiver<Input>) = mpsc::sync_channel(128);
                 let Ok((_input, mut output)) = connect(&name, tx) else {
@@ -302,12 +392,19 @@ impl ApcSession {
                     continue;
                 };
                 state.sent = None;
-                if refresh(&mut output, &sequence, &mut state).is_err() {
+                if refresh(&mut output, &sequence, &mut state, performance.apc.as_ref()).is_err() {
                     continue;
                 }
                 while !worker_stop.load(Ordering::Acquire) {
                     while let Ok(event) = rx.try_recv() {
-                        let _ = state.apply(event, &sequence, Instant::now());
+                        let result = if let Some(mapping) = &performance.apc {
+                            apply_authored(&mut state, event, &sequence, mapping, &handles)
+                        } else {
+                            state.apply(event, &sequence, Instant::now())
+                        };
+                        if let Err(error) = result {
+                            eprintln!("APC performance mapping error: {error}");
+                        }
                     }
                     if state
                         .clear_armed
@@ -315,7 +412,9 @@ impl ApcSession {
                     {
                         state.clear_armed = None;
                     }
-                    if refresh(&mut output, &sequence, &mut state).is_err() {
+                    if refresh(&mut output, &sequence, &mut state, performance.apc.as_ref())
+                        .is_err()
+                    {
                         break;
                     }
                     thread::sleep(Duration::from_millis(25));
@@ -326,6 +425,74 @@ impl ApcSession {
             stop,
             thread: Some(thread),
         }
+    }
+}
+
+fn publish_fader(handle: &ControlHandle, value: u8) -> Result<(), String> {
+    let (min, max) = handle.range();
+    let normalized = f64::from(value) / 127.0;
+    let target = if handle.scale() == crate::model::ControlScale::Logarithmic {
+        min * (max / min).powf(normalized)
+    } else {
+        min + (max - min) * normalized
+    };
+    handle.publish(target)
+}
+
+fn apply_authored(
+    state: &mut GridController,
+    input: Input,
+    sequence: &SequencerControl,
+    mapping: &crate::model::ApcMapping,
+    handles: &BTreeMap<String, ControlHandle>,
+) -> Result<(), String> {
+    match input {
+        Input::Button(PAGE_A_NOTE) => {
+            state.page = 0;
+            Ok(())
+        }
+        Input::Button(PAGE_B_NOTE) => {
+            state.page = 1;
+            Ok(())
+        }
+        Input::Button(LEFT_NOTE) => sequence.set_step_bank(sequence.step_bank().saturating_sub(1)),
+        Input::Button(RIGHT_NOTE) => {
+            sequence.set_step_bank((sequence.step_bank() + 1).min((sequence.steps - 1) / 8))
+        }
+        Input::Button(PLAY_STOP_NOTE) => sequence.execute("transport"),
+        Input::Button(RESTART_NOTE) => sequence.execute("restart"),
+        Input::Button(CLEAR_NOTE) => sequence.execute("clear"),
+        Input::Grid(cell) => {
+            let track = 7 - usize::from(cell / 8);
+            let column = usize::from(cell % 8);
+            let page = &mapping.pages[state.page];
+            if page == "steps" {
+                sequence.select_track(track)?;
+                sequence.execute(&format!("toggle:{}", column + 1))
+            } else {
+                let role = &mapping.performance_rows[track];
+                if role.is_empty() {
+                    Ok(())
+                } else if role == "restart" {
+                    sequence.execute("restart")
+                } else if (role == "pattern" && column >= sequence.pattern_names().len())
+                    || matches!(role.as_str(), "mute" | "solo" | "track")
+                        && column >= sequence.track_names().len()
+                {
+                    Ok(())
+                } else {
+                    sequence.execute(&format!("{role}:{column}"))
+                }
+            }
+        }
+        Input::Fader(index, value) => {
+            let id = &mapping.fader_controls[usize::from(index)];
+            let handle = handles
+                .get(id)
+                .ok_or_else(|| format!("APC fader targets unknown control '{id}'"))?;
+            publish_fader(handle, value)
+        }
+        Input::Button(_) => Ok(()),
     }
 }
 impl Drop for ApcSession {
@@ -340,6 +507,25 @@ impl Drop for ApcSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::ApcMapping;
+
+    fn authored_mapping(control: &str) -> ApcMapping {
+        ApcMapping {
+            pages: ["steps".into(), "performance".into()],
+            performance_rows: [
+                "pattern".into(),
+                "mute".into(),
+                "solo".into(),
+                "track".into(),
+                "restart".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ],
+            fader_controls: std::array::from_fn(|_| control.into()),
+        }
+    }
+
     #[test]
     fn grid_pages_toggle_correct_halves_and_clear_is_guarded() {
         let sequence = SequencerControl::new("test".into(), 120.0, 16, 4).unwrap();
@@ -409,5 +595,96 @@ mod tests {
         assert_eq!(leds[56], [127, 127, 127]);
         assert!(buttons[0]);
         assert!(buttons[6]);
+    }
+
+    #[test]
+    fn authored_pages_share_step_pattern_mute_solo_and_selection_commands() {
+        let sequence = SequencerControl::new("test".into(), 120.0, 16, 4).unwrap();
+        for n in 0..8 {
+            sequence.add_track(format!("T{n}")).unwrap();
+        }
+        sequence.define_pattern("Foundation".into()).unwrap();
+        sequence.define_pattern("Broken".into()).unwrap();
+        let mapping = authored_mapping("level");
+        let handles = BTreeMap::new();
+        let mut state = GridController::new();
+
+        apply_authored(&mut state, Input::Grid(56), &sequence, &mapping, &handles).unwrap();
+        assert_eq!(sequence.pattern().velocities[0][0], 1.0);
+        apply_authored(
+            &mut state,
+            Input::Button(RIGHT_NOTE),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        apply_authored(&mut state, Input::Grid(57), &sequence, &mapping, &handles).unwrap();
+        assert_eq!(sequence.pattern().velocities[0][9], 1.0);
+
+        apply_authored(
+            &mut state,
+            Input::Button(PAGE_B_NOTE),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        apply_authored(&mut state, Input::Grid(57), &sequence, &mapping, &handles).unwrap();
+        assert_eq!(sequence.queued_pattern(), Some(1));
+        apply_authored(&mut state, Input::Grid(48), &sequence, &mapping, &handles).unwrap();
+        assert!(sequence.muted(0));
+        apply_authored(&mut state, Input::Grid(40), &sequence, &mapping, &handles).unwrap();
+        assert!(sequence.soloed(0));
+        apply_authored(&mut state, Input::Grid(33), &sequence, &mapping, &handles).unwrap();
+        assert_eq!(sequence.selected_track(), 1);
+
+        let (leds, _) = authored_led_frame(&sequence, &state, &mapping);
+        assert_eq!(leds[57], [127, 90, 0]);
+        assert_eq!(leds[48], [127, 0, 0]);
+        assert_eq!(leds[40], [127, 127, 0]);
+        assert_eq!(leds[33], [0, 80, 127]);
+    }
+
+    #[test]
+    fn midi_cc_faders_target_authored_controls() {
+        assert_eq!(decode(&[0xb0, 48, 127]), Some(Input::Fader(0, 127)));
+        assert_eq!(decode(&[0xb0, 56, 0]), Some(Input::Fader(8, 0)));
+        let graph = crate::lua::read(
+            r#"
+            local i=meldritch.instrument("fader")
+            local o=i:oscillator {waveform="sine",frequency=110}
+            i:connect(o.out,i.output.left);i:connect(o.out,i.output.right)
+            i:control {id="level",label="Level",target=o.frequency,range={80,880},curve="log"}
+            return i
+            "#,
+        )
+        .unwrap();
+        let mut machine = crate::compiler::compile(&graph).unwrap();
+        let handle = machine.control_handle("level").unwrap();
+        let mut handles = BTreeMap::new();
+        handles.insert("level".into(), handle);
+        let sequence = SequencerControl::new("test".into(), 120.0, 16, 4).unwrap();
+        for n in 0..8 {
+            sequence.add_track(format!("T{n}")).unwrap();
+        }
+        let mut state = GridController::new();
+        apply_authored(
+            &mut state,
+            Input::Fader(0, 127),
+            &sequence,
+            &authored_mapping("level"),
+            &handles,
+        )
+        .unwrap();
+        let mut rendered = vec![0.0; 480];
+        machine.process(&mut rendered);
+        assert!(
+            rendered
+                .windows(2)
+                .filter(|v| v[0] < 0.0 && v[1] >= 0.0)
+                .count()
+                >= 8
+        );
     }
 }

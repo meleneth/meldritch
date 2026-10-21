@@ -1,5 +1,6 @@
 //! Shared authored pattern state and audio-domain sequencer transport.
 
+use serde::{Deserialize, Serialize};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU8, Ordering},
@@ -9,6 +10,20 @@ pub const MAX_TRACKS: usize = 8;
 pub const MAX_STEPS: usize = 64;
 pub const MAX_PATTERNS: usize = 16;
 const NONE: u8 = u8::MAX;
+
+#[derive(Serialize, Deserialize)]
+struct SavedPattern {
+    name: String,
+    velocities: Vec<Vec<f32>>,
+    pitches_hz: Vec<Vec<f32>>,
+    gates: Vec<Vec<f32>>,
+}
+#[derive(Serialize, Deserialize)]
+struct SavedProject {
+    version: u32,
+    steps: usize,
+    patterns: Vec<SavedPattern>,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Pattern {
@@ -51,7 +66,10 @@ pub struct SequencerControl {
     muted: [AtomicBool; MAX_TRACKS],
     soloed: [AtomicBool; MAX_TRACKS],
     selected_track: AtomicU8,
+    selected_step: AtomicU8,
+    step_bank: AtomicU8,
     status: Mutex<String>,
+    arrangement: Mutex<Vec<(usize, u32)>>,
 }
 
 impl SequencerControl {
@@ -86,7 +104,10 @@ impl SequencerControl {
             muted: std::array::from_fn(|_| AtomicBool::new(false)),
             soloed: std::array::from_fn(|_| AtomicBool::new(false)),
             selected_track: AtomicU8::new(0),
+            selected_step: AtomicU8::new(0),
+            step_bank: AtomicU8::new(0),
             status: Mutex::new("Ready".into()),
+            arrangement: Mutex::new(Vec::new()),
         }))
     }
     pub fn add_track(&self, name: String) -> Result<usize, String> {
@@ -278,14 +299,43 @@ impl SequencerControl {
         self.set_status(format!("Queued {}", self.pattern_names()[index]));
         Ok(())
     }
+    pub fn set_arrangement(&self, sections: &[(usize, u32)]) -> Result<(), String> {
+        if sections.is_empty()
+            || sections
+                .iter()
+                .any(|(pattern, repeats)| *pattern >= self.pattern_names().len() || *repeats == 0)
+        {
+            return Err("arrangement requires known patterns with positive repeats".into());
+        }
+        *self
+            .arrangement
+            .lock()
+            .map_err(|_| "sequencer arrangement state poisoned")? = sections.to_vec();
+        self.active_pattern
+            .store(sections[0].0 as u8, Ordering::Release);
+        Ok(())
+    }
     pub fn selected_track(&self) -> usize {
         usize::from(self.selected_track.load(Ordering::Acquire))
+    }
+    pub fn selected_step(&self) -> usize {
+        usize::from(self.selected_step.load(Ordering::Acquire))
+    }
+    pub fn step_bank(&self) -> usize {
+        usize::from(self.step_bank.load(Ordering::Acquire))
     }
     pub fn select_track(&self, track: usize) -> Result<(), String> {
         if track >= self.track_names().len() {
             return Err("track is out of range".into());
         }
         self.selected_track.store(track as u8, Ordering::Release);
+        Ok(())
+    }
+    pub fn set_step_bank(&self, bank: usize) -> Result<(), String> {
+        if bank * 8 >= self.steps {
+            return Err("step bank is out of range".into());
+        }
+        self.step_bank.store(bank as u8, Ordering::Release);
         Ok(())
     }
     pub fn toggle_mute(&self, track: usize) -> Result<(), String> {
@@ -319,6 +369,206 @@ impl SequencerControl {
         if let Ok(mut status) = self.status.lock() {
             *status = value
         }
+    }
+    pub fn execute(&self, command: &str) -> Result<(), String> {
+        if command == "transport" {
+            self.toggle_transport();
+            return Ok(());
+        }
+        if command == "start" {
+            self.start();
+            return Ok(());
+        }
+        if command == "stop" {
+            self.stop();
+            return Ok(());
+        }
+        if command == "restart" {
+            self.restart();
+            return Ok(());
+        }
+        if command == "clear" {
+            return self.clear_track(self.selected_track());
+        }
+        if command == "copy:next" {
+            let active = self.active_pattern();
+            let count = self.pattern_names().len();
+            if count < 2 {
+                return Err("copy:next requires at least two patterns".into());
+            }
+            let target = (active + 1) % count;
+            self.copy_pattern(active, target)?;
+            self.set_status(format!(
+                "Copied {} to {}",
+                self.pattern_names()[active],
+                self.pattern_names()[target]
+            ));
+            return Ok(());
+        }
+        if let Some(value) = command.strip_prefix("bank:") {
+            return self.set_step_bank(value.parse().map_err(|_| "invalid bank")?);
+        }
+        if let Some(value) = command.strip_prefix("toggle:") {
+            let column: usize = value.parse().map_err(|_| "invalid step column")?;
+            if !(1..=8).contains(&column) {
+                return Err("step column must be 1..8".into());
+            }
+            let step = self.step_bank() * 8 + column - 1;
+            self.selected_step.store(step as u8, Ordering::Release);
+            return self.toggle(self.selected_track(), step);
+        }
+        if command == "track:up" {
+            return self.select_track(self.selected_track().saturating_sub(1));
+        }
+        if command == "track:down" {
+            return self.select_track(
+                (self.selected_track() + 1).min(self.track_names().len().saturating_sub(1)),
+            );
+        }
+        for (prefix, action) in [("track:", 0), ("mute:", 1), ("solo:", 2), ("pattern:", 3)] {
+            if let Some(value) = command.strip_prefix(prefix) {
+                let index: usize = value.parse().map_err(|_| "invalid command index")?;
+                return match action {
+                    0 => self.select_track(index),
+                    1 => self.toggle_mute(index),
+                    2 => self.toggle_solo(index),
+                    _ => self.queue_pattern(index),
+                };
+            }
+        }
+        if command == "mute" {
+            return self.toggle_mute(self.selected_track());
+        }
+        if command == "solo" {
+            return self.toggle_solo(self.selected_track());
+        }
+        let edit = |velocity: f32, pitch: f32, gate: f32| -> Result<(), String> {
+            let mut state = self
+                .pattern
+                .lock()
+                .map_err(|_| "sequencer pattern state poisoned")?;
+            let active = self.active_pattern();
+            let track = self.selected_track();
+            let step = self.selected_step();
+            let pattern = state.authored.get_mut(active).ok_or("unknown pattern")?;
+            pattern.velocities[track][step] =
+                (pattern.velocities[track][step] + velocity).clamp(0.0, 1.0);
+            pattern.pitches_hz[track][step] =
+                (pattern.pitches_hz[track][step] * pitch).clamp(1.0, 24_000.0);
+            pattern.gates[track][step] = (pattern.gates[track][step] + gate).clamp(0.0, 1.0);
+            state.pending_revision = true;
+            Ok(())
+        };
+        match command {
+            "velocity:up" => edit(0.1, 1.0, 0.0),
+            "velocity:down" => edit(-0.1, 1.0, 0.0),
+            "pitch:up" => edit(0.0, 2.0_f32.powf(1.0 / 12.0), 0.0),
+            "pitch:down" => edit(0.0, 2.0_f32.powf(-1.0 / 12.0), 0.0),
+            "gate:up" => edit(0.0, 1.0, 0.1),
+            "gate:down" => edit(0.0, 1.0, -0.1),
+            _ => Err(format!("unknown performance command '{command}'")),
+        }
+    }
+    pub fn save_project(&self, path: &std::path::Path) -> Result<(), String> {
+        let state = self
+            .pattern
+            .lock()
+            .map_err(|_| "sequencer pattern state poisoned")?;
+        let patterns = state
+            .names
+            .iter()
+            .zip(&state.authored)
+            .map(|(name, p)| SavedPattern {
+                name: name.clone(),
+                velocities: p
+                    .velocities
+                    .iter()
+                    .map(|row| row[..self.steps].to_vec())
+                    .collect(),
+                pitches_hz: p
+                    .pitches_hz
+                    .iter()
+                    .map(|row| row[..self.steps].to_vec())
+                    .collect(),
+                gates: p
+                    .gates
+                    .iter()
+                    .map(|row| row[..self.steps].to_vec())
+                    .collect(),
+            })
+            .collect();
+        let json = serde_json::to_vec_pretty(&SavedProject {
+            version: 1,
+            steps: self.steps,
+            patterns,
+        })
+        .map_err(|e| e.to_string())?;
+        let temporary = path.with_extension("json.tmp");
+        std::fs::write(&temporary, json).map_err(|e| e.to_string())?;
+        std::fs::rename(&temporary, path).map_err(|e| e.to_string())?;
+        self.set_status(format!("Saved {}", path.display()));
+        Ok(())
+    }
+    pub fn load_project(&self, path: &std::path::Path) -> Result<(), String> {
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let saved: SavedProject = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        if saved.version != 1
+            || saved.steps != self.steps
+            || saved.patterns.is_empty()
+            || saved.patterns.len() > MAX_PATTERNS
+        {
+            return Err("saved groovebox project is incompatible".into());
+        }
+        let tracks = self.track_names().len();
+        let mut names = Vec::new();
+        let mut patterns = Vec::new();
+        for item in saved.patterns {
+            if item.name.is_empty() || names.contains(&item.name) {
+                return Err("saved patterns require unique nonempty names".into());
+            }
+            if item.velocities.len() != MAX_TRACKS
+                || item.pitches_hz.len() != MAX_TRACKS
+                || item.gates.len() != MAX_TRACKS
+            {
+                return Err("saved pattern requires eight track rows".into());
+            }
+            let mut pattern = Pattern::default();
+            for track in 0..tracks {
+                if item.velocities[track].len() != self.steps
+                    || item.pitches_hz[track].len() != self.steps
+                    || item.gates[track].len() != self.steps
+                {
+                    return Err("saved pattern row length is incompatible".into());
+                }
+                if item.velocities[track]
+                    .iter()
+                    .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+                    || item.pitches_hz[track]
+                        .iter()
+                        .any(|value| !value.is_finite() || !(1.0..=24_000.0).contains(value))
+                    || item.gates[track]
+                        .iter()
+                        .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+                {
+                    return Err("saved pattern contains an invalid musical event".into());
+                }
+                pattern.velocities[track][..self.steps].copy_from_slice(&item.velocities[track]);
+                pattern.pitches_hz[track][..self.steps].copy_from_slice(&item.pitches_hz[track]);
+                pattern.gates[track][..self.steps].copy_from_slice(&item.gates[track]);
+            }
+            names.push(item.name);
+            patterns.push(pattern)
+        }
+        let mut state = self
+            .pattern
+            .lock()
+            .map_err(|_| "sequencer pattern state poisoned")?;
+        state.names = names;
+        state.authored = patterns;
+        state.pending_revision = true;
+        self.active_pattern.store(0, Ordering::Release);
+        self.queued_pattern.store(NONE, Ordering::Release);
+        Ok(())
     }
     pub fn publish_bpm(&self, bpm: f64) -> Result<(), String> {
         if !bpm.is_finite() || bpm <= 0.0 {
@@ -365,10 +615,18 @@ pub(crate) struct SequencerRuntime {
     gates: [f64; MAX_TRACKS],
     pitches: [f64; MAX_TRACKS],
     velocities: [f64; MAX_TRACKS],
+    arrangement: Vec<(usize, u32)>,
+    arrangement_section: usize,
+    arrangement_repeats: u32,
 }
 
 impl SequencerRuntime {
     pub fn new(control: Arc<SequencerControl>) -> Self {
+        let arrangement = control
+            .arrangement
+            .lock()
+            .map(|value| value.clone())
+            .unwrap_or_default();
         Self {
             control,
             pattern: Pattern::default(),
@@ -379,6 +637,9 @@ impl SequencerRuntime {
             gates: [0.0; MAX_TRACKS],
             pitches: [440.0; MAX_TRACKS],
             velocities: [0.0; MAX_TRACKS],
+            arrangement,
+            arrangement_section: 0,
+            arrangement_repeats: 0,
         }
     }
     pub fn begin_frame(&mut self, sample_rate: f64) {
@@ -407,6 +668,20 @@ impl SequencerRuntime {
         if self.frames_until_step <= 0.0 {
             let boundary = self.initialized && self.step == 0;
             if boundary {
+                if !self.arrangement.is_empty() {
+                    self.arrangement_repeats += 1;
+                    let repeats = self.arrangement[self.arrangement_section].1;
+                    if self.arrangement_repeats >= repeats
+                        && self.arrangement_section + 1 < self.arrangement.len()
+                    {
+                        self.arrangement_section += 1;
+                        self.arrangement_repeats = 0;
+                        self.control.active_pattern.store(
+                            self.arrangement[self.arrangement_section].0 as u8,
+                            Ordering::Release,
+                        );
+                    }
+                }
                 let queued = self.control.queued_pattern.swap(NONE, Ordering::AcqRel);
                 if queued != NONE {
                     self.control.active_pattern.store(queued, Ordering::Release);
@@ -593,6 +868,32 @@ mod tests {
             assert_eq!(control.active_pattern(), second);
             assert_eq!(runtime.trigger(0), 0.75);
         }
+    }
+    #[test]
+    fn authored_arrangement_advances_after_requested_pattern_repeats() {
+        let control = SequencerControl::new("arrangement".into(), 120.0, 16, 4).unwrap();
+        control.add_track("T".into()).unwrap();
+        let foundation = control.define_pattern("Foundation".into()).unwrap();
+        let broken = control.define_pattern("Broken".into()).unwrap();
+        let mut first = [0.0; 16];
+        first[0] = 0.25;
+        let mut second = [0.0; 16];
+        second[0] = 0.75;
+        control.set_pattern_steps(foundation, 0, &first).unwrap();
+        control.set_pattern_steps(broken, 0, &second).unwrap();
+        control
+            .set_arrangement(&[(foundation, 2), (broken, 1)])
+            .unwrap();
+        let mut runtime = SequencerRuntime::new(Arc::clone(&control));
+        let mut starts = Vec::new();
+        for _ in 0..49 {
+            runtime.begin_frame(8.0);
+            if runtime.trigger(0) > 0.0 {
+                starts.push(runtime.trigger(0));
+            }
+        }
+        assert_eq!(starts, [0.25, 0.25, 0.75, 0.75]);
+        assert_eq!(control.active_pattern(), broken);
     }
     #[test]
     fn mute_and_solo_preserve_pattern_and_have_coherent_precedence() {

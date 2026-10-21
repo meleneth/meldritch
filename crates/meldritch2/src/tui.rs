@@ -140,8 +140,31 @@ fn draw_pattern_grid(
         .ok_or("pattern grid requires a sequencer")?;
     let sequence = &performance.sequencer;
     let names = sequence.track_names();
+    let patterns = sequence.pattern_names();
     let pattern = sequence.pattern();
     let first = page * 8;
+    let active = patterns
+        .get(sequence.active_pattern())
+        .map(String::as_str)
+        .unwrap_or("?");
+    let queued = sequence
+        .queued_pattern()
+        .and_then(|index| patterns.get(index))
+        .map_or(String::new(), |name| format!(" -> {name}"));
+    queue!(
+        out,
+        Print(format!(
+            "  Pattern: {active}{queued} | {} | {}\r\n  Status: {}\r\n",
+            if sequence.playing() {
+                "PLAYING"
+            } else {
+                "STOPPED"
+            },
+            sequence.bpm(),
+            sequence.status()
+        ))
+    )
+    .map_err(|error| error.to_string())?;
     queue!(out, Print("          ")).map_err(|error| error.to_string())?;
     for step in first..(first + 8).min(sequence.steps) {
         queue!(out, Print(format!("{:02} ", step + 1))).map_err(|e| e.to_string())?;
@@ -151,8 +174,10 @@ fn draw_pattern_grid(
         queue!(
             out,
             Print(format!(
-                "{}{:8} ",
+                "{}{}{}{:6} ",
                 if track == selected_track { ">" } else { " " },
+                if sequence.muted(track) { "M" } else { " " },
+                if sequence.soloed(track) { "S" } else { " " },
                 name
             ))
         )
@@ -175,7 +200,7 @@ fn draw_pattern_grid(
     }
     queue!(
         out,
-        Print("\r\n1-8: toggle  Up/Down: track  Tab: page  Space: play/stop  +/-: BPM  r: restart  Shift-C: clear track\r\n")
+        Print("\r\n1-8 toggle | [ ] bank | Up/Down track | F1-F4 pattern | Space transport\r\nm mute | o solo | c copy | +/- velocity | p/P pitch | g/G gate | C clear | S save\r\n")
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -187,6 +212,46 @@ fn navigation_key(code: KeyCode) -> Option<String> {
         KeyCode::Char(character) => Some(character.to_string()),
         _ => None,
     }
+}
+
+fn performance_key(code: KeyCode) -> Option<String> {
+    match code {
+        KeyCode::F(number) => Some(format!("F{number}")),
+        KeyCode::Up => Some("Up".into()),
+        KeyCode::Down => Some("Down".into()),
+        KeyCode::Left => Some("Left".into()),
+        KeyCode::Right => Some("Right".into()),
+        KeyCode::Tab => Some("Tab".into()),
+        KeyCode::BackTab => Some("BackTab".into()),
+        KeyCode::Char(' ') => Some("Space".into()),
+        KeyCode::Char(c) => Some(c.to_string()),
+        _ => None,
+    }
+}
+
+fn dispatch_performance_binding(
+    performance: &crate::model::Performance,
+    key_name: &str,
+) -> Result<bool, String> {
+    let Some(binding) = performance
+        .key_bindings
+        .iter()
+        .find(|binding| binding.key == key_name)
+    else {
+        return Ok(false);
+    };
+    if binding.command == "save" {
+        let path = performance
+            .project_file
+            .as_ref()
+            .ok_or("performance save command requires project_file")?;
+        performance
+            .sequencer
+            .save_project(std::path::Path::new(path))?;
+    } else {
+        performance.sequencer.execute(&binding.command)?;
+    }
+    Ok(true)
 }
 
 impl Drop for Terminal {
@@ -343,10 +408,19 @@ fn draw(
                 WidgetView::PerformanceStatus => {
                     if let Some(performance) = output.performance() {
                         let sequence = &performance.sequencer;
+                        let patterns = sequence.pattern_names();
+                        let active = patterns
+                            .get(sequence.active_pattern())
+                            .map(String::as_str)
+                            .unwrap_or("?");
+                        let queued = sequence
+                            .queued_pattern()
+                            .and_then(|index| patterns.get(index))
+                            .map_or(String::new(), |name| format!(" -> {name}"));
                         queue!(
                             out,
                             Print(format!(
-                                "  {} | {:.0} BPM | {} | step {:02}\r\n",
+                                "  {} | {:.0} BPM | {} | pattern {active}{queued} | step {:02}\r\n  {}\r\n",
                                 sequence.name,
                                 sequence.bpm(),
                                 if sequence.playing() {
@@ -354,7 +428,8 @@ fn draw(
                                 } else {
                                     "STOPPED"
                                 },
-                                sequence.current_step() + 1
+                                sequence.current_step() + 1,
+                                sequence.status()
                             ))
                         )
                         .map_err(|error| error.to_string())
@@ -442,7 +517,8 @@ pub fn perform(
     let _apc = match (output.apc_mini(), output.performance()) {
         (Some(name), Some(performance)) => Some(crate::apc::ApcSession::start(
             name.to_owned(),
-            std::sync::Arc::clone(&performance.sequencer),
+            performance.clone(),
+            output.controls(),
         )),
         _ => None,
     };
@@ -520,6 +596,23 @@ pub fn perform(
             output.performance().is_some(),
             ScreenPanel::has_pattern_grid,
         );
+        if grid_active
+            && let Some(performance) = output.performance()
+            && let Some(key_name) = performance_key(key.code)
+            && dispatch_performance_binding(performance, &key_name)?
+        {
+            grid_page = performance.sequencer.step_bank();
+            grid_track = performance.sequencer.selected_track();
+            draw(
+                &panel,
+                screens.as_ref(),
+                output,
+                midi_session,
+                keyboard.as_ref(),
+                Some((grid_page, grid_track)),
+            )?;
+            continue;
+        }
         if grid_active && let Some(performance) = output.performance() {
             let sequence = &performance.sequencer;
             match key.code {
@@ -647,7 +740,7 @@ pub fn perform(
 mod tests {
     use crossterm::event::KeyCode;
 
-    use super::{TuiKeyboard, navigation_key};
+    use super::{TuiKeyboard, dispatch_performance_binding, navigation_key};
     use crate::{
         compiler::compile,
         live_notes::live_note_queue,
@@ -661,6 +754,28 @@ mod tests {
         assert_eq!(navigation_key(KeyCode::F(1)).as_deref(), Some("F1"));
         assert_eq!(navigation_key(KeyCode::F(2)).as_deref(), Some("F2"));
         assert_eq!(navigation_key(KeyCode::Left), None);
+    }
+
+    #[test]
+    fn authored_keyboard_bindings_dispatch_the_same_semantic_commands() {
+        let graph = lua::read(
+            r#"
+            local i=meldritch.instrument("keys")
+            local o=i:constant {value=0}
+            i:connect(o.out,i.output.left);i:connect(o.out,i.output.right)
+            local q=i:sequencer {bpm=120,steps=16,steps_per_beat=4}
+            q:track("One")
+            i:performance {layout="step_grid",sequencer=q,keys={m="mute",["1"]="toggle:1"}}
+            return i
+            "#,
+        )
+        .unwrap();
+        let performance = graph.performance.as_ref().unwrap();
+        assert!(!dispatch_performance_binding(performance, "x").unwrap());
+        assert!(dispatch_performance_binding(performance, "m").unwrap());
+        assert!(performance.sequencer.muted(0));
+        assert!(dispatch_performance_binding(performance, "1").unwrap());
+        assert_eq!(performance.sequencer.pattern().velocities[0][0], 1.0);
     }
 
     #[test]

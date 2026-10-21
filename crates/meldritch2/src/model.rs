@@ -199,6 +199,22 @@ pub struct Graph {
 pub struct Performance {
     pub layout: String,
     pub sequencer: Arc<SequencerControl>,
+    pub key_bindings: Vec<PerformanceBinding>,
+    pub apc: Option<ApcMapping>,
+    pub project_file: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PerformanceBinding {
+    pub key: String,
+    pub command: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ApcMapping {
+    pub pages: [String; 2],
+    pub performance_rows: [String; 8],
+    pub fader_controls: [String; 9],
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
