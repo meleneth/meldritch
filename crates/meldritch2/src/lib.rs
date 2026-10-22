@@ -1,6 +1,7 @@
 pub mod compiler;
 pub mod contract;
 pub mod device;
+pub mod event_bridge;
 mod expand;
 pub mod live;
 pub mod live_notes;

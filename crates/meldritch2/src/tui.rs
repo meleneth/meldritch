@@ -545,6 +545,19 @@ fn draw(
                     .map_err(|error| error.to_string())
                 }
                 WidgetView::PerformanceSurface(_) => Ok(()),
+                WidgetView::EventActivity { label, state } => {
+                    let (_, pitch, velocity) = state.activity(0).unwrap_or((0, 440.0, 0.0));
+                    queue!(
+                        out,
+                        Print(format!(
+                            "{label}: step {:02} | pitch {:.2} Hz | velocity {:.2}\r\n",
+                            state.step() + 1,
+                            pitch,
+                            velocity
+                        ))
+                    )
+                    .map_err(|error| error.to_string())
+                }
             }?;
         }
     } else if step_grid.is_none() {
@@ -592,6 +605,7 @@ pub fn perform(
     output: &DeviceOutput,
     midi_session: Option<&MidiInputSession>,
     mut keyboard: Option<TuiKeyboard>,
+    mut events: Option<&mut crate::lua::EventOwner>,
 ) -> Result<(), String> {
     let _apc = match (output.apc_mini(), output.performance()) {
         (Some(name), Some(performance)) => Some(crate::apc::ApcSession::start(
@@ -621,6 +635,9 @@ pub fn perform(
             .ok_or("Lua navigation requires at least one screen")?
             .activate_screen(navigation.initial_screen())?;
     }
+    if let (Some(screens), Some(events)) = (&screens, &mut events) {
+        events.mount_screen(screens.current_id())?;
+    }
     let mut panel = Panel::new(controls);
     let _terminal = Terminal::enter()?;
     draw(
@@ -633,7 +650,18 @@ pub fn perform(
     )?;
     let mut grid_page = 0usize;
     let mut grid_track = 0usize;
+    let mut callback_errors = Vec::new();
+    let mut callback_failure_count = 0;
     loop {
+        if let Some(events) = &mut events {
+            events.dispatch();
+            for error in events.take_errors() {
+                if callback_errors.len() < 32 {
+                    callback_errors.push(error);
+                }
+            }
+            callback_failure_count = events.failure_count();
+        }
         if !event::poll(Duration::from_millis(100)).map_err(|error| error.to_string())? {
             draw(
                 &panel,
@@ -660,7 +688,14 @@ pub fn perform(
             (&navigation, navigation_key(key.code), &mut screens)
             && let Some(screen) = navigation.dispatch(&key_name)?
         {
+            let previous = screens.current_id().to_owned();
             screens.activate_screen(&screen)?;
+            if previous != screens.current_id()
+                && let Some(events) = &mut events
+            {
+                events.unmount_screen(&previous);
+                events.mount_screen(screens.current_id())?;
+            }
             draw(
                 &panel,
                 Some(screens),
@@ -762,11 +797,18 @@ pub fn perform(
             }
         }
         if let Some(screens) = &mut screens {
+            let previous = screens.current_id().to_owned();
             match key.code {
                 KeyCode::Tab if navigation.is_none() => screens.switch(1),
                 KeyCode::BackTab if navigation.is_none() => screens.switch(-1),
                 KeyCode::Enter => screens.activate()?,
                 _ => {}
+            }
+            if previous != screens.current_id()
+                && let Some(events) = &mut events
+            {
+                events.unmount_screen(&previous);
+                events.mount_screen(screens.current_id())?;
             }
             if (navigation.is_none() && matches!(key.code, KeyCode::Tab | KeyCode::BackTab))
                 || key.code == KeyCode::Enter
@@ -812,7 +854,14 @@ pub fn perform(
             )?;
         }
     }
-    Ok(())
+    if callback_errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Lua event callback failures ({callback_failure_count}; showing up to 32):\n{}",
+            callback_errors.join("\n")
+        ))
+    }
 }
 
 #[cfg(test)]

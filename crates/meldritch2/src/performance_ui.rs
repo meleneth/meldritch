@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
 use crate::{
+    event_bridge::EventUiState,
     model::PerformanceSurface,
     panel::ControlRow,
     sequencer::{MAX_TRACKS, SequencerControl},
@@ -121,6 +122,7 @@ pub(crate) struct SurfaceView {
     pub(crate) title: String,
     pub(crate) tracks: Vec<TrackView>,
     pub(crate) activity: RefCell<ActivityAnimator>,
+    pub(crate) events: std::sync::Arc<EventUiState>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -172,9 +174,9 @@ impl Default for ActivityAnimator {
 }
 
 impl ActivityAnimator {
-    fn update(&mut self, sequence: &SequencerControl, now: Instant) {
+    fn update(&mut self, events: &EventUiState, now: Instant) {
         for track in 0..MAX_TRACKS {
-            if let Some((generation, pitch)) = sequence.activity(track)
+            if let Some((generation, pitch, _velocity)) = events.activity(track)
                 && generation != self.seen[track]
             {
                 self.seen[track] = generation;
@@ -225,7 +227,7 @@ fn note_name(frequency: f64) -> String {
 fn transport(frame: &mut Frame, view: &SurfaceView, sequence: &SequencerControl, width: usize) {
     let names = sequence.pattern_names();
     let active = names
-        .get(sequence.active_pattern())
+        .get(view.events.pattern())
         .map(String::as_str)
         .unwrap_or("?");
     let queued = sequence
@@ -233,11 +235,11 @@ fn transport(frame: &mut Frame, view: &SurfaceView, sequence: &SequencerControl,
         .and_then(|i| names.get(i))
         .map_or(String::new(), |v| format!(" → {v}"));
     let state = if sequence.playing() { "▶" } else { "■" };
-    let bar = sequence.position_steps() / 16 + 1;
+    let bar = view.events.position() / 16 + 1;
     let text = format!(
         " {state} {:.0} BPM │ {active}{queued} │ BAR {bar:02} STEP {:02} │ {} ",
         sequence.bpm(),
-        sequence.current_step() + 1,
+        view.events.step() + 1,
         view.title
     );
     frame.line(
@@ -471,7 +473,7 @@ fn steps(frame: &mut Frame, view: &SurfaceView, sequence: &SequencerControl) {
         }];
         for step in 0..16.min(sequence.steps) {
             let velocity = pattern.velocities[track][step];
-            let playhead = sequence.playing() && sequence.current_step() == step;
+            let playhead = sequence.playing() && view.events.step() == step;
             let glyph = match (velocity > 0.0, velocity >= 0.85, playhead) {
                 (false, _, false) => "·",
                 (true, false, false) => "●",
@@ -579,7 +581,7 @@ pub(crate) fn render(
     width: u16,
     height: u16,
 ) -> Frame {
-    activity.update(sequence, now);
+    activity.update(&view.events, now);
     let width = usize::from(width).max(40);
     let mut frame = Frame::default();
     transport(&mut frame, view, sequence, width);
@@ -623,7 +625,7 @@ pub(crate) fn validate_surface(surface: &PerformanceSurface) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{compiler::compile, lua, sequencer::SequencerRuntime};
+    use crate::{compiler::compile, lua};
     use std::sync::Arc;
 
     fn fixture() -> (SurfaceView, Arc<SequencerControl>, crate::compiler::Machine) {
@@ -665,6 +667,7 @@ mod tests {
                 title: "TEST".into(),
                 tracks,
                 activity: RefCell::new(Default::default()),
+                events: Arc::new(Default::default()),
             },
             sequence,
             machine,
@@ -730,22 +733,10 @@ mod tests {
     }
 
     #[test]
-    fn audible_activity_uses_latest_pitch_and_decays_while_muted_events_do_not_flash() {
+    fn dispatched_activity_uses_latest_pitch_and_decays() {
         let (view, sequence, _machine) = fixture();
-        let pattern = sequence.define_pattern("Notes".into()).unwrap();
-        let mut pitch = [440.0; 16];
-        let gate = [0.5; 16];
-        let mut velocity = [0.0; 16];
-        pitch[0] = 261.625_58;
-        pitch[1] = 293.664_76;
-        velocity[0] = 1.0;
-        velocity[1] = 1.0;
-        sequence
-            .set_pattern_notes(pattern, 6, &pitch, &gate, &velocity)
-            .unwrap();
         let base = Instant::now();
-        let mut runtime = SequencerRuntime::new(Arc::clone(&sequence));
-        runtime.begin_frame(8.0);
+        view.events.observe_trigger(7, 261.625_58, 1.0).unwrap();
         render(
             &view,
             &sequence,
@@ -757,9 +748,9 @@ mod tests {
         assert!(view.activity.borrow().active(6));
         assert_eq!(
             pitch_color(view.activity.borrow().pitch(6)),
-            pitch_color(pitch[0] as f64)
+            pitch_color(261.625_58)
         );
-        runtime.begin_frame(8.0);
+        view.events.observe_trigger(7, 293.664_76, 0.8).unwrap();
         render(
             &view,
             &sequence,
@@ -770,7 +761,7 @@ mod tests {
         );
         assert_eq!(
             pitch_color(view.activity.borrow().pitch(6)),
-            pitch_color(pitch[1] as f64)
+            pitch_color(293.664_76)
         );
         render(
             &view,
@@ -781,20 +772,13 @@ mod tests {
             35,
         );
         assert!(!view.activity.borrow().active(6));
-        sequence.toggle_mute(6).unwrap();
-        sequence.restart();
-        runtime.begin_frame(8.0);
-        let generation = sequence.activity(6).unwrap().0;
-        runtime.begin_frame(8.0);
-        assert_eq!(sequence.activity(6).unwrap().0, generation);
     }
 
     #[test]
     fn playhead_and_transport_position_advance_without_touching_audio_graph_state() {
         let (view, sequence, _machine) = fixture();
         let base = Instant::now();
-        let mut runtime = SequencerRuntime::new(Arc::clone(&sequence));
-        runtime.begin_frame(8.0);
+        view.events.observe_step(1, 1, 0);
         let first = render(
             &view,
             &sequence,
@@ -805,7 +789,7 @@ mod tests {
         )
         .plain_lines()
         .join("\n");
-        runtime.begin_frame(8.0);
+        view.events.observe_step(2, 1, 1);
         let second = render(
             &view,
             &sequence,
@@ -817,6 +801,6 @@ mod tests {
         .plain_lines()
         .join("\n");
         assert_ne!(first, second);
-        assert_eq!(sequence.position_steps(), 2);
+        assert_eq!(view.events.position(), 1);
     }
 }

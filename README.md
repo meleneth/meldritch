@@ -45,6 +45,12 @@ buffer boundaries; prepared graph replacement; instrument-declared controls
 and terminal screens; and MIDI mappings, timed notes, and bounded polyphonic
 voice assignment.
 
+Sequencers also expose demand-driven asynchronous observations to retained Lua
+programs. `source:on(kind, callback)` creates a persistent subscription, while
+`screen:on(source, kind, callback)` scopes it to screen mount/unmount. Event
+callbacks run on the UI owner thread, never in the audio callback; queues are
+bounded and observational, so audio behavior never depends on Lua delivery.
+
 Those capabilities are foundations, not the product definition. Current
 graphs are compiled as directed acyclic graphs, signals use explicit mono
 ports (including paired stereo modules), normalizations are selected during
@@ -70,6 +76,7 @@ The complete authored instruments can be performed directly:
 ```sh
 cargo run -p meldritch2 -- perform examples/instruments/subtractive.lua
 cargo run -p meldritch2 -- perform examples/instruments/drone.lua
+cargo run -p meldritch2 -- perform examples/instruments/event_plaits.lua
 cargo run -p meldritch2 -- perform examples/instruments/tr909.lua
 ```
 

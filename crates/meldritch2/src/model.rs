@@ -146,6 +146,10 @@ pub enum Widget {
     PatternGrid,
     TransportStatus,
     PerformanceSurface(PerformanceSurface),
+    EventActivity {
+        label: String,
+        state: Arc<crate::event_bridge::EventUiState>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -153,6 +157,7 @@ pub struct PerformanceSurface {
     pub title: String,
     pub theme: String,
     pub tracks: Vec<PerformanceTrackView>,
+    pub event_state: Option<Arc<crate::event_bridge::EventUiState>>,
 }
 
 #[derive(Clone, Debug)]

@@ -27,6 +27,10 @@ pub(crate) enum WidgetView {
     PatternGrid,
     TransportStatus,
     PerformanceSurface(SurfaceView),
+    EventActivity {
+        label: String,
+        state: std::sync::Arc<crate::event_bridge::EventUiState>,
+    },
 }
 
 impl WidgetView {
@@ -39,6 +43,7 @@ impl WidgetView {
 }
 
 pub(crate) struct ScreenView {
+    pub id: String,
     pub title: String,
     pub widgets: Vec<WidgetView>,
     pub selected: Option<usize>,
@@ -127,12 +132,21 @@ impl ScreenPanel {
                             title: surface.title.clone(),
                             tracks,
                             activity: std::cell::RefCell::new(Default::default()),
+                            events: surface
+                                .event_state
+                                .clone()
+                                .unwrap_or_else(|| std::sync::Arc::new(Default::default())),
                         })
                     }
+                    Widget::EventActivity { label, state } => WidgetView::EventActivity {
+                        label: label.clone(),
+                        state: std::sync::Arc::clone(state),
+                    },
                 });
             }
             let selected = widgets.iter().position(WidgetView::selectable);
             views.push(ScreenView {
+                id: screen.id.clone(),
                 title: screen.title.clone(),
                 widgets,
                 selected,
@@ -153,6 +167,10 @@ impl ScreenPanel {
 
     pub fn current(&self) -> &ScreenView {
         &self.screens[self.active]
+    }
+
+    pub fn current_id(&self) -> &str {
+        &self.current().id
     }
 
     pub fn position(&self) -> (usize, usize) {

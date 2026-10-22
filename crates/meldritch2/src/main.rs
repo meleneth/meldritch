@@ -56,6 +56,15 @@ fn load_graph(path: &str) -> Result<Graph, String> {
         })
 }
 
+fn load_program(path: &str) -> Result<lua::Program, String> {
+    let path = std::path::Path::new(path);
+    fs::read_to_string(path)
+        .map_err(|error| error.to_string())
+        .and_then(|script| {
+            lua::read_program_with_root(&script, path.parent().unwrap_or(std::path::Path::new(".")))
+        })
+}
+
 fn open_output(graph: &Graph, device_arg: Option<String>) -> Result<DeviceOutput, String> {
     match device_arg {
         None => match graph.devices.audio_output.as_deref() {
@@ -274,14 +283,14 @@ fn main() {
                 process::exit(2);
             }
         }
-        let result = load_graph(&path).and_then(|graph| {
-            let configured_midi = graph.devices.midi_input.clone();
-            let configured_controls = graph.devices.midi_controls.clone();
-            open_output(&graph, device_arg)
-                .map(|output| (output, configured_midi, configured_controls))
+        let result = load_program(&path).and_then(|program| {
+            let configured_midi = program.graph().devices.midi_input.clone();
+            let configured_controls = program.graph().devices.midi_controls.clone();
+            open_output(program.graph(), device_arg)
+                .map(|output| (output, configured_midi, configured_controls, program))
         });
         match result {
-            Ok((mut output, configured_midi, configured_controls)) => {
+            Ok((mut output, configured_midi, configured_controls, mut program)) => {
                 let midi_session = match (midi_index, configured_midi) {
                     (Some(index), _) => {
                         let opened = match output.take_timed_midi_router() {
@@ -328,10 +337,14 @@ fn main() {
                 } else {
                     None
                 };
-                if let Err(error) = output
-                    .start()
-                    .and_then(|_| tui::perform(&output, midi_session.as_ref(), keyboard))
-                {
+                if let Err(error) = output.start().and_then(|_| {
+                    tui::perform(
+                        &output,
+                        midi_session.as_ref(),
+                        keyboard,
+                        Some(program.events_mut()),
+                    )
+                }) {
                     eprintln!("{error}");
                     process::exit(1);
                 }

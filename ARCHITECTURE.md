@@ -109,9 +109,37 @@ automated tests:
   primitives.
 - CPAL output compiles at the selected device rate and renders bounded chunks
   into interleaved host buffers.
+- Sequencers advertise source-scoped asynchronous event contracts. Lua can
+  subscribe persistently with `sequence:on(...)` or for a screen lifetime with
+  `screen:on(...)`. Per-kind atomic interest counts gate fixed-capacity SPSC
+  publication, and callbacks run only when the UI-thread owner drains events.
+  With no relevant subscriber, the producer does not construct a payload or
+  touch the queue. These lossy observations never drive musical correctness.
 
 The executable evidence is concentrated in the Meldritch 2 unit tests and the
 Lua corpus under `crates/meldritch2/examples/`.
+
+### Sequencer event contracts
+
+Every delivered event contains `kind`, numeric `source_id`, authored `source`
+name, and the zero-based absolute `sample_position` at occurrence time. Lua
+indices remain one-based: `step_advanced` adds `step`, `pattern`, and monotonic
+`position`; `note_on`, `note_off`, and `voice_triggered` add `track`, `pitch`
+in Hz, and `velocity`; `pattern_changed` adds the newly committed `pattern`.
+Events preserve production order within one sequencer source. No global order
+between independent producers is promised.
+
+Each source owns a fixed-capacity SPSC queue. A full queue drops the newest
+observation and increments its diagnostic counter; it never blocks audio.
+Registration and removal are serialized by the Lua owner and become visible at
+the producer's next atomic interest check; a lifetime epoch prevents queued
+events from an earlier mount reaching a later subscription.
+Callbacks execute later on the retained Lua program's UI thread. Callback
+errors are recorded with source and event kind, do not stop other subscribers,
+and are reported when the TUI exits. Disconnect is idempotent; a disconnected
+callback does not receive already queued events, dead sources are pruned, and
+runtime shutdown removes remaining interest. Current authoritative state can
+always be queried after an observational drop.
 
 ## Current limitations
 
@@ -138,6 +166,11 @@ These are implementation facts, not desired permanent boundaries:
   and replay are not implemented.
 - Device integration exists, but hardware behavior is environment-dependent and
   is not evidence by itself of architectural expressiveness.
+- The event bridge currently has sequencer producers only. Its 255-event usable
+  per-source queue drops newest observations on overflow and reports the count;
+  Lua dispatch latency follows the non-real-time UI polling cadence. MIDI input
+  and scalar controls retain their existing authoritative paths rather than
+  producing redundant event traffic.
 
 ## Intended capabilities not yet implemented
 

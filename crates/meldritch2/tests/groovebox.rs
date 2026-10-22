@@ -11,7 +11,7 @@ const SAMPLE_RATE: f64 = 8_000.0;
 const PATTERN_FRAMES: usize = 15_000;
 static FIXTURE_ID: AtomicUsize = AtomicUsize::new(0);
 
-fn fixture() -> (std::path::PathBuf, meldritch2::model::Graph) {
+fn fixture_source() -> (std::path::PathBuf, String) {
     let root = std::env::temp_dir().join(format!(
         "meldritch-groovebox-{}-{}",
         std::process::id(),
@@ -54,7 +54,12 @@ fn fixture() -> (std::path::PathBuf, meldritch2::model::Graph) {
         "source=\"local\",bank=\"Fixture\",manifest=\"kit.json\",cache=false",
     );
     let script = format!("local build=(function() {source} end)(); return build(false)");
-    (root.clone(), lua::read_with_root(&script, &root).unwrap())
+    (root, script)
+}
+fn fixture() -> (std::path::PathBuf, meldritch2::model::Graph) {
+    let (root, script) = fixture_source();
+    let graph = lua::read_with_root(&script, &root).unwrap();
+    (root, graph)
 }
 fn render(graph: &meldritch2::model::Graph, frames: usize) -> (Vec<f64>, Vec<f64>) {
     let mut machine = compile_at_rate(graph, SAMPLE_RATE).unwrap();
@@ -114,6 +119,79 @@ fn lua_authors_eight_tracks_four_patterns_controls_screen_and_apc_mapping() {
             .contains(&"bass_resonance".into())
     );
     assert!(surface.tracks[7].melodic);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn mounted_lua_subscribers_drive_real_activity_and_unmount_removes_interest() {
+    let (root, script) = fixture_source();
+    let mut program = lua::read_program_with_root(&script, &root).unwrap();
+    let sequence = program
+        .graph()
+        .performance
+        .as_ref()
+        .unwrap()
+        .sequencer
+        .clone();
+    let Widget::PerformanceSurface(surface) = &program.graph().screens[0].widgets[0] else {
+        panic!("groovebox surface")
+    };
+    let state = surface
+        .event_state
+        .clone()
+        .expect("Lua event observation state");
+    let mut machine = compile_at_rate(program.graph(), SAMPLE_RATE).unwrap();
+    assert_eq!(sequence.event_source().diagnostics().publications, 0);
+    program.events_mut().mount_screen("groovebox").unwrap();
+    program.events_mut().mount_screen("groovebox").unwrap();
+    assert_eq!(program.events_mut().active_subscriptions(), 4);
+
+    machine.process_stereo(&mut [0.0], &mut [0.0]);
+    assert!(program.events_mut().dispatch() >= 3);
+    assert_eq!(state.step(), 0);
+    assert_eq!(state.activity(0).unwrap().0, 1);
+    assert!(state.activity(0).unwrap().2 > 0.0);
+
+    sequence.toggle_mute(0).unwrap();
+    sequence.restart();
+    machine.process_stereo(&mut [0.0], &mut [0.0]);
+    program.events_mut().dispatch();
+    assert_eq!(state.activity(0).unwrap().0, 1, "muted kick must not flash");
+
+    sequence.toggle_mute(0).unwrap();
+    sequence.queue_pattern(1).unwrap();
+    let mut left = vec![0.0; PATTERN_FRAMES + 1];
+    let mut right = vec![0.0; PATTERN_FRAMES + 1];
+    machine.process_stereo(&mut left, &mut right);
+    program.events_mut().dispatch();
+    assert_eq!(
+        state.pattern(),
+        1,
+        "only committed pattern transition is observed"
+    );
+
+    program.events_mut().unmount_screen("groovebox");
+    assert_eq!(program.events_mut().active_subscriptions(), 0);
+    assert!(!sequence.event_source().event_names().any(|kind| {
+        sequence
+            .event_source()
+            .interested(meldritch2::event_bridge::EventKind::parse(kind).unwrap())
+    }));
+    sequence.queue_pattern(2).unwrap();
+    machine.process_stereo(&mut left, &mut right);
+    assert_eq!(sequence.active_pattern(), 2);
+    assert_eq!(
+        state.pattern(),
+        1,
+        "unmounted observation remains unchanged"
+    );
+    program.events_mut().mount_screen("groovebox").unwrap();
+    assert_eq!(
+        state.pattern(),
+        2,
+        "mount callback resynchronizes current state"
+    );
+    program.events_mut().unmount_screen("groovebox");
     fs::remove_dir_all(root).unwrap();
 }
 

@@ -57,6 +57,23 @@ local ui_tracks={}
 for index,name in ipairs(names) do
   ui_tracks[index]={label=name,volume=volume_controls[index],controls=track_controls[index],color=colors[index],melodic=index>=7}
 end
-screen:performance_surface {title="GROOVEBOX",theme="lospec500",tracks=ui_tracks}
+local events=meldritch.event_ui()
+screen:performance_surface {title="GROOVEBOX",theme="lospec500",tracks=ui_tracks,events=events}
+screen:on(seq,"step_advanced",function(event)
+  events:step(event.step,event.pattern,event.position)
+end)
+screen:on(seq,"voice_triggered",function(event)
+  if event.track<=6 then events:trigger(event.track,event.pitch,event.velocity) end
+end)
+screen:on(seq,"note_on",function(event)
+  if event.track>=7 then events:trigger(event.track,event.pitch,event.velocity) end
+end)
+screen:on(seq,"pattern_changed",function(event)
+  events:pattern(event.pattern)
+end)
+screen:on_mount(function()
+  local state=seq:state()
+  events:step(state.step,state.pattern,state.position)
+end)
 return box
 end

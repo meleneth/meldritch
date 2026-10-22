@@ -40,10 +40,14 @@ the transport, complete 8×16 grid, and contextual controls remain visible.
 Truecolor is used when `COLORTERM` advertises it, with ANSI-256 and monochrome
 fallbacks.
 
-Activity lights come from bounded counters published by the audio-domain
-sequencer only when a track actually dispatches an audible trigger. The TUI
-holds the flash for 180 ms and then decays it. Drum colors are authored per
-track. Melodic color is deterministic by pitch class: C red, C♯ orange, D
+Activity lights and the playhead come through screen-owned Lua subscriptions to
+the sequencer's `voice_triggered`, `note_on`, `step_advanced`, and
+`pattern_changed` contracts. Rust checks source/kind interest before constructing
+or queueing an event; the TUI-thread Lua owner drains the bounded queue and
+updates the visual observation state. Leaving the screen disconnects those
+subscriptions without touching playback. The TUI holds each flash for 180 ms
+and then decays it. Drum colors are authored per track. Melodic color is
+deterministic by pitch class: C red, C♯ orange, D
 amber, D♯ yellow, E green, F pale green, F♯ aqua, G cyan, G♯ blue, A violet,
 A♯ pink, and B rose. The latest overlapping melodic trigger wins. Muted and
 solo-masked events do not illuminate.

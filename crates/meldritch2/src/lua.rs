@@ -7,6 +7,10 @@ use std::{
 use mlua::{AnyUserData, Function, Lua, Table, UserData, UserDataMethods, Value};
 
 use crate::contract;
+use crate::event_bridge::{
+    EventKind, EventRuntime, LuaEventUiState, LuaSubscription, ScreenLifecycle, ScreenSubscription,
+    SubscriptionRegistry,
+};
 use crate::model::{
     Action, Connection, Control, ControlScale, Endpoint, ExternalInput, ExternalParameter,
     ExternalPort, Graph, MidiButton, MidiButtonEdge, MidiButtonMessage, MidiCc, MidiNotes,
@@ -21,8 +25,11 @@ use crate::sequencer::SequencerControl;
 struct LuaSampleBank(SampleBank);
 #[derive(Clone, Debug)]
 struct LuaSample(Arc<PreparedSample>);
-#[derive(Clone, Debug)]
-struct LuaSequencer(Arc<SequencerControl>);
+#[derive(Clone)]
+struct LuaSequencer {
+    control: Arc<SequencerControl>,
+    subscriptions: SubscriptionRegistry,
+}
 #[derive(Clone, Debug)]
 struct LuaSequencerTrack {
     sequencer: Arc<SequencerControl>,
@@ -52,9 +59,12 @@ impl UserData for LuaSampleBank {
 impl UserData for LuaSequencer {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("track", |lua, this, name: String| {
-            let track = this.0.add_track(name).map_err(mlua::Error::external)?;
+            let track = this
+                .control
+                .add_track(name)
+                .map_err(mlua::Error::external)?;
             lua.create_userdata(LuaSequencerTrack {
-                sequencer: Arc::clone(&this.0),
+                sequencer: Arc::clone(&this.control),
                 track,
             })
         });
@@ -62,12 +72,14 @@ impl UserData for LuaSequencer {
             let values = values
                 .sequence_values::<f32>()
                 .collect::<mlua::Result<Vec<_>>>()?;
-            this.0
+            this.control
                 .set_steps(track, &values)
                 .map_err(mlua::Error::external)
         });
         methods.add_method("define_pattern", |_, this, name: String| {
-            this.0.define_pattern(name).map_err(mlua::Error::external)
+            this.control
+                .define_pattern(name)
+                .map_err(mlua::Error::external)
         });
         methods.add_method(
             "set_pattern_steps",
@@ -75,7 +87,7 @@ impl UserData for LuaSequencer {
                 let values = values
                     .sequence_values::<f32>()
                     .collect::<mlua::Result<Vec<_>>>()?;
-                this.0
+                this.control
                     .set_pattern_steps(pattern, track, &values)
                     .map_err(mlua::Error::external)
             },
@@ -84,16 +96,20 @@ impl UserData for LuaSequencer {
             let pitches=pitches.sequence_values::<f32>().collect::<mlua::Result<Vec<_>>>()?;
             let gates=gates.sequence_values::<f32>().collect::<mlua::Result<Vec<_>>>()?;
             let velocities=velocities.sequence_values::<f32>().collect::<mlua::Result<Vec<_>>>()?;
-            this.0.set_pattern_notes(pattern,track,&pitches,&gates,&velocities).map_err(mlua::Error::external)
+            this.control.set_pattern_notes(pattern,track,&pitches,&gates,&velocities).map_err(mlua::Error::external)
         });
         methods.add_method("queue_pattern", |_, this, pattern: usize| {
-            this.0.queue_pattern(pattern).map_err(mlua::Error::external)
+            this.control
+                .queue_pattern(pattern)
+                .map_err(mlua::Error::external)
         });
         methods.add_method("copy_pattern", |_, this, (from, to): (usize, usize)| {
-            this.0.copy_pattern(from, to).map_err(mlua::Error::external)
+            this.control
+                .copy_pattern(from, to)
+                .map_err(mlua::Error::external)
         });
         methods.add_method("load_project", |_, this, path: String| {
-            this.0
+            this.control
                 .load_project(std::path::Path::new(&path))
                 .map_err(mlua::Error::external)
         });
@@ -103,21 +119,51 @@ impl UserData for LuaSequencer {
                 let item = item?;
                 parsed.push((item.get::<usize>(1)?, item.get::<u32>(2)?));
             }
-            this.0
+            this.control
                 .set_arrangement(&parsed)
                 .map_err(mlua::Error::external)
         });
         methods.add_method("start", |_, this, ()| {
-            this.0.start();
+            this.control.start();
             Ok(())
         });
         methods.add_method("stop", |_, this, ()| {
-            this.0.stop();
+            this.control.stop();
             Ok(())
         });
         methods.add_method("restart", |_, this, ()| {
-            this.0.restart();
+            this.control.restart();
             Ok(())
+        });
+        methods.add_method("event_kinds", |lua, this, ()| {
+            let result = lua.create_table()?;
+            for (index, name) in this.control.event_source().event_names().enumerate() {
+                result.set(index + 1, name)?;
+            }
+            Ok(result)
+        });
+        methods.add_method("event_diagnostics", |lua, this, ()| {
+            let diagnostics = this.control.event_source().diagnostics();
+            let result = lua.create_table()?;
+            result.set("publications", diagnostics.publications)?;
+            result.set("insertions", diagnostics.insertions)?;
+            result.set("dropped", diagnostics.dropped)?;
+            Ok(result)
+        });
+        methods.add_method("state", |lua, this, ()| {
+            let result = lua.create_table()?;
+            result.set("step", this.control.current_step() + 1)?;
+            result.set("pattern", this.control.active_pattern() + 1)?;
+            result.set("position", this.control.position_steps())?;
+            result.set("playing", this.control.playing())?;
+            Ok(result)
+        });
+        methods.add_method("on", |lua, this, (event, callback): (String, Function)| {
+            let id = this
+                .subscriptions
+                .connect(this.control.event_source(), &event, callback)
+                .map_err(mlua::Error::external)?;
+            lua.create_userdata(LuaSubscription::new(this.subscriptions.clone(), id))
         });
     }
 }
@@ -128,7 +174,7 @@ function meldritch.graph()
   local graph = { modules = {}, instances = {}, connections = {}, normalizations = {},
     controls = {}, midi_ccs = {}, note_bindings = {}, poly_bindings = {}, external_inputs = {}, external_outputs = {},
     external_parameters = {}, screens = {}, actions = {}, midi_buttons = {}, midi_packets = {},
-    performance = nil, _navigation = nil, _devices = {} }
+    performance = nil, _navigation = nil, _devices = {}, _event_handles = {} }
   function graph:devices(devices)
     assert(type(devices) == "table", "devices must be a table")
     assert(devices.audio_output == nil or
@@ -246,7 +292,8 @@ function meldritch.graph()
   end
   function graph:screen(id, title)
     assert(type(id) == "string" and type(title) == "string", "screen ID and title must be strings")
-    local screen = { id = id, title = title, widgets = {} }
+    local screen = { id = id, title = title, widgets = {}, subscriptions = {},
+      mount_callback = nil, unmount_callback = nil }
     function screen:label(text)
       assert(type(text) == "string", "label text must be a string")
       table.insert(self.widgets, { kind = "label", text = text })
@@ -280,7 +327,27 @@ function meldritch.graph()
       assert(type(spec) == "table" and type(spec.title) == "string" and type(spec.tracks) == "table",
         "performance surface requires title and tracks")
       table.insert(self.widgets, { kind = "performance_surface", title = spec.title,
-        theme = spec.theme or "lospec500", tracks = spec.tracks })
+        theme = spec.theme or "lospec500", tracks = spec.tracks, events = spec.events })
+    end
+    function screen:event_activity(label, events)
+      assert(type(label) == "string", "event activity requires a label")
+      table.insert(self.widgets, { kind = "event_activity", label = label, events = events })
+    end
+    function screen:on(source, event, callback)
+      assert(type(source) == "table" and source._native, "screen event source must be a sequencer")
+      assert(type(event) == "string" and type(callback) == "function",
+        "screen subscription requires an event name and callback")
+      table.insert(self.subscriptions, { native = source._native, event = event, callback = callback })
+    end
+    function screen:on_mount(callback)
+      assert(type(callback) == "function" and self.mount_callback == nil,
+        "screen accepts one mount callback")
+      self.mount_callback = callback
+    end
+    function screen:on_unmount(callback)
+      assert(type(callback) == "function" and self.unmount_callback == nil,
+        "screen accepts one unmount callback")
+      self.unmount_callback = callback
     end
     table.insert(self.screens, screen)
     return screen
@@ -545,6 +612,14 @@ local function decorate_scope(facade, scope, prefix)
     function sequence:start() command(self, "start") end
     function sequence:stop() command(self, "stop") end
     function sequence:restart() command(self, "restart") end
+    function sequence:on(event, callback)
+      local subscription = self._native:on(event, callback)
+      table.insert(facade._event_handles, subscription)
+      return subscription
+    end
+    function sequence:event_kinds() return self._native:event_kinds() end
+    function sequence:event_diagnostics() return self._native:event_diagnostics() end
+    function sequence:state() return self._native:state() end
     return sequence
   end
   function facade:connect(source, destination)
@@ -593,6 +668,7 @@ function meldritch.instrument(name)
     _actions = {},
     _midi_buttons = {},
     _midi_packets = {},
+    _event_handles = {},
     _screens = {},
     _navigation = nil,
     note = {
@@ -726,6 +802,7 @@ function meldritch.instrument(name)
     root.performance = self._performance
     root.screens = self._screens
     root._navigation = self._navigation
+    root._event_handles = self._event_handles
     local terminal = root:module("output", "stereo_output")
     if self._uses_notes then
       assert(self._note_pitch and self._note_gate, "note instruments must connect pitch and gate")
@@ -790,6 +867,57 @@ pub fn read(script: &str) -> Result<Graph, String> {
 }
 
 pub fn read_with_root(script: &str, project_root: &Path) -> Result<Graph, String> {
+    read_program_with_root(script, project_root).map(Program::into_graph)
+}
+
+pub struct EventOwner {
+    runtime: EventRuntime,
+    _root: Table,
+    lua: Lua,
+}
+
+impl EventOwner {
+    pub fn mount_screen(&mut self, screen: &str) -> Result<(), String> {
+        self.runtime.mount_screen(screen)
+    }
+    pub fn unmount_screen(&mut self, screen: &str) {
+        self.runtime.unmount_screen(screen);
+    }
+    pub fn dispatch(&mut self) -> usize {
+        self.runtime.dispatch(&self.lua)
+    }
+    pub fn take_errors(&mut self) -> Vec<String> {
+        self.runtime.take_errors()
+    }
+    pub fn callback_count(&self) -> u64 {
+        self.runtime.callback_count()
+    }
+    pub fn failure_count(&self) -> u64 {
+        self.runtime.failure_count()
+    }
+    pub fn active_subscriptions(&self) -> usize {
+        self.runtime.active_subscriptions()
+    }
+}
+
+pub struct Program {
+    graph: Graph,
+    events: EventOwner,
+}
+
+impl Program {
+    pub fn graph(&self) -> &Graph {
+        &self.graph
+    }
+    pub fn events_mut(&mut self) -> &mut EventOwner {
+        &mut self.events
+    }
+    pub fn into_graph(self) -> Graph {
+        self.graph
+    }
+}
+
+pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Program, String> {
     let lua = Lua::new();
     let include_root = project_root.canonicalize().map_err(|e| e.to_string())?;
     let include = lua
@@ -883,13 +1011,16 @@ pub fn read_with_root(script: &str, project_root: &Path) -> Result<Graph, String
     meldritch
         .set("_plaits_model", plaits_model)
         .map_err(|e| e.to_string())?;
+    let subscriptions = SubscriptionRegistry::default();
+    let sequencer_subscriptions = subscriptions.clone();
     let sequencer = lua
         .create_function(
-            |lua, (name, bpm, steps, resolution): (String, f64, usize, u32)| {
-                lua.create_userdata(LuaSequencer(
-                    SequencerControl::new(name, bpm, steps, resolution)
+            move |lua, (name, bpm, steps, resolution): (String, f64, usize, u32)| {
+                lua.create_userdata(LuaSequencer {
+                    control: SequencerControl::new(name, bpm, steps, resolution)
                         .map_err(mlua::Error::external)?,
-                ))
+                    subscriptions: sequencer_subscriptions.clone(),
+                })
             },
         )
         .map_err(|e| e.to_string())?;
@@ -899,11 +1030,19 @@ pub fn read_with_root(script: &str, project_root: &Path) -> Result<Graph, String
     let tempo = lua
         .create_function(|lua, native: AnyUserData| {
             let native = native.borrow::<LuaSequencer>()?;
-            lua.create_userdata(LuaSequencerTempo(Arc::clone(&native.0)))
+            lua.create_userdata(LuaSequencerTempo(Arc::clone(&native.control)))
         })
         .map_err(|e| e.to_string())?;
     meldritch
         .set("_sequencer_tempo", tempo)
+        .map_err(|e| e.to_string())?;
+    let event_ui = lua
+        .create_function(|lua, ()| {
+            lua.create_userdata(LuaEventUiState(Arc::new(Default::default())))
+        })
+        .map_err(|e| e.to_string())?;
+    meldritch
+        .set("event_ui", event_ui)
         .map_err(|e| e.to_string())?;
     let mut table: Table = lua.load(script).eval().map_err(|e| e.to_string())?;
     if let Some(finalize) = table
@@ -912,7 +1051,7 @@ pub fn read_with_root(script: &str, project_root: &Path) -> Result<Graph, String
     {
         table = finalize.call(table.clone()).map_err(|e| e.to_string())?;
     }
-    let mut graph = graph_from_table(table)?;
+    let mut graph = graph_from_table(table.clone())?;
     let definitions: Table = meldritch
         .get("_subpatches")
         .map_err(|e| format!("subpatch definitions: {e}"))?;
@@ -931,7 +1070,53 @@ pub fn read_with_root(script: &str, project_root: &Path) -> Result<Graph, String
             },
         );
     }
-    Ok(graph)
+    let (screen_specs, lifecycle) = screen_runtime(&table)?;
+    drop(definitions);
+    drop(meldritch);
+    Ok(Program {
+        graph,
+        events: EventOwner {
+            runtime: EventRuntime::new(subscriptions, screen_specs, lifecycle),
+            _root: table,
+            lua,
+        },
+    })
+}
+
+fn screen_runtime(root: &Table) -> Result<(Vec<ScreenSubscription>, Vec<ScreenLifecycle>), String> {
+    let screens: Table = root.get("screens").map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    let mut lifecycle = Vec::new();
+    for screen in screens.sequence_values::<Table>() {
+        let screen = screen.map_err(|e| e.to_string())?;
+        let screen_id: String = screen.get("id").map_err(|e| e.to_string())?;
+        lifecycle.push(ScreenLifecycle {
+            screen: screen_id.clone(),
+            mount: screen.get("mount_callback").map_err(|e| e.to_string())?,
+            unmount: screen.get("unmount_callback").map_err(|e| e.to_string())?,
+        });
+        let subscriptions: Table = screen.get("subscriptions").map_err(|e| e.to_string())?;
+        for subscription in subscriptions.sequence_values::<Table>() {
+            let subscription = subscription.map_err(|e| e.to_string())?;
+            let native: AnyUserData = subscription.get("native").map_err(|e| e.to_string())?;
+            let native = native.borrow::<LuaSequencer>().map_err(|e| e.to_string())?;
+            let name: String = subscription.get("event").map_err(|e| e.to_string())?;
+            let kind = EventKind::parse(&name).ok_or_else(|| format!("unknown event '{name}'"))?;
+            if !native.control.event_source().supports(kind) {
+                return Err(format!(
+                    "source '{}' does not produce event '{name}'",
+                    native.control.event_source().name()
+                ));
+            }
+            result.push(ScreenSubscription {
+                screen: screen_id.clone(),
+                source: Arc::downgrade(native.control.event_source()),
+                kind,
+                callback: subscription.get("callback").map_err(|e| e.to_string())?,
+            });
+        }
+    }
+    Ok((result, lifecycle))
 }
 
 fn external_inputs(table: &Table) -> Result<Vec<ExternalInput>, String> {
@@ -1017,7 +1202,7 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
         let native = native.borrow::<LuaSequencer>().map_err(|e| e.to_string())?;
         graph.performance = Some(Performance {
             layout: performance.get("layout").map_err(|e| e.to_string())?,
-            sequencer: Arc::clone(&native.0),
+            sequencer: Arc::clone(&native.control),
             key_bindings: performance
                 .get::<Table>("keys")
                 .map_err(|e| e.to_string())?
@@ -1066,7 +1251,7 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
         let kind: String = action.get("action").map_err(|e| e.to_string())?;
         graph.actions.push(Action {
             label: action.get("label").map_err(|e| e.to_string())?,
-            sequencer: Arc::clone(&native.0),
+            sequencer: Arc::clone(&native.control),
             action: match kind.as_str() {
                 "start" => crate::model::TransportAction::Start,
                 "stop" => crate::model::TransportAction::Stop,
@@ -1171,7 +1356,29 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                         title: widget.get("title").map_err(|e| e.to_string())?,
                         theme: widget.get("theme").map_err(|e| e.to_string())?,
                         tracks,
+                        event_state: widget
+                            .get::<Option<AnyUserData>>("events")
+                            .map_err(|e| e.to_string())?
+                            .map(|state| {
+                                state
+                                    .borrow::<LuaEventUiState>()
+                                    .map(|state| Arc::clone(&state.0))
+                                    .map_err(|e| e.to_string())
+                            })
+                            .transpose()?,
                     })
+                }
+                "event_activity" => {
+                    let state: AnyUserData = widget.get("events").map_err(|e| e.to_string())?;
+                    Widget::EventActivity {
+                        label: widget.get("label").map_err(|e| e.to_string())?,
+                        state: Arc::clone(
+                            &state
+                                .borrow::<LuaEventUiState>()
+                                .map_err(|e| e.to_string())?
+                                .0,
+                        ),
+                    }
                 }
                 other => return Err(format!("unknown screen widget '{other}'")),
             });

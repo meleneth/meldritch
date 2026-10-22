@@ -472,6 +472,9 @@ fn validate_screens(
                         }
                     }
                 }
+                Widget::EventActivity { label, .. } => {
+                    text(label, "event activity label")?;
+                }
             }
         }
     }

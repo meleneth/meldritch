@@ -6,6 +6,8 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU8, Ordering},
 };
 
+use crate::event_bridge::{EventKind, EventPayload, EventSource};
+
 pub const MAX_TRACKS: usize = 8;
 pub const MAX_STEPS: usize = 64;
 pub const MAX_PATTERNS: usize = 16;
@@ -70,9 +72,8 @@ pub struct SequencerControl {
     step_bank: AtomicU8,
     status: Mutex<String>,
     arrangement: Mutex<Vec<(usize, u32)>>,
-    activity_generation: [std::sync::atomic::AtomicU64; MAX_TRACKS],
-    activity_pitch: [std::sync::atomic::AtomicU64; MAX_TRACKS],
     position_steps: std::sync::atomic::AtomicU64,
+    events: Arc<EventSource>,
 }
 
 impl SequencerControl {
@@ -88,6 +89,16 @@ impl SequencerControl {
         if steps_per_beat == 0 || !bpm.is_finite() || bpm <= 0.0 {
             return Err("sequencer requires positive BPM and resolution".into());
         }
+        let events = EventSource::new(
+            name.clone(),
+            &[
+                EventKind::StepAdvanced,
+                EventKind::NoteOn,
+                EventKind::NoteOff,
+                EventKind::VoiceTriggered,
+                EventKind::PatternChanged,
+            ],
+        );
         Ok(Arc::new(Self {
             name,
             steps,
@@ -111,11 +122,8 @@ impl SequencerControl {
             step_bank: AtomicU8::new(0),
             status: Mutex::new("Ready".into()),
             arrangement: Mutex::new(Vec::new()),
-            activity_generation: std::array::from_fn(|_| std::sync::atomic::AtomicU64::new(0)),
-            activity_pitch: std::array::from_fn(|_| {
-                std::sync::atomic::AtomicU64::new(440.0_f64.to_bits())
-            }),
             position_steps: std::sync::atomic::AtomicU64::new(0),
+            events,
         }))
     }
     pub fn add_track(&self, name: String) -> Result<usize, String> {
@@ -373,16 +381,11 @@ impl SequencerControl {
     pub fn status(&self) -> String {
         self.status.lock().map(|v| v.clone()).unwrap_or_default()
     }
-    pub fn activity(&self, track: usize) -> Option<(u64, f64)> {
-        let generation = self.activity_generation.get(track)?;
-        let pitch = self.activity_pitch.get(track)?;
-        Some((
-            generation.load(Ordering::Acquire),
-            f64::from_bits(pitch.load(Ordering::Acquire)),
-        ))
-    }
     pub fn position_steps(&self) -> u64 {
         self.position_steps.load(Ordering::Acquire)
+    }
+    pub fn event_source(&self) -> &Arc<EventSource> {
+        &self.events
     }
     fn set_status(&self, value: String) {
         if let Ok(mut status) = self.status.lock() {
@@ -634,9 +637,12 @@ pub(crate) struct SequencerRuntime {
     gates: [f64; MAX_TRACKS],
     pitches: [f64; MAX_TRACKS],
     velocities: [f64; MAX_TRACKS],
+    audible_notes: [bool; MAX_TRACKS],
     arrangement: Vec<(usize, u32)>,
     arrangement_section: usize,
     arrangement_repeats: u32,
+    sample_position: u64,
+    active_pattern: usize,
 }
 
 impl SequencerRuntime {
@@ -646,6 +652,7 @@ impl SequencerRuntime {
             .lock()
             .map(|value| value.clone())
             .unwrap_or_default();
+        let active_pattern = control.active_pattern();
         Self {
             control,
             pattern: Pattern::default(),
@@ -656,14 +663,32 @@ impl SequencerRuntime {
             gates: [0.0; MAX_TRACKS],
             pitches: [440.0; MAX_TRACKS],
             velocities: [0.0; MAX_TRACKS],
+            audible_notes: [false; MAX_TRACKS],
             arrangement,
             arrangement_section: 0,
             arrangement_repeats: 0,
+            sample_position: 0,
+            active_pattern,
         }
     }
     pub fn begin_frame(&mut self, sample_rate: f64) {
-        for gate in &mut self.gates {
-            *gate = (*gate - 1.0).max(0.0);
+        let sample_position = self.sample_position;
+        self.sample_position = self.sample_position.wrapping_add(1);
+        for track in 0..MAX_TRACKS {
+            self.gates[track] = (self.gates[track] - 1.0).max(0.0);
+            if self.audible_notes[track]
+                && (self.gates[track] == 0.0 || !self.control.track_enabled(track))
+            {
+                self.audible_notes[track] = false;
+                let pitch = self.pitches[track];
+                self.control
+                    .events
+                    .publish(EventKind::NoteOff, sample_position, || EventPayload::Note {
+                        track: track as u8,
+                        pitch,
+                        velocity: 0.0,
+                    });
+            }
         }
         match self.control.command.swap(0, Ordering::AcqRel) {
             1 => {
@@ -716,12 +741,34 @@ impl SequencerRuntime {
                     }
                 }
             }
+            let active_pattern = self.control.active_pattern();
+            if active_pattern != self.active_pattern {
+                self.active_pattern = active_pattern;
+                self.control
+                    .events
+                    .publish(EventKind::PatternChanged, sample_position, || {
+                        EventPayload::Pattern {
+                            pattern: active_pattern as u8,
+                        }
+                    });
+            }
             self.trigger_step = Some(self.step);
             self.control
                 .current_step
                 .store(self.step as u8, Ordering::Release);
             let bpm = self.control.bpm().max(1.0);
             let step_frames = sample_rate * 60.0 / (bpm * self.control.steps_per_beat as f64);
+            let step = self.step;
+            let position = self.control.position_steps.load(Ordering::Relaxed);
+            self.control
+                .events
+                .publish(EventKind::StepAdvanced, sample_position, || {
+                    EventPayload::Step {
+                        step: step as u8,
+                        pattern: active_pattern as u8,
+                        position,
+                    }
+                });
             for track in 0..MAX_TRACKS {
                 let velocity = self.pattern.velocities[track][self.step] as f64;
                 self.velocities[track] = velocity;
@@ -729,9 +776,24 @@ impl SequencerRuntime {
                     self.pitches[track] = self.pattern.pitches_hz[track][self.step] as f64;
                     self.gates[track] = self.pattern.gates[track][self.step] as f64 * step_frames;
                     if self.control.track_enabled(track) {
-                        self.control.activity_pitch[track]
-                            .store(self.pitches[track].to_bits(), Ordering::Release);
-                        self.control.activity_generation[track].fetch_add(1, Ordering::AcqRel);
+                        self.audible_notes[track] = true;
+                        let pitch = self.pitches[track];
+                        self.control
+                            .events
+                            .publish(EventKind::NoteOn, sample_position, || EventPayload::Note {
+                                track: track as u8,
+                                pitch,
+                                velocity,
+                            });
+                        self.control.events.publish(
+                            EventKind::VoiceTriggered,
+                            sample_position,
+                            || EventPayload::Note {
+                                track: track as u8,
+                                pitch,
+                                velocity,
+                            },
+                        );
                     }
                 }
             }
