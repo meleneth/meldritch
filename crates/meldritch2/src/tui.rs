@@ -307,6 +307,10 @@ fn dispatch_performance_binding(
         panel
             .ok_or("control navigation requires a performance control panel")?
             .apply(gesture)?;
+    } else if let Some(id) = binding.command.strip_prefix("control:select:") {
+        panel
+            .ok_or("control selection requires a performance control panel")?
+            .select_id(id)?;
     } else if binding.command == "save" {
         let path = performance
             .project_file
@@ -515,6 +519,25 @@ fn draw(
                     }
                     Ok(())
                 }
+                WidgetView::ControlFocus => {
+                    let Some(selected) = panel.selected() else {
+                        queue!(
+                            out,
+                            Print("┌─ PARAMETER ─┐\r\n│ unavailable │\r\n└─────────────┘\r\n")
+                        )
+                        .map_err(|error| error.to_string())?;
+                        continue;
+                    };
+                    let row = &panel.rows()[selected];
+                    let (min, max) = row.range();
+                    let normalized = ((row.value() - min) / (max - min)).clamp(0.0, 1.0);
+                    let filled = (normalized * 32.0).round() as usize;
+                    queue!(out, Print(format!(
+                        "┌─ SELECTED PARAMETER ─────────────────────┐\r\n│ {:<38} │\r\n│ [{}{}] │\r\n│ {:>10.4}   {:>10.4} … {:<10.4} │\r\n└─────────────────────────────────────────┘\r\n",
+                        row.label(), "█".repeat(filled), "░".repeat(32 - filled), row.value(), min, max
+                    )))
+                    .map_err(|error| error.to_string())
+                }
                 WidgetView::PerformanceStatus => {
                     if let Some(performance) = output.performance() {
                         let sequence = &performance.sequencer;
@@ -640,7 +663,7 @@ pub fn perform(
     mut keyboard: Option<TuiKeyboard>,
     mut events: Option<&mut crate::lua::EventOwner>,
 ) -> Result<(), String> {
-    let _apc = match (output.apc_mini(), output.performance()) {
+    let apc = match (output.apc_mini(), output.performance()) {
         (Some(name), Some(performance)) => Some(crate::apc::ApcSession::start(
             name.to_owned(),
             performance.clone(),
@@ -653,11 +676,14 @@ pub fn perform(
         .iter()
         .cloned()
         .map(|surface| {
-            crate::stream_deck::StreamDeckSession::start(crate::stream_deck::SurfaceRuntime::new(
-                surface,
-                output.controls(),
-                output.performance().cloned(),
-            ))
+            crate::stream_deck::StreamDeckSession::start(
+                crate::stream_deck::SurfaceRuntime::new(
+                    surface,
+                    output.controls(),
+                    output.performance().cloned(),
+                )
+                .with_focus(output.focus_controls(), output.focus_selection()),
+            )
         })
         .collect::<Vec<_>>();
     let controls = output.controls();
@@ -683,7 +709,7 @@ pub fn perform(
     if let (Some(screens), Some(events)) = (&screens, &mut events) {
         events.mount_screen(screens.current_id())?;
     }
-    let mut panel = Panel::new(controls);
+    let mut panel = Panel::with_selection(output.focus_controls(), output.focus_selection());
     let _terminal = Terminal::enter()?;
     draw(
         &panel,
@@ -901,6 +927,14 @@ pub fn perform(
                 None,
             )?;
         }
+    }
+    // Signal all attached surfaces before joining either worker so the two
+    // one-second shutdown sweeps run together rather than serially.
+    if let Some(apc) = &apc {
+        apc.begin_shutdown();
+    }
+    for stream_deck in &stream_decks {
+        stream_deck.begin_shutdown();
     }
     if callback_errors.is_empty() {
         Ok(())

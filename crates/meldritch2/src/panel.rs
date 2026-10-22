@@ -1,3 +1,8 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+
 use crate::compiler::ControlHandle;
 use crate::model::ControlScale;
 
@@ -11,6 +16,7 @@ pub enum Gesture {
     Maximum,
 }
 
+#[derive(Clone)]
 pub struct ControlRow {
     handle: ControlHandle,
     authored_value: f64,
@@ -61,19 +67,27 @@ impl ControlRow {
 }
 
 /// Presentation state only; the control handles own publication to DSP.
+#[derive(Clone)]
 pub struct Panel {
     rows: Vec<ControlRow>,
-    selected: usize,
+    selected: Arc<AtomicUsize>,
 }
 
 impl Panel {
     pub fn new(controls: Vec<(ControlHandle, f64)>) -> Self {
+        Self::with_selection(controls, Arc::new(AtomicUsize::new(0)))
+    }
+
+    pub(crate) fn with_selection(
+        controls: Vec<(ControlHandle, f64)>,
+        selected: Arc<AtomicUsize>,
+    ) -> Self {
         Self {
             rows: controls
                 .into_iter()
                 .map(|(handle, authored_value)| ControlRow::new(handle, authored_value))
                 .collect(),
-            selected: 0,
+            selected,
         }
     }
 
@@ -81,7 +95,36 @@ impl Panel {
         &self.rows
     }
     pub fn selected(&self) -> Option<usize> {
-        (!self.rows.is_empty()).then_some(self.selected)
+        (!self.rows.is_empty()).then_some(
+            self.selected
+                .load(Ordering::Acquire)
+                .min(self.rows.len().saturating_sub(1)),
+        )
+    }
+
+    pub fn select_id(&self, id: &str) -> Result<(), String> {
+        let index = self
+            .rows
+            .iter()
+            .position(|row| row.id() == id)
+            .ok_or_else(|| format!("unknown focus control '{id}'"))?;
+        self.selected.store(index, Ordering::Release);
+        Ok(())
+    }
+
+    pub fn publish_selected_normalized(&self, normalized: f64) -> Result<(), String> {
+        let Some(index) = self.selected() else {
+            return Ok(());
+        };
+        let row = &self.rows[index];
+        let (min, max) = row.range();
+        let normalized = normalized.clamp(0.0, 1.0);
+        let value = if row.handle.scale() == ControlScale::Logarithmic {
+            min * (max / min).powf(normalized)
+        } else {
+            min + (max - min) * normalized
+        };
+        row.publish(value)
     }
 
     pub fn apply(&mut self, gesture: Gesture) -> Result<(), String> {
@@ -89,10 +132,17 @@ impl Panel {
             return Ok(());
         }
         match gesture {
-            Gesture::Previous => self.selected = self.selected.saturating_sub(1),
-            Gesture::Next => self.selected = (self.selected + 1).min(self.rows.len() - 1),
+            Gesture::Previous => {
+                let selected = self.selected().unwrap_or(0).saturating_sub(1);
+                self.selected.store(selected, Ordering::Release);
+            }
+            Gesture::Next => {
+                let selected = (self.selected().unwrap_or(0) + 1).min(self.rows.len() - 1);
+                self.selected.store(selected, Ordering::Release);
+            }
             Gesture::Decrease | Gesture::Increase | Gesture::Minimum | Gesture::Maximum => {
-                self.rows[self.selected].adjust(gesture)?;
+                let selected = self.selected().unwrap_or(0);
+                self.rows[selected].adjust(gesture)?;
             }
         }
         Ok(())

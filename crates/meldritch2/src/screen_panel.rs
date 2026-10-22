@@ -23,6 +23,7 @@ pub(crate) enum WidgetView {
         value: f64,
     },
     PerformanceControls,
+    ControlFocus,
     PerformanceStatus,
     PatternGrid,
     TransportStatus,
@@ -102,6 +103,7 @@ impl ScreenPanel {
                         }
                     }
                     Widget::PerformanceControls => WidgetView::PerformanceControls,
+                    Widget::ControlFocus => WidgetView::ControlFocus,
                     Widget::PerformanceStatus => WidgetView::PerformanceStatus,
                     Widget::PatternGrid => WidgetView::PatternGrid,
                     Widget::TransportStatus => WidgetView::TransportStatus,
@@ -195,10 +197,12 @@ impl ScreenPanel {
     }
 
     pub fn has_performance_controls(&self) -> bool {
-        self.current()
-            .widgets
-            .iter()
-            .any(|widget| matches!(widget, WidgetView::PerformanceControls))
+        self.current().widgets.iter().any(|widget| {
+            matches!(
+                widget,
+                WidgetView::PerformanceControls | WidgetView::ControlFocus
+            )
+        })
     }
 
     pub fn switch(&mut self, direction: i32) {

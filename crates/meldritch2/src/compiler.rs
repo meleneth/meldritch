@@ -752,7 +752,7 @@ fn validate_screens(
                         ));
                     }
                 }
-                Widget::PerformanceControls => {}
+                Widget::PerformanceControls | Widget::ControlFocus => {}
                 Widget::PerformanceStatus | Widget::PatternGrid | Widget::TransportStatus => {
                     if !has_performance {
                         return Err(format!(
@@ -1795,6 +1795,37 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 "duplicate MIDI CC mapping for channel {} CC {}",
                 binding.channel, binding.number
             ));
+        }
+    }
+    if let Some(focus) = graph
+        .performance
+        .as_ref()
+        .and_then(|performance| performance.control_focus.as_ref())
+    {
+        if focus.controls.is_empty() {
+            return Err("performance focus requires at least one control".into());
+        }
+        let mut focused = BTreeSet::new();
+        for id in &focus.controls {
+            if !controls.contains_key(id) {
+                return Err(format!("performance focus targets unknown control '{id}'"));
+            }
+            if !focused.insert(id) {
+                return Err(format!("performance focus repeats control '{id}'"));
+            }
+        }
+        for mapping in &focus.midi_ccs {
+            if !(1..=16).contains(&mapping.channel) || mapping.number > 127 {
+                return Err(
+                    "performance focus MIDI mapping requires channel 1..16 and CC 0..127".into(),
+                );
+            }
+            if !mapped_ccs.insert((mapping.channel, mapping.number)) {
+                return Err(format!(
+                    "duplicate MIDI CC mapping for channel {} CC {}",
+                    mapping.channel, mapping.number
+                ));
+            }
         }
     }
     let action_labels = graph

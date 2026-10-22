@@ -2,7 +2,7 @@
 
 use crate::{
     compiler::ControlHandle, device::unique_name_match, model::Performance,
-    sequencer::SequencerControl,
+    performance_ui::LOSPEC500, sequencer::SequencerControl,
 };
 use midir::{Ignore, MidiInput, MidiOutput, MidiOutputConnection};
 use std::collections::BTreeMap;
@@ -366,6 +366,48 @@ fn refresh(
     Ok(())
 }
 
+fn shutdown_color(cell: usize, frame: usize) -> [u8; 3] {
+    let row = cell / 8;
+    let column = cell % 8;
+    LOSPEC500[(row + column + frame) % LOSPEC500.len()]
+}
+
+fn shutdown_animation(output: &mut MidiOutputConnection) {
+    for frame in 0..20 {
+        for cell in 0..64 {
+            let checker = (cell / 8 + cell % 8 + frame) % 4;
+            let rgb = if checker < 2 {
+                shutdown_color(cell, frame * 2)
+            } else {
+                shutdown_color(cell, frame * 2 + 12)
+            };
+            if output
+                .send(&apc_rgb(cell as u8, rgb).expect("valid APC cell"))
+                .is_err()
+            {
+                return;
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    for cell in 0..64 {
+        let _ = output.send(&apc_rgb(cell as u8, [0, 0, 0]).expect("valid APC cell"));
+    }
+    for note in [
+        PAGE_A_NOTE,
+        PAGE_B_NOTE,
+        UP_NOTE,
+        DOWN_NOTE,
+        LEFT_NOTE,
+        RIGHT_NOTE,
+        PLAY_STOP_NOTE,
+        RESTART_NOTE,
+        CLEAR_NOTE,
+    ] {
+        let _ = output.send(&[0x90, note, 0]);
+    }
+}
+
 pub struct ApcSession {
     stop: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
@@ -419,12 +461,20 @@ impl ApcSession {
                     }
                     thread::sleep(Duration::from_millis(25));
                 }
+                if worker_stop.load(Ordering::Acquire) {
+                    shutdown_animation(&mut output);
+                    return;
+                }
             }
         });
         Self {
             stop,
             thread: Some(thread),
         }
+    }
+
+    pub fn begin_shutdown(&self) {
+        self.stop.store(true, Ordering::Release);
     }
 }
 
@@ -497,7 +547,7 @@ fn apply_authored(
 }
 impl Drop for ApcSession {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
+        self.begin_shutdown();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -686,5 +736,12 @@ mod tests {
                 .count()
                 >= 8
         );
+    }
+
+    #[test]
+    fn shutdown_checkerboard_uses_distinct_lospec_colors() {
+        assert_ne!(shutdown_color(0, 0), shutdown_color(1, 0));
+        assert_ne!(shutdown_color(0, 0), shutdown_color(0, 1));
+        assert!(shutdown_color(63, 19).iter().any(|channel| *channel > 0));
     }
 }

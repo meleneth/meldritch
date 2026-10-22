@@ -1,3 +1,4 @@
+use std::sync::{Arc, atomic::AtomicUsize};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -25,7 +26,7 @@ fn runtime(
     rate: f64,
 ) -> (meldritch2::compiler::Machine, SurfaceRuntime) {
     let machine = compile_at_rate(graph, rate).unwrap();
-    let controls = machine
+    let controls: Vec<_> = machine
         .control_ids()
         .map(|id| {
             let handle = machine.control_handle(id).unwrap();
@@ -33,11 +34,29 @@ fn runtime(
             (handle, value)
         })
         .collect();
-    let runtime = SurfaceRuntime::new(
+    let mut runtime = SurfaceRuntime::new(
         graph.control_surfaces[0].clone(),
-        controls,
+        controls.clone(),
         graph.performance.clone(),
     );
+    if let Some(focus) = graph
+        .performance
+        .as_ref()
+        .and_then(|p| p.control_focus.as_ref())
+    {
+        let focused = focus
+            .controls
+            .iter()
+            .map(|id| {
+                controls
+                    .iter()
+                    .find(|(handle, _)| handle.id() == id)
+                    .unwrap()
+                    .clone()
+            })
+            .collect();
+        runtime = runtime.with_focus(focused, Arc::new(AtomicUsize::new(0)));
+    }
     (machine, runtime)
 }
 
@@ -109,22 +128,48 @@ fn playground_loads_pages_and_simulates_press_release_and_external_state() {
 #[test]
 fn delay_lab_surface_drives_real_controls_and_audio_without_hardware() {
     let graph = load("examples/experiments/02_delay_feedback.lua");
+    assert!(matches!(
+        graph.screens[0].widgets.last(),
+        Some(meldritch2::model::Widget::ControlFocus)
+    ));
+    assert_eq!(
+        graph
+            .performance
+            .as_ref()
+            .unwrap()
+            .control_focus
+            .as_ref()
+            .unwrap()
+            .controls
+            .len(),
+        7
+    );
     let (mut machine, mut runtime) = runtime(&graph, 8_000.0);
     let mut adapter = SimulatedAdapter::default();
     adapter.connect(&mut runtime);
+    assert_eq!(runtime.focused_control_id(), Some("left_time"));
     adapter
         .input(
             &mut runtime,
             ButtonEdge {
-                index: 3,
+                index: 10,
                 pressed: true,
             },
         )
         .unwrap();
-    assert_eq!(
-        machine.control_handle("pingpong").unwrap().override_value(),
-        Some(0.78)
-    );
+    assert_eq!(runtime.focused_control_id(), Some("feedback"));
+    let sequence = graph.performance.as_ref().unwrap().sequencer.clone();
+    adapter
+        .input(
+            &mut runtime,
+            ButtonEdge {
+                index: 1,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    machine.process_stereo(&mut [0.0], &mut [0.0]);
+    assert!(!sequence.playing());
     adapter
         .input(
             &mut runtime,
@@ -134,19 +179,11 @@ fn delay_lab_surface_drives_real_controls_and_audio_without_hardware() {
             },
         )
         .unwrap();
+    machine.process_stereo(&mut [0.0], &mut [0.0]);
+    assert!(sequence.playing());
     let mut left = vec![0.0; 24_000];
     let mut right = vec![0.0; left.len()];
-    machine.process_stereo(&mut left[..128], &mut right[..128]);
-    adapter
-        .input(
-            &mut runtime,
-            ButtonEdge {
-                index: 0,
-                pressed: false,
-            },
-        )
-        .unwrap();
-    machine.process_stereo(&mut left[128..], &mut right[128..]);
+    machine.process_stereo(&mut left, &mut right);
     assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
     assert!(left.iter().chain(&right).any(|sample| sample.abs() > 1e-6));
     assert!(

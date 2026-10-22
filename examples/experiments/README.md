@@ -16,8 +16,14 @@ The simulated adapter used by `tests/stream_deck.rs` exercises the same page,
 edge, semantic-action, state feedback, and image-invalidation logic without
 physical hardware.
 
-The delay experiment intentionally has no fake clear operation: the current
-stereo delay contract does not expose state reset. `IMPULSE` generates a short
-enveloped pulse; `DECAY` and `BUILD` make decaying versus accumulating feedback
-easy to compare. `PINGPONG` and `MOD` are stateful toggles. The `TIMES` page
-selects independent left/right times, feedback filtering, and feedback drive.
+The delay experiment starts its 16-step bassline immediately. Stream Deck
+START/STOP/RESTART and the keyboard (`s`, `x`, `r`, or Space) share the normal
+sequencer command path. Its parameter buttons and F1-F7 select the outlined
+TUI parameter widget; `h`/`l` or any configured MicroLab knob then edits that
+selection. The default MicroLab profile listens to channel 1 CC 74, 71, 76,
+and 77 and is intentionally authored beside the experiment.
+
+There is no fake delay clear operation: the stereo-delay contract does not
+currently expose state reset. IMPULSE adds a transient over the running bass,
+while DECAY/BUILD and the PING/MOD toggles make stable and accumulating feedback
+easy to compare.

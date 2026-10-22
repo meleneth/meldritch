@@ -22,6 +22,7 @@ use elgato_streamdeck::{StreamDeckInput, info::Kind};
 use font8x8::UnicodeFonts;
 use image::{DynamicImage, Rgb, RgbImage};
 
+use crate::panel::Panel;
 use crate::{
     compiler::ControlHandle,
     model::{ControlSurface, Performance, SurfaceAction, SurfaceButton, SurfaceButtonMode},
@@ -51,6 +52,7 @@ pub struct SurfaceRuntime {
     performance: Option<Performance>,
     sent: [Option<ButtonVisual>; 32],
     invalidated: bool,
+    focus: Option<Panel>,
 }
 
 impl SurfaceRuntime {
@@ -71,11 +73,29 @@ impl SurfaceRuntime {
             performance,
             sent: std::array::from_fn(|_| None),
             invalidated: true,
+            focus: None,
         }
+    }
+
+    pub fn with_focus(
+        mut self,
+        controls: Vec<(ControlHandle, f64)>,
+        selected: Arc<std::sync::atomic::AtomicUsize>,
+    ) -> Self {
+        self.focus = Some(Panel::with_selection(controls, selected));
+        self
     }
 
     pub fn page(&self) -> &str {
         &self.page
+    }
+
+    pub fn focused_control_id(&self) -> Option<&str> {
+        let focus = self.focus.as_ref()?;
+        focus
+            .selected()
+            .and_then(|index| focus.rows().get(index))
+            .map(|row| row.id())
     }
 
     pub fn invalidate(&mut self) {
@@ -128,12 +148,21 @@ impl SurfaceRuntime {
             None => {}
             Some(SurfaceAction::Refresh) => self.invalidated = true,
             Some(SurfaceAction::Page(page)) => self.page.clone_from(page),
-            Some(SurfaceAction::Command(command)) => self
-                .performance
-                .as_ref()
-                .ok_or("surface command requires a performance model")?
-                .sequencer
-                .execute(command)?,
+            Some(SurfaceAction::Command(command)) => {
+                if let Some(id) = command.strip_prefix("control:select:") {
+                    self.focus
+                        .as_ref()
+                        .ok_or("surface control selection requires a performance focus")?
+                        .select_id(id)?;
+                    self.invalidated = true;
+                } else {
+                    self.performance
+                        .as_ref()
+                        .ok_or("surface command requires a performance model")?
+                        .sequencer
+                        .execute(command)?;
+                }
+            }
             Some(SurfaceAction::Control { id, value }) => self
                 .controls
                 .get(id)
@@ -145,6 +174,17 @@ impl SurfaceRuntime {
     }
 
     fn control_active(&self, button: &SurfaceButton) -> Option<bool> {
+        if let Some(SurfaceAction::Command(command)) = button.press.as_ref()
+            && let Some(id) = command.strip_prefix("control:select:")
+        {
+            let focus = self.focus.as_ref()?;
+            return Some(
+                focus
+                    .selected()
+                    .and_then(|index| focus.rows().get(index))
+                    .is_some_and(|row| row.id() == id),
+            );
+        }
         let SurfaceAction::Control { id, value } = button.press.as_ref()? else {
             return None;
         };
@@ -385,15 +425,71 @@ fn hardware_worker(
                 Err(_) => connected = false,
             }
         }
+        if connected && stop.load(Ordering::Acquire) {
+            shutdown_animation(&deck, kind);
+            return;
+        }
     }
+}
+
+fn shutdown_animation(deck: &elgato_streamdeck::StreamDeck, kind: Kind) {
+    let size = kind.key_image_format().size;
+    let count = usize::from(kind.key_count()).min(32);
+    for frame in 0..20 {
+        for key in 0..count {
+            let row = key / 8;
+            let column = key % 8;
+            let offset = if (row + column + frame) % 4 < 2 {
+                0
+            } else {
+                12
+            };
+            let color = crate::performance_ui::LOSPEC500
+                [(row + column + frame * 2 + offset) % crate::performance_ui::LOSPEC500.len()];
+            let visual = ButtonVisual {
+                id: "shutdown".into(),
+                label: String::new(),
+                icon: None,
+                color,
+                active: false,
+            };
+            if deck
+                .set_button_image(key as u8, button_image(&visual, size))
+                .is_err()
+            {
+                return;
+            }
+        }
+        if deck.flush().is_err() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    let black = ButtonVisual {
+        id: "clear".into(),
+        label: String::new(),
+        icon: None,
+        color: [0, 0, 0],
+        active: false,
+    };
+    for key in 0..count {
+        let _ = deck.set_button_image(key as u8, button_image(&black, size));
+    }
+    let _ = deck.flush();
 }
 
 impl Drop for StreamDeckSession {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
+        self.begin_shutdown();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+impl StreamDeckSession {
+    pub fn begin_shutdown(&self) {
+        self.stop.store(true, Ordering::Release);
     }
 }
 
@@ -603,6 +699,7 @@ mod tests {
             key_bindings: Vec::new(),
             apc: None,
             project_file: None,
+            control_focus: None,
         };
         let mut runtime = SurfaceRuntime::new(surface, Vec::new(), Some(performance));
         runtime

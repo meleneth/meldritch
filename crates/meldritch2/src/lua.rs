@@ -365,6 +365,9 @@ function meldritch.graph()
     function screen:performance_controls()
       table.insert(self.widgets, { kind = "performance_controls" })
     end
+    function screen:control_focus()
+      table.insert(self.widgets, { kind = "control_focus" })
+    end
     function screen:performance_status()
       table.insert(self.widgets, { kind = "performance_status" })
     end
@@ -909,7 +912,7 @@ function meldritch.instrument(name)
   function instrument:performance(spec)
     assert(type(spec) == "table" and spec.layout == "step_grid" and spec.sequencer, "performance requires a step_grid sequencer")
     self._performance = { layout = spec.layout, native = spec.sequencer._native,
-      keys = spec.keys or {}, apc = spec.apc, project_file = spec.project_file }
+      keys = spec.keys or {}, apc = spec.apc, project_file = spec.project_file, focus = spec.focus }
   end
 
   function instrument:_finalize()
@@ -1517,6 +1520,38 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                 })
                 .transpose()?,
             project_file: performance.get("project_file").map_err(|e| e.to_string())?,
+            control_focus: performance
+                .get::<Option<Table>>("focus")
+                .map_err(|e| e.to_string())?
+                .map(|focus| {
+                    let controls = focus
+                        .get::<Table>("controls")
+                        .map_err(|e| e.to_string())?
+                        .sequence_values::<String>()
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|e| e.to_string())?;
+                    let midi_ccs = focus
+                        .get::<Option<Table>>("midi")
+                        .map_err(|e| e.to_string())?
+                        .map(|mappings| {
+                            mappings
+                                .sequence_values::<Table>()
+                                .map(|mapping| {
+                                    let mapping = mapping.map_err(|e| e.to_string())?;
+                                    Ok(crate::model::FocusMidiCc {
+                                        channel: mapping
+                                            .get("channel")
+                                            .map_err(|e| e.to_string())?,
+                                        number: mapping.get("cc").map_err(|e| e.to_string())?,
+                                    })
+                                })
+                                .collect::<Result<Vec<_>, String>>()
+                        })
+                        .transpose()?
+                        .unwrap_or_default();
+                    Ok::<_, String>(crate::model::ControlFocus { controls, midi_ccs })
+                })
+                .transpose()?,
         });
     }
     let actions: Table = table.get("actions").map_err(|e| e.to_string())?;
@@ -1596,6 +1631,7 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                     value: widget.get("value").map_err(|e| e.to_string())?,
                 },
                 "performance_controls" => Widget::PerformanceControls,
+                "control_focus" => Widget::ControlFocus,
                 "performance_status" => Widget::PerformanceStatus,
                 "pattern_grid" => Widget::PatternGrid,
                 "transport_status" => Widget::TransportStatus,

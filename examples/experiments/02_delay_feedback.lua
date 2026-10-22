@@ -1,65 +1,82 @@
+-- Delay Feedback Laboratory: a playable bass sequencer and focused delay editor.
+-- MicroLab mk3 knobs CC 74/71/76/77 all address the parameter selected from
+-- Stream Deck or F1-F7. Change the CC declarations here for another profile.
 local instrument = meldritch.instrument("Delay Feedback Laboratory")
+instrument:devices { midi_controls={"MicroLab mk3:MicroLab mk3"} }
 
-local source = instrument:oscillator { waveform="pulse", frequency=110, pulse_width=.3 }
-local envelope = instrument:adsr { attack=.001, decay=.035, sustain=0, release=.025 }
-local gate = instrument:constant { value=0 }
-local amp = instrument:vca {}
-instrument:connect(gate.out, envelope.gate)
-instrument:connect(source.out, amp.input)
-instrument:connect(envelope.out, amp.cv)
+local sequence=instrument:sequencer {bpm=118,steps=16,steps_per_beat=4}
+local bass=sequence:track("Bassline")
+local pattern=sequence:pattern("Feedback Bass")
+pattern:notes("Bassline",{
+  {step=1,note=36,velocity=.95,gate=.58},{step=3,note=36,velocity=.58,gate=.34},
+  {step=5,note=43,velocity=.82,gate=.48},{step=7,note=39,velocity=.62,gate=.3},
+  {step=9,note=36,velocity=1,gate=.68},{step=11,note=48,velocity=.7,gate=.3},
+  {step=13,note=43,velocity=.86,gate=.52},{step=16,note=34,velocity=.7,gate=.24},
+},16)
 
-local modulation = instrument:lfo { waveform="sine", frequency=.17 }
-local mod_depth = instrument:constant { value=0 }
-local mod_scale = instrument:multiply {}
-instrument:connect(modulation.out, mod_scale.a)
-instrument:connect(mod_depth.out, mod_scale.b)
+local source=instrument:oscillator {waveform="pulse",frequency=65.406,pulse_width=.32}
+local envelope=instrument:adsr {attack=.002,decay=.12,sustain=.22,release=.09}
+local impulse=instrument:constant {value=0}
+local gates=instrument:mixer {inputs=2}
+local amp=instrument:vca {}
+instrument:connect(bass.pitch,source.pitch)
+instrument:connect(bass.gate,gates.input[1]);instrument:connect(impulse.out,gates.input[2])
+instrument:connect(gates.out,envelope.gate)
+instrument:connect(source.out,amp.input);instrument:connect(envelope.out,amp.cv)
 
-local delay = instrument:stereo_delay { left_beats=.5, right_beats=.75,
-  feedback=.68, crossfeed=.72, mix=.52, filter_cutoff=5200, feedback_drive=1.4 }
-instrument:connect(amp.out, delay.input.left)
-instrument:connect(amp.out, delay.input.right)
-instrument:connect(mod_scale.out, delay.left_time_mod)
-instrument:connect(mod_scale.out, delay.right_time_mod)
-instrument:connect(delay.left, instrument.output.left)
-instrument:connect(delay.right, instrument.output.right)
+local modulation=instrument:lfo {waveform="sine",frequency=.17}
+local mod_depth=instrument:constant {value=0}
+local mod_scale=instrument:multiply {}
+instrument:connect(modulation.out,mod_scale.a);instrument:connect(mod_depth.out,mod_scale.b)
 
-instrument:control { id="impulse", label="Impulse", target=gate.value, range={0,1} }
-instrument:control { id="left_time", label="Left time", target=delay.left_beats, range={.0625,4} }
-instrument:control { id="right_time", label="Right time", target=delay.right_beats, range={.0625,4} }
-instrument:control { id="feedback", label="Feedback", target=delay.feedback, range={0,.94} }
-instrument:control { id="feedback_drive", label="Feedback drive", target=delay.feedback_drive, range={.1,8} }
-instrument:control { id="filter", label="Feedback filter", target=delay.filter_cutoff, range={80,16000}, curve="log" }
-instrument:control { id="pingpong", label="Ping pong", target=delay.crossfeed, range={0,.95} }
-instrument:control { id="modulation", label="Delay modulation", target=mod_depth.value, range={0,.2} }
+local delay=instrument:stereo_delay {left_beats=.5,right_beats=.75,
+  feedback=.68,crossfeed=.72,mix=.52,filter_cutoff=5200,feedback_drive=1.4}
+instrument:connect(amp.out,delay.input.left);instrument:connect(amp.out,delay.input.right)
+instrument:connect(mod_scale.out,delay.left_time_mod);instrument:connect(mod_scale.out,delay.right_time_mod)
+instrument:connect(sequence.tempo,delay.bpm)
+instrument:connect(delay.left,instrument.output.left);instrument:connect(delay.right,instrument.output.right)
 
-instrument:control_surface {
-  id="delay_feedback_deck", device="stream_deck_xl", initial_page="play",
-  pages={
-    { id="play", buttons={
-      { id="hit", index=0, label="IMPULSE", icon="triangle", mode="momentary", color={45,12,8},
-        active_color={255,90,25}, press={control="impulse",value=1}, release={control="impulse",value=0} },
-      { id="feedback_low", index=1, label="DECAY", color={15,35,30}, active_color={25,180,110},
-        press={control="feedback",value=.48} },
-      { id="feedback_high", index=2, label="BUILD", color={45,22,8}, active_color={230,100,20},
-        press={control="feedback",value=.9} },
-      { id="pingpong", index=3, label="PINGPONG", icon="bars", mode="toggle", color={15,18,40},
-        active_color={45,90,230}, press={control="pingpong",value=.78}, release={control="pingpong",value=0} },
-      { id="modulation", index=4, label="MOD", mode="toggle", color={28,15,38},
-        active_color={170,50,210}, press={control="modulation",value=.08}, release={control="modulation",value=0} },
-      { id="times", index=31, label="TIMES", color={25,25,35}, active_color={80,80,130}, press={page="times"} },
-    }},
-    { id="times", buttons={
-      { id="short_left", index=0, label="L 1/4", color={10,35,45}, press={control="left_time",value=.25} },
-      { id="long_left", index=1, label="L 1", color={10,35,45}, press={control="left_time",value=1} },
-      { id="short_right", index=8, label="R 3/8", color={35,15,45}, press={control="right_time",value=.375} },
-      { id="long_right", index=9, label="R 3/2", color={35,15,45}, press={control="right_time",value=1.5} },
-      { id="dark", index=16, label="DARK", color={35,20,8}, press={control="filter",value=1400} },
-      { id="bright", index=17, label="BRIGHT", color={45,38,8}, press={control="filter",value=9000} },
-      { id="clean", index=24, label="CLEAN", color={12,25,30}, press={control="feedback_drive",value=.8} },
-      { id="drive", index=25, label="DRIVE", color={50,15,8}, press={control="feedback_drive",value=4} },
-      { id="back", index=31, label="PLAY", color={25,25,35}, active_color={80,80,130}, press={page="play"} },
-    }},
-  },
-}
+instrument:control {id="impulse",label="Impulse",target=impulse.value,range={0,1}}
+instrument:control {id="left_time",label="Left echo time",target=delay.left_beats,range={.0625,4}}
+instrument:control {id="right_time",label="Right echo time",target=delay.right_beats,range={.0625,4}}
+instrument:control {id="feedback",label="Feedback",target=delay.feedback,range={0,.94}}
+instrument:control {id="feedback_drive",label="Feedback drive",target=delay.feedback_drive,range={.1,8}}
+instrument:control {id="filter",label="Feedback filter",target=delay.filter_cutoff,range={80,16000},curve="log"}
+instrument:control {id="pingpong",label="Ping pong",target=delay.crossfeed,range={0,.95}}
+instrument:control {id="modulation",label="Delay modulation",target=mod_depth.value,range={0,.2}}
 
+local focus={"left_time","right_time","feedback","feedback_drive","filter","pingpong","modulation"}
+instrument:performance {layout="step_grid",sequencer=sequence,
+  keys={Space="transport",s="start",x="stop",r="restart",Left="step:previous",Right="step:next",
+    Up="velocity:up",Down="velocity:down",["["]="bank:previous",["]"]="bank:next",
+    F1="control:select:left_time",F2="control:select:right_time",F3="control:select:feedback",
+    F4="control:select:feedback_drive",F5="control:select:filter",F6="control:select:pingpong",
+    F7="control:select:modulation",h="control:decrease",l="control:increase",
+    ["1"]="toggle:1",["2"]="toggle:2",["3"]="toggle:3",["4"]="toggle:4",
+    ["5"]="toggle:5",["6"]="toggle:6",["7"]="toggle:7",["8"]="toggle:8"},
+  focus={controls=focus,midi={{channel=1,cc=74},{channel=1,cc=71},{channel=1,cc=76},{channel=1,cc=77}}}}
+
+instrument:control_surface {id="delay_feedback_deck",device="stream_deck_xl",initial_page="lab",pages={{id="lab",buttons={
+  {id="start",index=0,label="START",icon="triangle",color={18,55,42},active_color={40,190,85},press={command="start"}},
+  {id="stop",index=1,label="STOP",icon="square",color={60,20,28},active_color={235,45,63},press={command="stop"}},
+  {id="restart",index=2,label="RESTART",color={50,35,16},active_color={243,168,51},press={command="restart"}},
+  {id="hit",index=3,label="IMPULSE",icon="triangle",mode="momentary",color={45,12,8},active_color={255,90,25},press={control="impulse",value=1},release={control="impulse",value=0}},
+  {id="left",index=8,label="LEFT TIME",color={10,35,45},active_color={54,197,244},press={command="control:select:left_time"}},
+  {id="right",index=9,label="RIGHT TIME",color={10,35,45},active_color={54,197,244},press={command="control:select:right_time"}},
+  {id="feedback",index=10,label="FEEDBACK",color={45,22,8},active_color={233,133,55},press={command="control:select:feedback"}},
+  {id="drive",index=11,label="DRIVE",color={50,15,8},active_color={236,39,63},press={command="control:select:feedback_drive"}},
+  {id="filter",index=16,label="FILTER",color={35,38,8},active_color={157,230,78},press={command="control:select:filter"}},
+  {id="pingpong",index=17,label="PINGPONG",color={15,18,40},active_color={51,136,222},press={command="control:select:pingpong"}},
+  {id="modulation",index=18,label="MOD",color={28,15,38},active_color={200,120,175},press={command="control:select:modulation"}},
+  {id="decay",index=24,label="DECAY",color={15,35,30},press={control="feedback",value=.48}},
+  {id="build",index=25,label="BUILD",color={45,22,8},press={control="feedback",value=.9}},
+  {id="ping_toggle",index=26,label="PING ON",mode="toggle",color={15,18,40},active_color={45,90,230},press={control="pingpong",value=.78},release={control="pingpong",value=0}},
+  {id="mod_toggle",index=27,label="MOD ON",mode="toggle",color={28,15,38},active_color={170,50,210},press={control="modulation",value=.08},release={control="modulation",value=0}},
+}}}}
+
+local activity=meldritch.event_ui()
+local screen=instrument:screen("laboratory","Delay Feedback Laboratory")
+screen:performance_status();screen:pattern_grid();screen:control_focus()
+screen:on(sequence,"step_advanced",function(event) activity:step(event.step,event.pattern,event.position) end)
+sequence:start()
 return instrument

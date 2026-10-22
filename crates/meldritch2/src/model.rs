@@ -142,6 +142,7 @@ pub enum Widget {
         value: f64,
     },
     PerformanceControls,
+    ControlFocus,
     PerformanceStatus,
     PatternGrid,
     TransportStatus,
@@ -266,6 +267,19 @@ pub struct Performance {
     pub key_bindings: Vec<PerformanceBinding>,
     pub apc: Option<ApcMapping>,
     pub project_file: Option<String>,
+    pub control_focus: Option<ControlFocus>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ControlFocus {
+    pub controls: Vec<String>,
+    pub midi_ccs: Vec<FocusMidiCc>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FocusMidiCc {
+    pub channel: u8,
+    pub number: u8,
 }
 
 #[derive(Clone, Debug)]

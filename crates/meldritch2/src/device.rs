@@ -146,6 +146,8 @@ pub struct DeviceOutput {
     actions: Vec<Action>,
     apc_mini: Option<String>,
     control_surfaces: Vec<ControlSurface>,
+    focus_controls: Vec<(ControlHandle, f64)>,
+    focus_selection: Arc<std::sync::atomic::AtomicUsize>,
     midi_router: MidiRouter,
     timed_midi_router: Option<TimedMidiRouter>,
     errors: Arc<AtomicU64>,
@@ -253,7 +255,7 @@ impl DeviceOutput {
         let actions = graph.actions.clone();
         let apc_mini = graph.devices.apc_mini.clone();
         let control_surfaces = graph.control_surfaces.clone();
-        let controls = machine
+        let controls: Vec<(ControlHandle, f64)> = machine
             .control_ids()
             .map(|id| {
                 let handle = machine.control_handle(id).expect("compiled control");
@@ -263,7 +265,36 @@ impl DeviceOutput {
                 (handle, value)
             })
             .collect();
-        let midi_router = MidiRouter::from_machine(&machine);
+        let focus_selection = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let focus_controls = performance
+            .as_ref()
+            .and_then(|performance| performance.control_focus.as_ref())
+            .map(|focus| {
+                focus
+                    .controls
+                    .iter()
+                    .map(|id| {
+                        controls
+                            .iter()
+                            .find(|(handle, _)| handle.id() == id)
+                            .cloned()
+                            .expect("validated performance focus control")
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| controls.clone());
+        let midi_router = if let Some(focus) = performance
+            .as_ref()
+            .and_then(|performance| performance.control_focus.as_ref())
+        {
+            MidiRouter::from_machine(&machine).with_focus(
+                focus_controls.clone(),
+                Arc::clone(&focus_selection),
+                &focus.midi_ccs,
+            )
+        } else {
+            MidiRouter::from_machine(&machine)
+        };
         let (timed_midi_router, mut note_consumer) =
             if machine.midi_notes().is_empty() && !machine.has_poly_notes() {
                 (None, None)
@@ -341,6 +372,8 @@ impl DeviceOutput {
             actions,
             apc_mini,
             control_surfaces,
+            focus_controls,
+            focus_selection,
             midi_router,
             timed_midi_router,
             errors,
@@ -364,6 +397,12 @@ impl DeviceOutput {
 
     pub fn controls(&self) -> Vec<(ControlHandle, f64)> {
         self.controls.clone()
+    }
+    pub(crate) fn focus_controls(&self) -> Vec<(ControlHandle, f64)> {
+        self.focus_controls.clone()
+    }
+    pub(crate) fn focus_selection(&self) -> Arc<std::sync::atomic::AtomicUsize> {
+        Arc::clone(&self.focus_selection)
     }
     pub fn screens(&self) -> &[Screen] {
         &self.screens

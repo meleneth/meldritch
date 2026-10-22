@@ -5,6 +5,7 @@ use std::sync::{
 
 use crate::compiler::{ControlHandle, MAX_POLY_VOICES, Machine};
 use crate::model::{Action, MidiButtonEdge, MidiButtonMessage, PolyOverflow};
+use crate::panel::Panel;
 use crate::{
     live_notes::{LiveNoteProducer, PushError},
     midi_clock::{ClockError, MidiFrameClock},
@@ -364,6 +365,8 @@ pub struct MidiRouter {
     notes: Vec<Option<NoteRoute>>,
     buttons: Vec<ButtonRoute>,
     packets: Vec<PacketRoute>,
+    focus_routes: Vec<bool>,
+    focus: Option<Panel>,
 }
 
 #[derive(Clone)]
@@ -444,7 +447,23 @@ impl MidiRouter {
             notes,
             buttons,
             packets,
+            focus_routes: vec![false; 16 * 128],
+            focus: None,
         }
+    }
+
+    pub(crate) fn with_focus(
+        mut self,
+        controls: Vec<(ControlHandle, f64)>,
+        selected: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        mappings: &[crate::model::FocusMidiCc],
+    ) -> Self {
+        for mapping in mappings {
+            self.focus_routes
+                [usize::from(mapping.channel - 1) * 128 + usize::from(mapping.number)] = true;
+        }
+        self.focus = Some(Panel::with_selection(controls, selected));
+        self
     }
 
     /// Returns true only for a mapped, valid three-byte CC or note message.
@@ -462,6 +481,13 @@ impl MidiRouter {
             return false;
         }
         let index = usize::from(message[0] & 0x0F) * 128 + usize::from(message[1]);
+        if self.focus_routes[index] {
+            return self.focus.as_ref().is_some_and(|focus| {
+                focus
+                    .publish_selected_normalized(f64::from(message[2]) / 127.0)
+                    .is_ok()
+            });
+        }
         let Some(handle) = &self.routes[index] else {
             return false;
         };
@@ -566,5 +592,63 @@ impl MidiRouter {
             return result.is_ok();
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    #[test]
+    fn authored_cc_edits_whichever_control_is_selected() {
+        let graph = crate::lua::read(
+            r#"
+            local i=meldritch.instrument("focus")
+            local left=i:constant {value=.2};local right=i:constant {value=.3}
+            i:connect(left.out,i.output.left);i:connect(right.out,i.output.right)
+            i:control {id="left",label="Left",target=left.value,range={0,1}}
+            i:control {id="right",label="Right",target=right.value,range={0,1}}
+            return i
+        "#,
+        )
+        .unwrap();
+        let machine = crate::compiler::compile(&graph).unwrap();
+        let controls = ["left", "right"]
+            .into_iter()
+            .map(|id| {
+                let handle = machine.control_handle(id).unwrap();
+                let value = machine.effective_value(handle.target()).unwrap();
+                (handle, value)
+            })
+            .collect();
+        let selected = Arc::new(AtomicUsize::new(0));
+        let router = MidiRouter::from_machine(&machine).with_focus(
+            controls,
+            Arc::clone(&selected),
+            &[crate::model::FocusMidiCc {
+                channel: 1,
+                number: 74,
+            }],
+        );
+        assert!(router.dispatch(&[0xb0, 74, 127]));
+        assert_eq!(
+            machine.control_handle("left").unwrap().override_value(),
+            Some(1.0)
+        );
+        assert_eq!(
+            machine.control_handle("right").unwrap().override_value(),
+            None
+        );
+        selected.store(1, Ordering::Release);
+        assert!(router.dispatch(&[0xb0, 74, 0]));
+        assert_eq!(
+            machine.control_handle("right").unwrap().override_value(),
+            Some(0.0)
+        );
+        assert!(!router.dispatch(&[0xb0, 75, 100]));
     }
 }
