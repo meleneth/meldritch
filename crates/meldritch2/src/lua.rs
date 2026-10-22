@@ -621,7 +621,7 @@ local function decorate_scope(facade, scope, prefix)
     local native = meldritch._sequencer(self.name or prefix, values.bpm, values.steps, values.steps_per_beat)
     local tempo = scope:module(self:_id("sequencer_tempo"), "sequencer_tempo", { bpm = values.bpm }, meldritch._sequencer_tempo(native))
     local sequence = { _native = native, _tracks = {}, _patterns = {}, _steps = values.steps,
-      bpm = parameter(tempo, "bpm") }
+      bpm = parameter(tempo, "bpm"), tempo = tempo.out }
     function sequence:track(name)
       assert(type(name) == "string" and name ~= "", "track name must be nonempty")
       local runtime = self._native:track(name)
@@ -1146,6 +1146,12 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
     meldritch
         .set("musical", musical)
         .map_err(|e| e.to_string())?;
+    let arp: Table = lua
+        .load(include_str!("../lua/arp.lua"))
+        .set_name("meldritch/arp.lua")
+        .eval()
+        .map_err(|e| e.to_string())?;
+    meldritch.set("arp", arp).map_err(|e| e.to_string())?;
     let mut table: Table = lua.load(script).eval().map_err(|e| e.to_string())?;
     if let Some(finalize) = table
         .get::<Option<Function>>("_finalize")
