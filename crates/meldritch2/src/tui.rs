@@ -648,6 +648,18 @@ pub fn perform(
         )),
         _ => None,
     };
+    let mut stream_decks = output
+        .control_surfaces()
+        .iter()
+        .cloned()
+        .map(|surface| {
+            crate::stream_deck::StreamDeckSession::start(crate::stream_deck::SurfaceRuntime::new(
+                surface,
+                output.controls(),
+                output.performance().cloned(),
+            ))
+        })
+        .collect::<Vec<_>>();
     let controls = output.controls();
     let tempo_control = controls
         .iter()
@@ -686,6 +698,9 @@ pub fn perform(
     let mut callback_errors = Vec::new();
     let mut callback_failure_count = 0;
     loop {
+        for stream_deck in &mut stream_decks {
+            stream_deck.poll()?;
+        }
         if let Some(events) = &mut events {
             events.dispatch();
             for error in events.take_errors() {

@@ -51,7 +51,10 @@ arc-swap = "1"
 clap = { version = "4", features = ["derive"] }
 cpal = "0.18"
 crossterm = "0.29"
+elgato-streamdeck = "0.14"
+font8x8 = "0.3"
 hound = "3"
+image = { version = "0.25", default-features = false }
 midir = "0.11"
 percent-encoding = "2"
 ratatui = "0.30"

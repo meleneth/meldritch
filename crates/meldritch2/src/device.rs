@@ -13,7 +13,7 @@ use crate::{
     live::{LiveControl, LiveRuntime},
     live_notes::{LiveNoteConsumer, live_note_queue},
     midi::{MidiRouter, TimedMidiRouter},
-    model::{Action, Graph, Navigation, Performance, Screen},
+    model::{Action, ControlSurface, Graph, Navigation, Performance, Screen},
 };
 
 const CHUNK_FRAMES: usize = 256;
@@ -145,6 +145,7 @@ pub struct DeviceOutput {
     performance: Option<Performance>,
     actions: Vec<Action>,
     apc_mini: Option<String>,
+    control_surfaces: Vec<ControlSurface>,
     midi_router: MidiRouter,
     timed_midi_router: Option<TimedMidiRouter>,
     errors: Arc<AtomicU64>,
@@ -251,6 +252,7 @@ impl DeviceOutput {
         let performance = graph.performance.clone();
         let actions = graph.actions.clone();
         let apc_mini = graph.devices.apc_mini.clone();
+        let control_surfaces = graph.control_surfaces.clone();
         let controls = machine
             .control_ids()
             .map(|id| {
@@ -338,6 +340,7 @@ impl DeviceOutput {
             performance,
             actions,
             apc_mini,
+            control_surfaces,
             midi_router,
             timed_midi_router,
             errors,
@@ -376,6 +379,9 @@ impl DeviceOutput {
     }
     pub fn apc_mini(&self) -> Option<&str> {
         self.apc_mini.as_deref()
+    }
+    pub fn control_surfaces(&self) -> &[ControlSurface] {
+        &self.control_surfaces
     }
     pub fn midi_router(&self) -> MidiRouter {
         self.midi_router.clone()

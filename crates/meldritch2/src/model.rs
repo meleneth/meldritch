@@ -215,6 +215,48 @@ pub struct Graph {
     pub navigation: Option<Navigation>,
     pub performance: Option<Performance>,
     pub actions: Vec<Action>,
+    pub control_surfaces: Vec<ControlSurface>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ControlSurface {
+    pub id: String,
+    pub device: String,
+    pub initial_page: String,
+    pub pages: Vec<ControlPage>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ControlPage {
+    pub id: String,
+    pub buttons: Vec<SurfaceButton>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SurfaceButtonMode {
+    Momentary,
+    Toggle,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurfaceButton {
+    pub id: String,
+    pub index: u8,
+    pub label: String,
+    pub icon: Option<String>,
+    pub color: [u8; 3],
+    pub active_color: [u8; 3],
+    pub mode: SurfaceButtonMode,
+    pub press: Option<SurfaceAction>,
+    pub release: Option<SurfaceAction>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SurfaceAction {
+    Command(String),
+    Control { id: String, value: f64 },
+    Page(String),
+    Refresh,
 }
 
 #[derive(Clone, Debug)]

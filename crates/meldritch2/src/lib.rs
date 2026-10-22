@@ -18,6 +18,7 @@ pub mod poly;
 pub mod sample;
 mod screen_panel;
 pub mod sequencer;
+pub mod stream_deck;
 pub mod timed;
 pub mod tui;
 mod units;

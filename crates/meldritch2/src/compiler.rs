@@ -2012,6 +2012,85 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             }
         }
     }
+    for surface in &graph.control_surfaces {
+        if surface.id.is_empty() || surface.device != "stream_deck_xl" {
+            return Err(format!(
+                "control surface '{}' requires device='stream_deck_xl'",
+                surface.id
+            ));
+        }
+        let pages = surface
+            .pages
+            .iter()
+            .map(|page| page.id.as_str())
+            .collect::<BTreeSet<_>>();
+        if pages.len() != surface.pages.len()
+            || pages.contains("")
+            || !pages.contains(surface.initial_page.as_str())
+        {
+            return Err(format!(
+                "control surface '{}' requires unique page IDs and a valid initial_page",
+                surface.id
+            ));
+        }
+        let mut button_ids = BTreeSet::new();
+        for page in &surface.pages {
+            let mut indexes = BTreeSet::new();
+            for button in &page.buttons {
+                if button.id.is_empty()
+                    || !button_ids.insert(button.id.as_str())
+                    || button.index >= 32
+                    || !indexes.insert(button.index)
+                {
+                    return Err(format!(
+                        "control surface '{}' requires stable unique button IDs and indexes 0..31 per page",
+                        surface.id
+                    ));
+                }
+                if button
+                    .icon
+                    .as_deref()
+                    .is_some_and(|icon| !matches!(icon, "circle" | "square" | "triangle" | "bars"))
+                {
+                    return Err(format!(
+                        "surface button '{}' has an unknown generated icon",
+                        button.id
+                    ));
+                }
+                for action in [&button.press, &button.release].into_iter().flatten() {
+                    match action {
+                        crate::model::SurfaceAction::Command(_) if graph.performance.is_none() => {
+                            return Err(format!(
+                                "surface button '{}' uses a command without a performance model",
+                                button.id
+                            ));
+                        }
+                        crate::model::SurfaceAction::Control { id, value } => {
+                            let binding = controls.get(id).ok_or_else(|| {
+                                format!(
+                                    "surface button '{}' targets unknown control '{id}'",
+                                    button.id
+                                )
+                            })?;
+                            if !value.is_finite() || *value < binding.min || *value > binding.max {
+                                return Err(format!(
+                                    "surface button '{}' value {value} is outside control '{id}' range {}..{}",
+                                    button.id, binding.min, binding.max
+                                ));
+                            }
+                        }
+                        crate::model::SurfaceAction::Page(id) if !pages.contains(id.as_str()) => {
+                            return Err(format!(
+                                "surface button '{}' targets unknown page '{id}'",
+                                button.id
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
     if let Some(navigation) = &graph.navigation {
         validate_navigation(navigation, &graph.screens)?;
     }

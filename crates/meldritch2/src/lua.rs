@@ -12,11 +12,12 @@ use crate::event_bridge::{
     SubscriptionRegistry,
 };
 use crate::model::{
-    Action, Connection, Control, ControlScale, Endpoint, ExternalInput, ExternalParameter,
-    ExternalPort, Graph, MidiButton, MidiButtonEdge, MidiButtonMessage, MidiCc, MidiNotes,
-    MidiPacket, MidiPoly, MidiPolyVoice, Module, ModuleRuntime, Navigation, NavigationBinding,
-    NavigationEvent, ParameterId, Performance, PerformanceSurface, PerformanceTrackView,
-    PolyOverflow, Screen, Subpatch, SubpatchInstance, Widget,
+    Action, Connection, Control, ControlPage, ControlScale, ControlSurface, Endpoint,
+    ExternalInput, ExternalParameter, ExternalPort, Graph, MidiButton, MidiButtonEdge,
+    MidiButtonMessage, MidiCc, MidiNotes, MidiPacket, MidiPoly, MidiPolyVoice, Module,
+    ModuleRuntime, Navigation, NavigationBinding, NavigationEvent, ParameterId, Performance,
+    PerformanceSurface, PerformanceTrackView, PolyOverflow, Screen, Subpatch, SubpatchInstance,
+    SurfaceAction, SurfaceButton, SurfaceButtonMode, Widget,
 };
 use crate::sample::{PreparedSample, SampleBank};
 use crate::sequencer::SequencerControl;
@@ -219,7 +220,7 @@ function meldritch.graph()
   local graph = { modules = {}, instances = {}, connections = {}, normalizations = {},
     controls = {}, midi_ccs = {}, note_bindings = {}, poly_bindings = {}, external_inputs = {}, external_outputs = {},
     external_parameters = {}, screens = {}, actions = {}, midi_buttons = {}, midi_packets = {},
-    performance = nil, _navigation = nil, _devices = {}, _event_handles = {} }
+    performance = nil, _navigation = nil, _devices = {}, _event_handles = {}, _control_surfaces = {} }
   function graph:devices(devices)
     assert(type(devices) == "table", "devices must be a table")
     assert(devices.audio_output == nil or
@@ -246,6 +247,11 @@ function meldritch.graph()
       midi_controls = devices.midi_controls or {},
       apc_mini = devices.apc_mini,
     }
+  end
+  function graph:control_surface(surface)
+    assert(type(surface) == "table", "control surface must be a table")
+    table.insert(self._control_surfaces, surface)
+    return surface
   end
   function graph:module(id, kind, values, runtime)
     assert(type(id) == "string" and type(kind) == "string", "module ID and type must be strings")
@@ -443,6 +449,9 @@ local function decorate_scope(facade, scope, prefix)
   facade._counts = {}
   function facade:devices(devices)
     scope:devices(devices)
+  end
+  function facade:control_surface(surface)
+    return scope:control_surface(surface)
   end
   function facade:_id(kind)
     self._counts[kind] = (self._counts[kind] or 0) + 1
@@ -931,6 +940,7 @@ function meldritch.instrument(name)
     root.screens = self._screens
     root._navigation = self._navigation
     root._event_handles = self._event_handles
+    root._control_surfaces = definition._control_surfaces
     local terminal = root:module("output", "stereo_output")
     if self._uses_notes then
       assert(self._note_pitch and self._note_gate, "note instruments must connect pitch and gate")
@@ -1322,8 +1332,122 @@ fn external_ports(table: &Table, field: &str) -> Result<Vec<ExternalPort>, Strin
         .collect()
 }
 
+fn surface_color(table: &Table, field: &str, fallback: [u8; 3]) -> Result<[u8; 3], String> {
+    let Some(color) = table
+        .get::<Option<Table>>(field)
+        .map_err(|e| format!("surface {field}: {e}"))?
+    else {
+        return Ok(fallback);
+    };
+    Ok([
+        color.get(1).map_err(|e| e.to_string())?,
+        color.get(2).map_err(|e| e.to_string())?,
+        color.get(3).map_err(|e| e.to_string())?,
+    ])
+}
+
+fn surface_action(value: Option<Table>) -> Result<Option<SurfaceAction>, String> {
+    let Some(action) = value else { return Ok(None) };
+    if let Some(command) = action
+        .get::<Option<String>>("command")
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(Some(SurfaceAction::Command(command)));
+    }
+    if let Some(control) = action
+        .get::<Option<String>>("control")
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(Some(SurfaceAction::Control {
+            id: control,
+            value: action.get("value").map_err(|e| e.to_string())?,
+        }));
+    }
+    if let Some(page) = action
+        .get::<Option<String>>("page")
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(Some(SurfaceAction::Page(page)));
+    }
+    if action
+        .get::<Option<bool>>("refresh")
+        .map_err(|e| e.to_string())?
+        == Some(true)
+    {
+        return Ok(Some(SurfaceAction::Refresh));
+    }
+    Err("surface action requires command, control/value, page, or refresh=true".into())
+}
+
+fn control_surfaces(table: &Table) -> Result<Vec<ControlSurface>, String> {
+    let surfaces: Table = table.get("_control_surfaces").map_err(|e| e.to_string())?;
+    surfaces
+        .sequence_values::<Table>()
+        .map(|surface| {
+            let surface = surface.map_err(|e| e.to_string())?;
+            let pages: Table = surface.get("pages").map_err(|e| e.to_string())?;
+            let pages = pages
+                .sequence_values::<Table>()
+                .map(|page| {
+                    let page = page.map_err(|e| e.to_string())?;
+                    let buttons: Table = page.get("buttons").map_err(|e| e.to_string())?;
+                    let buttons = buttons
+                        .sequence_values::<Table>()
+                        .map(|button| {
+                            let button = button.map_err(|e| e.to_string())?;
+                            let mode = match button
+                                .get::<Option<String>>("mode")
+                                .map_err(|e| e.to_string())?
+                                .as_deref()
+                                .unwrap_or("momentary")
+                            {
+                                "momentary" => SurfaceButtonMode::Momentary,
+                                "toggle" => SurfaceButtonMode::Toggle,
+                                other => {
+                                    return Err(format!("unknown surface button mode '{other}'"));
+                                }
+                            };
+                            Ok(SurfaceButton {
+                                id: button.get("id").map_err(|e| e.to_string())?,
+                                index: button.get("index").map_err(|e| e.to_string())?,
+                                label: button.get("label").map_err(|e| e.to_string())?,
+                                icon: button.get("icon").map_err(|e| e.to_string())?,
+                                color: surface_color(&button, "color", [20, 20, 20])?,
+                                active_color: surface_color(&button, "active_color", [0, 180, 80])?,
+                                mode,
+                                press: surface_action(
+                                    button.get("press").map_err(|e| e.to_string())?,
+                                )?,
+                                release: surface_action(
+                                    button.get("release").map_err(|e| e.to_string())?,
+                                )?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, String>>()?;
+                    Ok(ControlPage {
+                        id: page.get("id").map_err(|e| e.to_string())?,
+                        buttons,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            Ok(ControlSurface {
+                id: surface.get("id").map_err(|e| e.to_string())?,
+                device: surface
+                    .get::<Option<String>>("device")
+                    .map_err(|e| e.to_string())?
+                    .unwrap_or_else(|| "stream_deck_xl".into()),
+                initial_page: surface.get("initial_page").map_err(|e| e.to_string())?,
+                pages,
+            })
+        })
+        .collect()
+}
+
 fn graph_from_table(table: Table) -> Result<Graph, String> {
-    let mut graph = Graph::default();
+    let mut graph = Graph {
+        control_surfaces: control_surfaces(&table)?,
+        ..Graph::default()
+    };
     let devices: Table = table
         .get("_devices")
         .map_err(|e| format!("graph devices: {e}"))?;
