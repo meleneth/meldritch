@@ -372,7 +372,8 @@ fn shutdown_color(cell: usize, frame: usize) -> [u8; 3] {
     LOSPEC500[(row + column + frame) % LOSPEC500.len()]
 }
 
-fn shutdown_animation(output: &mut MidiOutputConnection) {
+fn shutdown_animation(output: &mut MidiOutputConnection) -> Result<(), String> {
+    let mut first_error = None;
     for frame in 0..20 {
         for cell in 0..64 {
             let checker = (cell / 8 + cell % 8 + frame) % 4;
@@ -381,36 +382,32 @@ fn shutdown_animation(output: &mut MidiOutputConnection) {
             } else {
                 shutdown_color(cell, frame * 2 + 12)
             };
-            if output
-                .send(&apc_rgb(cell as u8, rgb).expect("valid APC cell"))
-                .is_err()
-            {
-                return;
+            if let Err(error) = output.send(&apc_rgb(cell as u8, rgb).expect("valid APC cell")) {
+                first_error.get_or_insert_with(|| error.to_string());
             }
         }
         thread::sleep(Duration::from_millis(50));
     }
     for cell in 0..64 {
-        let _ = output.send(&apc_rgb(cell as u8, [0, 0, 0]).expect("valid APC cell"));
+        if let Err(error) = output.send(&apc_rgb(cell as u8, [0, 0, 0]).expect("valid APC cell")) {
+            first_error.get_or_insert_with(|| error.to_string());
+        }
     }
-    for note in [
-        PAGE_A_NOTE,
-        PAGE_B_NOTE,
-        UP_NOTE,
-        DOWN_NOTE,
-        LEFT_NOTE,
-        RIGHT_NOTE,
-        PLAY_STOP_NOTE,
-        RESTART_NOTE,
-        CLEAR_NOTE,
-    ] {
-        let _ = output.send(&[0x90, note, 0]);
+    // Clear every note-addressable LED, not only the buttons used by the
+    // current authored mapping.  This also removes stale device/page state.
+    for note in 0..=127 {
+        if let Err(error) = output.send(&[0x90, note, 0]) {
+            first_error.get_or_insert_with(|| error.to_string());
+        }
     }
+    first_error.map_or(Ok(()), |error| {
+        Err(format!("APC shutdown animation failed: {error}"))
+    })
 }
 
 pub struct ApcSession {
     stop: Arc<AtomicBool>,
-    thread: Option<thread::JoinHandle<()>>,
+    thread: Option<thread::JoinHandle<Result<(), String>>>,
 }
 impl ApcSession {
     pub fn start(
@@ -462,10 +459,10 @@ impl ApcSession {
                     thread::sleep(Duration::from_millis(25));
                 }
                 if worker_stop.load(Ordering::Acquire) {
-                    shutdown_animation(&mut output);
-                    return;
+                    return shutdown_animation(&mut output);
                 }
             }
+            Ok(())
         });
         Self {
             stop,
@@ -475,6 +472,16 @@ impl ApcSession {
 
     pub fn begin_shutdown(&self) {
         self.stop.store(true, Ordering::Release);
+    }
+
+    pub fn finish(&mut self) -> Result<(), String> {
+        self.begin_shutdown();
+        match self.thread.take() {
+            Some(thread) => thread
+                .join()
+                .map_err(|_| "APC worker panicked".to_owned())?,
+            None => Ok(()),
+        }
     }
 }
 
@@ -551,10 +558,7 @@ fn apply_authored(
 }
 impl Drop for ApcSession {
     fn drop(&mut self) {
-        self.begin_shutdown();
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
+        let _ = self.finish();
     }
 }
 

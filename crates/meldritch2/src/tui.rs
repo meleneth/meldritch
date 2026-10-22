@@ -663,7 +663,7 @@ pub fn perform(
     mut keyboard: Option<TuiKeyboard>,
     mut events: Option<&mut crate::lua::EventOwner>,
 ) -> Result<(), String> {
-    let apc = match (output.apc_mini(), output.performance()) {
+    let mut apc = match (output.apc_mini(), output.performance()) {
         (Some(name), Some(performance)) => Some(crate::apc::ApcSession::start(
             name.to_owned(),
             performance.clone(),
@@ -935,6 +935,23 @@ pub fn perform(
     }
     for stream_deck in &stream_decks {
         stream_deck.begin_shutdown();
+    }
+    let mut shutdown_errors = Vec::new();
+    for stream_deck in &mut stream_decks {
+        if let Err(error) = stream_deck.finish() {
+            shutdown_errors.push(error);
+        }
+    }
+    if let Some(apc) = &mut apc
+        && let Err(error) = apc.finish()
+    {
+        shutdown_errors.push(error);
+    }
+    if !shutdown_errors.is_empty() {
+        return Err(format!(
+            "control-surface shutdown failed:\n{}",
+            shutdown_errors.join("\n")
+        ));
     }
     if callback_errors.is_empty() {
         Ok(())

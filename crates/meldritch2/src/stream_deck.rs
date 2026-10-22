@@ -15,7 +15,7 @@ use std::{
         mpsc::{self, Receiver, SyncSender},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use elgato_streamdeck::{StreamDeckInput, info::Kind};
@@ -262,8 +262,19 @@ fn button_image(visual: &ButtonVisual, size: (usize, usize)) -> DynamicImage {
             }
         }
     }
-    let scale = 2usize;
-    let chars = visual.label.chars().take(10).collect::<Vec<_>>();
+    // XL keys are 96 pixels wide on the devices we support.  Pick a scale
+    // which fits the authored label instead of letting a long label index
+    // beyond the image (and kill the HID worker).
+    let label = visual.label.chars().take(10).collect::<Vec<_>>();
+    let scale = if label.len().saturating_mul(16) <= size.0 {
+        2usize
+    } else {
+        1usize
+    };
+    let chars = label
+        .into_iter()
+        .take(size.0 / (8 * scale).max(1))
+        .collect::<Vec<_>>();
     let width = chars.len() * 8 * scale;
     let start_x = size.0.saturating_sub(width) / 2;
     let start_y = size.1.saturating_sub(8 * scale) / 2;
@@ -301,7 +312,7 @@ pub struct StreamDeckSession {
     presentation: SyncSender<Presentation>,
     stop: Arc<AtomicBool>,
     dropped_inputs: Arc<AtomicU64>,
-    thread: Option<thread::JoinHandle<()>>,
+    thread: Option<thread::JoinHandle<Result<(), String>>>,
 }
 
 impl StreamDeckSession {
@@ -351,7 +362,7 @@ fn hardware_worker(
     input: SyncSender<ButtonEdge>,
     presentation: Receiver<Presentation>,
     dropped_inputs: Arc<AtomicU64>,
-) {
+) -> Result<(), String> {
     let mut visuals: [Option<ButtonVisual>; 32] = std::array::from_fn(|_| None);
     while !stop.load(Ordering::Acquire) {
         while let Ok(Presentation::Update(updates)) = presentation.try_recv() {
@@ -426,15 +437,17 @@ fn hardware_worker(
             }
         }
         if connected && stop.load(Ordering::Acquire) {
-            shutdown_animation(&deck, kind);
-            return;
+            return shutdown_animation(&deck, kind);
         }
     }
+    Ok(())
 }
 
-fn shutdown_animation(deck: &elgato_streamdeck::StreamDeck, kind: Kind) {
+fn shutdown_animation(deck: &elgato_streamdeck::StreamDeck, kind: Kind) -> Result<(), String> {
     let size = kind.key_image_format().size;
     let count = usize::from(kind.key_count()).min(32);
+    let mut first_error = None;
+    let started = Instant::now();
     for frame in 0..20 {
         for key in 0..count {
             let row = key / 8;
@@ -453,17 +466,20 @@ fn shutdown_animation(deck: &elgato_streamdeck::StreamDeck, kind: Kind) {
                 color,
                 active: false,
             };
-            if deck
-                .set_button_image(key as u8, button_image(&visual, size))
-                .is_err()
-            {
-                return;
+            if let Err(error) = deck.set_button_image(key as u8, button_image(&visual, size)) {
+                first_error.get_or_insert_with(|| error.to_string());
             }
         }
-        if deck.flush().is_err() {
-            return;
+        if let Err(error) = deck.flush() {
+            first_error.get_or_insert_with(|| error.to_string());
         }
-        thread::sleep(Duration::from_millis(50));
+        let deadline = Duration::from_millis(50 * (frame + 1) as u64);
+        if started.elapsed() >= Duration::from_secs(1) {
+            break;
+        }
+        if let Some(remaining) = deadline.checked_sub(started.elapsed()) {
+            thread::sleep(remaining);
+        }
     }
     let black = ButtonVisual {
         id: "clear".into(),
@@ -473,23 +489,37 @@ fn shutdown_animation(deck: &elgato_streamdeck::StreamDeck, kind: Kind) {
         active: false,
     };
     for key in 0..count {
-        let _ = deck.set_button_image(key as u8, button_image(&black, size));
+        if let Err(error) = deck.set_button_image(key as u8, button_image(&black, size)) {
+            first_error.get_or_insert_with(|| error.to_string());
+        }
     }
-    let _ = deck.flush();
+    if let Err(error) = deck.flush() {
+        first_error.get_or_insert_with(|| error.to_string());
+    }
+    first_error.map_or(Ok(()), |error| {
+        Err(format!("Stream Deck shutdown animation failed: {error}"))
+    })
 }
 
 impl Drop for StreamDeckSession {
     fn drop(&mut self) {
-        self.begin_shutdown();
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
+        let _ = self.finish();
     }
 }
 
 impl StreamDeckSession {
     pub fn begin_shutdown(&self) {
         self.stop.store(true, Ordering::Release);
+    }
+
+    pub fn finish(&mut self) -> Result<(), String> {
+        self.begin_shutdown();
+        match self.thread.take() {
+            Some(thread) => thread
+                .join()
+                .map_err(|_| "Stream Deck worker panicked".to_owned())?,
+            None => Ok(()),
+        }
     }
 }
 
@@ -709,5 +739,19 @@ mod tests {
             })
             .unwrap();
         assert!(sequence.playing());
+    }
+
+    #[test]
+    fn xl_button_renderer_fits_long_authored_labels() {
+        let visual = ButtonVisual {
+            id: "long-label".into(),
+            label: "MODULATION".into(),
+            icon: Some("bars".into()),
+            color: [12, 34, 56],
+            active: false,
+        };
+        let image = button_image(&visual, (96, 96));
+        assert_eq!(image.width(), 96);
+        assert_eq!(image.height(), 96);
     }
 }
