@@ -21,7 +21,10 @@ START/STOP/RESTART and the keyboard (`s`, `x`, `r`, or Space) share the normal
 sequencer command path. Its parameter buttons and F1-F7 select the outlined
 TUI parameter widget; `h`/`l` or any configured MicroLab knob then edits that
 selection. The default MicroLab profile listens to channel 1 CC 74, 71, 76,
-and 77 and is intentionally authored beside the experiment.
+and 77 and is intentionally authored beside the experiment. The APC mini mk2
+channel faders address the source and delay controls; its far-right fader is
+wired to a linked stereo master gain after the delay, as required for every
+APC-authored performance surface.
 
 There is no fake delay clear operation: the stereo-delay contract does not
 currently expose state reset. IMPULSE adds a transient over the running bass,

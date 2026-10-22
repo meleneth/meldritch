@@ -142,7 +142,13 @@ fn delay_lab_surface_drives_real_controls_and_audio_without_hardware() {
             .unwrap()
             .controls
             .len(),
-        7
+        8
+    );
+    let apc = graph.performance.as_ref().unwrap().apc.as_ref().unwrap();
+    assert_eq!(apc.master_control, "master_volume");
+    assert_eq!(
+        graph.devices.apc_mini.as_deref(),
+        Some("APC mini mk2:APC mini mk2 Control")
     );
     let (mut machine, mut runtime) = runtime(&graph, 8_000.0);
     let mut adapter = SimulatedAdapter::default();
@@ -190,6 +196,23 @@ fn delay_lab_surface_drives_real_controls_and_audio_without_hardware() {
         left.iter()
             .zip(&right)
             .any(|(left, right)| (left - right).abs() > 1e-7)
+    );
+    let master = machine.control_handle("master_volume").unwrap();
+    assert_eq!(
+        master.targets().count(),
+        2,
+        "master must link both stereo gains"
+    );
+    master.publish(0.0).unwrap();
+    let mut silent_left = vec![1.0; 512];
+    let mut silent_right = vec![1.0; 512];
+    machine.process_stereo(&mut silent_left, &mut silent_right);
+    assert!(
+        silent_left
+            .iter()
+            .chain(&silent_right)
+            .all(|sample| sample.abs() < 1e-12),
+        "APC master destination must be after the complete stereo delay path"
     );
 }
 
