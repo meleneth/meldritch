@@ -513,6 +513,24 @@ local function decorate_scope(facade, scope, prefix)
     handle.mix = parameter(handle, "mix")
     return modulatable(handle, { time = handle.time_mod, feedback = handle.feedback_mod, mix = handle.mix_mod })
   end
+  function facade:stereo_delay(values)
+    local handle = scope:module(self:_id("stereo_delay"), "stereo_delay", copy_values(values,
+      { "left_beats", "right_beats", "feedback", "crossfeed", "mix", "filter_cutoff", "feedback_drive" }))
+    handle.input = { left = handle.input_left, right = handle.input_right, direction = "stereo_input" }
+    handle.out = { left = handle.left, right = handle.right, direction = "stereo_output" }
+    handle.left_beats = parameter(handle, "left_beats")
+    handle.right_beats = parameter(handle, "right_beats")
+    handle.feedback = parameter(handle, "feedback")
+    handle.crossfeed = parameter(handle, "crossfeed")
+    handle.mix = parameter(handle, "mix")
+    handle.filter_cutoff = parameter(handle, "filter_cutoff")
+    handle.feedback_drive = parameter(handle, "feedback_drive")
+    return modulatable(handle, {
+      left_time = handle.left_time_mod, right_time = handle.right_time_mod,
+      feedback = handle.feedback_mod, mix = handle.mix_mod,
+      filter_cutoff = handle.filter_mod,
+    })
+  end
   function facade:envelope_follower(values)
     local handle = scope:module(self:_id("envelope_follower"), "envelope_follower", copy_values(values, { "attack", "release" }))
     handle.attack = parameter(handle, "attack")

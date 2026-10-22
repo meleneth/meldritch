@@ -30,6 +30,7 @@ enum OpProcessor {
     },
     Sample(SamplePlayerRuntime),
     Delay(DelayRuntime),
+    StereoDelay(StereoDelayRuntime),
     Plaits(Box<PlaitsRuntime>),
     SequencerTrack {
         sequencer: usize,
@@ -37,6 +38,8 @@ enum OpProcessor {
     },
     SequencerTempo(Arc<SequencerControl>),
 }
+
+const MAX_DELAY_SECONDS: f64 = 4.0;
 
 #[derive(Debug)]
 struct DelayRuntime {
@@ -46,7 +49,7 @@ struct DelayRuntime {
 
 impl DelayRuntime {
     fn new(sample_rate: f64) -> Result<Self, String> {
-        let frames = (sample_rate * 4.0).ceil() as usize + 2;
+        let frames = (sample_rate * MAX_DELAY_SECONDS).ceil() as usize + 2;
         let mut line = Vec::new();
         line.try_reserve_exact(frames)
             .map_err(|_| "not enough memory to prepare four-second delay line".to_string())?;
@@ -57,7 +60,7 @@ impl DelayRuntime {
     fn process(&mut self, input: &[f64], params: &[f64], sample_rate: f64, out: &mut [f64]) {
         let dry = if input[0].is_finite() { input[0] } else { 0.0 };
         let modulation = |value: f64| if value.is_finite() { value } else { 0.0 };
-        let time = (params[0] + modulation(input[1])).clamp(1.0 / sample_rate, 4.0);
+        let time = (params[0] + modulation(input[1])).clamp(1.0 / sample_rate, MAX_DELAY_SECONDS);
         let feedback = (params[1] + modulation(input[2])).clamp(-0.99, 0.99);
         let mix = (params[2] + modulation(input[3])).clamp(0.0, 1.0);
         let delay = time * sample_rate;
@@ -72,9 +75,104 @@ impl DelayRuntime {
     }
 }
 
+#[derive(Debug)]
+struct StereoDelayRuntime {
+    lines: [Vec<f64>; 2],
+    write: usize,
+    delay_samples: [f64; 2],
+    initialized: bool,
+    feedback_filter: [f64; 2],
+}
+
+impl StereoDelayRuntime {
+    fn new(sample_rate: f64) -> Result<Self, String> {
+        let frames = (sample_rate * MAX_DELAY_SECONDS).ceil() as usize + 2;
+        let prepare = || -> Result<Vec<f64>, String> {
+            let mut line = Vec::new();
+            line.try_reserve_exact(frames).map_err(|_| {
+                "not enough memory to prepare four-second stereo delay lines".to_string()
+            })?;
+            line.resize(frames, 0.0);
+            Ok(line)
+        };
+        Ok(Self {
+            lines: [prepare()?, prepare()?],
+            write: 0,
+            delay_samples: [0.0; 2],
+            initialized: false,
+            feedback_filter: [0.0; 2],
+        })
+    }
+
+    fn finite(value: f64, fallback: f64) -> f64 {
+        if value.is_finite() { value } else { fallback }
+    }
+
+    fn read(line: &[f64], write: usize, delay_samples: f64) -> f64 {
+        let read = (write as f64 - delay_samples).rem_euclid(line.len() as f64);
+        let first = read.floor() as usize;
+        let second = (first + 1) % line.len();
+        let fraction = read - first as f64;
+        line[first] + (line[second] - line[first]) * fraction
+    }
+
+    fn process(&mut self, input: &[f64], params: &[f64], sample_rate: f64, out: &mut [f64]) {
+        let dry = [Self::finite(input[0], 0.0), Self::finite(input[1], 0.0)];
+        let bpm = Self::finite(input[2], 120.0).clamp(1.0, 1_000.0);
+        let seconds_per_beat = 60.0 / bpm;
+        let target = [
+            (params[0] * seconds_per_beat + Self::finite(input[3], 0.0))
+                .clamp(1.0 / sample_rate, MAX_DELAY_SECONDS)
+                * sample_rate,
+            (params[1] * seconds_per_beat + Self::finite(input[4], 0.0))
+                .clamp(1.0 / sample_rate, MAX_DELAY_SECONDS)
+                * sample_rate,
+        ];
+        if !self.initialized {
+            self.delay_samples = target;
+            self.initialized = true;
+        } else {
+            // A 20 ms glide prevents an instantaneous read-head jump while
+            // retaining slow chorus-style modulation and tempo following.
+            let slew = 1.0 - (-1.0 / (0.020 * sample_rate)).exp();
+            for channel in 0..2 {
+                self.delay_samples[channel] +=
+                    (target[channel] - self.delay_samples[channel]) * slew;
+            }
+        }
+
+        let wet = [
+            Self::read(&self.lines[0], self.write, self.delay_samples[0]),
+            Self::read(&self.lines[1], self.write, self.delay_samples[1]),
+        ];
+        let feedback = (params[2] + Self::finite(input[5], 0.0)).clamp(-0.95, 0.95);
+        let crossfeed = params[3].clamp(0.0, 1.0);
+        let mix = (params[4] + Self::finite(input[6], 0.0)).clamp(0.0, 1.0);
+        let cutoff = (params[5] + Self::finite(input[7], 0.0)).clamp(20.0, sample_rate * 0.49);
+        let filter_coefficient = 1.0 - (-std::f64::consts::TAU * cutoff / sample_rate).exp();
+        let crossed = [
+            wet[0] * (1.0 - crossfeed) + wet[1] * crossfeed,
+            wet[1] * (1.0 - crossfeed) + wet[0] * crossfeed,
+        ];
+        let drive = params[6].clamp(0.1, 8.0);
+        let normalization = drive.tanh();
+        for channel in 0..2 {
+            self.feedback_filter[channel] +=
+                (crossed[channel] - self.feedback_filter[channel]) * filter_coefficient;
+            let saturated = (self.feedback_filter[channel] * drive).tanh() / normalization;
+            self.lines[channel][self.write] = dry[channel] + saturated * feedback;
+            out[channel] = dry[channel] * (1.0 - mix) + wet[channel] * mix;
+            if !out[channel].is_finite() {
+                out[channel] = 0.0;
+            }
+        }
+        self.write = (self.write + 1) % self.lines[0].len();
+    }
+}
+
 #[cfg(test)]
 mod delay_runtime_tests {
-    use super::DelayRuntime;
+    use super::{DelayRuntime, StereoDelayRuntime};
 
     #[test]
     fn impulse_repeats_at_requested_time_with_bounded_feedback_and_reset() {
@@ -115,6 +213,92 @@ mod delay_runtime_tests {
             );
             assert!(out[0].is_finite());
         }
+    }
+
+    #[test]
+    fn stereo_fractional_taps_and_independent_routing_are_exact() {
+        let mut delay = StereoDelayRuntime::new(100.0).unwrap();
+        // At 120 BPM, 0.05 beat is 2.5 samples and 0.1 beat is 5 samples.
+        let params = [0.05, 0.1, 0.0, 0.0, 1.0, 20_000.0, 1.0];
+        let mut rendered = Vec::new();
+        for frame in 0..8 {
+            let mut out = [0.0; 2];
+            delay.process(
+                &[f64::from(frame == 0), 0.0, 120.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                &params,
+                100.0,
+                &mut out,
+            );
+            rendered.push(out);
+        }
+        assert!((rendered[2][0] - 0.5).abs() < 1e-12);
+        assert!((rendered[3][0] - 0.5).abs() < 1e-12);
+        assert_eq!(rendered[5][1], 0.0);
+    }
+
+    #[test]
+    fn ping_pong_feedback_crosses_channels_and_stays_bounded() {
+        let mut delay = StereoDelayRuntime::new(100.0).unwrap();
+        let params = [0.2, 0.2, 0.9, 1.0, 1.0, 49.0, 1.5];
+        let mut rendered = Vec::new();
+        for frame in 0..80 {
+            let mut out = [0.0; 2];
+            delay.process(
+                &[f64::from(frame == 0), 0.0, 120.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                &params,
+                100.0,
+                &mut out,
+            );
+            assert!(
+                out.iter()
+                    .all(|sample| sample.is_finite() && sample.abs() <= 2.0)
+            );
+            rendered.push(out);
+        }
+        assert!(rendered[10][0] > 0.9);
+        assert!(rendered[20][1].abs() > 0.2);
+        assert!(rendered[20][0].abs() < 1e-9);
+    }
+
+    #[test]
+    fn tempo_modulation_and_parameter_changes_glide_without_resetting_state() {
+        let mut delay = StereoDelayRuntime::new(1_000.0).unwrap();
+        let mut params = [0.25, 0.375, 0.8, 0.7, 0.7, 1_500.0, 2.0];
+        let mut energy_after_change = 0.0;
+        for frame in 0..4_000 {
+            if frame == 900 {
+                params[0] = 0.75;
+                params[1] = 0.5;
+            }
+            let modulation = (frame as f64 / 300.0).sin() * 0.005;
+            let mut out = [0.0; 2];
+            delay.process(
+                &[
+                    f64::from(frame == 0),
+                    0.0,
+                    if frame < 2_000 { 120.0 } else { 90.0 },
+                    modulation,
+                    -modulation,
+                    f64::NAN,
+                    0.0,
+                    0.0,
+                ],
+                &params,
+                1_000.0,
+                &mut out,
+            );
+            assert!(
+                out.iter()
+                    .all(|sample| sample.is_finite() && sample.abs() <= 2.0)
+            );
+            if frame > 900 {
+                energy_after_change += out[0].abs() + out[1].abs();
+            }
+        }
+        assert!(
+            energy_after_change > 0.01,
+            "delay state was lost after parameter edit"
+        );
     }
 }
 
@@ -628,6 +812,9 @@ impl Machine {
                     player.process(inputs[0], params[0], self.sample_rate, outputs)
                 }
                 OpProcessor::Delay(delay) => {
+                    delay.process(inputs, params, self.sample_rate, outputs)
+                }
+                OpProcessor::StereoDelay(delay) => {
                     delay.process(inputs, params, self.sample_rate, outputs)
                 }
                 OpProcessor::Plaits(plaits) => plaits.process(inputs, params, outputs),
@@ -1354,16 +1541,18 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             .iter()
             .map(|p| param_ids[&ParameterId::new(&module.id, p.name)])
             .collect();
-        let processor = if module.kind == "delay"
-            && matches!(module.runtime, ModuleRuntime::Contract)
-        {
-            OpProcessor::Delay(DelayRuntime::new(sample_rate)?)
-        } else {
-            match &module.runtime {
-                ModuleRuntime::Contract => OpProcessor::Contract {
+        let processor = if matches!(module.runtime, ModuleRuntime::Contract) {
+            match module.kind.as_str() {
+                "delay" => OpProcessor::Delay(DelayRuntime::new(sample_rate)?),
+                "stereo_delay" => OpProcessor::StereoDelay(StereoDelayRuntime::new(sample_rate)?),
+                _ => OpProcessor::Contract {
                     process: c.process,
                     state: vec![0.0; c.state_len],
                 },
+            }
+        } else {
+            match &module.runtime {
+                ModuleRuntime::Contract => unreachable!("contract runtime handled above"),
                 ModuleRuntime::Sample(sample) if module.kind == "sample_player" => {
                     OpProcessor::Sample(SamplePlayerRuntime::new(Arc::clone(sample), sample_rate)?)
                 }
