@@ -115,6 +115,15 @@ automated tests:
   publication, and callbacks run only when the UI-thread owner drains events.
   With no relevant subscriber, the producer does not construct a payload or
   touch the queue. These lossy observations never drive musical correctness.
+- The embedded `meldritch.musical` Lua library owns stable project, track,
+  pattern, arrangement, and editing identities. Rust retains a bounded
+  prepared sequencer projection with independent per-track 1–64-step loops.
+  Interactive adapters share its semantic mutation commands, and active versus
+  viewed patterns remain separate.
+- Musical saves are canonical Lua tables written by an atomic temporary-file
+  replacement. Reload validates stable track and pattern targets before
+  publishing the prepared revision; procedural examples preserve their source
+  generator and apply the saved Lua layer after reconstruction.
 
 The executable evidence is concentrated in the Meldritch 2 unit tests and the
 Lua corpus under `crates/meldritch2/examples/`.

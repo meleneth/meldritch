@@ -8,7 +8,8 @@ use std::{
 
 const CORE: &str = include_str!("../../../examples/groovebox/groovebox_core.lua");
 const SAMPLE_RATE: f64 = 8_000.0;
-const PATTERN_FRAMES: usize = 15_000;
+// Foundation's kick is the intentionally longer 32-step polymetric row.
+const PATTERN_FRAMES: usize = 30_000;
 static FIXTURE_ID: AtomicUsize = AtomicUsize::new(0);
 
 fn fixture_source() -> (std::path::PathBuf, String) {
@@ -288,7 +289,7 @@ fn shared_commands_edit_only_selected_cells_and_persistence_round_trips() {
     let after = sequence.pattern();
     assert_ne!(before.velocities[6][10], after.velocities[6][10]);
     assert_eq!(before.velocities[5], after.velocities[5]);
-    let path = root.join("project.json");
+    let path = root.join("project.lua");
     sequence.save_project(&path).unwrap();
     sequence.execute("clear").unwrap();
     assert_ne!(sequence.pattern().velocities[6], after.velocities[6]);

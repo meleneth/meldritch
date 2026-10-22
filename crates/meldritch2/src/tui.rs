@@ -185,6 +185,10 @@ fn draw_pattern_grid(
         .get(sequence.active_pattern())
         .map(String::as_str)
         .unwrap_or("?");
+    let viewed = patterns
+        .get(sequence.viewed_pattern())
+        .map(String::as_str)
+        .unwrap_or("?");
     let queued = sequence
         .queued_pattern()
         .and_then(|index| patterns.get(index))
@@ -192,7 +196,7 @@ fn draw_pattern_grid(
     queue!(
         out,
         Print(format!(
-            "  Pattern: {active}{queued} | {} | {}\r\n  Status: {}\r\n",
+            "  Playing: {active}{queued} | Viewing: {viewed} | {} | {}\r\n  Status: {}\r\n",
             if sequence.playing() {
                 "PLAYING"
             } else {
@@ -236,9 +240,23 @@ fn draw_pattern_grid(
         }
         queue!(out, Print("\r\n")).map_err(|e| e.to_string())?;
     }
+    let selected_step = sequence.selected_step();
+    let selected_name = names.get(selected_track).map(String::as_str).unwrap_or("?");
+    if selected_track < names.len() && selected_step < usize::from(pattern.lengths[selected_track])
+    {
+        queue!(out, Print(format!(
+            "\r\n  {selected_name} step {:02}/{:02} | velocity {:.2} | pitch {:.2} Hz | gate {:.2}\r\n",
+            selected_step + 1,
+            pattern.lengths[selected_track],
+            pattern.velocities[selected_track][selected_step],
+            pattern.pitches_hz[selected_track][selected_step],
+            pattern.gates[selected_track][selected_step],
+        )))
+        .map_err(|e| e.to_string())?;
+    }
     queue!(
         out,
-        Print("\r\n1-8 toggle | [ ] bank | Up/Down track | F1-F4 pattern | Space transport\r\nm mute | o solo | c copy | j/k control | h/l adjust | +/- velocity | p/P pitch | g/G gate | C clear | S save\r\n")
+        Print("\r\n1-8 toggle | [ ] bank | arrows select track/step | n/N viewed pattern | F1-F4 playing pattern\r\nd duplicate | ,/. rotate | +/- velocity | p/P pitch | g/G gate | C clear | S save | R reload\r\n")
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -294,6 +312,21 @@ fn dispatch_performance_binding(
             .project_file
             .as_ref()
             .ok_or("performance save command requires project_file")?;
+        performance
+            .sequencer
+            .save_project(std::path::Path::new(path))?;
+    } else if binding.command == "reload" {
+        let path = performance
+            .project_file
+            .as_ref()
+            .ok_or("performance reload command requires project_file")?;
+        performance
+            .sequencer
+            .load_project(std::path::Path::new(path))?;
+    } else if let Some(path) = binding.command.strip_prefix("save_as:") {
+        if path.is_empty() {
+            return Err("save_as requires a destination".into());
+        }
         performance
             .sequencer
             .save_project(std::path::Path::new(path))?;

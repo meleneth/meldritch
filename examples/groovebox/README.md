@@ -16,19 +16,25 @@ do not download the kit again. To render the deterministic 20-bar arrangement
 (Foundation, Broken, Acid, Atmosphere, then Foundation) as stereo 24-bit WAV:
 
 ```sh
-cargo run -- render examples/groovebox/render.lua groovebox-demo.wav 37.5
+cargo run -- render examples/groovebox/render.lua groovebox-demo.wav 82.5
 ```
 
 ## Keyboard
 
 `F1`-`F4` queue Foundation, Broken, Acid, and Atmosphere for the next pattern
 boundary. `Space` toggles transport, `s` starts, `x` stops, and `r` restarts. Up/Down
-select a track, `[`/`]` select steps 1-8 or 9-16, and `1`-`8` toggle steps in
-that bank. `m` and `o` toggle mute and solo. `+`/`-` change the selected event's
+select a track, `[`/`]` move through eight-step editing banks; the display pages
+in sixteen-step viewports. `1`-`8` toggle the selected APC-compatible bank.
+`n`/`N` select the next/previous pattern
+for editing without changing the playing pattern. `,`/`.` rotate the selected
+track. `m` and `o` toggle mute and solo. `+`/`-` change the selected event's
 velocity, `p`/`P` transpose it by a semitone, and `g`/`G` change its gate.
-`c` copies the active pattern over the following pattern; `C` clears the
+`d` duplicates the viewed pattern under a new stable name, `c` copies it over
+the following pattern, and `C` clears the
 selected track. `S` deliberately saves the editable project to
-`groovebox-project.json`; shipped Lua is never overwritten. `j`/`k` move
+`groovebox-project.lua`; `R` reloads it. Shipped Lua is never overwritten. The generated file
+is deterministic, human-readable Lua addressed by track and pattern IDs.
+`j`/`k` move
 through the declared track, voice, tempo, and master controls; `h`/`l` adjust
 the selected control. `q` exits.
 
@@ -74,13 +80,20 @@ input, RGB output, and semantic command/control dispatch.
 
 Switching pages does not alter transport or pattern contents. Solo masks other
 tracks at the sequencer output and never destroys their authored mute state.
+The same arrows continue through all eight banks of a 64-step track.
+
+`F10` opens the generic track editing workspace and `F9` returns to the live
+performance surface. Both operate on the same selected track, viewed pattern,
+step bank, and semantic edit commands.
 
 ## Authored data and persistence
 
 `patterns.lua` contains four human-readable patterns. Drum events carry
 velocity; Bass and Lead events independently carry MIDI pitch, fractional gate
 duration, and velocity. Runtime edits affect the current performance state.
-Saving writes a versioned JSON project beside the launch working directory.
+Saving atomically writes a versioned Lua edit layer beside the launch working
+directory. The shipped program remains the source of instrument construction;
+reload rebuilds that program and applies the saved musical state by stable IDs.
 After saving, restart that exact composition with:
 
 ```sh

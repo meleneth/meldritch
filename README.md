@@ -51,6 +51,14 @@ programs. `source:on(kind, callback)` creates a persistent subscription, while
 callbacks run on the UI owner thread, never in the audio callback; queues are
 bounded and observational, so audio behavior never depends on Lua delivery.
 
+The built-in `meldritch.musical` Lua library composes stable projects, tracks,
+patterns, arrangements, editing operations, and persistence over that prepared
+runtime. Track loops may independently use 1–64 steps, viewed material is
+separate from playing material, and queued changes commit at loop boundaries.
+Deliberate saves are deterministic Lua edit layers addressed by track and
+pattern IDs; procedural generators are rebuilt before their saved edits are
+applied.
+
 Those capabilities are foundations, not the product definition. Current
 graphs are compiled as directed acyclic graphs, signals use explicit mono
 ports (including paired stereo modules), normalizations are selected during
@@ -78,6 +86,8 @@ cargo run -p meldritch2 -- perform examples/instruments/subtractive.lua
 cargo run -p meldritch2 -- perform examples/instruments/drone.lua
 cargo run -p meldritch2 -- perform examples/instruments/event_plaits.lua
 cargo run -p meldritch2 -- perform examples/instruments/tr909.lua
+cargo run -p meldritch2 -- perform examples/groovebox/groovebox.lua
+cargo run -p meldritch2 -- perform examples/generative/generative.lua
 ```
 
 The subtractive instrument uses MIDI channel 1 when a MIDI input is selected;

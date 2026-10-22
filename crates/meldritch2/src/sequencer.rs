@@ -1,6 +1,5 @@
 //! Shared authored pattern state and audio-domain sequencer transport.
 
-use serde::{Deserialize, Serialize};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU8, Ordering},
@@ -13,25 +12,14 @@ pub const MAX_STEPS: usize = 64;
 pub const MAX_PATTERNS: usize = 16;
 const NONE: u8 = u8::MAX;
 
-#[derive(Serialize, Deserialize)]
-struct SavedPattern {
-    name: String,
-    velocities: Vec<Vec<f32>>,
-    pitches_hz: Vec<Vec<f32>>,
-    gates: Vec<Vec<f32>>,
-}
-#[derive(Serialize, Deserialize)]
-struct SavedProject {
-    version: u32,
-    steps: usize,
-    patterns: Vec<SavedPattern>,
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct Pattern {
     pub velocities: [[f32; MAX_STEPS]; MAX_TRACKS],
     pub pitches_hz: [[f32; MAX_STEPS]; MAX_TRACKS],
     pub gates: [[f32; MAX_STEPS]; MAX_TRACKS],
+    /// Authored loop length for each track. The executor wraps every track
+    /// independently; this is musical state, not a viewport size.
+    pub lengths: [u8; MAX_TRACKS],
 }
 
 impl Default for Pattern {
@@ -40,6 +28,7 @@ impl Default for Pattern {
             velocities: [[0.0; MAX_STEPS]; MAX_TRACKS],
             pitches_hz: [[440.0; MAX_STEPS]; MAX_TRACKS],
             gates: [[0.5; MAX_STEPS]; MAX_TRACKS],
+            lengths: [16; MAX_TRACKS],
         }
     }
 }
@@ -65,6 +54,7 @@ pub struct SequencerControl {
     current_step: AtomicU8,
     active_pattern: AtomicU8,
     queued_pattern: AtomicU8,
+    viewed_pattern: AtomicU8,
     muted: [AtomicBool; MAX_TRACKS],
     soloed: [AtomicBool; MAX_TRACKS],
     selected_track: AtomicU8,
@@ -99,6 +89,8 @@ impl SequencerControl {
                 EventKind::PatternChanged,
             ],
         );
+        let mut initial = Pattern::default();
+        initial.lengths.fill(steps as u8);
         Ok(Arc::new(Self {
             name,
             steps,
@@ -107,7 +99,7 @@ impl SequencerControl {
             track_names: Mutex::new(Vec::new()),
             pattern: Mutex::new(PublishedPattern {
                 names: vec!["Default".into()],
-                authored: vec![Pattern::default()],
+                authored: vec![initial],
                 pending_revision: true,
             }),
             command: AtomicU8::new(1),
@@ -115,6 +107,7 @@ impl SequencerControl {
             current_step: AtomicU8::new(0),
             active_pattern: AtomicU8::new(0),
             queued_pattern: AtomicU8::new(NONE),
+            viewed_pattern: AtomicU8::new(0),
             muted: std::array::from_fn(|_| AtomicBool::new(false)),
             soloed: std::array::from_fn(|_| AtomicBool::new(false)),
             selected_track: AtomicU8::new(0),
@@ -147,7 +140,7 @@ impl SequencerControl {
             .unwrap_or_default()
     }
     pub fn set_steps(&self, track: usize, values: &[f32]) -> Result<(), String> {
-        self.set_pattern_steps(self.active_pattern(), track, values)
+        self.set_pattern_steps(self.viewed_pattern(), track, values)
     }
     pub fn define_pattern(&self, name: String) -> Result<usize, String> {
         if name.is_empty() {
@@ -168,7 +161,9 @@ impl SequencerControl {
             return Err(format!("sequencer permits at most {MAX_PATTERNS} patterns"));
         }
         state.names.push(name);
-        state.authored.push(Pattern::default());
+        let mut pattern = Pattern::default();
+        pattern.lengths.fill(self.steps as u8);
+        state.authored.push(pattern);
         Ok(state.names.len() - 1)
     }
     pub fn pattern_names(&self) -> Vec<String> {
@@ -183,8 +178,8 @@ impl SequencerControl {
         track: usize,
         values: &[f32],
     ) -> Result<(), String> {
-        if values.len() != self.steps {
-            return Err(format!("pattern requires exactly {} steps", self.steps));
+        if values.is_empty() || values.len() > MAX_STEPS {
+            return Err(format!("pattern row length must be 1..={MAX_STEPS}"));
         }
         if values
             .iter()
@@ -197,7 +192,12 @@ impl SequencerControl {
             .lock()
             .map_err(|_| "sequencer pattern state poisoned")?;
         let target = state.authored.get_mut(pattern).ok_or("unknown pattern")?;
-        target.velocities[track][..self.steps].copy_from_slice(values);
+        if track >= self.track_names().len() {
+            return Err("track is out of range".into());
+        }
+        target.velocities[track].fill(0.0);
+        target.velocities[track][..values.len()].copy_from_slice(values);
+        target.lengths[track] = values.len() as u8;
         state.pending_revision = true;
         Ok(())
     }
@@ -209,13 +209,13 @@ impl SequencerControl {
         gates: &[f32],
         velocities: &[f32],
     ) -> Result<(), String> {
-        if pitches.len() != self.steps
-            || gates.len() != self.steps
-            || velocities.len() != self.steps
+        if pitches.is_empty()
+            || pitches.len() > MAX_STEPS
+            || gates.len() != pitches.len()
+            || velocities.len() != pitches.len()
         {
             return Err(format!(
-                "melodic pattern requires exactly {} pitch, gate, and velocity values",
-                self.steps
+                "melodic pattern requires 1..={MAX_STEPS} equally sized pitch, gate, and velocity values"
             ));
         }
         if pitches
@@ -236,22 +236,30 @@ impl SequencerControl {
             .lock()
             .map_err(|_| "sequencer pattern state poisoned")?;
         let target = state.authored.get_mut(pattern).ok_or("unknown pattern")?;
-        target.pitches_hz[track][..self.steps].copy_from_slice(pitches);
-        target.gates[track][..self.steps].copy_from_slice(gates);
+        target.pitches_hz[track][..pitches.len()].copy_from_slice(pitches);
+        target.gates[track][..gates.len()].copy_from_slice(gates);
+        target.lengths[track] = pitches.len() as u8;
         state.pending_revision = true;
         Ok(())
     }
     pub fn toggle(&self, track: usize, step: usize) -> Result<(), String> {
-        if track >= self.track_names().len() || step >= self.steps {
+        if track >= self.track_names().len() || step >= MAX_STEPS {
             return Err("sequencer cell is out of range".into());
         }
         let mut state = self
             .pattern
             .lock()
             .map_err(|_| "sequencer pattern state poisoned")?;
-        let active = usize::from(self.active_pattern.load(Ordering::Acquire));
-        let enabled = state.authored[active].velocities[track][step] <= 0.0;
-        state.authored[active].velocities[track][step] = if enabled { 1.0 } else { 0.0 };
+        let viewed = self.viewed_pattern();
+        let length = usize::from(state.authored[viewed].lengths[track]);
+        if step >= length {
+            return Err(format!(
+                "step {} is beyond this track's {length}-step pattern",
+                step + 1
+            ));
+        }
+        let enabled = state.authored[viewed].velocities[track][step] <= 0.0;
+        state.authored[viewed].velocities[track][step] = if enabled { 1.0 } else { 0.0 };
         state.pending_revision = true;
         self.set_status(format!(
             "{} step {} {}",
@@ -266,8 +274,9 @@ impl SequencerControl {
             .pattern
             .lock()
             .map_err(|_| "sequencer pattern state poisoned")?;
-        let active = usize::from(self.active_pattern.load(Ordering::Acquire));
-        state.authored[active].velocities[track][..self.steps].fill(0.0);
+        let viewed = self.viewed_pattern();
+        let length = usize::from(state.authored[viewed].lengths[track]);
+        state.authored[viewed].velocities[track][..length].fill(0.0);
         state.pending_revision = true;
         self.set_status(format!(
             "Cleared {}",
@@ -286,8 +295,86 @@ impl SequencerControl {
         state.pending_revision = true;
         Ok(())
     }
+    pub fn copy_pattern_track(&self, from: usize, to: usize, track: usize) -> Result<(), String> {
+        if track >= self.track_names().len() {
+            return Err("track is out of range".into());
+        }
+        let mut state = self
+            .pattern
+            .lock()
+            .map_err(|_| "sequencer pattern state poisoned")?;
+        let source = *state.authored.get(from).ok_or("unknown source pattern")?;
+        let target = state.authored.get_mut(to).ok_or("unknown target pattern")?;
+        target.velocities[track] = source.velocities[track];
+        target.pitches_hz[track] = source.pitches_hz[track];
+        target.gates[track] = source.gates[track];
+        target.lengths[track] = source.lengths[track];
+        state.pending_revision = true;
+        Ok(())
+    }
+    pub fn duplicate_pattern(&self, from: usize, name: String) -> Result<usize, String> {
+        if self
+            .pattern_names()
+            .iter()
+            .any(|candidate| candidate == &name)
+        {
+            return Err(format!("pattern '{name}' already exists"));
+        }
+        let target = self.define_pattern(name)?;
+        self.copy_pattern(from, target)?;
+        self.viewed_pattern.store(target as u8, Ordering::Release);
+        Ok(target)
+    }
+    pub fn rotate_track(&self, track: usize, amount: i32) -> Result<(), String> {
+        if track >= self.track_names().len() {
+            return Err("track is out of range".into());
+        }
+        let mut state = self
+            .pattern
+            .lock()
+            .map_err(|_| "sequencer pattern state poisoned")?;
+        let viewed = self.viewed_pattern();
+        let pattern = state
+            .authored
+            .get_mut(viewed)
+            .ok_or("unknown viewed pattern")?;
+        let length = usize::from(pattern.lengths[track]);
+        if length == 0 {
+            return Err("track pattern has no steps".into());
+        }
+        let right = amount.rem_euclid(length as i32) as usize;
+        pattern.velocities[track][..length].rotate_right(right);
+        pattern.pitches_hz[track][..length].rotate_right(right);
+        pattern.gates[track][..length].rotate_right(right);
+        state.pending_revision = true;
+        Ok(())
+    }
+    pub fn set_pattern_length(
+        &self,
+        pattern: usize,
+        track: usize,
+        length: usize,
+    ) -> Result<(), String> {
+        if !(1..=MAX_STEPS).contains(&length) {
+            return Err(format!("pattern length must be 1..={MAX_STEPS}"));
+        }
+        if track >= self.track_names().len() {
+            return Err("track is out of range".into());
+        }
+        let mut state = self
+            .pattern
+            .lock()
+            .map_err(|_| "sequencer pattern state poisoned")?;
+        state
+            .authored
+            .get_mut(pattern)
+            .ok_or("unknown pattern")?
+            .lengths[track] = length as u8;
+        state.pending_revision = true;
+        Ok(())
+    }
     pub fn pattern(&self) -> Pattern {
-        let active = self.active_pattern();
+        let active = self.viewed_pattern();
         self.pattern
             .lock()
             .ok()
@@ -302,6 +389,17 @@ impl SequencerControl {
     }
     pub fn active_pattern(&self) -> usize {
         usize::from(self.active_pattern.load(Ordering::Acquire))
+    }
+    pub fn viewed_pattern(&self) -> usize {
+        usize::from(self.viewed_pattern.load(Ordering::Acquire))
+    }
+    pub fn view_pattern(&self, index: usize) -> Result<(), String> {
+        if index >= self.pattern_names().len() {
+            return Err("unknown pattern".into());
+        }
+        self.viewed_pattern.store(index as u8, Ordering::Release);
+        self.set_status(format!("Viewing {}", self.pattern_names()[index]));
+        Ok(())
     }
     pub fn queued_pattern(&self) -> Option<usize> {
         let value = self.queued_pattern.load(Ordering::Acquire);
@@ -348,10 +446,16 @@ impl SequencerControl {
         Ok(())
     }
     pub fn set_step_bank(&self, bank: usize) -> Result<(), String> {
-        if bank * 8 >= self.steps {
+        let length = self.pattern().lengths[self.selected_track()] as usize;
+        if bank * 8 >= length {
             return Err("step bank is out of range".into());
         }
         self.step_bank.store(bank as u8, Ordering::Release);
+        let selected = self.selected_step();
+        if selected / 8 != bank {
+            self.selected_step
+                .store((bank * 8) as u8, Ordering::Release);
+        }
         Ok(())
     }
     pub fn toggle_mute(&self, track: usize) -> Result<(), String> {
@@ -413,7 +517,7 @@ impl SequencerControl {
             return self.clear_track(self.selected_track());
         }
         if command == "copy:next" {
-            let active = self.active_pattern();
+            let active = self.viewed_pattern();
             let count = self.pattern_names().len();
             if count < 2 {
                 return Err("copy:next requires at least two patterns".into());
@@ -427,8 +531,53 @@ impl SequencerControl {
             ));
             return Ok(());
         }
+        if command == "duplicate" {
+            let viewed = self.viewed_pattern();
+            let names = self.pattern_names();
+            let base = format!("{} Copy", names[viewed]);
+            let mut name = base.clone();
+            let mut suffix = 2;
+            while names.contains(&name) {
+                name = format!("{base} {suffix}");
+                suffix += 1;
+            }
+            let created = self.duplicate_pattern(viewed, name.clone())?;
+            self.set_status(format!("Duplicated as {name}"));
+            self.viewed_pattern.store(created as u8, Ordering::Release);
+            return Ok(());
+        }
         if let Some(value) = command.strip_prefix("bank:") {
             return self.set_step_bank(value.parse().map_err(|_| "invalid bank")?);
+        }
+        if command == "page:next" {
+            let length = usize::from(self.pattern().lengths[self.selected_track()]);
+            return self.set_step_bank((self.step_bank() + 2).min((length - 1) / 8));
+        }
+        if command == "page:previous" {
+            return self.set_step_bank(self.step_bank().saturating_sub(2));
+        }
+        if command == "bank:next" {
+            let length = usize::from(self.pattern().lengths[self.selected_track()]);
+            return self.set_step_bank((self.step_bank() + 1).min((length - 1) / 8));
+        }
+        if command == "bank:previous" {
+            return self.set_step_bank(self.step_bank().saturating_sub(1));
+        }
+        if command == "pattern:next" || command == "pattern:previous" {
+            let count = self.pattern_names().len();
+            let viewed = self.viewed_pattern();
+            let next = if command.ends_with("next") {
+                (viewed + 1) % count
+            } else {
+                (viewed + count - 1) % count
+            };
+            return self.view_pattern(next);
+        }
+        if command == "rotate:left" {
+            return self.rotate_track(self.selected_track(), -1);
+        }
+        if command == "rotate:right" {
+            return self.rotate_track(self.selected_track(), 1);
         }
         if let Some(value) = command.strip_prefix("toggle:") {
             let column: usize = value.parse().map_err(|_| "invalid step column")?;
@@ -446,6 +595,18 @@ impl SequencerControl {
             return self.select_track(
                 (self.selected_track() + 1).min(self.track_names().len().saturating_sub(1)),
             );
+        }
+        if command == "step:previous" || command == "step:next" {
+            let length = usize::from(self.pattern().lengths[self.selected_track()]);
+            let current = self.selected_step().min(length - 1);
+            let step = if command.ends_with("next") {
+                (current + 1) % length
+            } else {
+                (current + length - 1) % length
+            };
+            self.selected_step.store(step as u8, Ordering::Release);
+            self.step_bank.store((step / 8) as u8, Ordering::Release);
+            return Ok(());
         }
         for (prefix, action) in [("track:", 0), ("mute:", 1), ("solo:", 2), ("pattern:", 3)] {
             if let Some(value) = command.strip_prefix(prefix) {
@@ -469,7 +630,7 @@ impl SequencerControl {
                 .pattern
                 .lock()
                 .map_err(|_| "sequencer pattern state poisoned")?;
-            let active = self.active_pattern();
+            let active = self.viewed_pattern();
             let track = self.selected_track();
             let step = self.selected_step();
             let pattern = state.authored.get_mut(active).ok_or("unknown pattern")?;
@@ -496,90 +657,171 @@ impl SequencerControl {
             .pattern
             .lock()
             .map_err(|_| "sequencer pattern state poisoned")?;
-        let patterns = state
-            .names
-            .iter()
-            .zip(&state.authored)
-            .map(|(name, p)| SavedPattern {
-                name: name.clone(),
-                velocities: p
-                    .velocities
-                    .iter()
-                    .map(|row| row[..self.steps].to_vec())
-                    .collect(),
-                pitches_hz: p
-                    .pitches_hz
-                    .iter()
-                    .map(|row| row[..self.steps].to_vec())
-                    .collect(),
-                gates: p
-                    .gates
-                    .iter()
-                    .map(|row| row[..self.steps].to_vec())
-                    .collect(),
-            })
-            .collect();
-        let json = serde_json::to_vec_pretty(&SavedProject {
-            version: 1,
-            steps: self.steps,
-            patterns,
-        })
-        .map_err(|e| e.to_string())?;
-        let temporary = path.with_extension("json.tmp");
-        std::fs::write(&temporary, json).map_err(|e| e.to_string())?;
+        let quote = |value: &str| format!("{value:?}");
+        let tracks = self.track_names();
+        let mut lua = String::from(
+            "-- Meldritch 2 canonical musical project; generated deliberately.\nreturn {\n  version = 2,\n  tracks = {",
+        );
+        for name in &tracks {
+            lua.push_str(&format!("{},", quote(name)));
+        }
+        lua.push_str("},\n");
+        lua.push_str(&format!(
+            "  active_pattern = {},\n  viewed_pattern = {},\n",
+            quote(&state.names[self.active_pattern()]),
+            quote(&state.names[self.viewed_pattern()])
+        ));
+        lua.push_str("  patterns = {\n");
+        for (name, pattern) in state.names.iter().zip(&state.authored) {
+            lua.push_str(&format!("    {{ id = {}, tracks = {{\n", quote(name)));
+            for (track, track_name) in tracks.iter().enumerate() {
+                let length = usize::from(pattern.lengths[track]);
+                lua.push_str(&format!(
+                    "      [{}] = {{ length = {length}, events = {{",
+                    quote(track_name)
+                ));
+                for step in 0..length {
+                    let velocity = pattern.velocities[track][step];
+                    if velocity > 0.0 {
+                        lua.push_str(&format!(
+                            "{{step={},velocity={velocity:?},pitch={:?},gate={:?}}},",
+                            step + 1,
+                            pattern.pitches_hz[track][step],
+                            pattern.gates[track][step]
+                        ));
+                    }
+                }
+                lua.push_str("} },\n");
+            }
+            lua.push_str("    } },\n");
+        }
+        lua.push_str("  },\n  arrangement = {");
+        if let Ok(arrangement) = self.arrangement.lock() {
+            for (pattern, repeats) in arrangement.iter().copied() {
+                if let Some(name) = state.names.get(pattern) {
+                    lua.push_str(&format!("{{pattern={},repeats={repeats}}},", quote(name)));
+                }
+            }
+        }
+        lua.push_str("},\n}\n");
+        drop(state);
+        let temporary = path.with_extension("lua.tmp");
+        use std::io::Write;
+        let mut file = std::fs::File::create(&temporary).map_err(|e| e.to_string())?;
+        file.write_all(lua.as_bytes()).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
         std::fs::rename(&temporary, path).map_err(|e| e.to_string())?;
         self.set_status(format!("Saved {}", path.display()));
         Ok(())
     }
     pub fn load_project(&self, path: &std::path::Path) -> Result<(), String> {
-        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-        let saved: SavedProject = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-        if saved.version != 1
-            || saved.steps != self.steps
-            || saved.patterns.is_empty()
-            || saved.patterns.len() > MAX_PATTERNS
-        {
-            return Err("saved groovebox project is incompatible".into());
+        use mlua::{Lua, Table};
+        let source =
+            std::fs::read_to_string(path).map_err(|e| format!("load {}: {e}", path.display()))?;
+        let vm = Lua::new();
+        let saved: Table = vm
+            .load(&source)
+            .set_name(path.to_string_lossy())
+            .eval()
+            .map_err(|e| format!("evaluate saved Lua project: {e}"))?;
+        if saved.get::<u32>("version").map_err(|e| e.to_string())? != 2 {
+            return Err("saved Lua project version is incompatible".into());
         }
-        let tracks = self.track_names().len();
+        let saved_tracks: Vec<String> = saved
+            .get::<Table>("tracks")
+            .map_err(|e| e.to_string())?
+            .sequence_values()
+            .collect::<mlua::Result<_>>()
+            .map_err(|e| e.to_string())?;
+        let track_names = self.track_names();
+        if saved_tracks != track_names {
+            return Err(format!(
+                "saved project track identities {:?} do not match loaded program {:?}",
+                saved_tracks, track_names
+            ));
+        }
+        let tracks = track_names.len();
         let mut names = Vec::new();
         let mut patterns = Vec::new();
-        for item in saved.patterns {
-            if item.name.is_empty() || names.contains(&item.name) {
+        let saved_patterns: Table = saved.get("patterns").map_err(|e| e.to_string())?;
+        for item in saved_patterns.sequence_values::<Table>() {
+            let item = item.map_err(|e| e.to_string())?;
+            let name: String = item.get("id").map_err(|e| e.to_string())?;
+            if name.is_empty() || names.contains(&name) {
                 return Err("saved patterns require unique nonempty names".into());
             }
-            if item.velocities.len() != MAX_TRACKS
-                || item.pitches_hz.len() != MAX_TRACKS
-                || item.gates.len() != MAX_TRACKS
-            {
-                return Err("saved pattern requires eight track rows".into());
-            }
             let mut pattern = Pattern::default();
-            for track in 0..tracks {
-                if item.velocities[track].len() != self.steps
-                    || item.pitches_hz[track].len() != self.steps
-                    || item.gates[track].len() != self.steps
-                {
-                    return Err("saved pattern row length is incompatible".into());
+            let rows: Table = item.get("tracks").map_err(|e| e.to_string())?;
+            for (track, track_name) in track_names.iter().enumerate().take(tracks) {
+                let row: Table = rows.get(track_name.as_str()).map_err(|_| {
+                    format!("saved pattern '{name}' is missing track '{track_name}'")
+                })?;
+                let length: usize = row.get("length").map_err(|e| e.to_string())?;
+                if !(1..=MAX_STEPS).contains(&length) {
+                    return Err(format!(
+                        "saved pattern '{name}' track '{track_name}' has invalid length {length}"
+                    ));
                 }
-                if item.velocities[track]
-                    .iter()
-                    .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
-                    || item.pitches_hz[track]
-                        .iter()
-                        .any(|value| !value.is_finite() || !(1.0..=24_000.0).contains(value))
-                    || item.gates[track]
-                        .iter()
-                        .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
-                {
-                    return Err("saved pattern contains an invalid musical event".into());
+                pattern.lengths[track] = length as u8;
+                let events: Table = row.get("events").map_err(|e| e.to_string())?;
+                for event in events.sequence_values::<Table>() {
+                    let event = event.map_err(|e| e.to_string())?;
+                    let step: usize = event.get("step").map_err(|e| e.to_string())?;
+                    let velocity: f32 = event.get("velocity").map_err(|e| e.to_string())?;
+                    let pitch: f32 = event.get("pitch").map_err(|e| e.to_string())?;
+                    let gate: f32 = event.get("gate").map_err(|e| e.to_string())?;
+                    if step == 0
+                        || step > length
+                        || !velocity.is_finite()
+                        || !(0.0..=1.0).contains(&velocity)
+                        || !pitch.is_finite()
+                        || !(1.0..=24_000.0).contains(&pitch)
+                        || !gate.is_finite()
+                        || !(0.0..=1.0).contains(&gate)
+                    {
+                        return Err(format!(
+                            "saved pattern '{name}' track '{track_name}' contains an invalid event"
+                        ));
+                    }
+                    pattern.velocities[track][step - 1] = velocity;
+                    pattern.pitches_hz[track][step - 1] = pitch;
+                    pattern.gates[track][step - 1] = gate;
                 }
-                pattern.velocities[track][..self.steps].copy_from_slice(&item.velocities[track]);
-                pattern.pitches_hz[track][..self.steps].copy_from_slice(&item.pitches_hz[track]);
-                pattern.gates[track][..self.steps].copy_from_slice(&item.gates[track]);
             }
-            names.push(item.name);
+            names.push(name);
             patterns.push(pattern)
+        }
+        if names.is_empty() || names.len() > MAX_PATTERNS {
+            return Err("saved project requires 1..16 patterns".into());
+        }
+        let active_name: String = saved.get("active_pattern").map_err(|e| e.to_string())?;
+        let viewed_name: String = saved.get("viewed_pattern").map_err(|e| e.to_string())?;
+        let active = names
+            .iter()
+            .position(|name| name == &active_name)
+            .ok_or_else(|| format!("saved active pattern target '{active_name}' is missing"))?;
+        let viewed = names
+            .iter()
+            .position(|name| name == &viewed_name)
+            .ok_or_else(|| format!("saved viewed pattern target '{viewed_name}' is missing"))?;
+        let mut arrangement = Vec::new();
+        if let Some(sections) = saved
+            .get::<Option<Table>>("arrangement")
+            .map_err(|e| e.to_string())?
+        {
+            for section in sections.sequence_values::<Table>() {
+                let section = section.map_err(|e| e.to_string())?;
+                let target: String = section.get("pattern").map_err(|e| e.to_string())?;
+                let repeats: u32 = section.get("repeats").map_err(|e| e.to_string())?;
+                let target = names
+                    .iter()
+                    .position(|name| name == &target)
+                    .ok_or_else(|| format!("saved arrangement target '{target}' is missing"))?;
+                if repeats == 0 {
+                    return Err("arrangement repeats must be positive".into());
+                }
+                arrangement.push((target, repeats));
+            }
         }
         let mut state = self
             .pattern
@@ -588,8 +830,14 @@ impl SequencerControl {
         state.names = names;
         state.authored = patterns;
         state.pending_revision = true;
-        self.active_pattern.store(0, Ordering::Release);
+        self.active_pattern.store(active as u8, Ordering::Release);
+        self.viewed_pattern.store(viewed as u8, Ordering::Release);
         self.queued_pattern.store(NONE, Ordering::Release);
+        *self
+            .arrangement
+            .lock()
+            .map_err(|_| "sequencer arrangement state poisoned")? = arrangement;
+        self.set_status(format!("Reloaded {}", path.display()));
         Ok(())
     }
     pub fn publish_bpm(&self, bpm: f64) -> Result<(), String> {
@@ -734,11 +982,11 @@ impl SequencerRuntime {
             }
             if let Ok(mut state) = self.control.pattern.try_lock() {
                 let active = self.control.active_pattern();
-                if state.pending_revision || boundary || !self.initialized {
-                    if let Some(next) = state.authored.get(active) {
-                        self.pattern = *next;
-                        state.pending_revision = false;
-                    }
+                if (state.pending_revision || boundary || !self.initialized)
+                    && let Some(next) = state.authored.get(active)
+                {
+                    self.pattern = *next;
+                    state.pending_revision = false;
                 }
             }
             let active_pattern = self.control.active_pattern();
@@ -770,11 +1018,13 @@ impl SequencerRuntime {
                     }
                 });
             for track in 0..MAX_TRACKS {
-                let velocity = self.pattern.velocities[track][self.step] as f64;
+                let length = usize::from(self.pattern.lengths[track]).max(1);
+                let track_step = self.step % length;
+                let velocity = self.pattern.velocities[track][track_step] as f64;
                 self.velocities[track] = velocity;
                 if velocity > 0.0 {
-                    self.pitches[track] = self.pattern.pitches_hz[track][self.step] as f64;
-                    self.gates[track] = self.pattern.gates[track][self.step] as f64 * step_frames;
+                    self.pitches[track] = self.pattern.pitches_hz[track][track_step] as f64;
+                    self.gates[track] = self.pattern.gates[track][track_step] as f64 * step_frames;
                     if self.control.track_enabled(track) {
                         self.audible_notes[track] = true;
                         let pitch = self.pitches[track];
@@ -797,7 +1047,16 @@ impl SequencerRuntime {
                     }
                 }
             }
-            self.step = (self.step + 1) % self.control.steps;
+            let cycle = self
+                .pattern
+                .lengths
+                .iter()
+                .copied()
+                .map(usize::from)
+                .max()
+                .unwrap_or(1)
+                .max(1);
+            self.step = (self.step + 1) % cycle;
             self.control.position_steps.fetch_add(1, Ordering::AcqRel);
             self.frames_until_step += step_frames;
             self.initialized = true;
@@ -1000,5 +1259,83 @@ mod tests {
         assert!(!control.track_enabled(0));
         control.toggle_mute(0).unwrap();
         assert!(control.track_enabled(0));
+    }
+    #[test]
+    fn independent_lengths_wrap_and_duplicated_patterns_do_not_alias() {
+        let control = SequencerControl::new("polymeter".into(), 120.0, 64, 4).unwrap();
+        control.add_track("Three".into()).unwrap();
+        control.add_track("Five".into()).unwrap();
+        let source = control.define_pattern("Source".into()).unwrap();
+        control
+            .set_pattern_steps(source, 0, &[1.0, 0.0, 0.0])
+            .unwrap();
+        control
+            .set_pattern_steps(source, 1, &[1.0, 0.0, 0.0, 0.0, 0.0])
+            .unwrap();
+        let copy = control.duplicate_pattern(source, "Copy".into()).unwrap();
+        control.toggle(0, 1).unwrap();
+        assert_eq!(control.pattern_at(source).unwrap().velocities[0][1], 0.0);
+        assert_eq!(control.pattern_at(copy).unwrap().velocities[0][1], 1.0);
+        control.queue_pattern(source).unwrap();
+        let mut runtime = SequencerRuntime::new(control);
+        let mut three = Vec::new();
+        let mut five = Vec::new();
+        for frame in 0..16 {
+            runtime.begin_frame(8.0);
+            if runtime.trigger(0) > 0.0 {
+                three.push(frame);
+            }
+            if runtime.trigger(1) > 0.0 {
+                five.push(frame);
+            }
+        }
+        assert_eq!(three, [0, 3, 6, 9, 12, 15]);
+        assert_eq!(five, [0, 5, 10, 15]);
+    }
+
+    #[test]
+    fn viewed_pattern_and_sixteen_step_page_are_independent_of_playback() {
+        let control = SequencerControl::new("editing".into(), 120.0, 64, 4).unwrap();
+        control.add_track("Track".into()).unwrap();
+        let playing = control.define_pattern("Playing".into()).unwrap();
+        let viewed = control.define_pattern("Viewed".into()).unwrap();
+        control.set_pattern_steps(playing, 0, &[0.0; 32]).unwrap();
+        control.set_pattern_steps(viewed, 0, &[0.0; 32]).unwrap();
+        control.view_pattern(viewed).unwrap();
+        control.execute("page:next").unwrap();
+        control.execute("toggle:1").unwrap();
+        assert_eq!(control.step_bank(), 2);
+        assert_eq!(control.pattern_at(viewed).unwrap().velocities[0][16], 1.0);
+        assert_eq!(control.pattern_at(playing).unwrap().velocities[0][16], 0.0);
+        control.execute("toggle:2").unwrap();
+        assert_eq!(control.pattern_at(viewed).unwrap().velocities[0][17], 1.0);
+        assert_eq!(control.active_pattern(), playing);
+    }
+
+    #[test]
+    fn canonical_lua_save_reload_is_deterministic_and_uses_stable_targets() {
+        let control = SequencerControl::new("persist".into(), 123.0, 64, 4).unwrap();
+        control.add_track("Bass".into()).unwrap();
+        let a = control.define_pattern("A".into()).unwrap();
+        control.set_pattern_steps(a, 0, &[1.0, 0.0, 0.5]).unwrap();
+        control.set_arrangement(&[(a, 2)]).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("meldritch2-project-{}.lua", std::process::id()));
+        control.save_project(&path).unwrap();
+        let first = std::fs::read_to_string(&path).unwrap();
+        control.save_project(&path).unwrap();
+        assert_eq!(first, std::fs::read_to_string(&path).unwrap());
+        control.clear_track(0).unwrap();
+        control.load_project(&path).unwrap();
+        assert_eq!(control.pattern_at(a).unwrap().velocities[0][2], 0.5);
+        let wrong = SequencerControl::new("wrong".into(), 123.0, 64, 4).unwrap();
+        wrong.add_track("Renamed".into()).unwrap();
+        assert!(
+            wrong
+                .load_project(&path)
+                .unwrap_err()
+                .contains("identities")
+        );
+        std::fs::remove_file(path).unwrap();
     }
 }

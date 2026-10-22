@@ -7,7 +7,7 @@ use crate::{
     event_bridge::EventUiState,
     model::PerformanceSurface,
     panel::ControlRow,
-    sequencer::{MAX_TRACKS, SequencerControl},
+    sequencer::{MAX_STEPS, MAX_TRACKS, SequencerControl},
 };
 
 /// Authoritative 42-color Lospec 500 palette:
@@ -452,7 +452,21 @@ fn compact_strips(
 
 fn steps(frame: &mut Frame, view: &SurfaceView, sequence: &SequencerControl) {
     let pattern = sequence.pattern();
-    frame.line("┌─ SEQUENCER ─────┬────┬────┬────┐", Some(31), true);
+    let first = (sequence.step_bank() / 2) * 16;
+    let viewed = sequence
+        .pattern_names()
+        .get(sequence.viewed_pattern())
+        .cloned()
+        .unwrap_or_else(|| "?".into());
+    frame.line(
+        format!(
+            "┌─ SEQUENCER · VIEW {viewed} · {:02}-{:02} ─┐",
+            first + 1,
+            (first + 16).min(MAX_STEPS)
+        ),
+        Some(31),
+        true,
+    );
     for (track, meta) in view.tracks.iter().enumerate() {
         let mut spans = vec![Span {
             text: format!(
@@ -471,9 +485,10 @@ fn steps(frame: &mut Frame, view: &SurfaceView, sequence: &SequencerControl) {
             }),
             bold: sequence.selected_track() == track,
         }];
-        for step in 0..16.min(sequence.steps) {
+        let length = usize::from(pattern.lengths[track]);
+        for step in first..(first + 16).min(length) {
             let velocity = pattern.velocities[track][step];
-            let playhead = sequence.playing() && view.events.step() == step;
+            let playhead = sequence.playing() && view.events.step() % length == step;
             let glyph = match (velocity > 0.0, velocity >= 0.85, playhead) {
                 (false, _, false) => "·",
                 (true, false, false) => "●",
@@ -495,7 +510,7 @@ fn steps(frame: &mut Frame, view: &SurfaceView, sequence: &SequencerControl) {
                 color: Some(color),
                 bold: playhead,
             });
-            if step % 4 == 3 && step != 15 {
+            if step % 4 == 3 && step != first + 15 {
                 spans.push(Span {
                     text: " ".into(),
                     color: None,
@@ -512,7 +527,9 @@ fn controls(frame: &mut Frame, view: &SurfaceView, sequence: &SequencerControl, 
     let index = sequence.selected_track().min(view.tracks.len() - 1);
     let track = &view.tracks[index];
     let pattern = sequence.pattern();
-    let step = sequence.selected_step().min(sequence.steps - 1);
+    let step = sequence
+        .selected_step()
+        .min(usize::from(pattern.lengths[index]).saturating_sub(1));
     let mut heading = format!(" {} CONTROLS ", track.label.to_uppercase());
     if track.melodic {
         heading.push_str(&format!(

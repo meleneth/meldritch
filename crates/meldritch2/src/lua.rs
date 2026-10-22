@@ -108,6 +108,50 @@ impl UserData for LuaSequencer {
                 .copy_pattern(from, to)
                 .map_err(mlua::Error::external)
         });
+        methods.add_method(
+            "duplicate_pattern",
+            |_, this, (from, name): (usize, String)| {
+                this.control
+                    .duplicate_pattern(from, name)
+                    .map_err(mlua::Error::external)
+            },
+        );
+        methods.add_method(
+            "copy_pattern_track",
+            |_, this, (from, to, track): (usize, usize, usize)| {
+                this.control
+                    .copy_pattern_track(from, to, track)
+                    .map_err(mlua::Error::external)
+            },
+        );
+        methods.add_method("view_pattern", |_, this, pattern: usize| {
+            this.control
+                .view_pattern(pattern)
+                .map_err(mlua::Error::external)
+        });
+        methods.add_method(
+            "set_pattern_length",
+            |_, this, (pattern, track, length): (usize, usize, usize)| {
+                this.control
+                    .set_pattern_length(pattern, track, length)
+                    .map_err(mlua::Error::external)
+            },
+        );
+        methods.add_method("rotate_track", |_, this, (track, amount): (usize, i32)| {
+            this.control
+                .rotate_track(track, amount)
+                .map_err(mlua::Error::external)
+        });
+        methods.add_method("execute", |_, this, command: String| {
+            this.control
+                .execute(&command)
+                .map_err(mlua::Error::external)
+        });
+        methods.add_method("save_project", |_, this, path: String| {
+            this.control
+                .save_project(std::path::Path::new(&path))
+                .map_err(mlua::Error::external)
+        });
         methods.add_method("load_project", |_, this, path: String| {
             this.control
                 .load_project(std::path::Path::new(&path))
@@ -154,6 +198,7 @@ impl UserData for LuaSequencer {
             let result = lua.create_table()?;
             result.set("step", this.control.current_step() + 1)?;
             result.set("pattern", this.control.active_pattern() + 1)?;
+            result.set("viewed_pattern", this.control.viewed_pattern() + 1)?;
             result.set("position", this.control.position_steps())?;
             result.set("playing", this.control.playing())?;
             Ok(result)
@@ -579,17 +624,23 @@ local function decorate_scope(facade, scope, prefix)
         local track=assert(sequence._tracks[track_name],"unknown sequencer track: "..tostring(track_name))
         sequence._native:set_pattern_steps(self.index,track,values)
       end
-      function pattern:notes(track_name, events)
+      function pattern:notes(track_name, events, length)
         local track=assert(sequence._tracks[track_name],"unknown sequencer track: "..tostring(track_name))
         local pitches, gates, velocities = {}, {}, {}
-        for step=1,sequence._steps do pitches[step]=440;gates[step]=0.5;velocities[step]=0 end
+        length = length or sequence._steps
+        assert(type(length)=="number" and length>=1 and length<=64 and length%1==0,"pattern length must be 1..64")
+        for step=1,length do pitches[step]=440;gates[step]=0.5;velocities[step]=0 end
         for _,event in ipairs(events) do
-          assert(type(event.step)=="number" and event.step>=1 and event.step<=sequence._steps,"note step is out of range")
+          assert(type(event.step)=="number" and event.step>=1 and event.step<=length,"note step is out of range")
           local pitch=event.frequency
           if not pitch then assert(type(event.note)=="number","note event requires note or frequency");pitch=440*2^((event.note-69)/12) end
           pitches[event.step]=pitch;gates[event.step]=event.gate or 0.5;velocities[event.step]=event.velocity or 1.0
         end
         sequence._native:set_pattern_notes(self.index,track,pitches,gates,velocities)
+      end
+      function pattern:length(track_name, length)
+        local track=assert(sequence._tracks[track_name],"unknown sequencer track: "..tostring(track_name))
+        sequence._native:set_pattern_length(self.index,track,length)
       end
       return pattern
     end
@@ -599,6 +650,30 @@ local function decorate_scope(facade, scope, prefix)
     function sequence:copy_pattern(from,to)
       self._native:copy_pattern(assert(self._patterns[from],"unknown pattern"),assert(self._patterns[to],"unknown pattern"))
     end
+    function sequence:duplicate_pattern(from,to)
+      local from_index=assert(self._patterns[from],"unknown pattern: "..tostring(from))
+      assert(not self._patterns[to],"duplicate pattern: "..tostring(to))
+      local index=self._native:duplicate_pattern(from_index,to);self._patterns[to]=index
+      local pattern={name=to,index=index}
+      function pattern:steps(track_name,values) local track=assert(sequence._tracks[track_name],"unknown track");sequence._native:set_pattern_steps(index,track,values) end
+      function pattern:notes(track_name,events,length)
+        length=length or sequence._steps;local pitches,gates,velocities={},{},{}
+        for step=1,length do pitches[step]=440;gates[step]=.5;velocities[step]=0 end
+        for _,event in ipairs(events) do local pitch=event.frequency or 440*2^((assert(event.note)-69)/12);pitches[event.step]=pitch;gates[event.step]=event.gate or .5;velocities[event.step]=event.velocity or 1 end
+        sequence._native:set_pattern_notes(index,assert(sequence._tracks[track_name],"unknown track"),pitches,gates,velocities)
+      end
+      function pattern:length(track_name,length) sequence._native:set_pattern_length(index,assert(sequence._tracks[track_name],"unknown track"),length) end
+      return pattern
+    end
+    function sequence:compose_pattern(name, selections)
+      local target=self:pattern(name)
+      for track_name,source_name in pairs(selections) do
+        self._native:copy_pattern_track(assert(self._patterns[source_name],"unknown pattern: "..tostring(source_name)),target.index,assert(self._tracks[track_name],"unknown track: "..tostring(track_name)))
+      end
+      return target
+    end
+    function sequence:view_pattern(name) self._native:view_pattern(assert(self._patterns[name],"unknown pattern: "..tostring(name))) end
+    function sequence:save_project(path) self._native:save_project(path) end
     function sequence:load_project(path) self._native:load_project(path) end
     function sequence:arrangement(sections)
       local resolved={};for _,section in ipairs(sections) do resolved[#resolved+1]={assert(self._patterns[section.pattern],"unknown pattern"),section.repeats or 1} end
@@ -620,6 +695,7 @@ local function decorate_scope(facade, scope, prefix)
     function sequence:event_kinds() return self._native:event_kinds() end
     function sequence:event_diagnostics() return self._native:event_diagnostics() end
     function sequence:state() return self._native:state() end
+    function sequence:command(command) return self._native:execute(command) end
     return sequence
   end
   function facade:connect(source, destination)
@@ -1043,6 +1119,14 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
         .map_err(|e| e.to_string())?;
     meldritch
         .set("event_ui", event_ui)
+        .map_err(|e| e.to_string())?;
+    let musical: Table = lua
+        .load(include_str!("../lua/musical.lua"))
+        .set_name("meldritch/musical.lua")
+        .eval()
+        .map_err(|e| e.to_string())?;
+    meldritch
+        .set("musical", musical)
         .map_err(|e| e.to_string())?;
     let mut table: Table = lua.load(script).eval().map_err(|e| e.to_string())?;
     if let Some(finalize) = table
