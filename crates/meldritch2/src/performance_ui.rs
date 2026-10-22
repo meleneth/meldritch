@@ -7,8 +7,10 @@ use crate::{
     event_bridge::EventUiState,
     model::PerformanceSurface,
     panel::ControlRow,
-    sequencer::{MAX_STEPS, MAX_TRACKS, SequencerControl},
+    sequencer::{MAX_STEPS, SequencerControl},
 };
+
+const SURFACE_TRACKS: usize = 8;
 
 /// Authoritative 42-color Lospec 500 palette:
 /// https://lospec.com/palette-list/lospec500
@@ -158,24 +160,24 @@ impl Frame {
 }
 
 pub(crate) struct ActivityAnimator {
-    seen: [u64; MAX_TRACKS],
-    pitch: [f64; MAX_TRACKS],
-    until: [Option<Instant>; MAX_TRACKS],
+    seen: [u64; SURFACE_TRACKS],
+    pitch: [f64; SURFACE_TRACKS],
+    until: [Option<Instant>; SURFACE_TRACKS],
 }
 
 impl Default for ActivityAnimator {
     fn default() -> Self {
         Self {
-            seen: [0; MAX_TRACKS],
-            pitch: [440.0; MAX_TRACKS],
-            until: [None; MAX_TRACKS],
+            seen: [0; SURFACE_TRACKS],
+            pitch: [440.0; SURFACE_TRACKS],
+            until: [None; SURFACE_TRACKS],
         }
     }
 }
 
 impl ActivityAnimator {
     fn update(&mut self, events: &EventUiState, now: Instant) {
-        for track in 0..MAX_TRACKS {
+        for track in 0..SURFACE_TRACKS {
             if let Some((generation, pitch, _velocity)) = events.activity(track)
                 && generation != self.seen[track]
             {

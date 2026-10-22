@@ -969,7 +969,14 @@ impl SequencerRuntime {
             return;
         }
         if self.frames_until_step <= 0.0 {
-            let boundary = self.initialized && self.step == 0;
+            let cycle = self.pattern.lengths[..self.control.track_count()]
+                .iter()
+                .copied()
+                .map(usize::from)
+                .max()
+                .unwrap_or(1)
+                .max(1);
+            let boundary = self.initialized && self.step > 0 && self.step.is_multiple_of(cycle);
             if boundary {
                 if !self.arrangement.is_empty() {
                     self.arrangement_repeats += 1;
@@ -1002,6 +1009,7 @@ impl SequencerRuntime {
             let active_pattern = self.control.active_pattern();
             if active_pattern != self.active_pattern {
                 self.active_pattern = active_pattern;
+                self.step = 0;
                 self.control
                     .events
                     .publish(EventKind::PatternChanged, sample_position, || {
@@ -1010,13 +1018,21 @@ impl SequencerRuntime {
                         }
                     });
             }
-            self.trigger_step = Some(self.step);
+            let cycle = self.pattern.lengths[..self.control.track_count()]
+                .iter()
+                .copied()
+                .map(usize::from)
+                .max()
+                .unwrap_or(1)
+                .max(1);
+            let display_step = self.step % cycle;
+            self.trigger_step = Some(display_step);
             self.control
                 .current_step
-                .store(self.step as u8, Ordering::Release);
+                .store(display_step as u8, Ordering::Release);
             let bpm = self.control.bpm().max(1.0);
             let step_frames = sample_rate * 60.0 / (bpm * self.control.steps_per_beat as f64);
-            let step = self.step;
+            let step = display_step;
             let position = self.control.position_steps.load(Ordering::Relaxed);
             self.control
                 .events
@@ -1057,14 +1073,7 @@ impl SequencerRuntime {
                     }
                 }
             }
-            let cycle = self.pattern.lengths[..self.control.track_count()]
-                .iter()
-                .copied()
-                .map(usize::from)
-                .max()
-                .unwrap_or(1)
-                .max(1);
-            self.step = (self.step + 1) % cycle;
+            self.step = self.step.wrapping_add(1);
             self.control.position_steps.fetch_add(1, Ordering::AcqRel);
             self.frames_until_step += step_frames;
             self.initialized = true;
