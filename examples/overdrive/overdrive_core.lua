@@ -261,7 +261,7 @@ instrument:performance {layout="step_grid",sequencer=sequence,project_file="over
     ["7"]="toggle:7",["8"]="toggle:8"},
   apc={pages={"steps","performance"},performance_rows={"pattern","mute","solo","track","restart","","",""},
     faders={volume_controls[1],volume_controls[2],volume_controls[3],volume_controls[4],volume_controls[5],
-      volume_controls[6],volume_controls[7],volume_controls[8],"master_level"}}}
+      volume_controls[6],volume_controls[7],volume_controls[8]},master="master_level"}}
 -- Put shared bus controls on the Pulse page without teaching the UI what a bus is.
 track_controls[6]={"tone_6","shape_6","drive_6","dry_duck","wet_duck","duck_attack","duck_release",
   "delay_feedback","delay_filter","master_threshold","master_ratio","master_attack","master_release","master_bypass"}

@@ -536,7 +536,11 @@ fn apply_authored(
             }
         }
         Input::Fader(index, value) => {
-            let id = &mapping.fader_controls[usize::from(index)];
+            let id = if index == 8 {
+                &mapping.master_control
+            } else {
+                &mapping.fader_controls[usize::from(index)]
+            };
             let handle = handles
                 .get(id)
                 .ok_or_else(|| format!("APC fader targets unknown control '{id}'"))?;
@@ -573,6 +577,7 @@ mod tests {
                 String::new(),
             ],
             fader_controls: std::array::from_fn(|_| control.into()),
+            master_control: control.into(),
         }
     }
 
@@ -704,8 +709,11 @@ mod tests {
             r#"
             local i=meldritch.instrument("fader")
             local o=i:oscillator {waveform="sine",frequency=110}
-            i:connect(o.out,i.output.left);i:connect(o.out,i.output.right)
+            local master=i:gain {gain=.5}
+            i:connect(o.out,master.input)
+            i:connect(master.out,i.output.left);i:connect(master.out,i.output.right)
             i:control {id="level",label="Level",target=o.frequency,range={80,880},curve="log"}
+            i:control {id="master",label="Master",target=master.gain,range={0,1}}
             return i
             "#,
         )
@@ -714,16 +722,19 @@ mod tests {
         let handle = machine.control_handle("level").unwrap();
         let mut handles = BTreeMap::new();
         handles.insert("level".into(), handle);
+        handles.insert("master".into(), machine.control_handle("master").unwrap());
         let sequence = SequencerControl::new("test".into(), 120.0, 16, 4).unwrap();
         for n in 0..8 {
             sequence.add_track(format!("T{n}")).unwrap();
         }
         let mut state = GridController::new();
+        let mut mapping = authored_mapping("level");
+        mapping.master_control = "master".into();
         apply_authored(
             &mut state,
             Input::Fader(0, 127),
             &sequence,
-            &authored_mapping("level"),
+            &mapping,
             &handles,
         )
         .unwrap();
@@ -736,6 +747,16 @@ mod tests {
                 .count()
                 >= 8
         );
+        apply_authored(
+            &mut state,
+            Input::Fader(8, 0),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        machine.process(&mut rendered);
+        assert_eq!(rendered, vec![0.0; 480]);
     }
 
     #[test]

@@ -292,7 +292,10 @@ pub struct PerformanceBinding {
 pub struct ApcMapping {
     pub pages: [String; 2],
     pub performance_rows: [String; 8],
-    pub fader_controls: [String; 9],
+    /// The eight channel faders remain surface-authored.
+    pub fader_controls: [String; 8],
+    /// The physically separate far-right fader is always master volume.
+    pub master_control: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

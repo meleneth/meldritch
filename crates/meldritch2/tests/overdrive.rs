@@ -176,7 +176,7 @@ fn project_loads_eight_independent_tracks_patterns_effects_and_generic_surface()
     );
     assert_eq!(machine.screens()[0].title, "Delay Lab: Overdrive");
     assert_eq!(
-        performance.apc.as_ref().unwrap().fader_controls[8],
+        performance.apc.as_ref().unwrap().master_control,
         "master_level"
     );
     fs::remove_dir_all(root).unwrap();

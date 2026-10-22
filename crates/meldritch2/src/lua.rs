@@ -1511,11 +1511,15 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                     };
                     let pages = array("pages", 2)?;
                     let rows = array("performance_rows", 8)?;
-                    let faders = array("faders", 9)?;
+                    let faders = array("faders", 8)?;
+                    let master_control: String = apc
+                        .get("master")
+                        .map_err(|_| "APC mapping requires a master volume control".to_string())?;
                     Ok::<_, String>(crate::model::ApcMapping {
                         pages: pages.try_into().unwrap(),
                         performance_rows: rows.try_into().unwrap(),
                         fader_controls: faders.try_into().unwrap(),
+                        master_control,
                     })
                 })
                 .transpose()?,

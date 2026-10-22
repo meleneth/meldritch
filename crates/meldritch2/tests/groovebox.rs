@@ -100,7 +100,8 @@ fn lua_authors_eight_tracks_four_patterns_controls_screen_and_apc_mapping() {
     );
     let apc = performance.apc.as_ref().unwrap();
     assert_eq!(apc.pages, ["steps", "performance"]);
-    assert_eq!(apc.fader_controls[8], "master_level");
+    assert_eq!(apc.master_control, "master_level");
+    assert_eq!(apc.fader_controls.len(), 8);
     let machine = compile_at_rate(&graph, SAMPLE_RATE).unwrap();
     for index in 1..=8 {
         assert!(machine.control_handle(&format!("volume_{index}")).is_some());

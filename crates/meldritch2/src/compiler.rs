@@ -2042,6 +2042,12 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 return Err(format!("APC fader targets unknown control '{id}'"));
             }
         }
+        if !controls.contains_key(&apc.master_control) {
+            return Err(format!(
+                "APC master fader targets unknown control '{}'",
+                apc.master_control
+            ));
+        }
     }
     for surface in &graph.control_surfaces {
         if surface.id.is_empty() || surface.device != "stream_deck_xl" {

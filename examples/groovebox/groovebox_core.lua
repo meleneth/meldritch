@@ -61,7 +61,7 @@ if render_arrangement then project:arrangement {{name="Foundation",pattern="Foun
 seq:start()
 box:performance {layout="step_grid",sequencer=seq,project_file="groovebox-project.lua",
   keys={F1="pattern:0",F2="pattern:1",F3="pattern:2",F4="pattern:3",Space="transport",s="start",x="stop",r="restart",R="reload",Up="track:up",Down="track:down",Left="step:previous",Right="step:next",["["]="bank:previous",["]"]="bank:next",[","]="rotate:left",["."]="rotate:right",n="pattern:next",N="pattern:previous",m="mute",o="solo",c="copy:next",d="duplicate",C="clear",j="control:next",k="control:previous",h="control:decrease",l="control:increase",["+"]="velocity:up",["-"]="velocity:down",p="pitch:up",P="pitch:down",g="gate:up",G="gate:down",S="save",["1"]="toggle:1",["2"]="toggle:2",["3"]="toggle:3",["4"]="toggle:4",["5"]="toggle:5",["6"]="toggle:6",["7"]="toggle:7",["8"]="toggle:8"},
-  apc={pages={"steps","performance"},performance_rows={"pattern","mute","solo","track","restart","","",""},faders={volume_controls[1],volume_controls[2],volume_controls[3],volume_controls[4],volume_controls[5],volume_controls[6],volume_controls[7],volume_controls[8],"master_level"}}}
+  apc={pages={"steps","performance"},performance_rows={"pattern","mute","solo","track","restart","","",""},faders={volume_controls[1],volume_controls[2],volume_controls[3],volume_controls[4],volume_controls[5],volume_controls[6],volume_controls[7],volume_controls[8]},master="master_level"}}
 local screen=box:screen("groovebox","Groovebox")
 local colors={"red","orange","yellow","green","pink","violet","blue","cyan"}
 local ui_tracks={}
