@@ -131,6 +131,7 @@ fn fixed_state_sound_contracts_keep_extremes_and_nonfinite_signals_out_of_output
         "noise",
         "svf",
         "drive",
+        "ducker",
         "envelope_follower",
         "compressor",
     ] {
