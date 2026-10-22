@@ -49,8 +49,12 @@ fn decode(bytes: &[u8]) -> Option<Input> {
 }
 
 pub fn apc_rgb(cell: u8, rgb: [u8; 3]) -> Result<[u8; 16], String> {
-    if cell >= 64 {
-        return Err("APC RGB pad out of range".into());
+    apc_rgb_range(cell, cell, rgb)
+}
+
+fn apc_rgb_range(start: u8, end: u8, rgb: [u8; 3]) -> Result<[u8; 16], String> {
+    if start > end || end >= 64 {
+        return Err("APC RGB pad range out of bounds".into());
     }
     Ok([
         0xf0,
@@ -60,8 +64,8 @@ pub fn apc_rgb(cell: u8, rgb: [u8; 3]) -> Result<[u8; 16], String> {
         0x24,
         0,
         8,
-        cell,
-        cell,
+        start,
+        end,
         rgb[0] >> 7,
         rgb[0] & 0x7f,
         rgb[1] >> 7,
@@ -72,8 +76,11 @@ pub fn apc_rgb(cell: u8, rgb: [u8; 3]) -> Result<[u8; 16], String> {
     ])
 }
 
-fn apc_rgb_frame(colors: &[[u8; 3]; 64]) -> Vec<u8> {
+fn apc_rgb_chunk(start: u8, colors: &[[u8; 3]]) -> Result<Vec<u8>, String> {
     const BYTES_PER_PAD: usize = 8;
+    if colors.is_empty() || usize::from(start) + colors.len() > 64 {
+        return Err("APC RGB chunk must address one to 64 pads".into());
+    }
     let payload_len = colors.len() * BYTES_PER_PAD;
     let mut message = Vec::with_capacity(7 + payload_len + 1);
     message.extend_from_slice(&[
@@ -85,10 +92,11 @@ fn apc_rgb_frame(colors: &[[u8; 3]; 64]) -> Vec<u8> {
         ((payload_len >> 7) & 0x7f) as u8,
         (payload_len & 0x7f) as u8,
     ]);
-    for (cell, rgb) in colors.iter().enumerate() {
+    for (offset, rgb) in colors.iter().enumerate() {
+        let cell = start + offset as u8;
         message.extend_from_slice(&[
-            cell as u8,
-            cell as u8,
+            cell,
+            cell,
             rgb[0] >> 7,
             rgb[0] & 0x7f,
             rgb[1] >> 7,
@@ -98,7 +106,7 @@ fn apc_rgb_frame(colors: &[[u8; 3]; 64]) -> Vec<u8> {
         ]);
     }
     message.push(0xf7);
-    message
+    Ok(message)
 }
 
 #[derive(Debug)]
@@ -414,8 +422,14 @@ fn shutdown_animation(output: &mut MidiOutputConnection) -> Result<(), String> {
                 shutdown_color(cell, frame * 2 + 12)
             };
         }
-        if let Err(error) = output.send(&apc_rgb_frame(&colors)) {
-            first_error.get_or_insert_with(|| error.to_string());
+        // Keep each SysEx transfer comfortably below the device/USB packet
+        // boundary.  The controller truncates a 64-record message after the
+        // first half even though the protocol's length field can represent it.
+        for (chunk, colors) in colors.chunks(16).enumerate() {
+            let message = apc_rgb_chunk((chunk * 16) as u8, colors).expect("valid APC grid chunk");
+            if let Err(error) = output.send(&message) {
+                first_error.get_or_insert_with(|| error.to_string());
+            }
         }
         thread::sleep(FRAME_TIME);
     }
@@ -423,12 +437,18 @@ fn shutdown_animation(output: &mut MidiOutputConnection) -> Result<(), String> {
     // the controller time to consume the animation before its definitive
     // all-black state without extending shutdown noticeably.
     for pass in 0..2 {
-        if let Err(error) = output.send(&apc_rgb_frame(&[[0; 3]; 64])) {
+        if let Err(error) =
+            output.send(&apc_rgb_range(0, 63, [0, 0, 0]).expect("valid full APC grid clear"))
+        {
             first_error.get_or_insert_with(|| error.to_string());
         }
+        thread::sleep(Duration::from_millis(20));
         // The protocol defines exactly eight track and eight scene-launch LEDs.
         for note in (100..=107).chain(112..=119) {
             if let Err(error) = output.send(&[0x90, note, 0]) {
+                first_error.get_or_insert_with(|| error.to_string());
+            }
+            if let Err(error) = output.send(&[0x80, note, 0]) {
                 first_error.get_or_insert_with(|| error.to_string());
             }
         }
@@ -654,14 +674,18 @@ mod tests {
     }
 
     #[test]
-    fn bulk_rgb_frame_addresses_every_pad_in_one_protocol_message() {
-        let colors = std::array::from_fn(|cell| [cell as u8, 255 - cell as u8, 17]);
-        let message = apc_rgb_frame(&colors);
-        assert_eq!(&message[..7], &[0xf0, 0x47, 0x7f, 0x4f, 0x24, 4, 0]);
-        assert_eq!(message.len(), 520);
-        assert_eq!(&message[7..15], &[0, 0, 0, 0, 1, 127, 0, 17]);
-        assert_eq!(&message[511..519], &[63, 63, 0, 63, 1, 64, 0, 17]);
-        assert_eq!(message[519], 0xf7);
+    fn bounded_rgb_chunk_and_range_clear_follow_akai_protocol() {
+        let colors =
+            std::array::from_fn::<_, 16, _>(|offset| [offset as u8, 255 - offset as u8, 17]);
+        let message = apc_rgb_chunk(32, &colors).unwrap();
+        assert_eq!(&message[..7], &[0xf0, 0x47, 0x7f, 0x4f, 0x24, 1, 0]);
+        assert_eq!(message.len(), 136);
+        assert_eq!(&message[7..15], &[32, 32, 0, 0, 1, 127, 0, 17]);
+        assert_eq!(&message[127..135], &[47, 47, 0, 15, 1, 112, 0, 17]);
+        assert_eq!(message[135], 0xf7);
+
+        let clear = apc_rgb_range(0, 63, [0, 0, 0]).unwrap();
+        assert_eq!(&clear[5..9], &[0, 8, 0, 63]);
     }
     #[test]
     fn arrow_buttons_navigate_tracks_and_all_sixteen_steps() {
