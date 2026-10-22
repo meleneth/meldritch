@@ -1512,14 +1512,68 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                     let pages = array("pages", 2)?;
                     let rows = array("performance_rows", 8)?;
                     let faders = array("faders", 8)?;
+                    let optional_array = |field: &str| -> Result<[String; 8], String> {
+                        match apc.get::<Option<Table>>(field).map_err(|e| e.to_string())? {
+                            Some(_) => array(field, 8).map(|values| values.try_into().unwrap()),
+                            None => Ok(std::array::from_fn(|_| String::new())),
+                        }
+                    };
                     let master_control: String = apc
                         .get("master")
                         .map_err(|_| "APC mapping requires a master volume control".to_string())?;
+                    let piano_roll = apc
+                        .get::<Option<Table>>("piano_roll")
+                        .map_err(|e| e.to_string())?
+                        .map(|roll| {
+                            let track_names = native.control.track_names();
+                            let track = |name: String| {
+                                track_names
+                                    .iter()
+                                    .position(|candidate| candidate == &name)
+                                    .ok_or_else(|| {
+                                        format!("APC piano roll targets unknown track '{name}'")
+                                    })
+                            };
+                            let drums = roll
+                                .get::<Table>("drums")
+                                .map_err(|e| e.to_string())?
+                                .sequence_values::<String>()
+                                .map(|name| name.map_err(|e| e.to_string()).and_then(track))
+                                .collect::<Result<Vec<_>, _>>()?;
+                            let scale = roll
+                                .get::<Table>("scale")
+                                .map_err(|e| e.to_string())?
+                                .sequence_values::<u8>()
+                                .collect::<Result<Vec<_>, _>>()
+                                .map_err(|e| e.to_string())?;
+                            if drums.len() != 3 || scale.len() != 5 {
+                                return Err(
+                                    "APC piano_roll requires three drums and five scale degrees"
+                                        .into(),
+                                );
+                            }
+                            native
+                                .control
+                                .set_key_root(roll.get("root").map_err(|e| e.to_string())?)?;
+                            let melodic_track =
+                                track(roll.get("track").map_err(|e| e.to_string())?)?;
+                            native.control.set_key_track(melodic_track)?;
+                            native.control.select_track(melodic_track)?;
+                            Ok::<_, String>(crate::model::ApcPianoRoll {
+                                drum_tracks: drums.try_into().unwrap(),
+                                melodic_track,
+                                scale: scale.try_into().unwrap(),
+                            })
+                        })
+                        .transpose()?;
                     Ok::<_, String>(crate::model::ApcMapping {
                         pages: pages.try_into().unwrap(),
                         performance_rows: rows.try_into().unwrap(),
                         fader_controls: faders.try_into().unwrap(),
                         master_control,
+                        piano_roll,
+                        track_button_commands: optional_array("track_buttons")?,
+                        scene_button_commands: optional_array("scene_buttons")?,
                     })
                 })
                 .transpose()?,

@@ -459,6 +459,7 @@ pub struct ControlHandle {
     min: f64,
     max: f64,
     scale: ControlScale,
+    hardware_pickup: Arc<std::sync::atomic::AtomicI8>,
 }
 
 impl ControlHandle {
@@ -482,6 +483,13 @@ impl ControlHandle {
     }
     pub fn override_value(&self) -> Option<f64> {
         self.parameters[0].override_value()
+    }
+    pub(crate) fn set_hardware_pickup(&self, direction: i8) {
+        self.hardware_pickup
+            .store(direction.clamp(-1, 2), Ordering::Release);
+    }
+    pub(crate) fn hardware_pickup(&self) -> i8 {
+        self.hardware_pickup.load(Ordering::Acquire)
     }
     pub fn publish(&self, value: f64) -> Result<(), String> {
         if !value.is_finite() || value < self.min || value > self.max {
@@ -1236,6 +1244,7 @@ impl Machine {
             min: binding.min,
             max: binding.max,
             scale: binding.scale,
+            hardware_pickup: Arc::new(std::sync::atomic::AtomicI8::new(2)),
         })
     }
     pub fn set_override(&self, id: &ParameterId, value: Option<f64>) -> Result<(), String> {
@@ -2047,6 +2056,28 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 "APC master fader targets unknown control '{}'",
                 apc.master_control
             ));
+        }
+        if let Some(roll) = &apc.piano_roll {
+            let tracks = graph
+                .performance
+                .as_ref()
+                .expect("validated performance")
+                .sequencer
+                .track_count();
+            if roll
+                .drum_tracks
+                .iter()
+                .chain(std::iter::once(&roll.melodic_track))
+                .any(|track| *track >= tracks)
+            {
+                return Err("APC piano roll contains an invalid track index".into());
+            }
+            if roll.scale.windows(2).any(|pair| pair[0] >= pair[1]) || roll.scale[4] > 24 {
+                return Err(
+                    "APC piano roll scale must contain five ascending offsets up to 24 semitones"
+                        .into(),
+                );
+            }
         }
     }
     for surface in &graph.control_surfaces {

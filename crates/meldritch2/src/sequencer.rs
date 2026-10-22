@@ -63,6 +63,9 @@ pub struct SequencerControl {
     selected_track: AtomicU8,
     selected_step: AtomicU8,
     step_bank: AtomicU8,
+    step_zoom: AtomicU8,
+    key_root: AtomicU8,
+    key_track: AtomicU8,
     status: Mutex<String>,
     arrangement: Mutex<Vec<(usize, u32)>>,
     position_steps: std::sync::atomic::AtomicU64,
@@ -117,6 +120,9 @@ impl SequencerControl {
             selected_track: AtomicU8::new(0),
             selected_step: AtomicU8::new(0),
             step_bank: AtomicU8::new(0),
+            step_zoom: AtomicU8::new(1),
+            key_root: AtomicU8::new(36),
+            key_track: AtomicU8::new(0),
             status: Mutex::new("Ready".into()),
             arrangement: Mutex::new(Vec::new()),
             position_steps: std::sync::atomic::AtomicU64::new(0),
@@ -234,9 +240,11 @@ impl SequencerControl {
         }
         if gates
             .iter()
-            .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
+            .any(|v| !v.is_finite() || !(0.0..=MAX_STEPS as f32).contains(v))
         {
-            return Err("step gates must be finite values in 0..1".into());
+            return Err(format!(
+                "step gates must be finite durations in 0..={MAX_STEPS} steps"
+            ));
         }
         self.set_pattern_steps(pattern, track, velocities)?;
         let mut state = self
@@ -381,6 +389,43 @@ impl SequencerControl {
         state.pending_revision = true;
         Ok(())
     }
+    pub fn set_note(
+        &self,
+        track: usize,
+        step: usize,
+        pitch_hz: f32,
+        velocity: f32,
+        gate_steps: f32,
+    ) -> Result<(), String> {
+        if track >= self.track_count() || step >= MAX_STEPS {
+            return Err("sequencer note target is out of range".into());
+        }
+        if !pitch_hz.is_finite()
+            || !(1.0..=24_000.0).contains(&pitch_hz)
+            || !velocity.is_finite()
+            || !(0.0..=1.0).contains(&velocity)
+            || !gate_steps.is_finite()
+            || !(0.0..=MAX_STEPS as f32).contains(&gate_steps)
+        {
+            return Err("sequencer note values are invalid".into());
+        }
+        let mut state = self
+            .pattern
+            .lock()
+            .map_err(|_| "sequencer pattern state poisoned")?;
+        let pattern = state
+            .authored
+            .get_mut(self.viewed_pattern())
+            .ok_or("unknown viewed pattern")?;
+        if step >= usize::from(pattern.lengths[track]) {
+            return Err("sequencer note is beyond the track pattern length".into());
+        }
+        pattern.pitches_hz[track][step] = pitch_hz;
+        pattern.velocities[track][step] = velocity;
+        pattern.gates[track][step] = gate_steps;
+        state.pending_revision = true;
+        Ok(())
+    }
     pub fn pattern(&self) -> Pattern {
         let active = self.viewed_pattern();
         self.pattern
@@ -445,6 +490,52 @@ impl SequencerControl {
     }
     pub fn step_bank(&self) -> usize {
         usize::from(self.step_bank.load(Ordering::Acquire))
+    }
+    pub fn step_zoom(&self) -> usize {
+        usize::from(self.step_zoom.load(Ordering::Acquire))
+    }
+    pub fn key_root(&self) -> u8 {
+        self.key_root.load(Ordering::Acquire)
+    }
+    pub fn set_key_root(&self, root: u8) -> Result<(), String> {
+        if root > 120 {
+            return Err("sequencer key root must be a MIDI note in 0..120".into());
+        }
+        self.key_root.store(root, Ordering::Release);
+        Ok(())
+    }
+    pub fn set_key_track(&self, track: usize) -> Result<(), String> {
+        if track >= self.track_count() {
+            return Err("sequencer key track is out of range".into());
+        }
+        self.key_track.store(track as u8, Ordering::Release);
+        Ok(())
+    }
+    fn transpose_key(&self, semitones: i8) -> Result<(), String> {
+        let previous = self.key_root();
+        let next = (i16::from(previous) + i16::from(semitones)).clamp(0, 120) as u8;
+        let actual = i16::from(next) - i16::from(previous);
+        if actual == 0 {
+            return Ok(());
+        }
+        let ratio = 2.0_f32.powf(actual as f32 / 12.0);
+        let mut state = self
+            .pattern
+            .lock()
+            .map_err(|_| "sequencer pattern state poisoned")?;
+        let track = usize::from(self.key_track.load(Ordering::Acquire));
+        for pattern in &mut state.authored {
+            for step in 0..usize::from(pattern.lengths[track]) {
+                if pattern.velocities[track][step] > 0.0 {
+                    pattern.pitches_hz[track][step] =
+                        (pattern.pitches_hz[track][step] * ratio).clamp(1.0, 24_000.0);
+                }
+            }
+        }
+        state.pending_revision = true;
+        self.key_root.store(next, Ordering::Release);
+        self.set_status(format!("Key root MIDI {next}"));
+        Ok(())
     }
     pub fn select_track(&self, track: usize) -> Result<(), String> {
         if track >= self.track_names().len() {
@@ -523,6 +614,44 @@ impl SequencerControl {
         }
         if command == "clear" {
             return self.clear_track(self.selected_track());
+        }
+        if command == "zoom:in" || command == "zoom:out" {
+            let current = self.step_zoom();
+            let next = if command.ends_with("in") {
+                (current / 2).max(1)
+            } else {
+                (current * 2).min(8)
+            };
+            self.step_zoom.store(next as u8, Ordering::Release);
+            self.set_status(format!("Piano roll zoom: {next} step(s) per cell"));
+            return Ok(());
+        }
+        if command == "key:up" || command == "key:down" {
+            return self.transpose_key(if command.ends_with("up") { 1 } else { -1 });
+        }
+        if command == "length:increase" || command == "length:decrease" {
+            let pattern = self.viewed_pattern();
+            let track = self.selected_track();
+            let current = usize::from(self.pattern().lengths[track]);
+            let next = if command.ends_with("increase") {
+                (current + 8).min(MAX_STEPS)
+            } else {
+                current.saturating_sub(8).max(8)
+            };
+            self.set_pattern_length(pattern, track, next)?;
+            self.set_status(format!("Pattern length: {next} steps"));
+            return Ok(());
+        }
+        if command == "view:next" || command == "view:previous" {
+            let length = usize::from(self.pattern().lengths[self.selected_track()]);
+            let banks_per_view = self.step_zoom();
+            let max_bank = ((length.saturating_sub(1)) / (8 * banks_per_view)) * banks_per_view;
+            let next = if command.ends_with("next") {
+                (self.step_bank() + banks_per_view).min(max_bank)
+            } else {
+                self.step_bank().saturating_sub(banks_per_view)
+            };
+            return self.set_step_bank(next);
         }
         if command == "copy:next" {
             let active = self.viewed_pattern();
@@ -646,7 +775,8 @@ impl SequencerControl {
                 (pattern.velocities[track][step] + velocity).clamp(0.0, 1.0);
             pattern.pitches_hz[track][step] =
                 (pattern.pitches_hz[track][step] * pitch).clamp(1.0, 24_000.0);
-            pattern.gates[track][step] = (pattern.gates[track][step] + gate).clamp(0.0, 1.0);
+            pattern.gates[track][step] =
+                (pattern.gates[track][step] + gate).clamp(0.0, MAX_STEPS as f32);
             state.pending_revision = true;
             Ok(())
         };
@@ -785,7 +915,7 @@ impl SequencerControl {
                         || !pitch.is_finite()
                         || !(1.0..=24_000.0).contains(&pitch)
                         || !gate.is_finite()
-                        || !(0.0..=1.0).contains(&gate)
+                        || !(0.0..=MAX_STEPS as f32).contains(&gate)
                     {
                         return Err(format!(
                             "saved pattern '{name}' track '{track_name}' contains an invalid event"

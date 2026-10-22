@@ -86,6 +86,16 @@ impl SurfaceRuntime {
         self
     }
 
+    pub(crate) fn with_shared_focus(
+        mut self,
+        controls: Vec<(ControlHandle, f64)>,
+        selected: Arc<std::sync::atomic::AtomicUsize>,
+        pickup: Arc<std::sync::Mutex<crate::panel::PickupState>>,
+    ) -> Self {
+        self.focus = Some(Panel::with_selection_and_pickup(controls, selected, pickup));
+        self
+    }
+
     pub fn page(&self) -> &str {
         &self.page
     }

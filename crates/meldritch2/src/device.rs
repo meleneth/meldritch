@@ -148,6 +148,7 @@ pub struct DeviceOutput {
     control_surfaces: Vec<ControlSurface>,
     focus_controls: Vec<(ControlHandle, f64)>,
     focus_selection: Arc<std::sync::atomic::AtomicUsize>,
+    focus_pickup: Arc<std::sync::Mutex<crate::panel::PickupState>>,
     midi_router: MidiRouter,
     timed_midi_router: Option<TimedMidiRouter>,
     errors: Arc<AtomicU64>,
@@ -266,6 +267,7 @@ impl DeviceOutput {
             })
             .collect();
         let focus_selection = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let focus_pickup = Arc::new(std::sync::Mutex::new(crate::panel::PickupState::default()));
         let focus_controls = performance
             .as_ref()
             .and_then(|performance| performance.control_focus.as_ref())
@@ -290,6 +292,7 @@ impl DeviceOutput {
             MidiRouter::from_machine(&machine).with_focus(
                 focus_controls.clone(),
                 Arc::clone(&focus_selection),
+                Arc::clone(&focus_pickup),
                 &focus.midi_ccs,
             )
         } else {
@@ -374,6 +377,7 @@ impl DeviceOutput {
             control_surfaces,
             focus_controls,
             focus_selection,
+            focus_pickup,
             midi_router,
             timed_midi_router,
             errors,
@@ -403,6 +407,9 @@ impl DeviceOutput {
     }
     pub(crate) fn focus_selection(&self) -> Arc<std::sync::atomic::AtomicUsize> {
         Arc::clone(&self.focus_selection)
+    }
+    pub(crate) fn focus_pickup(&self) -> Arc<std::sync::Mutex<crate::panel::PickupState>> {
+        Arc::clone(&self.focus_pickup)
     }
     pub fn screens(&self) -> &[Screen] {
         &self.screens

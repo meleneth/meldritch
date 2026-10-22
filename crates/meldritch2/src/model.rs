@@ -296,6 +296,19 @@ pub struct ApcMapping {
     pub fader_controls: [String; 8],
     /// The physically separate far-right fader is always master volume.
     pub master_control: String,
+    /// Optional authored hybrid drum/piano-roll projection of the sequencer.
+    pub piano_roll: Option<ApcPianoRoll>,
+    /// Semantic commands for the eight red track and eight green scene buttons.
+    pub track_button_commands: [String; 8],
+    pub scene_button_commands: [String; 8],
+}
+
+#[derive(Clone, Debug)]
+pub struct ApcPianoRoll {
+    pub drum_tracks: [usize; 3],
+    pub melodic_track: usize,
+    /// Ascending semitone offsets projected bottom-to-top from the shared key.
+    pub scale: [u8; 5],
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -142,10 +142,49 @@ fn delay_lab_surface_drives_real_controls_and_audio_without_hardware() {
             .unwrap()
             .controls
             .len(),
-        8
+        18
     );
     let apc = graph.performance.as_ref().unwrap().apc.as_ref().unwrap();
     assert_eq!(apc.master_control, "master_volume");
+    let roll = apc.piano_roll.as_ref().expect("authored APC piano roll");
+    assert_eq!(roll.drum_tracks, [0, 1, 2]);
+    assert_eq!(roll.melodic_track, 3);
+    assert_eq!(roll.scale, [0, 2, 3, 5, 7]);
+    let authored = &graph
+        .subpatches
+        .values()
+        .next()
+        .expect("instrument definition")
+        .graph;
+    assert_eq!(
+        authored
+            .modules
+            .iter()
+            .filter(|module| module.kind == "sample_player")
+            .count(),
+        3
+    );
+    let kick_sidechains = authored
+        .connections
+        .iter()
+        .filter(|connection| {
+            connection.from.module.ends_with("sample_player_1")
+                && connection.from.port == "left"
+                && connection.to.module.contains("ducker")
+                && connection.to.port == "sidechain"
+        })
+        .count();
+    assert_eq!(
+        kick_sidechains, 2,
+        "audible kick must feed both duck detectors"
+    );
+    assert!(
+        authored.connections.iter().all(|connection| {
+            !(connection.from.module.contains("sample_player")
+                && connection.to.module.contains("stereo_delay"))
+        }),
+        "drums must remain outside the delay path"
+    );
     assert_eq!(
         graph.devices.apc_mini.as_deref(),
         Some("APC mini mk2:APC mini mk2 Control")
@@ -153,7 +192,7 @@ fn delay_lab_surface_drives_real_controls_and_audio_without_hardware() {
     let (mut machine, mut runtime) = runtime(&graph, 8_000.0);
     let mut adapter = SimulatedAdapter::default();
     adapter.connect(&mut runtime);
-    assert_eq!(runtime.focused_control_id(), Some("left_time"));
+    assert_eq!(runtime.focused_control_id(), Some("source_level"));
     adapter
         .input(
             &mut runtime,
@@ -212,7 +251,7 @@ fn delay_lab_surface_drives_real_controls_and_audio_without_hardware() {
             .iter()
             .chain(&silent_right)
             .all(|sample| sample.abs() < 1e-12),
-        "APC master destination must be after the complete stereo delay path"
+        "APC master destination must be after the complete dry-drum and delayed-bass mix"
     );
 }
 

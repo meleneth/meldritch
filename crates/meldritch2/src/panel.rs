@@ -1,5 +1,5 @@
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
 };
 
@@ -14,6 +14,21 @@ pub enum Gesture {
     Increase,
     Minimum,
     Maximum,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PickupDirection {
+    Below,
+    Captured,
+    Above,
+    Unknown,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct PickupState {
+    previous: Option<f64>,
+    captured: bool,
+    direction: Option<std::cmp::Ordering>,
 }
 
 #[derive(Clone)]
@@ -44,6 +59,9 @@ impl ControlRow {
     pub fn value(&self) -> f64 {
         self.handle.override_value().unwrap_or(self.authored_value)
     }
+    pub fn hardware_pickup(&self) -> i8 {
+        self.handle.hardware_pickup()
+    }
     pub(crate) fn publish(&self, value: f64) -> Result<(), String> {
         self.handle.publish(value)
     }
@@ -71,6 +89,7 @@ impl ControlRow {
 pub struct Panel {
     rows: Vec<ControlRow>,
     selected: Arc<AtomicUsize>,
+    pickup: Arc<Mutex<PickupState>>,
 }
 
 impl Panel {
@@ -82,12 +101,25 @@ impl Panel {
         controls: Vec<(ControlHandle, f64)>,
         selected: Arc<AtomicUsize>,
     ) -> Self {
+        Self::with_selection_and_pickup(
+            controls,
+            selected,
+            Arc::new(Mutex::new(PickupState::default())),
+        )
+    }
+
+    pub(crate) fn with_selection_and_pickup(
+        controls: Vec<(ControlHandle, f64)>,
+        selected: Arc<AtomicUsize>,
+        pickup: Arc<Mutex<PickupState>>,
+    ) -> Self {
         Self {
             rows: controls
                 .into_iter()
                 .map(|(handle, authored_value)| ControlRow::new(handle, authored_value))
                 .collect(),
             selected,
+            pickup,
         }
     }
 
@@ -109,7 +141,30 @@ impl Panel {
             .position(|row| row.id() == id)
             .ok_or_else(|| format!("unknown focus control '{id}'"))?;
         self.selected.store(index, Ordering::Release);
+        self.reset_pickup();
         Ok(())
+    }
+
+    pub fn pickup_direction(&self) -> PickupDirection {
+        let Ok(state) = self.pickup.lock() else {
+            return PickupDirection::Unknown;
+        };
+        if state.captured {
+            PickupDirection::Captured
+        } else {
+            match state.direction {
+                Some(std::cmp::Ordering::Less) => PickupDirection::Below,
+                Some(std::cmp::Ordering::Greater) => PickupDirection::Above,
+                Some(std::cmp::Ordering::Equal) => PickupDirection::Captured,
+                None => PickupDirection::Unknown,
+            }
+        }
+    }
+
+    fn reset_pickup(&self) {
+        if let Ok(mut state) = self.pickup.lock() {
+            *state = PickupState::default();
+        }
     }
 
     pub fn publish_selected_normalized(&self, normalized: f64) -> Result<(), String> {
@@ -119,6 +174,28 @@ impl Panel {
         let row = &self.rows[index];
         let (min, max) = row.range();
         let normalized = normalized.clamp(0.0, 1.0);
+        let current = if row.handle.scale() == ControlScale::Logarithmic {
+            (row.value() / min).ln() / (max / min).ln()
+        } else {
+            (row.value() - min) / (max - min)
+        }
+        .clamp(0.0, 1.0);
+        let mut pickup = self
+            .pickup
+            .lock()
+            .map_err(|_| "control pickup state poisoned")?;
+        let crossed = pickup
+            .previous
+            .is_some_and(|previous| (previous - current) * (normalized - current) <= 0.0);
+        if !pickup.captured && !crossed && (normalized - current).abs() > 0.025 {
+            pickup.previous = Some(normalized);
+            pickup.direction = normalized.partial_cmp(&current);
+            return Ok(());
+        }
+        pickup.captured = true;
+        pickup.previous = Some(normalized);
+        pickup.direction = Some(std::cmp::Ordering::Equal);
+        drop(pickup);
         let value = if row.handle.scale() == ControlScale::Logarithmic {
             min * (max / min).powf(normalized)
         } else {
@@ -135,10 +212,12 @@ impl Panel {
             Gesture::Previous => {
                 let selected = self.selected().unwrap_or(0).saturating_sub(1);
                 self.selected.store(selected, Ordering::Release);
+                self.reset_pickup();
             }
             Gesture::Next => {
                 let selected = (self.selected().unwrap_or(0) + 1).min(self.rows.len() - 1);
                 self.selected.store(selected, Ordering::Release);
+                self.reset_pickup();
             }
             Gesture::Decrease | Gesture::Increase | Gesture::Minimum | Gesture::Maximum => {
                 let selected = self.selected().unwrap_or(0);
@@ -151,7 +230,7 @@ impl Panel {
 
 #[cfg(test)]
 mod tests {
-    use super::{Gesture, Panel};
+    use super::{Gesture, Panel, PickupDirection};
     use crate::{compiler::compile, lua};
 
     #[test]
@@ -204,5 +283,21 @@ mod tests {
         assert!((panel.rows()[0].value() - 0.76).abs() < 1e-12);
         handle.clear().unwrap();
         assert_eq!(panel.rows()[0].value(), authored);
+    }
+
+    #[test]
+    fn physical_control_must_pick_up_current_value_before_publishing() {
+        let graph = lua::read(include_str!("../examples/10-midi-control.lua")).unwrap();
+        let machine = compile(&graph).unwrap();
+        let handle = machine.control_handle("level").unwrap();
+        let authored = machine.effective_value(handle.target()).unwrap();
+        let panel = Panel::new(vec![(handle.clone(), authored)]);
+        panel.publish_selected_normalized(1.0).unwrap();
+        assert_eq!(handle.override_value(), None);
+        assert_eq!(panel.pickup_direction(), PickupDirection::Above);
+        panel.publish_selected_normalized(authored).unwrap();
+        assert_eq!(panel.pickup_direction(), PickupDirection::Captured);
+        panel.publish_selected_normalized(0.8).unwrap();
+        assert_eq!(handle.override_value(), Some(0.8));
     }
 }

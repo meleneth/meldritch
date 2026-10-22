@@ -19,7 +19,7 @@ use crate::{
     midi::{TimedMidiError, TimedMidiRouter},
     midi_device::MidiInputSession,
     navigation::NavigationRuntime,
-    panel::{Gesture, Panel},
+    panel::{Gesture, Panel, PickupDirection},
     performance_ui::{ColorMode, Frame, LOSPEC500},
     screen_panel::{ScreenPanel, WidgetView},
 };
@@ -33,6 +33,78 @@ fn terminal_color(index: usize, mode: ColorMode) -> Option<Color> {
         )),
         ColorMode::Mono => None,
     }
+}
+
+fn fit_cell(mut text: String, width: usize) -> String {
+    let count = text.chars().count();
+    if count > width {
+        text = text
+            .chars()
+            .take(width.saturating_sub(1))
+            .collect::<String>()
+            + "…";
+    } else {
+        text.push_str(&" ".repeat(width - count));
+    }
+    text
+}
+
+fn control_focus_lines(panel: &Panel, terminal_width: usize) -> Vec<String> {
+    let mut inner = terminal_width.saturating_sub(4).clamp(36, 98);
+    let columns = usize::from(inner >= 72) + 1;
+    if columns == 2 && inner.is_multiple_of(2) {
+        inner -= 1;
+    }
+    let gap = columns - 1;
+    let cell_width = (inner - gap) / columns;
+    let mut lines = vec![format!("┌{}┐", "─".repeat(inner))];
+    lines.push(format!(
+        "│{}│",
+        fit_cell(" DELAY LAB CONTROLS".into(), inner)
+    ));
+    lines.push(format!("├{}┤", "─".repeat(inner)));
+    let selected = panel.selected();
+    for start in (0..panel.rows().len()).step_by(columns) {
+        let mut cells = Vec::with_capacity(columns);
+        for offset in 0..columns {
+            let index = start + offset;
+            let Some(row) = panel.rows().get(index) else {
+                cells.push(" ".repeat(cell_width));
+                continue;
+            };
+            let (min, max) = row.range();
+            let normalized = ((row.value() - min) / (max - min)).clamp(0.0, 1.0);
+            let label_width = if columns == 2 { 14 } else { 20 };
+            let bar_width = cell_width.saturating_sub(label_width + 13).max(4);
+            let filled = (normalized * bar_width as f64).round() as usize;
+            let pickup = match row.hardware_pickup() {
+                -1 => "↑",
+                0 => "◆",
+                1 => "↓",
+                _ if selected == Some(index) => match panel.pickup_direction() {
+                    PickupDirection::Below => "↑",
+                    PickupDirection::Above => "↓",
+                    PickupDirection::Captured => "◆",
+                    PickupDirection::Unknown => "○",
+                },
+                _ => " ",
+            };
+            let label = fit_cell(row.label().to_owned(), label_width);
+            let marker = if selected == Some(index) { ">" } else { " " };
+            cells.push(fit_cell(
+                format!(
+                    "{marker}{label}[{}{}] {:>7.3} {pickup}",
+                    "█".repeat(filled),
+                    "░".repeat(bar_width - filled),
+                    row.value()
+                ),
+                cell_width,
+            ));
+        }
+        lines.push(format!("│{}│", cells.join(" ")));
+    }
+    lines.push(format!("└{}┘", "─".repeat(inner)));
+    lines
 }
 
 fn draw_frame(out: &mut impl Write, frame: &Frame, mode: ColorMode) -> Result<(), String> {
@@ -520,23 +592,20 @@ fn draw(
                     Ok(())
                 }
                 WidgetView::ControlFocus => {
-                    let Some(selected) = panel.selected() else {
+                    if panel.selected().is_none() {
                         queue!(
                             out,
                             Print("┌─ PARAMETER ─┐\r\n│ unavailable │\r\n└─────────────┘\r\n")
                         )
                         .map_err(|error| error.to_string())?;
                         continue;
-                    };
-                    let row = &panel.rows()[selected];
-                    let (min, max) = row.range();
-                    let normalized = ((row.value() - min) / (max - min)).clamp(0.0, 1.0);
-                    let filled = (normalized * 32.0).round() as usize;
-                    queue!(out, Print(format!(
-                        "┌─ SELECTED PARAMETER ─────────────────────┐\r\n│ {:<38} │\r\n│ [{}{}] │\r\n│ {:>10.4}   {:>10.4} … {:<10.4} │\r\n└─────────────────────────────────────────┘\r\n",
-                        row.label(), "█".repeat(filled), "░".repeat(32 - filled), row.value(), min, max
-                    )))
-                    .map_err(|error| error.to_string())
+                    }
+                    let width = terminal::size().map_or(80, |(width, _)| usize::from(width));
+                    for line in control_focus_lines(panel, width) {
+                        queue!(out, Print(line), Print("\r\n"))
+                            .map_err(|error| error.to_string())?;
+                    }
+                    Ok(())
                 }
                 WidgetView::PerformanceStatus => {
                     if let Some(performance) = output.performance() {
@@ -682,7 +751,11 @@ pub fn perform(
                     output.controls(),
                     output.performance().cloned(),
                 )
-                .with_focus(output.focus_controls(), output.focus_selection()),
+                .with_shared_focus(
+                    output.focus_controls(),
+                    output.focus_selection(),
+                    output.focus_pickup(),
+                ),
             )
         })
         .collect::<Vec<_>>();
@@ -709,7 +782,11 @@ pub fn perform(
     if let (Some(screens), Some(events)) = (&screens, &mut events) {
         events.mount_screen(screens.current_id())?;
     }
-    let mut panel = Panel::with_selection(output.focus_controls(), output.focus_selection());
+    let mut panel = Panel::with_selection_and_pickup(
+        output.focus_controls(),
+        output.focus_selection(),
+        output.focus_pickup(),
+    );
     let _terminal = Terminal::enter()?;
     draw(
         &panel,
@@ -967,7 +1044,10 @@ pub fn perform(
 mod tests {
     use crossterm::event::KeyCode;
 
-    use super::{TuiKeyboard, dispatch_performance_binding, navigation_key, terminal_color};
+    use super::{
+        TuiKeyboard, control_focus_lines, dispatch_performance_binding, navigation_key,
+        terminal_color,
+    };
     use crate::{
         compiler::compile,
         live_notes::live_note_queue,
@@ -999,6 +1079,31 @@ mod tests {
             terminal_color(4, ColorMode::Ansi256),
             Some(crossterm::style::Color::AnsiValue(_))
         ));
+    }
+
+    #[test]
+    fn focused_control_bank_has_aligned_borders_at_supported_widths() {
+        let graph = lua::read(include_str!("../examples/09-controls.lua")).unwrap();
+        let machine = compile(&graph).unwrap();
+        let controls = machine
+            .control_ids()
+            .map(|id| {
+                let handle = machine.control_handle(id).unwrap();
+                let value = machine.effective_value(handle.target()).unwrap();
+                (handle, value)
+            })
+            .collect();
+        let panel = crate::panel::Panel::new(controls);
+        for width in [80, 100, 120] {
+            let lines = control_focus_lines(&panel, width);
+            let expected = lines[0].chars().count();
+            assert!(lines.iter().all(|line| line.chars().count() == expected));
+            assert!(
+                lines
+                    .iter()
+                    .all(|line| line.ends_with(['┐', '│', '┤', '┘']))
+            );
+        }
     }
 
     #[test]

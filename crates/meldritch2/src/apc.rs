@@ -25,10 +25,13 @@ pub const RIGHT_NOTE: u8 = 107;
 pub const PLAY_STOP_NOTE: u8 = 112;
 pub const RESTART_NOTE: u8 = 113;
 pub const CLEAR_NOTE: u8 = 114;
+const BUTTON_NOTES: [u8; 16] = [
+    100, 101, 102, 103, 104, 105, 106, 107, 112, 113, 114, 115, 116, 117, 118, 119,
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Input {
-    Grid(u8),
+    Grid(u8, bool),
     Button(u8),
     Fader(u8, u8),
 }
@@ -37,15 +40,21 @@ fn decode(bytes: &[u8]) -> Option<Input> {
     if bytes.len() >= 3 && bytes[0] & 0xf0 == 0xb0 && (48..=56).contains(&bytes[1]) {
         return Some(Input::Fader(bytes[1] - 48, bytes[2]));
     }
-    if bytes.len() < 3 || bytes[2] == 0 || bytes[0] & 0xf0 != 0x90 || bytes[0] & 0x0f != 0 {
+    if bytes.len() < 3 || bytes[0] & 0x0f != 0 {
         return None;
     }
-    match bytes[1] {
-        cell @ 0..=63 => Some(Input::Grid(cell)),
-        note @ (PAGE_A_NOTE | PAGE_B_NOTE | UP_NOTE | DOWN_NOTE | LEFT_NOTE | RIGHT_NOTE
-        | PLAY_STOP_NOTE | RESTART_NOTE | CLEAR_NOTE) => Some(Input::Button(note)),
-        _ => None,
+    if bytes[1] <= 63 && matches!(bytes[0] & 0xf0, 0x80 | 0x90) {
+        return Some(Input::Grid(
+            bytes[1],
+            bytes[0] & 0xf0 == 0x90 && bytes[2] > 0,
+        ));
     }
+    if bytes[2] == 0 || bytes[0] & 0xf0 != 0x90 {
+        return None;
+    }
+    BUTTON_NOTES
+        .contains(&bytes[1])
+        .then_some(Input::Button(bytes[1]))
 }
 
 pub fn apc_rgb(cell: u8, rgb: [u8; 3]) -> Result<[u8; 16], String> {
@@ -115,7 +124,15 @@ struct GridController {
     selected_track: usize,
     selected_step: usize,
     clear_armed: Option<Instant>,
-    sent: Option<([[u8; 3]; 64], [bool; 9])>,
+    sent: Option<([[u8; 3]; 64], [bool; 16])>,
+    held_note: Option<(u8, usize, f32)>,
+    fader_pickups: [FaderPickup; 9],
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct FaderPickup {
+    previous: Option<f64>,
+    captured: bool,
 }
 impl GridController {
     fn new() -> Self {
@@ -125,6 +142,8 @@ impl GridController {
             selected_step: 0,
             clear_armed: None,
             sent: None,
+            held_note: None,
+            fader_pickups: [FaderPickup::default(); 9],
         }
     }
     fn apply(
@@ -134,13 +153,14 @@ impl GridController {
         now: Instant,
     ) -> Result<(), String> {
         match input {
-            Input::Grid(cell) => {
+            Input::Grid(cell, true) => {
                 let track = 7 - usize::from(cell / 8);
                 let column = usize::from(cell % 8);
                 self.selected_track = track;
                 self.selected_step = self.page * 8 + column;
                 sequence.toggle(track, self.page * 8 + column)
             }
+            Input::Grid(_, false) => Ok(()),
             Input::Button(PAGE_A_NOTE) => {
                 self.page = 0;
                 self.selected_step %= 8;
@@ -247,7 +267,7 @@ fn connect(
     Ok((connection, output))
 }
 
-fn led_frame(sequence: &SequencerControl, state: &GridController) -> ([[u8; 3]; 64], [bool; 9]) {
+fn led_frame(sequence: &SequencerControl, state: &GridController) -> ([[u8; 3]; 64], [bool; 16]) {
     let pattern = sequence.pattern();
     let first = state.page * 8;
     let playing = sequence.playing();
@@ -277,24 +297,25 @@ fn led_frame(sequence: &SequencerControl, state: &GridController) -> ([[u8; 3]; 
             leds[usize::from(cell)] = rgb;
         }
     }
-    let buttons = [
-        state.page == 0,
-        state.page == 1,
-        state.selected_track > 0,
-        state.selected_track < 7,
-        state.selected_step > 0,
-        state.selected_step + 1 < sequence.steps,
-        playing,
-        false,
-        state.clear_armed.is_some(),
-    ];
+    let mut buttons = [false; 16];
+    buttons[0] = state.page == 0;
+    buttons[1] = state.page == 1;
+    buttons[4] = state.selected_track > 0;
+    buttons[5] = state.selected_track < 7;
+    buttons[6] = state.selected_step > 0;
+    buttons[7] = state.selected_step + 1 < sequence.steps;
+    buttons[8] = playing;
+    buttons[10] = state.clear_armed.is_some();
     (leds, buttons)
 }
 fn authored_led_frame(
     sequence: &SequencerControl,
     state: &GridController,
     mapping: &crate::model::ApcMapping,
-) -> ([[u8; 3]; 64], [bool; 9]) {
+) -> ([[u8; 3]; 64], [bool; 16]) {
+    if let Some(roll) = &mapping.piano_roll {
+        return piano_roll_led_frame(sequence, state, roll, mapping);
+    }
     if mapping.pages[state.page] == "steps" {
         let mut view = GridController::new();
         view.page = sequence.step_bank();
@@ -343,20 +364,169 @@ fn authored_led_frame(
             leds[(7 - row) * 8 + column] = rgb;
         }
     }
-    (
-        leds,
-        [
-            state.page == 0,
-            state.page == 1,
-            true,
-            true,
-            true,
-            true,
-            sequence.playing(),
-            false,
-            false,
-        ],
-    )
+    (leds, {
+        let mut buttons = [false; 16];
+        buttons[0] = state.page == 0;
+        buttons[1] = state.page == 1;
+        buttons[4..8].fill(true);
+        buttons[8] = sequence.playing();
+        buttons
+    })
+}
+
+fn midi_hz(note: u8) -> f32 {
+    440.0 * 2.0_f32.powf((f32::from(note) - 69.0) / 12.0)
+}
+
+fn piano_note(sequence: &SequencerControl, roll: &crate::model::ApcPianoRoll, row: usize) -> u8 {
+    let degree = roll.scale[7 - row];
+    sequence.key_root().saturating_add(degree).min(127)
+}
+
+fn piano_roll_led_frame(
+    sequence: &SequencerControl,
+    state: &GridController,
+    roll: &crate::model::ApcPianoRoll,
+    mapping: &crate::model::ApcMapping,
+) -> ([[u8; 3]; 64], [bool; 16]) {
+    let pattern = sequence.pattern();
+    let zoom = sequence.step_zoom();
+    let first = sequence.step_bank() * 8;
+    let mut leds = [[[2, 2, 2]; 8]; 8];
+    for row in 0..3 {
+        let track = roll.drum_tracks[row];
+        for column in 0..8 {
+            let start = first + column * zoom;
+            let end = (start + zoom).min(usize::from(pattern.lengths[track]));
+            let hits = (start..end)
+                .filter(|step| pattern.velocities[track][*step] > 0.0)
+                .count();
+            leds[row][column] = if hits > 1 {
+                LOSPEC500[15]
+            } else if hits == 1 {
+                LOSPEC500[[4, 8, 20][row]]
+            } else {
+                LOSPEC500[0]
+            };
+        }
+    }
+    let track = roll.melodic_track;
+    let length = usize::from(pattern.lengths[track]);
+    for row in 3..8 {
+        let note = piano_note(sequence, roll, row);
+        let pitch = midi_hz(note);
+        let base = LOSPEC500[crate::performance_ui::pitch_color(f64::from(pitch))];
+        for column in 0..8 {
+            let start = first + column * zoom;
+            let end = (start + zoom).min(length);
+            let mut events = 0;
+            let mut full = false;
+            for event_step in 0..length {
+                if pattern.velocities[track][event_step] <= 0.0
+                    || (69.0 + 12.0 * (pattern.pitches_hz[track][event_step] / 440.0).log2())
+                        .round() as u8
+                        != note
+                {
+                    continue;
+                }
+                let event_end = event_step as f32 + pattern.gates[track][event_step].max(0.01);
+                if event_step < end && event_end > start as f32 {
+                    events += 1;
+                    full |= event_step <= start && event_end >= end as f32;
+                }
+            }
+            leds[row][column] = if events > 1 {
+                LOSPEC500[36]
+            } else if full {
+                base
+            } else if events == 1 {
+                [base[0] / 3, base[1] / 3, base[2] / 3]
+            } else {
+                LOSPEC500[0]
+            };
+        }
+    }
+    if let Some((cell, _, _)) = state.held_note {
+        let row = 7 - usize::from(cell / 8);
+        let column = usize::from(cell % 8);
+        leds[row][column] = LOSPEC500[14];
+    }
+    if sequence.playing() {
+        let current = sequence.current_step();
+        if current >= first && current < first + 8 * zoom {
+            let column = (current - first) / zoom;
+            for row in 0..8 {
+                leds[row][column] = if leds[row][column] == LOSPEC500[0] {
+                    LOSPEC500[26]
+                } else {
+                    LOSPEC500[41]
+                };
+            }
+        }
+    }
+    let mut physical = [[0; 3]; 64];
+    for (row, cells) in leds.iter().enumerate() {
+        for (column, color) in cells.iter().enumerate() {
+            physical[(7 - row) * 8 + column] = *color;
+        }
+    }
+    let active = |command: &str| command == "transport" && sequence.playing();
+    let mut buttons = [false; 16];
+    for (index, command) in mapping.track_button_commands.iter().enumerate() {
+        buttons[index] = active(command) || !command.is_empty();
+    }
+    for (index, command) in mapping.scene_button_commands.iter().enumerate() {
+        buttons[8 + index] = active(command) || !command.is_empty();
+    }
+    (physical, buttons)
+}
+
+fn apply_piano_grid(
+    state: &mut GridController,
+    cell: u8,
+    pressed: bool,
+    sequence: &SequencerControl,
+    roll: &crate::model::ApcPianoRoll,
+) -> Result<(), String> {
+    let row = 7 - usize::from(cell / 8);
+    let column = usize::from(cell % 8);
+    let zoom = sequence.step_zoom();
+    let step = sequence.step_bank() * 8 + column * zoom;
+    if row < 3 {
+        if pressed {
+            return sequence.toggle(roll.drum_tracks[row], step);
+        }
+        return Ok(());
+    }
+    let track = roll.melodic_track;
+    let length = usize::from(sequence.pattern().lengths[track]);
+    if step >= length {
+        return Ok(());
+    }
+    if !pressed {
+        if state.held_note.is_some_and(|(held, _, _)| held == cell) {
+            let (_, start, pitch) = state.held_note.take().expect("held note");
+            return sequence.set_note(track, start, pitch, 0.85, 1.0);
+        }
+        return Ok(());
+    }
+    let pitch = midi_hz(piano_note(sequence, roll, row));
+    let pattern = sequence.pattern();
+    if pattern.velocities[track][step] > 0.0
+        && (pattern.pitches_hz[track][step] - pitch).abs() < 0.01
+    {
+        state.held_note = None;
+        return sequence.set_note(track, step, pitch, 0.0, 1.0);
+    }
+    if let Some((_, start, held_pitch)) = state.held_note.take() {
+        if step > start {
+            let duration = (step + zoom).min(length) - start;
+            return sequence.set_note(track, start, held_pitch, 0.85, duration as f32);
+        }
+        sequence.set_note(track, start, held_pitch, 0.85, 1.0)?;
+    }
+    state.held_note = Some((cell, step, pitch));
+    Ok(())
 }
 fn refresh(
     output: &mut MidiOutputConnection,
@@ -375,20 +545,7 @@ fn refresh(
                 .map_err(|e| e.to_string())?;
         }
     }
-    for (index, note) in [
-        PAGE_A_NOTE,
-        PAGE_B_NOTE,
-        UP_NOTE,
-        DOWN_NOTE,
-        LEFT_NOTE,
-        RIGHT_NOTE,
-        PLAY_STOP_NOTE,
-        RESTART_NOTE,
-        CLEAR_NOTE,
-    ]
-    .into_iter()
-    .enumerate()
-    {
+    for (index, note) in BUTTON_NOTES.into_iter().enumerate() {
         if state
             .sent
             .as_ref()
@@ -429,6 +586,12 @@ fn shutdown_animation(output: &mut MidiOutputConnection) -> Result<(), String> {
             let message = apc_rgb_chunk((chunk * 16) as u8, colors).expect("valid APC grid chunk");
             if let Err(error) = output.send(&message) {
                 first_error.get_or_insert_with(|| error.to_string());
+            }
+            // The XL grid accepts all four quadrants reliably when bulk writes
+            // are paced; back-to-back USB/MIDI transfers can starve the upper
+            // half while the lower packets are still being applied.
+            if chunk != 3 {
+                thread::sleep(Duration::from_millis(5));
             }
         }
         thread::sleep(FRAME_TIME);
@@ -478,7 +641,7 @@ impl ApcSession {
             let sequence = Arc::clone(&performance.sequencer);
             let handles = controls
                 .into_iter()
-                .map(|(handle, _)| (handle.id().to_owned(), handle))
+                .map(|(handle, value)| (handle.id().to_owned(), (handle, value)))
                 .collect::<BTreeMap<_, _>>();
             while !worker_stop.load(Ordering::Acquire) {
                 let (tx, rx): (SyncSender<Input>, Receiver<Input>) = mpsc::sync_channel(128);
@@ -541,9 +704,31 @@ impl ApcSession {
     }
 }
 
-fn publish_fader(handle: &ControlHandle, value: u8) -> Result<(), String> {
+fn publish_fader(
+    handle: &ControlHandle,
+    authored_value: f64,
+    value: u8,
+    pickup: &mut FaderPickup,
+) -> Result<(), String> {
     let (min, max) = handle.range();
     let normalized = f64::from(value) / 127.0;
+    let current_value = handle.override_value().unwrap_or(authored_value);
+    let current = if handle.scale() == crate::model::ControlScale::Logarithmic {
+        (current_value / min).ln() / (max / min).ln()
+    } else {
+        (current_value - min) / (max - min)
+    }
+    .clamp(0.0, 1.0);
+    let crossed = pickup
+        .previous
+        .is_some_and(|previous| (previous - current) * (normalized - current) <= 0.0);
+    pickup.previous = Some(normalized);
+    if !pickup.captured && !crossed && (normalized - current).abs() > 0.025 {
+        handle.set_hardware_pickup(if normalized < current { -1 } else { 1 });
+        return Ok(());
+    }
+    pickup.captured = true;
+    handle.set_hardware_pickup(0);
     let target = if handle.scale() == crate::model::ControlScale::Logarithmic {
         min * (max / min).powf(normalized)
     } else {
@@ -557,8 +742,30 @@ fn apply_authored(
     input: Input,
     sequence: &SequencerControl,
     mapping: &crate::model::ApcMapping,
-    handles: &BTreeMap<String, ControlHandle>,
+    handles: &BTreeMap<String, (ControlHandle, f64)>,
 ) -> Result<(), String> {
+    if let Some(roll) = &mapping.piano_roll {
+        match input {
+            Input::Grid(cell, pressed) => {
+                return apply_piano_grid(state, cell, pressed, sequence, roll);
+            }
+            Input::Button(note) => {
+                let command = if (100..=107).contains(&note) {
+                    &mapping.track_button_commands[usize::from(note - 100)]
+                } else if (112..=119).contains(&note) {
+                    &mapping.scene_button_commands[usize::from(note - 112)]
+                } else {
+                    ""
+                };
+                return if command.is_empty() {
+                    Ok(())
+                } else {
+                    sequence.execute(command)
+                };
+            }
+            Input::Fader(_, _) => {}
+        }
+    }
     match input {
         Input::Button(PAGE_A_NOTE) => {
             state.page = 0;
@@ -575,7 +782,7 @@ fn apply_authored(
         Input::Button(PLAY_STOP_NOTE) => sequence.execute("transport"),
         Input::Button(RESTART_NOTE) => sequence.execute("restart"),
         Input::Button(CLEAR_NOTE) => sequence.execute("clear"),
-        Input::Grid(cell) => {
+        Input::Grid(cell, true) => {
             let track = 7 - usize::from(cell / 8);
             let column = usize::from(cell % 8);
             let page = &mapping.pages[state.page];
@@ -598,16 +805,22 @@ fn apply_authored(
                 }
             }
         }
+        Input::Grid(_, false) => Ok(()),
         Input::Fader(index, value) => {
             let id = if index == 8 {
                 &mapping.master_control
             } else {
                 &mapping.fader_controls[usize::from(index)]
             };
-            let handle = handles
+            let (handle, authored_value) = handles
                 .get(id)
                 .ok_or_else(|| format!("APC fader targets unknown control '{id}'"))?;
-            publish_fader(handle, value)
+            publish_fader(
+                handle,
+                *authored_value,
+                value,
+                &mut state.fader_pickups[usize::from(index)],
+            )
         }
         Input::Button(_) => Ok(()),
     }
@@ -638,6 +851,9 @@ mod tests {
             ],
             fader_controls: std::array::from_fn(|_| control.into()),
             master_control: control.into(),
+            piano_roll: None,
+            track_button_commands: std::array::from_fn(|_| String::new()),
+            scene_button_commands: std::array::from_fn(|_| String::new()),
         }
     }
 
@@ -649,11 +865,11 @@ mod tests {
         }
         let mut grid = GridController::new();
         let now = Instant::now();
-        grid.apply(Input::Grid(56), &sequence, now).unwrap();
+        grid.apply(Input::Grid(56, true), &sequence, now).unwrap();
         assert_eq!(sequence.pattern().velocities[0][0], 1.0);
         grid.apply(Input::Button(PAGE_B_NOTE), &sequence, now)
             .unwrap();
-        grid.apply(Input::Grid(56), &sequence, now).unwrap();
+        grid.apply(Input::Grid(56, true), &sequence, now).unwrap();
         assert_eq!(sequence.pattern().velocities[0][8], 1.0);
         grid.apply(Input::Button(CLEAR_NOTE), &sequence, now)
             .unwrap();
@@ -724,7 +940,7 @@ mod tests {
         let (leds, buttons) = led_frame(&sequence, &state);
         assert_eq!(leds[56], [127, 127, 127]);
         assert!(buttons[0]);
-        assert!(buttons[6]);
+        assert!(buttons[8]);
     }
 
     #[test]
@@ -739,7 +955,14 @@ mod tests {
         let handles = BTreeMap::new();
         let mut state = GridController::new();
 
-        apply_authored(&mut state, Input::Grid(56), &sequence, &mapping, &handles).unwrap();
+        apply_authored(
+            &mut state,
+            Input::Grid(56, true),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
         assert_eq!(sequence.pattern().velocities[0][0], 1.0);
         apply_authored(
             &mut state,
@@ -749,7 +972,14 @@ mod tests {
             &handles,
         )
         .unwrap();
-        apply_authored(&mut state, Input::Grid(57), &sequence, &mapping, &handles).unwrap();
+        apply_authored(
+            &mut state,
+            Input::Grid(57, true),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
         assert_eq!(sequence.pattern().velocities[0][9], 1.0);
 
         apply_authored(
@@ -760,13 +990,41 @@ mod tests {
             &handles,
         )
         .unwrap();
-        apply_authored(&mut state, Input::Grid(57), &sequence, &mapping, &handles).unwrap();
+        apply_authored(
+            &mut state,
+            Input::Grid(57, true),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
         assert_eq!(sequence.queued_pattern(), Some(1));
-        apply_authored(&mut state, Input::Grid(48), &sequence, &mapping, &handles).unwrap();
+        apply_authored(
+            &mut state,
+            Input::Grid(48, true),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
         assert!(sequence.muted(0));
-        apply_authored(&mut state, Input::Grid(40), &sequence, &mapping, &handles).unwrap();
+        apply_authored(
+            &mut state,
+            Input::Grid(40, true),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
         assert!(sequence.soloed(0));
-        apply_authored(&mut state, Input::Grid(33), &sequence, &mapping, &handles).unwrap();
+        apply_authored(
+            &mut state,
+            Input::Grid(33, true),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
         assert_eq!(sequence.selected_track(), 1);
 
         let (leds, _) = authored_led_frame(&sequence, &state, &mapping);
@@ -774,6 +1032,104 @@ mod tests {
         assert_eq!(leds[48], [127, 0, 0]);
         assert_eq!(leds[40], [127, 127, 0]);
         assert_eq!(leds[33], [0, 80, 127]);
+    }
+
+    #[test]
+    fn authored_keylocked_piano_roll_edits_drums_notes_durations_and_key() {
+        let sequence = SequencerControl::new("lab".into(), 120.0, 64, 4).unwrap();
+        for name in ["Kick", "Snare", "Hat", "Bass"] {
+            sequence.add_track(name.into()).unwrap();
+        }
+        sequence.select_track(3).unwrap();
+        sequence.set_key_root(36).unwrap();
+        sequence.set_key_track(3).unwrap();
+        let mut mapping = authored_mapping("level");
+        mapping.piano_roll = Some(crate::model::ApcPianoRoll {
+            drum_tracks: [0, 1, 2],
+            melodic_track: 3,
+            scale: [0, 2, 3, 5, 7],
+        });
+        mapping.track_button_commands[5] = "key:up".into();
+        let mut state = GridController::new();
+        let handles = BTreeMap::new();
+
+        apply_authored(
+            &mut state,
+            Input::Grid(56, true),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        assert_eq!(sequence.pattern().velocities[0][0], 1.0);
+
+        apply_authored(
+            &mut state,
+            Input::Grid(1, true),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        apply_authored(
+            &mut state,
+            Input::Grid(3, true),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        let pattern = sequence.pattern();
+        assert!((pattern.pitches_hz[3][1] - midi_hz(36)).abs() < 0.01);
+        assert_eq!(pattern.gates[3][1], 3.0);
+
+        apply_authored(
+            &mut state,
+            Input::Button(105),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        assert_eq!(sequence.key_root(), 37);
+        assert!((sequence.pattern().pitches_hz[3][1] - midi_hz(37)).abs() < 0.01);
+    }
+
+    #[test]
+    fn zoomed_piano_roll_distinguishes_full_partial_and_multiple_notes() {
+        let sequence = SequencerControl::new("lab".into(), 120.0, 64, 4).unwrap();
+        for name in ["Kick", "Snare", "Hat", "Bass"] {
+            sequence.add_track(name.into()).unwrap();
+        }
+        sequence.select_track(3).unwrap();
+        sequence.set_key_root(36).unwrap();
+        sequence.set_key_track(3).unwrap();
+        sequence.stop();
+        let mut runtime = crate::sequencer::SequencerRuntime::new(Arc::clone(&sequence));
+        runtime.begin_frame(48_000.0);
+        sequence.execute("zoom:out").unwrap();
+        sequence.execute("zoom:out").unwrap();
+        let pitch = midi_hz(36);
+        sequence.set_note(3, 0, pitch, 0.8, 4.0).unwrap();
+        sequence.set_note(3, 4, pitch, 0.8, 1.0).unwrap();
+        sequence.set_note(3, 8, pitch, 0.8, 4.0).unwrap();
+        sequence.set_note(3, 10, pitch, 0.8, 1.0).unwrap();
+        let mut mapping = authored_mapping("level");
+        mapping.piano_roll = Some(crate::model::ApcPianoRoll {
+            drum_tracks: [0, 1, 2],
+            melodic_track: 3,
+            scale: [0, 2, 3, 5, 7],
+        });
+        let (leds, _) = piano_roll_led_frame(
+            &sequence,
+            &GridController::new(),
+            mapping.piano_roll.as_ref().unwrap(),
+            &mapping,
+        );
+        let base = LOSPEC500[crate::performance_ui::pitch_color(f64::from(pitch))];
+        assert_eq!(leds[0], base);
+        assert_eq!(leds[1], [base[0] / 3, base[1] / 3, base[2] / 3]);
+        assert_eq!(leds[2], LOSPEC500[36]);
     }
 
     #[test]
@@ -796,8 +1152,11 @@ mod tests {
         let mut machine = crate::compiler::compile(&graph).unwrap();
         let handle = machine.control_handle("level").unwrap();
         let mut handles = BTreeMap::new();
-        handles.insert("level".into(), handle);
-        handles.insert("master".into(), machine.control_handle("master").unwrap());
+        handles.insert("level".into(), (handle, 110.0));
+        handles.insert(
+            "master".into(),
+            (machine.control_handle("master").unwrap(), 0.5),
+        );
         let sequence = SequencerControl::new("test".into(), 120.0, 16, 4).unwrap();
         for n in 0..8 {
             sequence.add_track(format!("T{n}")).unwrap();
@@ -805,6 +1164,23 @@ mod tests {
         let mut state = GridController::new();
         let mut mapping = authored_mapping("level");
         mapping.master_control = "master".into();
+        apply_authored(
+            &mut state,
+            Input::Fader(0, 127),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        assert_eq!(handles["level"].0.override_value(), None);
+        apply_authored(
+            &mut state,
+            Input::Fader(0, 18),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
         apply_authored(
             &mut state,
             Input::Fader(0, 127),
@@ -822,6 +1198,23 @@ mod tests {
                 .count()
                 >= 8
         );
+        apply_authored(
+            &mut state,
+            Input::Fader(8, 0),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        assert_eq!(handles["master"].0.override_value(), None);
+        apply_authored(
+            &mut state,
+            Input::Fader(8, 64),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
         apply_authored(
             &mut state,
             Input::Fader(8, 0),

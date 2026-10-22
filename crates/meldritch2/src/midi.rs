@@ -456,13 +456,14 @@ impl MidiRouter {
         mut self,
         controls: Vec<(ControlHandle, f64)>,
         selected: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        pickup: std::sync::Arc<std::sync::Mutex<crate::panel::PickupState>>,
         mappings: &[crate::model::FocusMidiCc],
     ) -> Self {
         for mapping in mappings {
             self.focus_routes
                 [usize::from(mapping.channel - 1) * 128 + usize::from(mapping.number)] = true;
         }
-        self.focus = Some(Panel::with_selection(controls, selected));
+        self.focus = Some(Panel::with_selection_and_pickup(controls, selected, pickup));
         self
     }
 
@@ -598,10 +599,7 @@ impl MidiRouter {
 #[cfg(test)]
 mod focus_tests {
     use super::*;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
+    use std::sync::{Arc, atomic::AtomicUsize};
 
     #[test]
     fn authored_cc_edits_whichever_control_is_selected() {
@@ -629,11 +627,18 @@ mod focus_tests {
         let router = MidiRouter::from_machine(&machine).with_focus(
             controls,
             Arc::clone(&selected),
+            Arc::new(std::sync::Mutex::new(crate::panel::PickupState::default())),
             &[crate::model::FocusMidiCc {
                 channel: 1,
                 number: 74,
             }],
         );
+        assert!(router.dispatch(&[0xb0, 74, 127]));
+        assert_eq!(
+            machine.control_handle("left").unwrap().override_value(),
+            None
+        );
+        assert!(router.dispatch(&[0xb0, 74, 25]));
         assert!(router.dispatch(&[0xb0, 74, 127]));
         assert_eq!(
             machine.control_handle("left").unwrap().override_value(),
@@ -643,7 +648,13 @@ mod focus_tests {
             machine.control_handle("right").unwrap().override_value(),
             None
         );
-        selected.store(1, Ordering::Release);
+        router.focus.as_ref().unwrap().select_id("right").unwrap();
+        assert!(router.dispatch(&[0xb0, 74, 0]));
+        assert_eq!(
+            machine.control_handle("right").unwrap().override_value(),
+            None
+        );
+        assert!(router.dispatch(&[0xb0, 74, 38]));
         assert!(router.dispatch(&[0xb0, 74, 0]));
         assert_eq!(
             machine.control_handle("right").unwrap().override_value(),
