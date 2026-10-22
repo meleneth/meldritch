@@ -135,9 +135,8 @@ impl StereoDelayRuntime {
             // A 20 ms glide prevents an instantaneous read-head jump while
             // retaining slow chorus-style modulation and tempo following.
             let slew = 1.0 - (-1.0 / (0.020 * sample_rate)).exp();
-            for channel in 0..2 {
-                self.delay_samples[channel] +=
-                    (target[channel] - self.delay_samples[channel]) * slew;
+            for (current, target) in self.delay_samples.iter_mut().zip(target) {
+                *current += (target - *current) * slew;
             }
         }
 

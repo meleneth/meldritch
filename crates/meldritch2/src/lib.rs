@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 33);
+        assert_eq!(contract::all().len(), 34);
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.role, Role::Processor);
         assert_eq!(gain.inputs[0].name, "input");
@@ -126,6 +126,11 @@ mod tests {
         assert_eq!(gain.inputs[1].unconnected, Some(1.0));
         assert_eq!(gain.outputs[0].name, "out");
         assert_eq!(gain.params[0].name, "gain");
+        let stereo_delay = contract::find("stereo_delay").unwrap();
+        assert_eq!(stereo_delay.inputs[0].name, "input_left");
+        assert_eq!(stereo_delay.inputs[2].name, "bpm");
+        assert_eq!(stereo_delay.outputs.len(), 2);
+        assert_eq!(stereo_delay.params[0].name, "left_beats");
         let mix = contract::find("mix").unwrap();
         assert_eq!(
             mix.inputs.iter().map(|port| port.name).collect::<Vec<_>>(),
