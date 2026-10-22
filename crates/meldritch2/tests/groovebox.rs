@@ -1,3 +1,4 @@
+use meldritch2::model::Widget;
 use meldritch2::{compiler::compile_at_rate, lua};
 use std::{
     fs,
@@ -100,6 +101,19 @@ fn lua_authors_eight_tracks_four_patterns_controls_screen_and_apc_mapping() {
         assert!(machine.control_handle(&format!("voice_{index}")).is_some());
     }
     assert_eq!(machine.screens()[0].title, "Groovebox");
+    let Widget::PerformanceSurface(surface) = &graph.screens[0].widgets[0] else {
+        panic!("groovebox must author the generic performance surface")
+    };
+    assert_eq!(surface.theme, "lospec500");
+    assert_eq!(surface.tracks.len(), 8);
+    assert_eq!(surface.tracks[0].volume_control, "volume_1");
+    assert!(surface.tracks[0].control_ids.contains(&"voice_1".into()));
+    assert!(
+        surface.tracks[6]
+            .control_ids
+            .contains(&"bass_resonance".into())
+    );
+    assert!(surface.tracks[7].melodic);
     fs::remove_dir_all(root).unwrap();
 }
 

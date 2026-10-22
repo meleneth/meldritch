@@ -11,6 +11,7 @@ pub mod midi_device;
 pub mod model;
 mod navigation;
 pub mod panel;
+mod performance_ui;
 pub mod plaits;
 pub mod poly;
 pub mod sample;

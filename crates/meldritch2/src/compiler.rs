@@ -451,6 +451,27 @@ fn validate_screens(
                         ));
                     }
                 }
+                Widget::PerformanceSurface(surface) => {
+                    if !has_performance {
+                        return Err(format!(
+                            "screen '{}' uses a performance surface without a performance sequencer",
+                            screen.id
+                        ));
+                    }
+                    crate::performance_ui::validate_surface(surface)?;
+                    text(&surface.title, "performance surface title")?;
+                    for track in &surface.tracks {
+                        text(&track.label, "performance track label")?;
+                        for id in std::iter::once(&track.volume_control).chain(&track.control_ids) {
+                            if !controls.contains_key(id) {
+                                return Err(format!(
+                                    "screen '{}' performance surface references unknown control '{id}'",
+                                    screen.id
+                                ));
+                            }
+                        }
+                    }
+                }
             }
         }
     }

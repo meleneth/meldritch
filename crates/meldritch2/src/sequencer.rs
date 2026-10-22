@@ -70,6 +70,9 @@ pub struct SequencerControl {
     step_bank: AtomicU8,
     status: Mutex<String>,
     arrangement: Mutex<Vec<(usize, u32)>>,
+    activity_generation: [std::sync::atomic::AtomicU64; MAX_TRACKS],
+    activity_pitch: [std::sync::atomic::AtomicU64; MAX_TRACKS],
+    position_steps: std::sync::atomic::AtomicU64,
 }
 
 impl SequencerControl {
@@ -108,6 +111,11 @@ impl SequencerControl {
             step_bank: AtomicU8::new(0),
             status: Mutex::new("Ready".into()),
             arrangement: Mutex::new(Vec::new()),
+            activity_generation: std::array::from_fn(|_| std::sync::atomic::AtomicU64::new(0)),
+            activity_pitch: std::array::from_fn(|_| {
+                std::sync::atomic::AtomicU64::new(440.0_f64.to_bits())
+            }),
+            position_steps: std::sync::atomic::AtomicU64::new(0),
         }))
     }
     pub fn add_track(&self, name: String) -> Result<usize, String> {
@@ -364,6 +372,17 @@ impl SequencerControl {
     }
     pub fn status(&self) -> String {
         self.status.lock().map(|v| v.clone()).unwrap_or_default()
+    }
+    pub fn activity(&self, track: usize) -> Option<(u64, f64)> {
+        let generation = self.activity_generation.get(track)?;
+        let pitch = self.activity_pitch.get(track)?;
+        Some((
+            generation.load(Ordering::Acquire),
+            f64::from_bits(pitch.load(Ordering::Acquire)),
+        ))
+    }
+    pub fn position_steps(&self) -> u64 {
+        self.position_steps.load(Ordering::Acquire)
     }
     fn set_status(&self, value: String) {
         if let Ok(mut status) = self.status.lock() {
@@ -657,6 +676,7 @@ impl SequencerRuntime {
             3 => {
                 self.step = 0;
                 self.frames_until_step = 0.0;
+                self.control.position_steps.store(0, Ordering::Release);
                 self.control.playing.store(true, Ordering::Release);
             }
             _ => {}
@@ -708,9 +728,15 @@ impl SequencerRuntime {
                 if velocity > 0.0 {
                     self.pitches[track] = self.pattern.pitches_hz[track][self.step] as f64;
                     self.gates[track] = self.pattern.gates[track][self.step] as f64 * step_frames;
+                    if self.control.track_enabled(track) {
+                        self.control.activity_pitch[track]
+                            .store(self.pitches[track].to_bits(), Ordering::Release);
+                        self.control.activity_generation[track].fetch_add(1, Ordering::AcqRel);
+                    }
                 }
             }
             self.step = (self.step + 1) % self.control.steps;
+            self.control.position_steps.fetch_add(1, Ordering::AcqRel);
             self.frames_until_step += step_frames;
             self.initialized = true;
         }

@@ -32,9 +32,25 @@ selected track. `S` deliberately saves the editable project to
 through the declared track, voice, tempo, and master controls; `h`/`l` adjust
 the selected control. `q` exits.
 
-The screen shows active and queued patterns, transport, playhead, mute/solo
-flags, track selection, status messages, the step grid, and all declared voice,
-track-volume, and master controls.
+The Lua-authored performance surface uses the exact 42-color
+[Lospec 500 palette](https://lospec.com/palette-list/lospec500). At 120 columns
+it presents all eight outlined channel strips in one row; around 100 columns
+the strips wrap four-by-two; at 80×24 they collapse to compact live strips so
+the transport, complete 8×16 grid, and contextual controls remain visible.
+Truecolor is used when `COLORTERM` advertises it, with ANSI-256 and monochrome
+fallbacks.
+
+Activity lights come from bounded counters published by the audio-domain
+sequencer only when a track actually dispatches an audible trigger. The TUI
+holds the flash for 180 ms and then decays it. Drum colors are authored per
+track. Melodic color is deterministic by pitch class: C red, C♯ orange, D
+amber, D♯ yellow, E green, F pale green, F♯ aqua, G cyan, G♯ blue, A violet,
+A♯ pink, and B rose. The latest overlapping melodic trigger wins. Muted and
+solo-masked events do not illuminate.
+
+The screen shows active and queued patterns, transport and bar position, a
+moving playhead, accent velocity, mute/solo and track selection, actual APC
+fader positions, and only the controls Lua declares for the selected voice.
 
 ## APC mini mk2
 

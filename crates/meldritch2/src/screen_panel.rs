@@ -4,6 +4,7 @@ use crate::{
     compiler::ControlHandle,
     model::{Screen, Widget},
     panel::{ControlRow, Gesture},
+    performance_ui::{SurfaceView, TrackView, palette_index},
 };
 
 pub(crate) enum WidgetView {
@@ -25,6 +26,7 @@ pub(crate) enum WidgetView {
     PerformanceStatus,
     PatternGrid,
     TransportStatus,
+    PerformanceSurface(SurfaceView),
 }
 
 impl WidgetView {
@@ -98,6 +100,35 @@ impl ScreenPanel {
                     Widget::PerformanceStatus => WidgetView::PerformanceStatus,
                     Widget::PatternGrid => WidgetView::PatternGrid,
                     Widget::TransportStatus => WidgetView::TransportStatus,
+                    Widget::PerformanceSurface(surface) => {
+                        let mut tracks = Vec::with_capacity(surface.tracks.len());
+                        for track in &surface.tracks {
+                            let row = |id: &str| -> Result<ControlRow, String> {
+                                let (handle, authored) = controls
+                                    .get(id)
+                                    .ok_or_else(|| format!("unknown control '{id}'"))?;
+                                Ok(ControlRow::new(handle.clone(), *authored))
+                            };
+                            tracks.push(TrackView {
+                                label: track.label.clone(),
+                                volume: row(&track.volume_control)?,
+                                controls: track
+                                    .control_ids
+                                    .iter()
+                                    .map(|id| row(id))
+                                    .collect::<Result<Vec<_>, _>>()?,
+                                color: palette_index(&track.color).ok_or_else(|| {
+                                    format!("unknown Lospec 500 color '{}'", track.color)
+                                })?,
+                                melodic: track.melodic,
+                            });
+                        }
+                        WidgetView::PerformanceSurface(SurfaceView {
+                            title: surface.title.clone(),
+                            tracks,
+                            activity: std::cell::RefCell::new(Default::default()),
+                        })
+                    }
                 });
             }
             let selected = widgets.iter().position(WidgetView::selectable);
@@ -137,10 +168,12 @@ impl ScreenPanel {
     }
 
     pub fn has_pattern_grid(&self) -> bool {
-        self.current()
-            .widgets
-            .iter()
-            .any(|widget| matches!(widget, WidgetView::PatternGrid))
+        self.current().widgets.iter().any(|widget| {
+            matches!(
+                widget,
+                WidgetView::PatternGrid | WidgetView::PerformanceSurface(_)
+            )
+        })
     }
 
     pub fn has_performance_controls(&self) -> bool {

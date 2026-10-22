@@ -11,8 +11,8 @@ use crate::model::{
     Action, Connection, Control, ControlScale, Endpoint, ExternalInput, ExternalParameter,
     ExternalPort, Graph, MidiButton, MidiButtonEdge, MidiButtonMessage, MidiCc, MidiNotes,
     MidiPacket, MidiPoly, MidiPolyVoice, Module, ModuleRuntime, Navigation, NavigationBinding,
-    NavigationEvent, ParameterId, Performance, PolyOverflow, Screen, Subpatch, SubpatchInstance,
-    Widget,
+    NavigationEvent, ParameterId, Performance, PerformanceSurface, PerformanceTrackView,
+    PolyOverflow, Screen, Subpatch, SubpatchInstance, Widget,
 };
 use crate::sample::{PreparedSample, SampleBank};
 use crate::sequencer::SequencerControl;
@@ -275,6 +275,12 @@ function meldritch.graph()
     end
     function screen:transport_status()
       table.insert(self.widgets, { kind = "transport_status" })
+    end
+    function screen:performance_surface(spec)
+      assert(type(spec) == "table" and type(spec.title) == "string" and type(spec.tracks) == "table",
+        "performance surface requires title and tracks")
+      table.insert(self.widgets, { kind = "performance_surface", title = spec.title,
+        theme = spec.theme or "lospec500", tracks = spec.tracks })
     end
     table.insert(self.screens, screen)
     return screen
@@ -1132,6 +1138,41 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                 "performance_status" => Widget::PerformanceStatus,
                 "pattern_grid" => Widget::PatternGrid,
                 "transport_status" => Widget::TransportStatus,
+                "performance_surface" => {
+                    let tracks: Table = widget.get("tracks").map_err(|e| e.to_string())?;
+                    let tracks = tracks
+                        .sequence_values::<Table>()
+                        .map(|track| {
+                            let track = track.map_err(|e| e.to_string())?;
+                            let controls = track
+                                .get::<Option<Table>>("controls")
+                                .map_err(|e| e.to_string())?
+                                .map(|values| {
+                                    values
+                                        .sequence_values::<String>()
+                                        .collect::<Result<Vec<_>, _>>()
+                                        .map_err(|e| e.to_string())
+                                })
+                                .transpose()?
+                                .unwrap_or_default();
+                            Ok::<_, String>(PerformanceTrackView {
+                                label: track.get("label").map_err(|e| e.to_string())?,
+                                volume_control: track.get("volume").map_err(|e| e.to_string())?,
+                                control_ids: controls,
+                                color: track.get("color").map_err(|e| e.to_string())?,
+                                melodic: track
+                                    .get::<Option<bool>>("melodic")
+                                    .map_err(|e| e.to_string())?
+                                    .unwrap_or(false),
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Widget::PerformanceSurface(PerformanceSurface {
+                        title: widget.get("title").map_err(|e| e.to_string())?,
+                        theme: widget.get("theme").map_err(|e| e.to_string())?,
+                        tracks,
+                    })
+                }
                 other => return Err(format!("unknown screen widget '{other}'")),
             });
         }

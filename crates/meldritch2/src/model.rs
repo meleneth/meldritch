@@ -145,6 +145,23 @@ pub enum Widget {
     PerformanceStatus,
     PatternGrid,
     TransportStatus,
+    PerformanceSurface(PerformanceSurface),
+}
+
+#[derive(Clone, Debug)]
+pub struct PerformanceSurface {
+    pub title: String,
+    pub theme: String,
+    pub tracks: Vec<PerformanceTrackView>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PerformanceTrackView {
+    pub label: String,
+    pub volume_control: String,
+    pub control_ids: Vec<String>,
+    pub color: String,
+    pub melodic: bool,
 }
 
 #[derive(Clone, Debug)]

@@ -7,8 +7,11 @@ use crossterm::{
     cursor::{Hide, MoveTo, Show},
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute, queue,
-    style::Print,
-    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor},
+    terminal::{
+        self, BeginSynchronizedUpdate, Clear, ClearType, EndSynchronizedUpdate,
+        EnterAlternateScreen, LeaveAlternateScreen,
+    },
 };
 
 use crate::{
@@ -17,8 +20,43 @@ use crate::{
     midi_device::MidiInputSession,
     navigation::NavigationRuntime,
     panel::{Gesture, Panel},
+    performance_ui::{ColorMode, Frame, LOSPEC500},
     screen_panel::{ScreenPanel, WidgetView},
 };
+
+fn terminal_color(index: usize, mode: ColorMode) -> Option<Color> {
+    let [r, g, b] = LOSPEC500[index];
+    match mode {
+        ColorMode::TrueColor => Some(Color::Rgb { r, g, b }),
+        ColorMode::Ansi256 => Some(Color::AnsiValue(
+            16 + 36 * (r / 51) + 6 * (g / 51) + (b / 51),
+        )),
+        ColorMode::Mono => None,
+    }
+}
+
+fn draw_frame(out: &mut impl Write, frame: &Frame, mode: ColorMode) -> Result<(), String> {
+    for line in &frame.lines {
+        for span in line {
+            if let Some(color) = span.color.and_then(|index| terminal_color(index, mode)) {
+                queue!(out, SetForegroundColor(color)).map_err(|e| e.to_string())?;
+            }
+            queue!(
+                out,
+                SetAttribute(if span.bold {
+                    Attribute::Bold
+                } else {
+                    Attribute::NormalIntensity
+                }),
+                Print(&span.text),
+                ResetColor
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        queue!(out, Print("\r\n")).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 
 const NOTE_KEYS: [(char, u8); 12] = [
     ('z', 60),
@@ -283,8 +321,36 @@ fn draw(
     let mut out = stdout();
     queue!(
         out,
+        BeginSynchronizedUpdate,
         MoveTo(0, 0),
-        Clear(ClearType::All),
+        Clear(ClearType::All)
+    )
+    .map_err(|error| error.to_string())?;
+    if let Some(screens) = screens
+        && let Some(WidgetView::PerformanceSurface(surface)) = screens
+            .current()
+            .widgets
+            .iter()
+            .find(|widget| matches!(widget, WidgetView::PerformanceSurface(_)))
+    {
+        let performance = output
+            .performance()
+            .ok_or("performance surface requires a sequencer")?;
+        let (width, height) = terminal::size().unwrap_or((80, 24));
+        let frame = crate::performance_ui::render(
+            surface,
+            &performance.sequencer,
+            &mut surface.activity.borrow_mut(),
+            Instant::now(),
+            width,
+            height,
+        );
+        draw_frame(&mut out, &frame, ColorMode::detect())?;
+        queue!(out, EndSynchronizedUpdate).map_err(|error| error.to_string())?;
+        return out.flush().map_err(|error| error.to_string());
+    }
+    queue!(
+        out,
         Print("Meldritch 2 | "),
         Print(&output.device_name),
         Print(" | MIDI: "),
@@ -478,6 +544,7 @@ fn draw(
                     )
                     .map_err(|error| error.to_string())
                 }
+                WidgetView::PerformanceSurface(_) => Ok(()),
             }?;
         }
     } else if step_grid.is_none() {
@@ -517,6 +584,7 @@ fn draw(
         ))
     )
     .map_err(|error| error.to_string())?;
+    queue!(out, EndSynchronizedUpdate).map_err(|error| error.to_string())?;
     out.flush().map_err(|error| error.to_string())
 }
 
@@ -751,7 +819,7 @@ pub fn perform(
 mod tests {
     use crossterm::event::KeyCode;
 
-    use super::{TuiKeyboard, dispatch_performance_binding, navigation_key};
+    use super::{TuiKeyboard, dispatch_performance_binding, navigation_key, terminal_color};
     use crate::{
         compiler::compile,
         live_notes::live_note_queue,
@@ -765,6 +833,24 @@ mod tests {
         assert_eq!(navigation_key(KeyCode::F(1)).as_deref(), Some("F1"));
         assert_eq!(navigation_key(KeyCode::F(2)).as_deref(), Some("F2"));
         assert_eq!(navigation_key(KeyCode::Left), None);
+    }
+
+    #[test]
+    fn terminal_colors_support_truecolor_ansi_and_monochrome() {
+        use crate::performance_ui::ColorMode;
+        assert_eq!(terminal_color(4, ColorMode::Mono), None);
+        assert_eq!(
+            terminal_color(4, ColorMode::TrueColor),
+            Some(crossterm::style::Color::Rgb {
+                r: 0xec,
+                g: 0x27,
+                b: 0x3f
+            })
+        );
+        assert!(matches!(
+            terminal_color(4, ColorMode::Ansi256),
+            Some(crossterm::style::Color::AnsiValue(_))
+        ));
     }
 
     #[test]
