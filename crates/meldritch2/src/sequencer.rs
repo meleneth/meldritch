@@ -7,9 +7,11 @@ use std::sync::{
 
 use crate::event_bridge::{EventKind, EventPayload, EventSource};
 
-pub const MAX_TRACKS: usize = 8;
+/// Bounded prepared capacity; interfaces are free to project smaller viewports.
+pub const MAX_TRACKS: usize = 32;
 pub const MAX_STEPS: usize = 64;
-pub const MAX_PATTERNS: usize = 16;
+/// Index 255 remains the lock-free "none" sentinel.
+pub const MAX_PATTERNS: usize = 255;
 const NONE: u8 = u8::MAX;
 
 #[derive(Clone, Copy, Debug)]
@@ -48,6 +50,7 @@ pub struct SequencerControl {
     pub steps_per_beat: u32,
     pub bpm: std::sync::atomic::AtomicU64,
     track_names: Mutex<Vec<String>>,
+    track_count: AtomicU8,
     pattern: Mutex<PublishedPattern>,
     command: AtomicU8,
     playing: AtomicBool,
@@ -97,6 +100,7 @@ impl SequencerControl {
             steps_per_beat,
             bpm: std::sync::atomic::AtomicU64::new(bpm.to_bits()),
             track_names: Mutex::new(Vec::new()),
+            track_count: AtomicU8::new(0),
             pattern: Mutex::new(PublishedPattern {
                 names: vec!["Default".into()],
                 authored: vec![initial],
@@ -131,6 +135,7 @@ impl SequencerControl {
             return Err(format!("duplicate sequencer track '{name}'"));
         }
         names.push(name);
+        self.track_count.store(names.len() as u8, Ordering::Release);
         Ok(names.len() - 1)
     }
     pub fn track_names(&self) -> Vec<String> {
@@ -138,6 +143,9 @@ impl SequencerControl {
             .lock()
             .map(|v| v.clone())
             .unwrap_or_default()
+    }
+    pub fn track_count(&self) -> usize {
+        usize::from(self.track_count.load(Ordering::Acquire))
     }
     pub fn set_steps(&self, track: usize, values: &[f32]) -> Result<(), String> {
         self.set_pattern_steps(self.viewed_pattern(), track, values)
@@ -792,7 +800,9 @@ impl SequencerControl {
             patterns.push(pattern)
         }
         if names.is_empty() || names.len() > MAX_PATTERNS {
-            return Err("saved project requires 1..16 patterns".into());
+            return Err(format!(
+                "saved project requires 1..={MAX_PATTERNS} patterns"
+            ));
         }
         let active_name: String = saved.get("active_pattern").map_err(|e| e.to_string())?;
         let viewed_name: String = saved.get("viewed_pattern").map_err(|e| e.to_string())?;
@@ -922,7 +932,7 @@ impl SequencerRuntime {
     pub fn begin_frame(&mut self, sample_rate: f64) {
         let sample_position = self.sample_position;
         self.sample_position = self.sample_position.wrapping_add(1);
-        for track in 0..MAX_TRACKS {
+        for track in 0..self.control.track_count() {
             self.gates[track] = (self.gates[track] - 1.0).max(0.0);
             if self.audible_notes[track]
                 && (self.gates[track] == 0.0 || !self.control.track_enabled(track))
@@ -1017,7 +1027,7 @@ impl SequencerRuntime {
                         position,
                     }
                 });
-            for track in 0..MAX_TRACKS {
+            for track in 0..self.control.track_count() {
                 let length = usize::from(self.pattern.lengths[track]).max(1);
                 let track_step = self.step % length;
                 let velocity = self.pattern.velocities[track][track_step] as f64;
@@ -1047,9 +1057,7 @@ impl SequencerRuntime {
                     }
                 }
             }
-            let cycle = self
-                .pattern
-                .lengths
+            let cycle = self.pattern.lengths[..self.control.track_count()]
                 .iter()
                 .copied()
                 .map(usize::from)
@@ -1291,6 +1299,19 @@ mod tests {
         }
         assert_eq!(three, [0, 3, 6, 9, 12, 15]);
         assert_eq!(five, [0, 5, 10, 15]);
+    }
+
+    #[test]
+    fn eight_tracks_is_a_viewport_not_a_musical_model_limit() {
+        let control = SequencerControl::new("wide".into(), 120.0, 16, 4).unwrap();
+        for track in 0..12 {
+            control.add_track(format!("Track {track}")).unwrap();
+        }
+        control.set_steps(11, &[0.75]).unwrap();
+        let mut runtime = SequencerRuntime::new(Arc::clone(&control));
+        runtime.begin_frame(8.0);
+        assert_eq!(control.track_count(), 12);
+        assert_eq!(runtime.trigger(11), 0.75);
     }
 
     #[test]
