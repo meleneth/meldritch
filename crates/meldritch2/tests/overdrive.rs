@@ -5,7 +5,11 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use meldritch2::{compiler::compile_at_rate, lua, model::Graph};
+use meldritch2::{
+    compiler::{OfflineRenderer, RenderDiagnostics, compile_at_rate},
+    lua,
+    model::Graph,
+};
 
 const CORE: &str = include_str!("../../../examples/overdrive/overdrive_core.lua");
 const RATE: f64 = 8_000.0;
@@ -148,6 +152,14 @@ fn project_loads_eight_independent_tracks_patterns_effects_and_generic_surface()
     );
     assert_eq!(
         machine
+            .order()
+            .iter()
+            .filter(|id| id.contains("/stereo_compressor_"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        machine
             .control_handle("dry_duck")
             .unwrap()
             .targets()
@@ -168,6 +180,101 @@ fn project_loads_eight_independent_tracks_patterns_effects_and_generic_surface()
         "master_level"
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn production_composition_reports_every_drum_bus_sidechain_and_master_activity() {
+    let (root, graph) = fixture("showcase");
+    let mut machine = compile_at_rate(&graph, RATE).unwrap();
+    let mut diagnostics = RenderDiagnostics::default();
+    let mut left = vec![0.0; 80_000];
+    let mut right = vec![0.0; left.len()];
+    for (left, right) in left.chunks_mut(512).zip(right.chunks_mut(512)) {
+        machine.process_stereo_diagnostic(left, right, &mut diagnostics);
+    }
+    for (track, minimum) in [
+        ("Kick", 2),
+        ("SnareClap", 1),
+        ("CHat", 4),
+        ("OHat", 1),
+        ("Perc", 2),
+        ("Pulse", 8),
+        ("Chime", 3),
+        ("Lead", 4),
+    ] {
+        diagnostics.expect_track_events(track, minimum).unwrap();
+    }
+    for player in 1..=6 {
+        diagnostics
+            .expect_output(&format!("instrument/sample_player_{player}"), 0, 1e-5)
+            .unwrap();
+    }
+    diagnostics
+        .expect_output("instrument/mixer_1", 0, 1e-4)
+        .unwrap();
+    diagnostics
+        .expect_output("instrument/mixer_2", 0, 1e-5)
+        .unwrap();
+    for ducker in 1..=4 {
+        let id = format!("instrument/ducker_{ducker}");
+        diagnostics.expect_input(&id, 1, 1e-5).unwrap();
+        let gain = &diagnostics.module(&id).unwrap().outputs[1];
+        assert!(gain.rms() < 0.999, "{id} never reduced gain: {gain:?}");
+    }
+    diagnostics
+        .expect_output("instrument/stereo_compressor_1", 2, 0.01)
+        .unwrap();
+    diagnostics
+        .expect_output("instrument/stereo_compressor_1", 0, 1e-4)
+        .unwrap();
+    assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
+    assert_ne!(left, right);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn parallel_showcase_preserves_events_ducking_compression_and_sample_order() {
+    let (root_a, scalar_graph) = fixture("showcase");
+    let (root_b, serial_graph) = fixture("showcase");
+    let (root_c, parallel_graph) = fixture("showcase");
+    let frames = 24_000;
+    let scalar = render(&scalar_graph, frames, &[]);
+    let run = |graph: &Graph, workers| {
+        let mut renderer =
+            OfflineRenderer::new(compile_at_rate(graph, RATE).unwrap(), 512, workers).unwrap();
+        let mut left = vec![0.0; frames];
+        let mut right = vec![0.0; frames];
+        for (left, right) in left.chunks_mut(512).zip(right.chunks_mut(512)) {
+            renderer.process_stereo(left, right);
+        }
+        (left, right)
+    };
+    let serial = run(&serial_graph, 1);
+    let parallel = run(&parallel_graph, 4);
+    assert_eq!(scalar, serial, "block processing changed Overdrive output");
+    assert_eq!(
+        serial, parallel,
+        "parallel processing changed Overdrive output"
+    );
+    let positions: Vec<_> = [&scalar_graph, &serial_graph, &parallel_graph]
+        .into_iter()
+        .map(|graph| {
+            graph
+                .performance
+                .as_ref()
+                .unwrap()
+                .sequencer
+                .position_steps()
+        })
+        .collect();
+    assert_eq!(positions[0], positions[1], "block scheduling lost events");
+    assert_eq!(
+        positions[1], positions[2],
+        "parallel scheduling lost events"
+    );
+    fs::remove_dir_all(root_a).unwrap();
+    fs::remove_dir_all(root_b).unwrap();
+    fs::remove_dir_all(root_c).unwrap();
 }
 
 #[test]
@@ -283,10 +390,37 @@ fn seven_minute_arrangement_advances_on_the_shared_sixty_four_step_boundary() {
     // 448 Hz makes one sixteenth step exactly 60 frames at 112 BPM.
     let rate = 448.0;
     let mut machine = compile_at_rate(&graph, rate).unwrap();
-    let mut left = vec![0.0; 7 * 64 * 60 + 1];
+    let mut left = vec![0.0; 2 * 64 * 60 + 1];
     let mut right = vec![0.0; left.len()];
     machine.process_stereo(&mut left, &mut right);
     assert_eq!(sequence.active_pattern(), 1);
     assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn full_arrangement_contains_drums_after_the_authored_intro() {
+    let (root, graph) = fixture("full");
+    // At 448 Hz and 112 BPM each sixteenth is exactly 60 samples. Five
+    // 64-step cycles cover the atmospheric and percussion introductions;
+    // the following Groove section must contain the complete drum kit.
+    let rate = 448.0;
+    let intro_frames = 5 * 64 * 60;
+    let mut machine = compile_at_rate(&graph, rate).unwrap();
+    let mut diagnostics = RenderDiagnostics::default();
+    let mut left = vec![0.0; intro_frames];
+    let mut right = vec![0.0; intro_frames];
+    machine.process_stereo_diagnostic(&mut left, &mut right, &mut diagnostics);
+    assert_eq!(diagnostics.track("Kick").unwrap().events, 0);
+
+    let mut left = vec![0.0; 64 * 60];
+    let mut right = vec![0.0; left.len()];
+    machine.process_stereo_diagnostic(&mut left, &mut right, &mut diagnostics);
+    for track in ["Kick", "SnareClap", "CHat", "OHat", "Perc"] {
+        diagnostics.expect_track_events(track, 1).unwrap();
+    }
+    diagnostics
+        .expect_output("instrument/mixer_1", 0, 1e-6)
+        .unwrap();
     fs::remove_dir_all(root).unwrap();
 }

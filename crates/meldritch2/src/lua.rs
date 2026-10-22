@@ -540,6 +540,17 @@ local function decorate_scope(facade, scope, prefix)
       filter_cutoff = handle.filter_mod,
     })
   end
+  function facade:stereo_compressor(values)
+    local handle = scope:module(self:_id("stereo_compressor"), "stereo_compressor", copy_values(values,
+      { "threshold", "ratio", "attack", "release", "knee", "makeup_gain", "bypass" }))
+    handle.input = { left = handle.input_left, right = handle.input_right, direction = "stereo_input" }
+    handle.out = { left = handle.left, right = handle.right, direction = "stereo_output" }
+    handle.threshold = parameter(handle, "threshold"); handle.ratio = parameter(handle, "ratio")
+    handle.attack = parameter(handle, "attack"); handle.release = parameter(handle, "release")
+    handle.knee = parameter(handle, "knee"); handle.makeup_gain = parameter(handle, "makeup_gain")
+    handle.bypass = parameter(handle, "bypass")
+    return handle
+  end
   function facade:envelope_follower(values)
     local handle = scope:module(self:_id("envelope_follower"), "envelope_follower", copy_values(values, { "attack", "release" }))
     handle.attack = parameter(handle, "attack")

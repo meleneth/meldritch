@@ -26,6 +26,7 @@ pub mod sequencer_tempo;
 pub mod sequencer_track;
 pub mod sine;
 pub mod square;
+pub mod stereo_compressor;
 pub mod stereo_delay;
 pub mod stereo_mixer8;
 pub mod stereo_output;

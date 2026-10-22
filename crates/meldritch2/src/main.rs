@@ -8,7 +8,7 @@ use std::{
 };
 
 use meldritch2::{
-    compiler::{compile, compile_at_rate},
+    compiler::{OfflineRenderer, compile, compile_at_rate},
     device::{DeviceOutput, output_device_names},
     lua,
     midi_device::{MidiInputSession, MidiMonitorSession, describe_message, input_port_names},
@@ -16,10 +16,38 @@ use meldritch2::{
     tui,
 };
 
-fn render_wav(graph: &Graph, path: &str, seconds: f64) -> Result<(), String> {
+#[derive(Clone, Copy)]
+enum RenderMode {
+    Auto { max_workers: usize },
+    Scalar,
+    Block { workers: usize },
+}
+
+fn render_wav(graph: &Graph, path: &str, seconds: f64, mode: RenderMode) -> Result<(), String> {
     const RATE: u32 = 48_000;
+    const BLOCK: usize = 1_024;
     let frames = (seconds * f64::from(RATE)).ceil() as usize;
-    let mut machine = compile_at_rate(graph, f64::from(RATE))?;
+    let preparation_started = Instant::now();
+    let machine = compile_at_rate(graph, f64::from(RATE))?;
+    let preparation = preparation_started.elapsed();
+    let mode = match mode {
+        // Small graphs benchmark faster on the scalar reference. Larger
+        // graphs expose enough independent branches to amortize barriers.
+        RenderMode::Auto { max_workers } if machine.order().len() >= 32 && max_workers > 1 => {
+            RenderMode::Block {
+                workers: max_workers.min(4),
+            }
+        }
+        RenderMode::Auto { .. } => RenderMode::Scalar,
+        selected => selected,
+    };
+    let (mut scalar, mut block) = match mode {
+        RenderMode::Scalar => (Some(machine), None),
+        RenderMode::Block { workers } => {
+            (None, Some(OfflineRenderer::new(machine, BLOCK, workers)?))
+        }
+        RenderMode::Auto { .. } => unreachable!("automatic mode was resolved above"),
+    };
     let spec = hound::WavSpec {
         channels: 2,
         sample_rate: RATE,
@@ -27,12 +55,26 @@ fn render_wav(graph: &Graph, path: &str, seconds: f64) -> Result<(), String> {
         sample_format: hound::SampleFormat::Int,
     };
     let mut writer = hound::WavWriter::create(path, spec).map_err(|e| e.to_string())?;
-    let mut left = vec![0.0; 1024];
-    let mut right = vec![0.0; 1024];
+    let mut left = vec![0.0; BLOCK];
+    let mut right = vec![0.0; BLOCK];
     let mut remaining = frames;
+    let render_started = Instant::now();
+    let mut processing = Duration::ZERO;
+    let mut encoding = Duration::ZERO;
     while remaining > 0 {
         let count = remaining.min(left.len());
-        machine.process_stereo(&mut left[..count], &mut right[..count]);
+        let processing_started = Instant::now();
+        match (&mut scalar, &mut block) {
+            (Some(machine), None) => {
+                machine.process_stereo(&mut left[..count], &mut right[..count])
+            }
+            (None, Some(renderer)) => {
+                renderer.process_stereo(&mut left[..count], &mut right[..count])
+            }
+            _ => unreachable!("exactly one offline execution mode is active"),
+        }
+        processing += processing_started.elapsed();
+        let encoding_started = Instant::now();
         for (&l, &r) in left[..count].iter().zip(&right[..count]) {
             let scale = 8_388_607.0;
             writer
@@ -42,9 +84,44 @@ fn render_wav(graph: &Graph, path: &str, seconds: f64) -> Result<(), String> {
                 .write_sample((r.clamp(-1.0, 1.0) * scale).round() as i32)
                 .map_err(|e| e.to_string())?;
         }
+        encoding += encoding_started.elapsed();
         remaining -= count;
     }
-    writer.finalize().map_err(|e| e.to_string())
+    let render_time = render_started.elapsed();
+    let finalize_started = Instant::now();
+    writer.finalize().map_err(|e| e.to_string())?;
+    let finalize = finalize_started.elapsed();
+    let (executor, workers, modules, levels, width) = match (&scalar, &block) {
+        (Some(machine), None) => ("scalar", 1, machine.order().len(), 0, 1),
+        (None, Some(renderer)) => (
+            "block",
+            renderer.workers(),
+            renderer.module_count(),
+            renderer.dependency_levels(),
+            renderer.maximum_parallel_width(),
+        ),
+        _ => unreachable!(),
+    };
+    eprintln!(
+        "render profile: executor={executor} workers={workers} modules={modules} levels={levels} max_width={width} block={BLOCK} prepare={:.3}s processing={:.3}s encoding={:.3}s finalize={:.3}s total_loop={:.3}s throughput={:.2}x",
+        preparation.as_secs_f64(),
+        processing.as_secs_f64(),
+        encoding.as_secs_f64(),
+        finalize.as_secs_f64(),
+        render_time.as_secs_f64(),
+        seconds / render_time.as_secs_f64()
+    );
+    if let Some(renderer) = &block {
+        let profile = renderer.profile();
+        eprintln!(
+            "render profile: musical_scheduling={:.3}s dependency_graph_dsp_and_mix={:.3}s blocks={} frames={}",
+            profile.sequencing.as_secs_f64(),
+            profile.graph_execution.as_secs_f64(),
+            profile.blocks,
+            profile.frames
+        );
+    }
+    Ok(())
 }
 
 fn load_graph(path: &str) -> Result<Graph, String> {
@@ -119,7 +196,7 @@ fn main() {
     let mut args = env::args().skip(1);
     let Some(first) = args.next() else {
         eprintln!(
-            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 midi-sniff PORT [SECONDS] | meldritch2 render GRAPH.lua OUTPUT.wav SECONDS | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]\nAudio and controller names may instead be configured in Lua with graph:devices {{ audio_output = NAME, midi_input = NAME, midi_controls = {{ NAME, ... }}, apc_mini = NAME }}."
+            "usage: meldritch2 GRAPH.lua [--set=MODULE.PARAM=VALUE] | meldritch2 devices | meldritch2 midi-ports | meldritch2 midi-sniff PORT [SECONDS] | meldritch2 render GRAPH.lua OUTPUT.wav SECONDS [--workers=N|--scalar] | meldritch2 play GRAPH.lua SECONDS [--device=INDEX] | meldritch2 perform GRAPH.lua [--device=INDEX] [--midi=INDEX]\nAudio and controller names may instead be configured in Lua with graph:devices {{ audio_output = NAME, midi_input = NAME, midi_controls = {{ NAME, ... }}, apc_mini = NAME }}."
         );
         process::exit(2);
     };
@@ -243,11 +320,40 @@ fn main() {
             .next()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(0.0);
+        let option = args.next();
         if args.next().is_some() || !seconds.is_finite() || seconds <= 0.0 || seconds > 3600.0 {
             eprintln!("render requires finite SECONDS between 0 and 3600");
             process::exit(2);
         }
-        match load_graph(&source).and_then(|graph| render_wav(&graph, &output, seconds)) {
+        let mode = match option.as_deref() {
+            Some("--scalar") => RenderMode::Scalar,
+            Some(value) if value.starts_with("--workers=") => {
+                let workers = value["--workers=".len()..]
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|workers| *workers > 0)
+                    .unwrap_or_else(|| {
+                        eprintln!("--workers requires a positive integer");
+                        process::exit(2);
+                    });
+                RenderMode::Block { workers }
+            }
+            Some(value) => {
+                eprintln!("unknown render option '{value}'");
+                process::exit(2);
+            }
+            None => RenderMode::Auto {
+                max_workers: thread::available_parallelism().map_or(1, usize::from),
+            },
+        };
+        let load_started = Instant::now();
+        match load_graph(&source).and_then(|graph| {
+            eprintln!(
+                "render profile: Lua/project load={:.3}s",
+                load_started.elapsed().as_secs_f64()
+            );
+            render_wav(&graph, &output, seconds, mode)
+        }) {
             Ok(()) => println!("rendered {seconds:.3}s to {output}"),
             Err(error) => {
                 eprintln!("{error}");

@@ -3,7 +3,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use meldritch2::{compiler::compile_at_rate, lua, model::Graph};
+use meldritch2::{
+    compiler::{OfflineRenderer, compile_at_rate},
+    lua,
+    model::Graph,
+};
 
 fn example(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -24,6 +28,18 @@ fn render(graph: &Graph, rate: f64, seconds: f64) -> (Vec<f64>, Vec<f64>) {
     machine.process_stereo(&mut left, &mut right);
     assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
     assert!(left.iter().chain(&right).any(|sample| sample.abs() > 1e-7));
+    (left, right)
+}
+
+fn render_offline(graph: &Graph, rate: f64, seconds: f64, workers: usize) -> (Vec<f64>, Vec<f64>) {
+    let frames = (rate * seconds) as usize;
+    let mut renderer =
+        OfflineRenderer::new(compile_at_rate(graph, rate).unwrap(), 512, workers).unwrap();
+    let mut left = vec![0.0; frames];
+    let mut right = vec![0.0; frames];
+    for (left, right) in left.chunks_mut(512).zip(right.chunks_mut(512)) {
+        renderer.process_stereo(left, right);
+    }
     (left, right)
 }
 
@@ -75,6 +91,18 @@ fn delay_laboratory_uses_stereo_tempo_routing_and_produces_distinct_channels() {
             .zip(&right)
             .any(|(left, right)| (left - right).abs() > 1e-6)
     );
+}
+
+#[test]
+fn block_serial_and_parallel_preserve_stateful_delay_output() {
+    let scalar_graph = load("examples/delay_lab/delay_lab.lua");
+    let serial_graph = load("examples/delay_lab/delay_lab.lua");
+    let parallel_graph = load("examples/delay_lab/delay_lab.lua");
+    let scalar = render(&scalar_graph, 4_000.0, 8.0);
+    let serial = render_offline(&serial_graph, 4_000.0, 8.0, 1);
+    let parallel = render_offline(&parallel_graph, 4_000.0, 8.0, 4);
+    assert_eq!(scalar, serial, "block executor changed scalar semantics");
+    assert_eq!(serial, parallel, "parallel execution changed output");
 }
 
 fn write_acceptance_wav(relative: &str, name: &str) {

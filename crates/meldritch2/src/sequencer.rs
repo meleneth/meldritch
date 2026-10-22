@@ -1086,6 +1086,9 @@ impl SequencerRuntime {
         }
         self.trigger_step.map_or(0.0, |_| self.velocities[track])
     }
+    pub(crate) fn track_count(&self) -> usize {
+        self.control.track_count()
+    }
     pub fn pitch(&self, track: usize) -> f64 {
         self.pitches[track]
     }

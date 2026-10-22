@@ -13,6 +13,7 @@ mlua = { version = "0.12", features = ["lua54", "vendored"] }
 midir.workspace = true
 mi-plaits-dsp = { git = "https://github.com/sourcebox/mi-plaits-dsp-rs", rev = "effe9864bb67d23aaf5724722ac1ce165d4e7c9f" }
 percent-encoding.workspace = true
+rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

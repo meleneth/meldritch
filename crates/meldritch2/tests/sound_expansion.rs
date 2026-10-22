@@ -132,6 +132,7 @@ fn fixed_state_sound_contracts_keep_extremes_and_nonfinite_signals_out_of_output
         "svf",
         "drive",
         "ducker",
+        "stereo_compressor",
         "envelope_follower",
         "compressor",
     ] {
@@ -332,4 +333,30 @@ fn actual_909_sidechain_patch_uses_kick_audio_to_duck_and_recover() {
     );
     assert!(left.iter().zip(&right).any(|(l, r)| (l - r).abs() > 0.05));
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn stereo_compressor_is_a_generic_insert_with_discoverable_controls() {
+    let source = r#"
+      local i=meldritch.instrument("compressor insert")
+      local left=i:constant {value=.8}; local right=i:constant {value=.4}
+      local c=i:stereo_compressor {threshold=-24,ratio=4,attack=.0001,
+        release=.1,knee=6,makeup_gain=0,bypass=0}
+      i:connect(left.out,c.input.left); i:connect(right.out,c.input.right)
+      i:connect(c.left,i.output.left)
+      -- The right output deliberately bypasses the insert: the compressor is
+      -- an ordinary branch processor rather than privileged master behavior.
+      i:connect(right.out,i.output.right)
+      i:control {id="insert_ratio",label="Insert ratio",target=c.ratio,range={1,12}}
+      return i
+    "#;
+    let graph = lua::read(source).unwrap();
+    let mut machine = compile_at_rate(&graph, 48_000.0).unwrap();
+    assert!(machine.control_handle("insert_ratio").is_some());
+    let mut left = vec![0.0; 4_800];
+    let mut right = vec![0.0; left.len()];
+    machine.process_stereo(&mut left, &mut right);
+    assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
+    assert!(left.last().unwrap().abs() < right.last().unwrap().abs());
+    assert!(right.iter().all(|sample| (*sample - 0.4).abs() < 1e-12));
 }

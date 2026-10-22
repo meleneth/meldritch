@@ -18,7 +18,7 @@ for index,name in ipairs(names) do
   }
 end
 
-local drum_bus = instrument:mixer {inputs=8,headroom=.24}
+local drum_bus = instrument:mixer {inputs=8,headroom=.32}
 local synth_bus = instrument:mixer {inputs=8,headroom=.34}
 local master = instrument:mixer {inputs=8,headroom=.52}
 local volume_controls, track_controls = {}, {}
@@ -157,11 +157,19 @@ instrument:control {id="lead_space",label="Lead ambience",target=ambience_level_
 track_controls[8]={"lead_tone","lead_shape","lead_space"}
 
 instrument:connect(drum_bus.left,master.input[1].left);instrument:connect(drum_bus.right,master.input[1].right)
-instrument:connect(master.left,instrument.output.left);instrument:connect(master.right,instrument.output.right)
+local master_compressor=instrument:stereo_compressor {threshold=-16,ratio=2,attack=.025,
+  release=.18,knee=6,makeup_gain=1,bypass=0}
+instrument:connect(master.left,master_compressor.input.left);instrument:connect(master.right,master_compressor.input.right)
+instrument:connect(master_compressor.left,instrument.output.left);instrument:connect(master_compressor.right,instrument.output.right)
 instrument:control {id="tempo",label="Tempo",target=sequence.bpm,range={72,160}}
 instrument:control {id="delay_feedback",label="Delay feedback",target=delay.feedback,range={0,.94}}
 instrument:control {id="delay_filter",label="Delay filter",target=delay.filter_cutoff,range={80,16000},curve="log"}
 instrument:control {id="master_level",label="Master level",target=master.headroom,range={.05,.9}}
+instrument:control {id="master_threshold",label="Master threshold",target=master_compressor.threshold,range={-36,0}}
+instrument:control {id="master_ratio",label="Master ratio",target=master_compressor.ratio,range={1,8}}
+instrument:control {id="master_attack",label="Master attack",target=master_compressor.attack,range={.001,.2},curve="log"}
+instrument:control {id="master_release",label="Master release",target=master_compressor.release,range={.02,1},curve="log"}
+instrument:control {id="master_bypass",label="Master compressor bypass",target=master_compressor.bypass,range={0,1}}
 
 local function row(length,hits)
   local values={};for step=1,length do values[step]=0 end
@@ -229,12 +237,15 @@ if project_path then project:reload(project_path) end
 if arrangement_mode=="showcase" then
   project:arrangement {{name="Showcase",pattern="Overdrive",repeats=2}}
 else
-  -- 49 64-step cycles at 112 BPM = exactly 420 seconds.
-  project:arrangement {{name="Atmosphere",pattern="Atmosphere",repeats=7},
-    {name="Percussion",pattern="Percussion",repeats=6},{name="Groove",pattern="Groove",repeats=7},
-    {name="Poly",pattern="Poly",repeats=7},{name="Breakdown",pattern="Breakdown",repeats=6},
-    {name="Overdrive",pattern="Overdrive",repeats=9},{name="Outro",pattern="Outro",repeats=5},
-    {name="Tail",pattern="Tail",repeats=2}}
+  -- 49 64-step cycles at 112 BPM = exactly 420 seconds. The former
+  -- seven-cycle atmospheric opening deferred the first kick for almost two
+  -- minutes, which made a working drum graph sound absent. Percussion now
+  -- enters after two cycles and the kick establishes the groove after five.
+  project:arrangement {{name="Atmosphere",pattern="Atmosphere",repeats=2},
+    {name="Percussion",pattern="Percussion",repeats=3},{name="Groove",pattern="Groove",repeats=8},
+    {name="Poly",pattern="Poly",repeats=8},{name="Breakdown",pattern="Breakdown",repeats=7},
+    {name="Overdrive",pattern="Overdrive",repeats=12},{name="Outro",pattern="Outro",repeats=6},
+    {name="Tail",pattern="Tail",repeats=3}}
 end
 sequence:start()
 
@@ -252,7 +263,8 @@ instrument:performance {layout="step_grid",sequencer=sequence,project_file="over
     faders={volume_controls[1],volume_controls[2],volume_controls[3],volume_controls[4],volume_controls[5],
       volume_controls[6],volume_controls[7],volume_controls[8],"master_level"}}}
 -- Put shared bus controls on the Pulse page without teaching the UI what a bus is.
-track_controls[6]={"tone_6","shape_6","drive_6","dry_duck","wet_duck","duck_attack","duck_release","delay_feedback","delay_filter"}
+track_controls[6]={"tone_6","shape_6","drive_6","dry_duck","wet_duck","duck_attack","duck_release",
+  "delay_feedback","delay_filter","master_threshold","master_ratio","master_attack","master_release","master_bypass"}
 local ui_tracks={};local colors={"red","orange","yellow","green","pink","blue","cyan","violet"}
 for index,name in ipairs(names) do ui_tracks[index]={label=name,volume=volume_controls[index],
   controls=track_controls[index],color=colors[index],melodic=index>=6} end

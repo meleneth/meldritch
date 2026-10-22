@@ -3,6 +3,9 @@ use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
 };
+use std::time::{Duration, Instant};
+
+use rayon::prelude::*;
 
 use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
@@ -525,11 +528,135 @@ pub struct Machine {
     output_slots: [usize; 2],
     stereo: bool,
     order: Vec<String>,
+    op_ids: Vec<String>,
     authored_normalizations: Vec<Connection>,
     effective_connections: Vec<Connection>,
     sample_rate: f64,
     sequencers: Vec<SequencerRuntime>,
     sequencer_controls: Vec<Arc<SequencerControl>>,
+    level_ranges: Vec<std::ops::Range<usize>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SignalStats {
+    pub samples: u64,
+    pub active_samples: u64,
+    pub non_finite_samples: u64,
+    pub peak: f64,
+    pub sum_squares: f64,
+}
+
+impl SignalStats {
+    fn observe(&mut self, value: f64) {
+        self.samples += 1;
+        if !value.is_finite() {
+            self.non_finite_samples += 1;
+            return;
+        }
+        self.peak = self.peak.max(value.abs());
+        self.sum_squares += value * value;
+        if value.abs() > 1e-9 {
+            self.active_samples += 1;
+        }
+    }
+
+    pub fn rms(&self) -> f64 {
+        if self.samples == 0 {
+            0.0
+        } else {
+            (self.sum_squares / self.samples as f64).sqrt()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ModuleActivity {
+    pub id: String,
+    pub inputs: Vec<SignalStats>,
+    pub outputs: Vec<SignalStats>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TrackActivity {
+    pub source: String,
+    pub track: String,
+    pub events: u64,
+    pub audible_frames: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RenderDiagnostics {
+    pub frames: u64,
+    pub modules: Vec<ModuleActivity>,
+    pub tracks: Vec<TrackActivity>,
+}
+
+impl RenderDiagnostics {
+    pub fn module(&self, id: &str) -> Option<&ModuleActivity> {
+        self.modules.iter().find(|module| module.id == id)
+    }
+
+    pub fn track(&self, name: &str) -> Option<&TrackActivity> {
+        self.tracks.iter().find(|track| track.track == name)
+    }
+
+    pub fn expect_track_events(&self, name: &str, minimum: u64) -> Result<(), String> {
+        let track = self
+            .track(name)
+            .ok_or_else(|| format!("musical diagnostics have no track named '{name}'"))?;
+        if track.events < minimum {
+            return Err(format!(
+                "track '{}' from '{}' produced {} events; expected at least {minimum}",
+                track.track, track.source, track.events
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn expect_output(
+        &self,
+        module: &str,
+        output: usize,
+        minimum_rms: f64,
+    ) -> Result<(), String> {
+        let activity = self
+            .module(module)
+            .ok_or_else(|| format!("musical diagnostics have no module '{module}'"))?;
+        let signal = activity
+            .outputs
+            .get(output)
+            .ok_or_else(|| format!("module '{module}' has no diagnostic output {output}"))?;
+        if signal.non_finite_samples > 0 || signal.rms() < minimum_rms {
+            return Err(format!(
+                "module '{module}' output {output} RMS {} is below expected {minimum_rms} (peak {}, {} active samples, {} non-finite samples)",
+                signal.rms(),
+                signal.peak,
+                signal.active_samples,
+                signal.non_finite_samples
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn expect_input(&self, module: &str, input: usize, minimum_rms: f64) -> Result<(), String> {
+        let activity = self
+            .module(module)
+            .ok_or_else(|| format!("musical diagnostics have no module '{module}'"))?;
+        let signal = activity
+            .inputs
+            .get(input)
+            .ok_or_else(|| format!("module '{module}' has no diagnostic input {input}"))?;
+        if signal.non_finite_samples > 0 || signal.rms() < minimum_rms {
+            return Err(format!(
+                "module '{module}' input {input} RMS {} is below expected {minimum_rms} (peak {}, {} active samples, {} non-finite samples)",
+                signal.rms(),
+                signal.peak,
+                signal.active_samples,
+                signal.non_finite_samples
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -726,6 +853,47 @@ impl Machine {
         self.process_stereo_prepared(left, right);
     }
 
+    pub fn process_stereo_diagnostic(
+        &mut self,
+        left: &mut [f64],
+        right: &mut [f64],
+        diagnostics: &mut RenderDiagnostics,
+    ) {
+        assert_eq!(left.len(), right.len());
+        self.prepare_buffer();
+        if diagnostics.modules.is_empty() {
+            diagnostics.modules = self
+                .ops
+                .iter()
+                .zip(&self.op_ids)
+                .map(|(op, id)| ModuleActivity {
+                    id: id.clone(),
+                    inputs: vec![SignalStats::default(); op.inputs.len()],
+                    outputs: vec![SignalStats::default(); op.outputs.len()],
+                })
+                .collect();
+            for control in &self.sequencer_controls {
+                diagnostics
+                    .tracks
+                    .extend(
+                        control
+                            .track_names()
+                            .into_iter()
+                            .map(|track| TrackActivity {
+                                source: control.name.clone(),
+                                track,
+                                ..TrackActivity::default()
+                            }),
+                    );
+            }
+        }
+        for (left, right) in left.iter_mut().zip(right) {
+            self.process_one_diagnostic(diagnostics);
+            *left = self.slots[self.output_slots[0]];
+            *right = self.slots[self.output_slots[1]];
+        }
+    }
+
     pub(crate) fn prepare_buffer(&mut self) {
         // Snapshot all published values once, before processing this buffer.
         for (index, cell) in self.published.iter().enumerate() {
@@ -762,6 +930,16 @@ impl Machine {
             self.params[pair.gate_index] = pair.last_gate;
             if let Some(index) = pair.velocity_index {
                 self.params[index] = pair.last_velocity;
+            }
+        }
+        // Tempo is control state observed by the sequencer before its first
+        // frame. Publish it at the same buffer boundary as every other
+        // parameter so block and scalar executors share exact timing.
+        for op in &self.ops {
+            if let OpProcessor::SequencerTempo(control) = &op.processor {
+                control
+                    .bpm
+                    .store(self.params[op.params[0]].to_bits(), Ordering::Release);
             }
         }
     }
@@ -831,6 +1009,77 @@ impl Machine {
                 }
             }
         }
+    }
+
+    fn process_one_diagnostic(&mut self, diagnostics: &mut RenderDiagnostics) {
+        let mut track_offset = 0;
+        for sequencer in &mut self.sequencers {
+            sequencer.begin_frame(self.sample_rate);
+            for track in 0..sequencer.track_count() {
+                let activity = &mut diagnostics.tracks[track_offset + track];
+                if sequencer.trigger(track) > 0.0 {
+                    activity.events += 1;
+                }
+                if sequencer.enabled(track) > 0.0 && sequencer.gate(track) > 0.0 {
+                    activity.audible_frames += 1;
+                }
+            }
+            track_offset += sequencer.track_count();
+        }
+        for (op_index, op) in self.ops.iter_mut().enumerate() {
+            for (slot, input) in op.inputs.iter().enumerate() {
+                self.input_scratch[slot] = if input.sources.is_empty() {
+                    input.unconnected
+                } else {
+                    input
+                        .sources
+                        .iter()
+                        .fold(0.0, |sum, source| sum + self.slots[*source])
+                };
+                diagnostics.modules[op_index].inputs[slot].observe(self.input_scratch[slot]);
+            }
+            for (slot, index) in op.params.iter().enumerate() {
+                self.param_scratch[slot] = self.params[*index];
+            }
+            let inputs = &self.input_scratch[..op.inputs.len()];
+            let params = &self.param_scratch[..op.params.len()];
+            let outputs = &mut self.slots[op.outputs.clone()];
+            match &mut op.processor {
+                OpProcessor::Contract { process, state } => {
+                    process(state, inputs, params, self.sample_rate, outputs)
+                }
+                OpProcessor::Sample(player) => {
+                    player.process(inputs[0], params[0], self.sample_rate, outputs)
+                }
+                OpProcessor::Delay(delay) => {
+                    delay.process(inputs, params, self.sample_rate, outputs)
+                }
+                OpProcessor::StereoDelay(delay) => {
+                    delay.process(inputs, params, self.sample_rate, outputs)
+                }
+                OpProcessor::Plaits(plaits) => plaits.process(inputs, params, outputs),
+                OpProcessor::SequencerTrack { sequencer, track } => {
+                    let runtime = &self.sequencers[*sequencer];
+                    outputs[0] = runtime.trigger(*track);
+                    outputs[1] = runtime.pitch(*track);
+                    outputs[2] = runtime.gate(*track);
+                    outputs[3] = runtime.velocity(*track);
+                    outputs[4] = runtime.enabled(*track);
+                }
+                OpProcessor::SequencerTempo(control) => {
+                    control.bpm.store(params[0].to_bits(), Ordering::Release);
+                    outputs[0] = params[0];
+                }
+            }
+            for (signal, value) in diagnostics.modules[op_index]
+                .outputs
+                .iter_mut()
+                .zip(outputs)
+            {
+                signal.observe(*value);
+            }
+        }
+        diagnostics.frames += 1;
     }
 
     pub fn order(&self) -> &[String] {
@@ -999,6 +1248,263 @@ impl Machine {
     }
 }
 
+/// Block-oriented executor for file rendering. The live callback continues to
+/// use `Machine`'s scalar path; this executor is allowed to own worker threads
+/// and block-sized scratch allocated during preparation.
+pub struct OfflineRenderer {
+    machine: Machine,
+    block_size: usize,
+    workers: usize,
+    pool: Option<rayon::ThreadPool>,
+    slot_buffers: Vec<Vec<f64>>,
+    op_outputs: Vec<Vec<f64>>,
+    op_inputs: Vec<Vec<f64>>,
+    op_params: Vec<Vec<f64>>,
+    sequencer_ops: Vec<usize>,
+    profile: OfflineRenderProfile,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OfflineRenderProfile {
+    pub blocks: u64,
+    pub frames: u64,
+    pub sequencing: Duration,
+    pub graph_execution: Duration,
+}
+
+impl OfflineRenderer {
+    pub fn new(machine: Machine, block_size: usize, workers: usize) -> Result<Self, String> {
+        if block_size == 0 || workers == 0 {
+            return Err("offline renderer requires positive block size and worker count".into());
+        }
+        let pool = (workers > 1)
+            .then(|| {
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(workers)
+                    .thread_name(|index| format!("meldritch-render-{index}"))
+                    .build()
+                    .map_err(|error| error.to_string())
+            })
+            .transpose()?;
+        let slot_buffers = (0..machine.slots.len())
+            .map(|_| vec![0.0; block_size])
+            .collect();
+        let op_outputs = machine
+            .ops
+            .iter()
+            .map(|op| vec![0.0; block_size * op.outputs.len()])
+            .collect();
+        let op_inputs = machine
+            .ops
+            .iter()
+            .map(|op| vec![0.0; op.inputs.len()])
+            .collect();
+        let op_params = machine
+            .ops
+            .iter()
+            .map(|op| vec![0.0; op.params.len()])
+            .collect();
+        let sequencer_ops = machine
+            .ops
+            .iter()
+            .enumerate()
+            .filter_map(|(index, op)| {
+                matches!(
+                    op.processor,
+                    OpProcessor::SequencerTrack { .. } | OpProcessor::SequencerTempo(_)
+                )
+                .then_some(index)
+            })
+            .collect();
+        Ok(Self {
+            machine,
+            block_size,
+            workers,
+            pool,
+            slot_buffers,
+            op_outputs,
+            op_inputs,
+            op_params,
+            sequencer_ops,
+            profile: OfflineRenderProfile::default(),
+        })
+    }
+
+    pub fn workers(&self) -> usize {
+        self.workers
+    }
+
+    pub fn maximum_parallel_width(&self) -> usize {
+        self.machine
+            .level_ranges
+            .iter()
+            .map(std::ops::Range::len)
+            .max()
+            .unwrap_or(1)
+    }
+
+    pub fn module_count(&self) -> usize {
+        self.machine.ops.len()
+    }
+
+    pub fn dependency_levels(&self) -> usize {
+        self.machine.level_ranges.len()
+    }
+
+    pub fn machine(&self) -> &Machine {
+        &self.machine
+    }
+
+    pub fn profile(&self) -> OfflineRenderProfile {
+        self.profile
+    }
+
+    pub fn process_stereo(&mut self, left: &mut [f64], right: &mut [f64]) {
+        assert_eq!(left.len(), right.len());
+        assert!(left.len() <= self.block_size);
+        let frames = left.len();
+        self.machine.prepare_buffer();
+        for (op, values) in self.machine.ops.iter().zip(&mut self.op_params) {
+            for (target, index) in values.iter_mut().zip(&op.params) {
+                *target = self.machine.params[*index];
+            }
+        }
+
+        // Musical scheduling remains single-threaded and sample ordered. Its
+        // prepared signal buffers become ordinary dependencies for DSP levels.
+        let sequencing_started = Instant::now();
+        for frame in 0..frames {
+            for sequencer in &mut self.machine.sequencers {
+                sequencer.begin_frame(self.machine.sample_rate);
+            }
+            for &op_index in &self.sequencer_ops {
+                let op = &mut self.machine.ops[op_index];
+                let outputs = &mut self.op_outputs[op_index];
+                match &mut op.processor {
+                    OpProcessor::SequencerTrack { sequencer, track } => {
+                        let runtime = &self.machine.sequencers[*sequencer];
+                        let base = frame * 5;
+                        outputs[base] = runtime.trigger(*track);
+                        outputs[base + 1] = runtime.pitch(*track);
+                        outputs[base + 2] = runtime.gate(*track);
+                        outputs[base + 3] = runtime.velocity(*track);
+                        outputs[base + 4] = runtime.enabled(*track);
+                    }
+                    OpProcessor::SequencerTempo(control) => {
+                        let bpm = self.op_params[op_index][0];
+                        control.bpm.store(bpm.to_bits(), Ordering::Release);
+                        outputs[frame] = bpm;
+                    }
+                    _ => unreachable!("prepared sequencer op list contains only sequencer ops"),
+                }
+            }
+        }
+        self.profile.sequencing += sequencing_started.elapsed();
+
+        let graph_started = Instant::now();
+        for range in self.machine.level_ranges.clone() {
+            let slots = &self.slot_buffers;
+            let params = &self.op_params[range.clone()];
+            let sample_rate = self.machine.sample_rate;
+            let op_slice = &mut self.machine.ops[range.clone()];
+            let output_slice = &mut self.op_outputs[range.clone()];
+            let input_slice = &mut self.op_inputs[range.clone()];
+            let worthwhile = self.pool.is_some()
+                && range.len() > 1
+                && frames.saturating_mul(range.len()) >= 2_048;
+            if worthwhile {
+                self.pool.as_ref().unwrap().install(|| {
+                    op_slice
+                        .par_iter_mut()
+                        .zip(output_slice.par_iter_mut())
+                        .zip(input_slice.par_iter_mut())
+                        .zip(params.par_iter())
+                        .for_each(|(((op, outputs), inputs), params)| {
+                            process_offline_op(
+                                op,
+                                inputs,
+                                params,
+                                outputs,
+                                slots,
+                                sample_rate,
+                                frames,
+                            );
+                        });
+                });
+            } else {
+                for (((op, outputs), inputs), params) in op_slice
+                    .iter_mut()
+                    .zip(output_slice.iter_mut())
+                    .zip(input_slice.iter_mut())
+                    .zip(params)
+                {
+                    process_offline_op(op, inputs, params, outputs, slots, sample_rate, frames);
+                }
+            }
+            for (local_index, op) in self.machine.ops[range.clone()].iter().enumerate() {
+                let outputs = &self.op_outputs[range.start + local_index];
+                let output_count = op.outputs.len();
+                for (output, slot) in op.outputs.clone().enumerate() {
+                    for frame in 0..frames {
+                        self.slot_buffers[slot][frame] = outputs[frame * output_count + output];
+                    }
+                }
+            }
+        }
+        left.copy_from_slice(&self.slot_buffers[self.machine.output_slots[0]][..frames]);
+        right.copy_from_slice(&self.slot_buffers[self.machine.output_slots[1]][..frames]);
+        self.profile.graph_execution += graph_started.elapsed();
+        self.profile.blocks += 1;
+        self.profile.frames += frames as u64;
+    }
+}
+
+fn process_offline_op(
+    op: &mut Op,
+    inputs: &mut [f64],
+    params: &[f64],
+    outputs: &mut [f64],
+    slots: &[Vec<f64>],
+    sample_rate: f64,
+    frames: usize,
+) {
+    if matches!(
+        op.processor,
+        OpProcessor::SequencerTrack { .. } | OpProcessor::SequencerTempo(_)
+    ) {
+        return;
+    }
+    let output_count = op.outputs.len();
+    for frame in 0..frames {
+        for (target, input) in inputs.iter_mut().zip(&op.inputs) {
+            *target = if input.sources.is_empty() {
+                input.unconnected
+            } else {
+                input
+                    .sources
+                    .iter()
+                    .fold(0.0, |sum, source| sum + slots[*source][frame])
+            };
+        }
+        let frame_outputs =
+            &mut outputs[frame * output_count..frame.saturating_add(1) * output_count];
+        match &mut op.processor {
+            OpProcessor::Contract { process, state } => {
+                process(state, inputs, params, sample_rate, frame_outputs)
+            }
+            OpProcessor::Sample(player) => {
+                player.process(inputs[0], params[0], sample_rate, frame_outputs)
+            }
+            OpProcessor::Delay(delay) => delay.process(inputs, params, sample_rate, frame_outputs),
+            OpProcessor::StereoDelay(delay) => {
+                delay.process(inputs, params, sample_rate, frame_outputs)
+            }
+            OpProcessor::Plaits(plaits) => plaits.process(inputs, params, frame_outputs),
+            OpProcessor::SequencerTrack { .. } | OpProcessor::SequencerTempo(_) => unreachable!(),
+        }
+    }
+}
+
 pub fn compile(graph: &Graph) -> Result<Machine, String> {
     compile_at_rate(graph, 48_000.0)
 }
@@ -1154,9 +1660,11 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         .map(|(i, m)| (m.id.clone(), i))
         .collect();
     let mut schedule = Vec::with_capacity(graph.modules.len());
+    let mut levels = vec![0usize; graph.modules.len()];
     while let Some((_, i)) = ready.pop_first() {
         schedule.push(i);
         for &next in &dependents[i] {
+            levels[next] = levels[next].max(levels[i] + 1);
             indegree[next] -= 1;
             if indegree[next] == 0 {
                 ready.insert((graph.modules[next].id.clone(), next));
@@ -1165,6 +1673,26 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
     }
     if schedule.len() != graph.modules.len() {
         return Err("graph contains an unsupported cycle".into());
+    }
+    let public_order: Vec<String> = schedule
+        .iter()
+        .map(|&index| graph.modules[index].id.clone())
+        .collect();
+    schedule.sort_by(|left, right| {
+        levels[*left]
+            .cmp(&levels[*right])
+            .then_with(|| graph.modules[*left].id.cmp(&graph.modules[*right].id))
+    });
+    let mut level_ranges = Vec::new();
+    let mut start = 0;
+    while start < schedule.len() {
+        let level = levels[schedule[start]];
+        let mut end = start + 1;
+        while end < schedule.len() && levels[schedule[end]] == level {
+            end += 1;
+        }
+        level_ranges.push(start..end);
+        start = end;
     }
 
     let mut params = Vec::new();
@@ -1653,15 +2181,17 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             if stereo { output_base + 1 } else { output_base },
         ],
         stereo,
-        order: schedule
+        op_ids: schedule
             .iter()
             .map(|&i| graph.modules[i].id.clone())
             .collect(),
+        order: public_order,
         authored_normalizations: graph.normalizations.clone(),
         effective_connections,
         sample_rate,
         sequencers,
         sequencer_controls,
+        level_ranges,
     })
 }
 
