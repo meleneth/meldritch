@@ -444,6 +444,8 @@ fn hardware_worker(
 }
 
 fn shutdown_animation(deck: &elgato_streamdeck::StreamDeck, kind: Kind) -> Result<(), String> {
+    const FRAME_TIME: Duration = Duration::from_millis(75);
+    const ANIMATION_TIME: Duration = Duration::from_millis(1_500);
     let size = kind.key_image_format().size;
     let count = usize::from(kind.key_count()).min(32);
     let mut first_error = None;
@@ -473,8 +475,8 @@ fn shutdown_animation(deck: &elgato_streamdeck::StreamDeck, kind: Kind) -> Resul
         if let Err(error) = deck.flush() {
             first_error.get_or_insert_with(|| error.to_string());
         }
-        let deadline = Duration::from_millis(50 * (frame + 1) as u64);
-        if started.elapsed() >= Duration::from_secs(1) {
+        let deadline = FRAME_TIME * (frame + 1) as u32;
+        if started.elapsed() >= ANIMATION_TIME {
             break;
         }
         if let Some(remaining) = deadline.checked_sub(started.elapsed()) {

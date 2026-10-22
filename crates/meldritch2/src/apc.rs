@@ -402,6 +402,7 @@ fn shutdown_color(cell: usize, frame: usize) -> [u8; 3] {
 }
 
 fn shutdown_animation(output: &mut MidiOutputConnection) -> Result<(), String> {
+    const FRAME_TIME: Duration = Duration::from_millis(75);
     let mut first_error = None;
     for frame in 0..20 {
         let mut colors = [[0; 3]; 64];
@@ -416,15 +417,23 @@ fn shutdown_animation(output: &mut MidiOutputConnection) -> Result<(), String> {
         if let Err(error) = output.send(&apc_rgb_frame(&colors)) {
             first_error.get_or_insert_with(|| error.to_string());
         }
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(FRAME_TIME);
     }
-    if let Err(error) = output.send(&apc_rgb_frame(&[[0; 3]; 64])) {
-        first_error.get_or_insert_with(|| error.to_string());
-    }
-    // The protocol defines exactly eight track and eight scene-launch LEDs.
-    for note in (100..=107).chain(112..=119) {
-        if let Err(error) = output.send(&[0x90, note, 0]) {
+    // Repeat the terminal frame after a short settling interval.  This gives
+    // the controller time to consume the animation before its definitive
+    // all-black state without extending shutdown noticeably.
+    for pass in 0..2 {
+        if let Err(error) = output.send(&apc_rgb_frame(&[[0; 3]; 64])) {
             first_error.get_or_insert_with(|| error.to_string());
+        }
+        // The protocol defines exactly eight track and eight scene-launch LEDs.
+        for note in (100..=107).chain(112..=119) {
+            if let Err(error) = output.send(&[0x90, note, 0]) {
+                first_error.get_or_insert_with(|| error.to_string());
+            }
+        }
+        if pass == 0 {
+            thread::sleep(Duration::from_millis(75));
         }
     }
     first_error.map_or(Ok(()), |error| {
