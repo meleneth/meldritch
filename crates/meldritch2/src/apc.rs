@@ -72,6 +72,35 @@ pub fn apc_rgb(cell: u8, rgb: [u8; 3]) -> Result<[u8; 16], String> {
     ])
 }
 
+fn apc_rgb_frame(colors: &[[u8; 3]; 64]) -> Vec<u8> {
+    const BYTES_PER_PAD: usize = 8;
+    let payload_len = colors.len() * BYTES_PER_PAD;
+    let mut message = Vec::with_capacity(7 + payload_len + 1);
+    message.extend_from_slice(&[
+        0xf0,
+        0x47,
+        0x7f,
+        0x4f,
+        0x24,
+        ((payload_len >> 7) & 0x7f) as u8,
+        (payload_len & 0x7f) as u8,
+    ]);
+    for (cell, rgb) in colors.iter().enumerate() {
+        message.extend_from_slice(&[
+            cell as u8,
+            cell as u8,
+            rgb[0] >> 7,
+            rgb[0] & 0x7f,
+            rgb[1] >> 7,
+            rgb[1] & 0x7f,
+            rgb[2] >> 7,
+            rgb[2] & 0x7f,
+        ]);
+    }
+    message.push(0xf7);
+    message
+}
+
 #[derive(Debug)]
 struct GridController {
     page: usize,
@@ -375,27 +404,25 @@ fn shutdown_color(cell: usize, frame: usize) -> [u8; 3] {
 fn shutdown_animation(output: &mut MidiOutputConnection) -> Result<(), String> {
     let mut first_error = None;
     for frame in 0..20 {
-        for cell in 0..64 {
+        let mut colors = [[0; 3]; 64];
+        for (cell, color) in colors.iter_mut().enumerate() {
             let checker = (cell / 8 + cell % 8 + frame) % 4;
-            let rgb = if checker < 2 {
+            *color = if checker < 2 {
                 shutdown_color(cell, frame * 2)
             } else {
                 shutdown_color(cell, frame * 2 + 12)
             };
-            if let Err(error) = output.send(&apc_rgb(cell as u8, rgb).expect("valid APC cell")) {
-                first_error.get_or_insert_with(|| error.to_string());
-            }
+        }
+        if let Err(error) = output.send(&apc_rgb_frame(&colors)) {
+            first_error.get_or_insert_with(|| error.to_string());
         }
         thread::sleep(Duration::from_millis(50));
     }
-    for cell in 0..64 {
-        if let Err(error) = output.send(&apc_rgb(cell as u8, [0, 0, 0]).expect("valid APC cell")) {
-            first_error.get_or_insert_with(|| error.to_string());
-        }
+    if let Err(error) = output.send(&apc_rgb_frame(&[[0; 3]; 64])) {
+        first_error.get_or_insert_with(|| error.to_string());
     }
-    // Clear every note-addressable LED, not only the buttons used by the
-    // current authored mapping.  This also removes stale device/page state.
-    for note in 0..=127 {
+    // The protocol defines exactly eight track and eight scene-launch LEDs.
+    for note in (100..=107).chain(112..=119) {
         if let Err(error) = output.send(&[0x90, note, 0]) {
             first_error.get_or_insert_with(|| error.to_string());
         }
@@ -615,6 +642,17 @@ mod tests {
         let m = apc_rgb(63, [255, 128, 1]).unwrap();
         assert_eq!(&m[..5], &[0xf0, 0x47, 0x7f, 0x4f, 0x24]);
         assert_eq!(m[15], 0xf7);
+    }
+
+    #[test]
+    fn bulk_rgb_frame_addresses_every_pad_in_one_protocol_message() {
+        let colors = std::array::from_fn(|cell| [cell as u8, 255 - cell as u8, 17]);
+        let message = apc_rgb_frame(&colors);
+        assert_eq!(&message[..7], &[0xf0, 0x47, 0x7f, 0x4f, 0x24, 4, 0]);
+        assert_eq!(message.len(), 520);
+        assert_eq!(&message[7..15], &[0, 0, 0, 0, 1, 127, 0, 17]);
+        assert_eq!(&message[511..519], &[63, 63, 0, 63, 1, 64, 0, 17]);
+        assert_eq!(message[519], 0xf7);
     }
     #[test]
     fn arrow_buttons_navigate_tracks_and_all_sixteen_steps() {
