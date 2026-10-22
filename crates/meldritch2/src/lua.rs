@@ -506,6 +506,15 @@ local function decorate_scope(facade, scope, prefix)
     handle.output_gain = parameter(handle, "output_gain")
     return handle
   end
+  function facade:ducker(values)
+    local handle = scope:module(self:_id("ducker"), "ducker", copy_values(values,
+      { "threshold", "depth", "attack", "release" }))
+    handle.threshold = parameter(handle, "threshold")
+    handle.depth = parameter(handle, "depth")
+    handle.attack = parameter(handle, "attack")
+    handle.release = parameter(handle, "release")
+    return handle
+  end
   function facade:delay(values)
     local handle = scope:module(self:_id("delay"), "delay", copy_values(values, { "time", "feedback", "mix" }))
     handle.time = parameter(handle, "time")
@@ -805,7 +814,14 @@ function meldritch.instrument(name)
       assert(type(spec.target) == "table" and spec.target.direction == "parameter",
         "instrument control must target a writable parameter")
       assert(type(spec.range) == "table" and #spec.range == 2, "control range must contain two values")
+      local targets = spec.targets or {}
+      assert(type(targets) == "table", "instrument control targets must be a table")
+      for _, target in ipairs(targets) do
+        assert(type(target) == "table" and target.direction == "parameter",
+          "instrument control targets must be writable parameters")
+      end
       table.insert(self._controls, { id = spec.id, label = spec.label, target = spec.target,
+        targets = targets,
         range = { min = spec.range[1], max = spec.range[2], scale = spec.curve } })
       return
     end
@@ -882,10 +898,17 @@ function meldritch.instrument(name)
     definition:output("right", self._right)
 
     local exports = {}
+    local additional_exports = {}
     for index, control in ipairs(self._controls) do
       local exported = "control_" .. index
       definition:parameter(exported, { id = control.target.module }, control.target.parameter)
       exports[index] = exported
+      additional_exports[index] = {}
+      for target_index, target in ipairs(control.targets or {}) do
+        local extra = exported .. "_target_" .. target_index
+        definition:parameter(extra, { id = target.module }, target.parameter)
+        additional_exports[index][target_index] = extra
+      end
     end
 
     local root = meldritch.graph()
@@ -932,8 +955,13 @@ function meldritch.instrument(name)
       root:midi_poly(1, bindings)
       for index, control in ipairs(self._controls) do
         local targets = {}
-        for voice = 2, 4 do
-          targets[#targets + 1] = { module = voices[voice].id, parameter = exports[index] }
+        for voice = 1, 4 do
+          for _, extra in ipairs(additional_exports[index]) do
+            targets[#targets + 1] = { module = voices[voice].id, parameter = extra }
+          end
+          if voice > 1 then
+            targets[#targets + 1] = { module = voices[voice].id, parameter = exports[index] }
+          end
         end
         table.insert(root.controls, {
           id = control.id, label = control.label, module = voices[1].id, parameter = exports[index], targets = targets,
@@ -947,6 +975,11 @@ function meldritch.instrument(name)
       for index, control in ipairs(self._controls) do
         control.range.label = control.label
         root:control(control.id, instance, exports[index], control.range)
+        local targets = {}
+        for _, extra in ipairs(additional_exports[index]) do
+          targets[#targets + 1] = { module = instance.id, parameter = extra }
+        end
+        root.controls[#root.controls].targets = targets
       end
     end
     return root

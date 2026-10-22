@@ -4,6 +4,7 @@ pub mod compressor;
 pub mod constant;
 pub mod delay;
 pub mod drive;
+pub mod ducker;
 pub mod envelope;
 pub mod envelope_follower;
 pub mod gain;

@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 34);
+        assert_eq!(contract::all().len(), 35);
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.role, Role::Processor);
         assert_eq!(gain.inputs[0].name, "input");
