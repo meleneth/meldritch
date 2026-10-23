@@ -1,5 +1,6 @@
 use std::{
-    io::{Write, stdout},
+    cell::RefCell,
+    io::{BufWriter, Write, stdout},
     time::{Duration, Instant},
 };
 
@@ -226,10 +227,15 @@ impl Drop for TuiKeyboard {
     }
 }
 
+thread_local! {
+    static PREVIOUS_FRAME: RefCell<Vec<Vec<u8>>> = const { RefCell::new(Vec::new()) };
+}
+
 struct Terminal;
 
 impl Terminal {
     fn enter() -> Result<Self, String> {
+        PREVIOUS_FRAME.with(|previous| previous.borrow_mut().clear());
         terminal::enable_raw_mode().map_err(|error| error.to_string())?;
         if let Err(error) = execute!(stdout(), EnterAlternateScreen, Hide) {
             let _ = terminal::disable_raw_mode();
@@ -237,6 +243,45 @@ impl Terminal {
         }
         Ok(Self)
     }
+}
+
+fn frame_lines(body: &[u8]) -> Vec<Vec<u8>> {
+    body.split(|byte| *byte == b'\n')
+        .map(|line| line.strip_suffix(b"\r").unwrap_or(line).to_vec())
+        .collect()
+}
+
+fn present_frame(body: Vec<u8>) -> Result<(), String> {
+    let lines = frame_lines(&body);
+    let (changed, clear_from) = PREVIOUS_FRAME.with(|previous| {
+        let mut previous = previous.borrow_mut();
+        let changed = lines
+            .iter()
+            .enumerate()
+            .filter(|(row, line)| previous.get(*row) != Some(*line))
+            .map(|(row, line)| (row, line.clone()))
+            .collect::<Vec<_>>();
+        let clear_from = (previous.len() > lines.len()).then_some(lines.len());
+        previous.clone_from(&lines);
+        (changed, clear_from)
+    });
+    if changed.is_empty() && clear_from.is_none() {
+        return Ok(());
+    }
+    let stdout = stdout();
+    let mut out = BufWriter::with_capacity(body.len().min(16 * 1024) + 256, stdout.lock());
+    queue!(out, BeginSynchronizedUpdate).map_err(|error| error.to_string())?;
+    for (row, line) in changed {
+        queue!(out, MoveTo(0, row as u16)).map_err(|error| error.to_string())?;
+        out.write_all(&line).map_err(|error| error.to_string())?;
+        queue!(out, Clear(ClearType::UntilNewLine)).map_err(|error| error.to_string())?;
+    }
+    if let Some(row) = clear_from {
+        queue!(out, MoveTo(0, row as u16), Clear(ClearType::FromCursorDown))
+            .map_err(|error| error.to_string())?;
+    }
+    queue!(out, EndSynchronizedUpdate).map_err(|error| error.to_string())?;
+    out.flush().map_err(|error| error.to_string())
 }
 
 fn draw_pattern_grid(
@@ -427,14 +472,7 @@ fn draw(
     keyboard: Option<&TuiKeyboard>,
     step_grid: Option<(usize, usize)>,
 ) -> Result<(), String> {
-    let mut out = stdout();
-    queue!(
-        out,
-        BeginSynchronizedUpdate,
-        MoveTo(0, 0),
-        Clear(ClearType::All)
-    )
-    .map_err(|error| error.to_string())?;
+    let mut out = Vec::with_capacity(16 * 1024);
     if let Some(screens) = screens
         && let Some(WidgetView::PerformanceSurface(surface)) = screens
             .current()
@@ -455,8 +493,7 @@ fn draw(
             height,
         );
         draw_frame(&mut out, &frame, ColorMode::detect())?;
-        queue!(out, EndSynchronizedUpdate).map_err(|error| error.to_string())?;
-        return out.flush().map_err(|error| error.to_string());
+        return present_frame(out);
     }
     queue!(
         out,
@@ -722,8 +759,7 @@ fn draw(
         ))
     )
     .map_err(|error| error.to_string())?;
-    queue!(out, EndSynchronizedUpdate).map_err(|error| error.to_string())?;
-    out.flush().map_err(|error| error.to_string())
+    present_frame(out)
 }
 
 pub fn perform(
@@ -1045,8 +1081,8 @@ mod tests {
     use crossterm::event::KeyCode;
 
     use super::{
-        TuiKeyboard, control_focus_lines, dispatch_performance_binding, navigation_key,
-        terminal_color,
+        TuiKeyboard, control_focus_lines, dispatch_performance_binding, frame_lines,
+        navigation_key, terminal_color,
     };
     use crate::{
         compiler::compile,
@@ -1104,6 +1140,15 @@ mod tests {
                     .all(|line| line.ends_with(['┐', '│', '┤', '┘']))
             );
         }
+    }
+
+    #[test]
+    fn buffered_frames_are_split_into_stable_terminal_rows() {
+        assert_eq!(
+            frame_lines(b"short\r\nnext\r\n"),
+            vec![b"short".to_vec(), b"next".to_vec(), Vec::new()]
+        );
+        assert_eq!(frame_lines(b"no newline"), vec![b"no newline".to_vec()]);
     }
 
     #[test]
