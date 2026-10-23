@@ -1,4 +1,4 @@
-//! Control-thread sample resolution, persistent caching, and WAV preparation.
+//! Control-thread sample resolution, persistent caching, and audio preparation.
 
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,11 @@ pub struct SampleBank {
 enum SampleSource {
     BuiltinStrudel,
     LocalManifest(PathBuf),
+    RemoteManifest {
+        manifest: PathBuf,
+        base_url: String,
+        version: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -117,6 +122,38 @@ impl SampleBank {
         })
     }
 
+    pub fn remote(
+        bank: String,
+        manifest: PathBuf,
+        base_url: String,
+        version: String,
+        cache: bool,
+        project_root: PathBuf,
+    ) -> Result<Self, SampleError> {
+        validate_name(&bank, "bank")?;
+        let manifest = confined_path(&project_root, &manifest)?;
+        if !base_url.starts_with("https://") || !base_url.ends_with('/') {
+            return Err(SampleError::InvalidManifest(
+                "remote sample base_url must be an https URL ending in '/'".into(),
+            ));
+        }
+        if version.len() != 40 || !version.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(SampleError::InvalidManifest(
+                "remote sample version must be a pinned 40-character commit hash".into(),
+            ));
+        }
+        Ok(Self {
+            source: SampleSource::RemoteManifest {
+                manifest,
+                base_url,
+                version,
+            },
+            bank,
+            cache,
+            project_root,
+        })
+    }
+
     pub fn load(&self, name: &str, variant: usize) -> Result<Arc<PreparedSample>, SampleError> {
         validate_name(name, "sample")?;
         let key = format!("{}_{}", self.bank, name);
@@ -142,7 +179,7 @@ impl SampleBank {
             })?;
             (bytes, path.display().to_string())
         };
-        decode_wav(&bytes, identity, version).map(Arc::new)
+        decode_audio(&bytes, relative, identity, version).map(Arc::new)
     }
 
     fn manifest(&self) -> Result<(Manifest, String, String, bool), SampleError> {
@@ -179,6 +216,23 @@ impl SampleBank {
                 let base = confined_path(&self.project_root, &base)?;
                 let hash = sha256(&bytes);
                 Ok((manifest, base.display().to_string(), hash, false))
+            }
+            SampleSource::RemoteManifest {
+                manifest: path,
+                base_url,
+                version,
+            } => {
+                let bytes = fs::read(path)
+                    .map_err(|error| SampleError::Io(format!("{}: {error}", path.display())))?;
+                if bytes.len() > MAX_MANIFEST_BYTES {
+                    return Err(SampleError::InvalidManifest("manifest is too large".into()));
+                }
+                Ok((
+                    parse_manifest(&bytes)?,
+                    base_url.clone(),
+                    version.clone(),
+                    true,
+                ))
             }
         }
     }
@@ -250,7 +304,12 @@ fn validate_relative_asset(value: &str) -> Result<(), SampleError> {
     if path
         .extension()
         .and_then(|value| value.to_str())
-        .is_none_or(|extension| !extension.eq_ignore_ascii_case("wav"))
+        .is_none_or(|extension| {
+            !matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "wav" | "flac" | "ogg"
+            )
+        })
     {
         return Err(SampleError::UnsupportedFormat(value.into()));
     }
@@ -491,6 +550,34 @@ mod tests {
             manifest_entries(&Manifest(BTreeMap::new()), "missing"),
             Err(SampleError::MissingSample(_))
         ));
+        assert!(validate_relative_asset("kit/hit.flac").is_ok());
+        assert!(validate_relative_asset("field/air.ogg").is_ok());
+    }
+    #[test]
+    fn remote_manifests_require_https_and_an_immutable_revision() {
+        let root = temp("remote-validation");
+        assert!(
+            SampleBank::remote(
+                "Bank".into(),
+                "manifest.json".into(),
+                "https://example.invalid/audio/".into(),
+                "0123456789012345678901234567890123456789".into(),
+                true,
+                root.clone(),
+            )
+            .is_ok()
+        );
+        assert!(
+            SampleBank::remote(
+                "Bank".into(),
+                "manifest.json".into(),
+                "http://example.invalid/audio/".into(),
+                "main".into(),
+                true,
+                root,
+            )
+            .is_err()
+        );
     }
     #[test]
     fn wav_decoder_preserves_stereo_channels() {
@@ -510,7 +597,13 @@ mod tests {
             writer.write_sample::<i16>(-16384).unwrap();
             writer.finalize().unwrap();
         }
-        let sample = decode_wav(&cursor.into_inner(), "fixture".into(), "v1".into()).unwrap();
+        let sample = decode_audio(
+            &cursor.into_inner(),
+            "fixture.wav",
+            "fixture".into(),
+            "v1".into(),
+        )
+        .unwrap();
         assert_eq!(sample.channels, 2);
         assert_eq!(sample.sample_rate, 24_000);
         assert!(sample.left[0] > 0.49);
@@ -600,7 +693,62 @@ fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-pub fn decode_wav(
+pub fn decode_audio(
+    bytes: &[u8],
+    relative: &str,
+    identity: String,
+    source_version: String,
+) -> Result<PreparedSample, SampleError> {
+    match Path::new(relative)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("wav") => decode_wav(bytes, identity, source_version),
+        Some("flac") => decode_flac(bytes, identity, source_version),
+        Some("ogg") => decode_ogg(bytes, identity, source_version),
+        _ => Err(SampleError::UnsupportedFormat(relative.into())),
+    }
+}
+
+fn prepared(
+    identity: String,
+    source_version: String,
+    sample_rate: u32,
+    channels: u16,
+    values: Vec<f64>,
+) -> Result<PreparedSample, SampleError> {
+    if !matches!(channels, 1 | 2)
+        || values.is_empty()
+        || !values.len().is_multiple_of(usize::from(channels))
+    {
+        return Err(SampleError::UnsupportedFormat(format!(
+            "{identity}: invalid {channels}-channel audio frames"
+        )));
+    }
+    let (left, right) = if channels == 1 {
+        (values.clone(), values)
+    } else {
+        let mut left = Vec::with_capacity(values.len() / 2);
+        let mut right = Vec::with_capacity(values.len() / 2);
+        for frame in values.as_chunks::<2>().0 {
+            left.push(frame[0]);
+            right.push(frame[1]);
+        }
+        (left, right)
+    };
+    Ok(PreparedSample {
+        identity,
+        source_version,
+        sample_rate,
+        channels,
+        left: left.into(),
+        right: right.into(),
+    })
+}
+
+fn decode_wav(
     bytes: &[u8],
     identity: String,
     source_version: String,
@@ -634,28 +782,49 @@ pub fn decode_wav(
         }
     }
     .map_err(|error| SampleError::UnsupportedFormat(format!("{identity}: {error}")))?;
-    if values.is_empty() || values.len() % usize::from(spec.channels) != 0 {
-        return Err(SampleError::UnsupportedFormat(format!(
-            "{identity}: incomplete WAV frames"
-        )));
-    }
-    let (left, right) = if spec.channels == 1 {
-        (values.clone(), values)
-    } else {
-        let mut left = Vec::with_capacity(values.len() / 2);
-        let mut right = Vec::with_capacity(values.len() / 2);
-        for frame in values.as_chunks::<2>().0 {
-            left.push(frame[0]);
-            right.push(frame[1]);
-        }
-        (left, right)
-    };
-    Ok(PreparedSample {
+    prepared(
         identity,
         source_version,
-        sample_rate: spec.sample_rate,
-        channels: spec.channels,
-        left: left.into(),
-        right: right.into(),
-    })
+        spec.sample_rate,
+        spec.channels,
+        values,
+    )
+}
+
+fn decode_flac(
+    bytes: &[u8],
+    identity: String,
+    source_version: String,
+) -> Result<PreparedSample, SampleError> {
+    let mut reader = claxon::FlacReader::new(Cursor::new(bytes))
+        .map_err(|error| SampleError::UnsupportedFormat(format!("{identity}: {error}")))?;
+    let info = reader.streaminfo();
+    let channels = u16::try_from(info.channels)
+        .map_err(|_| SampleError::UnsupportedFormat(format!("{identity}: channel count")))?;
+    let scale = 2.0_f64.powi(i32::try_from(info.bits_per_sample.saturating_sub(1)).unwrap_or(31));
+    let values = reader
+        .samples()
+        .map(|value| value.map(|sample| f64::from(sample) / scale))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| SampleError::UnsupportedFormat(format!("{identity}: {error}")))?;
+    prepared(identity, source_version, info.sample_rate, channels, values)
+}
+
+fn decode_ogg(
+    bytes: &[u8],
+    identity: String,
+    source_version: String,
+) -> Result<PreparedSample, SampleError> {
+    let mut reader = lewton::inside_ogg::OggStreamReader::new(Cursor::new(bytes))
+        .map_err(|error| SampleError::UnsupportedFormat(format!("{identity}: {error}")))?;
+    let channels = u16::from(reader.ident_hdr.audio_channels);
+    let sample_rate = reader.ident_hdr.audio_sample_rate;
+    let mut values = Vec::new();
+    while let Some(packet) = reader
+        .read_dec_packet_itl()
+        .map_err(|error| SampleError::UnsupportedFormat(format!("{identity}: {error}")))?
+    {
+        values.extend(packet.into_iter().map(|sample| f64::from(sample) / 32768.0));
+    }
+    prepared(identity, source_version, sample_rate, channels, values)
 }

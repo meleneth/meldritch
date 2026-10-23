@@ -1,0 +1,9 @@
+{
+  "Pressure_machine_room": "corpora/oculus-audio-pack/ogg/AMBInd_RoomToneMachineRoom_LOOP_01.ogg",
+  "Pressure_machine_hum": "corpora/oculus-audio-pack/ogg/MACHMisc_MachineHum_LOOP_01.ogg",
+  "Pressure_hydraulic": "corpora/oculus-audio-pack/ogg/MACHInd_Hydraulic_OS_01.ogg",
+  "Pressure_breath": "corpora/oculus-audio-pack/ogg/HMNBrth_FemaleBreathing_OS_01.ogg",
+  "Pressure_creepy_drone": "corpora/oculus-audio-pack/ogg/DSGNDron_DroneCreepy_OS_01.ogg",
+  "Pressure_garage_door": "corpora/oculus-audio-pack/ogg/DOORMetl_GarageDoorClose_OS_01.ogg",
+  "Pressure_impact": "corpora/oculus-audio-pack/ogg/DSGNImpt_ImpactCreepyReverb_OS_01.ogg"
+}

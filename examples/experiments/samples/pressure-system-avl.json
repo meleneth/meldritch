@@ -1,0 +1,51 @@
+{
+  "AVL_kick": [
+    "Samples/36-Ludwig26Kick-1.flac",
+    "Samples/36-Ludwig26Kick-2.flac",
+    "Samples/36-Ludwig26Kick-3.flac",
+    "Samples/36-Ludwig26Kick-4.flac",
+    "Samples/36-Ludwig26Kick-5.flac"
+  ],
+  "AVL_snare": [
+    "Samples/38-PorkpieSnare-1.flac",
+    "Samples/38-PorkpieSnare-2.flac",
+    "Samples/38-PorkpieSnare-3.flac",
+    "Samples/38-PorkpieSnare-4.flac",
+    "Samples/38-PorkpieSnare-5.flac"
+  ],
+  "AVL_snare_edge": [
+    "Samples/40-PorkpieSnareEdge-1.flac",
+    "Samples/40-PorkpieSnareEdge-2.flac",
+    "Samples/40-PorkpieSnareEdge-3.flac",
+    "Samples/40-PorkpieSnareEdge-4.flac",
+    "Samples/40-PorkpieSnareEdge-5.flac"
+  ],
+  "AVL_hat_closed": [
+    "Samples/42-SabianRockHatClosed-1.flac",
+    "Samples/42-SabianRockHatClosed-2.flac",
+    "Samples/42-SabianRockHatClosed-3.flac",
+    "Samples/42-SabianRockHatClosed-4.flac",
+    "Samples/42-SabianRockHatClosed-5.flac"
+  ],
+  "AVL_hat_open": [
+    "Samples/46-SabianRockHatSemiOpen-1.flac",
+    "Samples/46-SabianRockHatSemiOpen-2.flac",
+    "Samples/46-SabianRockHatSemiOpen-3.flac",
+    "Samples/46-SabianRockHatSemiOpen-4.flac",
+    "Samples/46-SabianRockHatSemiOpen-5.flac"
+  ],
+  "AVL_floor_tom": [
+    "Samples/41-Ludwig16FloorTom-1.flac",
+    "Samples/41-Ludwig16FloorTom-2.flac",
+    "Samples/41-Ludwig16FloorTom-3.flac",
+    "Samples/41-Ludwig16FloorTom-4.flac",
+    "Samples/41-Ludwig16FloorTom-5.flac"
+  ],
+  "AVL_crash": [
+    "Samples/49-SabianAA16Crash-1.flac",
+    "Samples/49-SabianAA16Crash-2.flac",
+    "Samples/49-SabianAA16Crash-3.flac",
+    "Samples/49-SabianAA16Crash-4.flac",
+    "Samples/49-SabianAA16Crash-5.flac"
+  ]
+}

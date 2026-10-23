@@ -307,6 +307,9 @@ mod delay_runtime_tests {
 #[derive(Clone, Copy, Debug, Default)]
 struct SampleVoice {
     position: f64,
+    increment: f64,
+    low: usize,
+    high: usize,
 }
 
 #[derive(Debug)]
@@ -318,16 +321,15 @@ struct SamplePlayerRuntime {
 }
 
 impl SamplePlayerRuntime {
+    const MAX_VOICES: usize = 128;
+
     fn new(sample: Arc<PreparedSample>, output_rate: f64) -> Result<Self, String> {
-        let rendered_frames =
-            (sample.frames() as f64 * output_rate / f64::from(sample.sample_rate)).ceil();
-        if !rendered_frames.is_finite() || rendered_frames > usize::MAX as f64 {
-            return Err("sample is too long to prepare its overlap storage".into());
+        if sample.frames() == 0 || !output_rate.is_finite() || output_rate <= 0.0 {
+            return Err("sample player requires nonempty audio and a positive output rate".into());
         }
-        // A new rising edge requires at least one nonpositive frame between
-        // triggers. Preallocate every overlap that can exist during this
-        // sample's rendered lifetime, so the audio callback never allocates.
-        let max_voices = (rendered_frames as usize).div_ceil(2).max(1);
+        // Bound both callback work and storage for long field recordings. At
+        // overflow the oldest voice is stolen deterministically.
+        let max_voices = Self::MAX_VOICES;
         let mut voices = Vec::new();
         voices.try_reserve_exact(max_voices).map_err(|_| {
             format!(
@@ -342,33 +344,52 @@ impl SamplePlayerRuntime {
             last_trigger: 0.0,
         })
     }
-    fn process(&mut self, trigger: f64, gain: f64, output_rate: f64, out: &mut [f64]) {
+    fn process(&mut self, trigger: f64, params: &[f64], output_rate: f64, out: &mut [f64]) {
         if trigger > 0.0 && self.last_trigger <= 0.0 {
-            assert!(
-                self.voices.len() < self.max_voices,
-                "prepared sample overlap bound must cover every possible trigger"
-            );
-            self.voices.push(SampleVoice { position: 0.0 });
+            if self.voices.len() == self.max_voices {
+                self.voices.remove(0);
+            }
+            let frames = self.sample.frames();
+            let start = params[1].clamp(0.0, 1.0);
+            let finish = params[2].clamp(0.0, 1.0);
+            let low = ((start.min(finish) * frames as f64).floor() as usize).min(frames - 1);
+            let high = ((start.max(finish) * frames as f64).ceil() as usize).clamp(low + 1, frames);
+            let rate = if params[3].abs() < 0.01 {
+                if params[3] < 0.0 { -0.01 } else { 0.01 }
+            } else {
+                params[3]
+            };
+            let increment = f64::from(self.sample.sample_rate) / output_rate * rate;
+            let position = if increment < 0.0 {
+                (high - 1) as f64
+            } else {
+                low as f64
+            };
+            self.voices.push(SampleVoice {
+                position,
+                increment,
+                low,
+                high,
+            });
         }
         self.last_trigger = trigger;
-        let increment = self.sample.sample_rate as f64 / output_rate;
         let mut left = 0.0;
         let mut right = 0.0;
         for voice in &mut self.voices {
-            let index = voice.position.floor() as usize;
-            debug_assert!(index < self.sample.frames());
+            let index = (voice.position.floor() as usize).clamp(voice.low, voice.high - 1);
             let fraction = voice.position - index as f64;
-            let next = (index + 1).min(self.sample.frames() - 1);
+            let next = (index + 1).min(voice.high - 1);
             left += self.sample.left[index]
                 + (self.sample.left[next] - self.sample.left[index]) * fraction;
             right += self.sample.right[index]
                 + (self.sample.right[next] - self.sample.right[index]) * fraction;
-            voice.position += increment;
+            voice.position += voice.increment;
         }
-        self.voices
-            .retain(|voice| voice.position < self.sample.frames() as f64);
-        out[0] = left * gain;
-        out[1] = right * gain;
+        self.voices.retain(|voice| {
+            voice.position >= voice.low as f64 && voice.position < voice.high as f64
+        });
+        out[0] = left * params[0];
+        out[1] = right * params[0];
     }
 }
 
@@ -1069,7 +1090,7 @@ impl Machine {
                     process(state, inputs, params, self.sample_rate, outputs)
                 }
                 OpProcessor::Sample(player) => {
-                    player.process(inputs[0], params[0], self.sample_rate, outputs)
+                    player.process(inputs[0], params, self.sample_rate, outputs)
                 }
                 OpProcessor::Delay(delay) => {
                     delay.process(inputs, params, self.sample_rate, outputs)
@@ -1132,7 +1153,7 @@ impl Machine {
                     process(state, inputs, params, self.sample_rate, outputs)
                 }
                 OpProcessor::Sample(player) => {
-                    player.process(inputs[0], params[0], self.sample_rate, outputs)
+                    player.process(inputs[0], params, self.sample_rate, outputs)
                 }
                 OpProcessor::Delay(delay) => {
                     delay.process(inputs, params, self.sample_rate, outputs)
@@ -1590,7 +1611,7 @@ fn process_offline_op(
                 process(state, inputs, params, sample_rate, frame_outputs)
             }
             OpProcessor::Sample(player) => {
-                player.process(inputs[0], params[0], sample_rate, frame_outputs)
+                player.process(inputs[0], params, sample_rate, frame_outputs)
             }
             OpProcessor::Delay(delay) => delay.process(inputs, params, sample_rate, frame_outputs),
             OpProcessor::StereoDelay(delay) => {
@@ -2512,28 +2533,63 @@ mod sample_player_tests {
         let mut player =
             SamplePlayerRuntime::new(sample(2, &[1.0, 0.5], &[-1.0, -0.5]), 4.0).unwrap();
         let mut out = [0.0; 2];
-        player.process(1.0, 0.5, 4.0, &mut out);
+        let params = [0.5, 0.0, 1.0, 1.0];
+        player.process(1.0, &params, 4.0, &mut out);
         assert_eq!(out, [0.5, -0.5]);
-        player.process(0.0, 0.5, 4.0, &mut out);
+        player.process(0.0, &params, 4.0, &mut out);
         assert_eq!(out, [0.375, -0.375]);
         for _ in 0..3 {
-            player.process(0.0, 0.5, 4.0, &mut out);
+            player.process(0.0, &params, 4.0, &mut out);
         }
-        player.process(0.0, 0.5, 4.0, &mut out);
+        player.process(0.0, &params, 4.0, &mut out);
         assert_eq!(out, [0.0, 0.0]);
         assert!(out.iter().all(|v| v.is_finite()));
     }
     #[test]
-    fn retriggers_are_limited_by_sample_lifetime_instead_of_a_voice_cap() {
+    fn ordinary_retriggers_overlap_without_stealing() {
         let mut player =
             SamplePlayerRuntime::new(sample(48_000, &[1.0; 64], &[1.0; 64]), 48_000.0).unwrap();
         let mut out = [0.0; 2];
         for overlap in 1..=20 {
-            player.process(1.0, 1.0, 48_000.0, &mut out);
+            let params = [1.0, 0.0, 1.0, 1.0];
+            player.process(1.0, &params, 48_000.0, &mut out);
             assert_eq!(out, [f64::from(overlap), f64::from(overlap)]);
-            player.process(0.0, 1.0, 48_000.0, &mut out);
+            player.process(0.0, &params, 48_000.0, &mut out);
         }
         assert_eq!(player.voices.len(), 20);
-        assert_eq!(player.max_voices, 32);
+        assert_eq!(player.max_voices, SamplePlayerRuntime::MAX_VOICES);
+    }
+
+    #[test]
+    fn player_latches_forward_and_reverse_slices_at_each_trigger() {
+        let sample = sample(4, &[0.0, 1.0, 2.0, 3.0], &[0.0, 1.0, 2.0, 3.0]);
+        let mut player = SamplePlayerRuntime::new(sample, 4.0).unwrap();
+        let mut out = [0.0; 2];
+        let forward = [1.0, 0.25, 0.75, 1.0];
+        player.process(1.0, &forward, 4.0, &mut out);
+        assert_eq!(out, [1.0, 1.0]);
+        player.process(0.0, &forward, 4.0, &mut out);
+        assert_eq!(out, [2.0, 2.0]);
+        player.process(0.0, &forward, 4.0, &mut out);
+        assert_eq!(out, [0.0, 0.0]);
+        let reverse = [1.0, 0.25, 0.75, -1.0];
+        player.process(1.0, &reverse, 4.0, &mut out);
+        assert_eq!(out, [2.0, 2.0]);
+        player.process(0.0, &reverse, 4.0, &mut out);
+        assert_eq!(out, [1.0, 1.0]);
+    }
+
+    #[test]
+    fn player_bounds_pathological_overlap_by_stealing_the_oldest_voice() {
+        let mut player =
+            SamplePlayerRuntime::new(sample(48_000, &[1.0; 1024], &[1.0; 1024]), 48_000.0).unwrap();
+        let mut out = [0.0; 2];
+        let params = [1.0, 0.0, 1.0, 0.01];
+        for _ in 0..SamplePlayerRuntime::MAX_VOICES + 20 {
+            player.process(1.0, &params, 48_000.0, &mut out);
+            player.process(0.0, &params, 48_000.0, &mut out);
+        }
+        assert_eq!(player.voices.len(), SamplePlayerRuntime::MAX_VOICES);
+        assert!(out.iter().all(|value| value.is_finite()));
     }
 }

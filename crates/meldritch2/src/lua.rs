@@ -694,7 +694,16 @@ local function decorate_scope(facade, scope, prefix)
   end
   function facade:sample_player(values)
     assert(type(values) == "table" and values.sample ~= nil, "sample_player requires a prepared sample")
-    local handle = scope:module(self:_id("sample_player"), "sample_player", { gain = values.gain or 1.0 }, values.sample)
+    local handle = scope:module(self:_id("sample_player"), "sample_player", {
+      gain = values.gain or 1.0,
+      start = values.start or 0.0,
+      finish = values.finish or 1.0,
+      rate = values.rate or 1.0,
+    }, values.sample)
+    handle.gain = parameter(handle, "gain")
+    handle.start = parameter(handle, "start")
+    handle.finish = parameter(handle, "finish")
+    handle.rate = parameter(handle, "rate")
     handle.out = { left = handle.left, right = handle.right, direction = "stereo_output" }
     return handle
   end
@@ -1299,6 +1308,19 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
                 "local" => {
                     let manifest: String = spec.get("manifest")?;
                     SampleBank::local(bank, PathBuf::from(manifest), cache, root.clone())
+                }
+                "remote" => {
+                    let manifest: String = spec.get("manifest")?;
+                    let base_url: String = spec.get("base_url")?;
+                    let version: String = spec.get("version")?;
+                    SampleBank::remote(
+                        bank,
+                        PathBuf::from(manifest),
+                        base_url,
+                        version,
+                        cache,
+                        root.clone(),
+                    )
                 }
                 _ => {
                     return Err(mlua::Error::external(format!(
@@ -2500,6 +2522,127 @@ mod tests {
         assert!(!transport.playing());
         assert!(transport.arrangement_status().unwrap().finished);
         assert_eq!(transport.position_steps(), 1536);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn pressure_system_finishes_and_every_sampled_role_is_audible() {
+        let root =
+            std::env::temp_dir().join(format!("meldritch-pressure-lua-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let mut wav = Cursor::new(Vec::new());
+        {
+            let mut writer = hound::WavWriter::new(
+                &mut wav,
+                hound::WavSpec {
+                    channels: 2,
+                    sample_rate: 800,
+                    bits_per_sample: 16,
+                    sample_format: hound::SampleFormat::Int,
+                },
+            )
+            .unwrap();
+            for frame in 0..128 {
+                let sample = if frame < 32 { 24_000 - frame * 600 } else { 0 };
+                writer.write_sample::<i16>(sample as i16).unwrap();
+                writer.write_sample::<i16>((-sample) as i16).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+        fs::write(root.join("fixture.wav"), wav.into_inner()).unwrap();
+        fs::write(
+            root.join("samples.json"),
+            r#"{
+              "AVL_kick":["fixture.wav","fixture.wav","fixture.wav","fixture.wav","fixture.wav"],
+              "AVL_snare":["fixture.wav","fixture.wav","fixture.wav","fixture.wav","fixture.wav"],
+              "AVL_snare_edge":["fixture.wav","fixture.wav","fixture.wav"],
+              "AVL_hat_closed":["fixture.wav","fixture.wav","fixture.wav","fixture.wav"],
+              "AVL_hat_open":["fixture.wav","fixture.wav","fixture.wav","fixture.wav"],
+              "AVL_floor_tom":["fixture.wav","fixture.wav","fixture.wav","fixture.wav","fixture.wav"],
+              "Pressure_hydraulic":"fixture.wav", "Pressure_impact":"fixture.wav",
+              "Pressure_machine_room":"fixture.wav", "Pressure_creepy_drone":"fixture.wav",
+              "Pressure_breath":"fixture.wav", "RolandTR909_bd":"fixture.wav",
+              "RolandTR909_cp":"fixture.wav"
+            }"#,
+        )
+        .unwrap();
+        let source = include_str!("../../../examples/experiments/04_pressure_system.lua")
+            .replace(
+                r#"local avl=meldritch.samples {source="remote",bank="AVL",cache=true,
+  manifest="samples/pressure-system-avl.json",
+  base_url="https://raw.githubusercontent.com/studiorack/avl-drumkits/b06cb2c27359cbc68a830a82bddced05bd73d1a0/",
+  version="b06cb2c27359cbc68a830a82bddced05bd73d1a0"}"#,
+                r#"local avl=meldritch.samples {source="local",manifest="samples.json",bank="AVL",cache=true}"#,
+            )
+            .replace(
+                r#"local found=meldritch.samples {source="remote",bank="Pressure",cache=true,
+  manifest="samples/pressure-system-meta.json",
+  base_url="https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/",
+  version="251c0be57d5d1b3242b91f53e0cde62ab1cb42d9"}"#,
+                r#"local found=meldritch.samples {source="local",manifest="samples.json",bank="Pressure",cache=true}"#,
+            )
+            .replace(
+                r#"local tr=meldritch.samples {source="strudel",bank="RolandTR909",cache=true}"#,
+                r#"local tr=meldritch.samples {source="local",manifest="samples.json",bank="RolandTR909",cache=true}"#,
+            );
+        let graph = read_with_root(&source, &root).unwrap();
+        assert_eq!(graph.automations.len(), 12);
+        let apc = graph.performance.as_ref().unwrap().apc.as_ref().unwrap();
+        assert_eq!(apc.scene_patterns.len(), 8);
+        assert_eq!(apc.scene_quantization, 16);
+
+        let mut machine = compile_at_rate(&graph, 800.0).unwrap();
+        let frames = 418 * 800;
+        let mut left = vec![0.0; frames];
+        let mut right = vec![0.0; frames];
+        let mut diagnostics = RenderDiagnostics::default();
+        machine.process_stereo_diagnostic(&mut left, &mut right, &mut diagnostics);
+        assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
+        for name in [
+            "Break Kick",
+            "Break Snare",
+            "Ghost Snare",
+            "Closed Hat",
+            "Open Hat",
+            "Floor Tom",
+            "Electro Kick",
+            "Clap",
+            "Hydraulic",
+            "Impact",
+            "Bass",
+            "Low Drone",
+            "Hook",
+            "Machine Room",
+            "Industrial Drone",
+            "Breath Forward",
+            "Breath Reverse",
+        ] {
+            diagnostics.expect_track_events(name, 1).unwrap();
+        }
+        for player in 1..=15 {
+            diagnostics
+                .expect_output(&format!("instrument/sample_player_{player}"), 0, 1e-8)
+                .unwrap();
+        }
+        let rms = |start: usize, end: usize| {
+            let energy: f64 = left[start..end]
+                .iter()
+                .zip(&right[start..end])
+                .map(|(left, right)| left * left + right * right)
+                .sum();
+            (energy / (2 * (end - start)) as f64).sqrt()
+        };
+        let opening = rms(0, 24 * 800);
+        let release = rms(340 * 800, 380 * 800);
+        assert!(
+            release > opening * 1.25,
+            "release must materially exceed the opening"
+        );
+        let transport = &machine.sequencer_controls()[0];
+        assert!(!transport.playing());
+        assert!(transport.arrangement_status().unwrap().finished);
+        assert_eq!(transport.position_steps(), 3328);
         fs::remove_dir_all(root).unwrap();
     }
 }

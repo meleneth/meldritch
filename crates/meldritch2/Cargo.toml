@@ -11,6 +11,8 @@ crossterm.workspace = true
 elgato-streamdeck.workspace = true
 font8x8.workspace = true
 hound.workspace = true
+claxon.workspace = true
+lewton.workspace = true
 image.workspace = true
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
 midir.workspace = true

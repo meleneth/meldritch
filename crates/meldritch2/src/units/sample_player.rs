@@ -25,9 +25,26 @@ pub const CONTRACT: Contract = Contract {
             domain: Domain::MonoAudio,
         },
     ],
-    params: &[Param {
-        name: "gain",
-        default: 1.0,
-        range: Some((0.0, 4.0)),
-    }],
+    params: &[
+        Param {
+            name: "gain",
+            default: 1.0,
+            range: Some((0.0, 4.0)),
+        },
+        Param {
+            name: "start",
+            default: 0.0,
+            range: Some((0.0, 1.0)),
+        },
+        Param {
+            name: "finish",
+            default: 1.0,
+            range: Some((0.0, 1.0)),
+        },
+        Param {
+            name: "rate",
+            default: 1.0,
+            range: Some((-4.0, 4.0)),
+        },
+    ],
 };
