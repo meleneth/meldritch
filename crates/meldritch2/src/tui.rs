@@ -299,7 +299,12 @@ fn draw_pattern_grid(
         .as_ref()
         .and_then(|mapping| mapping.piano_roll.as_ref())
     {
-        return draw_piano_roll_grid(out, sequence, roll);
+        return draw_piano_roll_grid(
+            out,
+            sequence,
+            roll,
+            usize::from(terminal::size().map_or(80, |(width, _)| width)),
+        );
     }
     let names = sequence.track_names();
     let patterns = sequence.pattern_names();
@@ -400,24 +405,79 @@ fn midi_note_name(note: u8) -> String {
 fn piano_roll_lines(
     sequence: &crate::sequencer::SequencerControl,
     roll: &crate::model::ApcPianoRoll,
+    terminal_width: usize,
 ) -> Vec<String> {
     let pattern = sequence.pattern();
     let zoom = sequence.step_zoom();
     let first = sequence.step_bank() * 8;
     let current = sequence.current_step();
-    let mut lines = vec![format!(
-        "┌────────┬─────────┐  VIEW {:02}-{:02} · KEY {} · ZOOM {}",
+    let max_length = roll
+        .drum_tracks
+        .iter()
+        .copied()
+        .chain(std::iter::once(roll.melodic_track))
+        .map(|track| usize::from(pattern.lengths[track]))
+        .max()
+        .unwrap_or(8);
+    let remaining_cells = max_length.saturating_sub(first).div_ceil(zoom).max(1);
+    let available = terminal_width.saturating_sub(4).max(20);
+    let mut cell_count = 8.min(remaining_cells);
+    for candidate in (8..=remaining_cells.min(64)).step_by(8) {
+        let group_gaps = candidate.saturating_sub(1) / 4;
+        if 11 + candidate * 2 + group_gaps <= available {
+            cell_count = candidate;
+        }
+    }
+    let group_gaps = cell_count.saturating_sub(1) / 4;
+    let cell_width = ((available.saturating_sub(11 + group_gaps)) / cell_count).clamp(1, 3);
+    let grid_width = cell_count * cell_width + group_gaps;
+    let border = format!("┌────────┬{}┐", "─".repeat(grid_width));
+    let last = (first + cell_count * zoom).min(max_length);
+    let metadata = format!(
+        "  VIEW {:02}-{:02} · KEY {} · ZOOM {}",
         first + 1,
-        (first + 8 * zoom).min(usize::from(pattern.lengths[roll.melodic_track])),
+        last,
         midi_note_name(sequence.key_root()),
         zoom
-    )];
-    lines.push("│        │1234 5678│".into());
-    lines.push("├────────┼─────────┤".into());
+    );
+    let mut top = border;
+    if top.chars().count() + metadata.chars().count() <= terminal_width.saturating_sub(2) {
+        top.push_str(&metadata);
+    }
+    let format_cells = |values: Vec<String>| {
+        values
+            .chunks(4)
+            .map(|group| group.concat())
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let headings = (0..cell_count)
+        .map(|column| {
+            let step = first + column * zoom + 1;
+            fit_cell(
+                if cell_width == 1 {
+                    (step % 10).to_string()
+                } else {
+                    format!("{step:02}")
+                },
+                cell_width,
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut lines = vec![top];
+    lines.push(format!(
+        "│{}│{}│",
+        fit_cell(
+            format!("{} z{}", midi_note_name(sequence.key_root()), zoom),
+            8
+        ),
+        format_cells(headings)
+    ));
+    lines.push(format!("├────────┼{}┤", "─".repeat(grid_width)));
 
     let cells = |track: usize, pitch: Option<u8>| {
         let length = usize::from(pattern.lengths[track]);
-        (0..8)
+        (0..cell_count)
             .map(|column| {
                 let start = first + column * zoom;
                 let end = (start + zoom).min(length);
@@ -455,15 +515,19 @@ fn piano_roll_lines(
                     (_, _, false) => "✦",
                 }
             })
+            .map(|glyph| {
+                let left = cell_width.saturating_sub(1) / 2;
+                format!(
+                    "{}{}{}",
+                    " ".repeat(left),
+                    glyph,
+                    " ".repeat(cell_width - left - 1)
+                )
+            })
             .collect::<Vec<_>>()
     };
-    let row = |label: String, values: Vec<&str>| {
-        format!(
-            "│{}│{} {}│",
-            fit_cell(label, 8),
-            values[..4].concat(),
-            values[4..].concat()
-        )
+    let row = |label: String, values: Vec<String>| {
+        format!("│{}│{}│", fit_cell(label, 8), format_cells(values))
     };
     let names = sequence.track_names();
     for &track in &roll.drum_tracks {
@@ -472,7 +536,7 @@ fn piano_roll_lines(
             cells(track, None),
         ));
     }
-    lines.push("├────────┼─────────┤".into());
+    lines.push(format!("├────────┼{}┤", "─".repeat(grid_width)));
     for scale_index in (0..5).rev() {
         let note = sequence.key_root().saturating_add(roll.scale[scale_index]);
         lines.push(row(
@@ -480,7 +544,12 @@ fn piano_roll_lines(
             cells(roll.melodic_track, Some(note)),
         ));
     }
-    lines.push("└────────┴─────────┘  ◆ full  ◐ partial  ✦ multiple  █ playing".into());
+    let mut bottom = format!("└────────┴{}┘", "─".repeat(grid_width));
+    let legend = "  ◆ full  ◐ partial  ✦ multiple  █ playing";
+    if bottom.chars().count() + legend.chars().count() <= terminal_width.saturating_sub(2) {
+        bottom.push_str(legend);
+    }
+    lines.push(bottom);
     lines
 }
 
@@ -488,8 +557,9 @@ fn draw_piano_roll_grid(
     out: &mut impl Write,
     sequence: &crate::sequencer::SequencerControl,
     roll: &crate::model::ApcPianoRoll,
+    terminal_width: usize,
 ) -> Result<(), String> {
-    for line in piano_roll_lines(sequence, roll) {
+    for line in piano_roll_lines(sequence, roll, terminal_width) {
         queue!(out, Print("  "), Print(line), Print("\r\n")).map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -1220,17 +1290,18 @@ mod tests {
         sequence
             .set_pattern_steps(0, 0, &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
             .unwrap();
+        sequence.set_pattern_length(0, 1, 16).unwrap();
+        sequence.set_pattern_length(0, 2, 16).unwrap();
+        sequence.set_pattern_length(0, 3, 32).unwrap();
         sequence.set_note(3, 0, 65.406_39, 0.9, 2.0).unwrap();
-        let lines = piano_roll_lines(
-            &sequence,
-            &ApcPianoRoll {
-                drum_tracks: [0, 1, 2],
-                melodic_track: 3,
-                scale: [0, 2, 3, 5, 7],
-            },
-        );
+        let roll = ApcPianoRoll {
+            drum_tracks: [0, 1, 2],
+            melodic_track: 3,
+            scale: [0, 2, 3, 5, 7],
+        };
+        let lines = piano_roll_lines(&sequence, &roll, 80);
         assert_eq!(lines.len(), 13);
-        assert!(lines[0].contains("KEY C2"));
+        assert!(lines[1].contains("C2 z1"));
         assert!(lines.iter().any(|line| line.contains("Closed …")));
         assert!(
             lines
@@ -1238,12 +1309,15 @@ mod tests {
                 .any(|line| line.contains("BASS C2") && line.contains('◆'))
         );
         for line in &lines[1..12] {
-            assert_eq!(line.chars().count(), 20);
+            assert_eq!(line.chars().count(), 64);
             assert!(matches!(line.chars().last(), Some('│' | '┤')));
             if line.starts_with('│') {
                 assert_eq!(line.chars().last(), Some('│'));
             }
         }
+        let wide = piano_roll_lines(&sequence, &roll, 120);
+        assert!(wide[1].contains("01 02 03 04  05"));
+        assert_eq!(wide[1].chars().count(), 114);
     }
 
     #[test]
