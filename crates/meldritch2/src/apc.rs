@@ -1096,6 +1096,59 @@ mod tests {
     }
 
     #[test]
+    fn production_delay_lab_apc_grid_edits_its_authored_pattern() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/experiments/02_delay_feedback.lua");
+        let script = std::fs::read_to_string(&path).unwrap();
+        let graph = crate::lua::read_with_root(&script, path.parent().unwrap()).unwrap();
+        let performance = graph.performance.as_ref().unwrap();
+        let mapping = performance.apc.as_ref().unwrap();
+        let roll = mapping.piano_roll.as_ref().unwrap();
+        let sequence = &performance.sequencer;
+        let mut state = GridController::new();
+        let handles = BTreeMap::new();
+
+        assert_eq!(sequence.pattern().velocities[roll.drum_tracks[0]][1], 0.0);
+        apply_authored(
+            &mut state,
+            Input::Grid(57, true),
+            sequence,
+            mapping,
+            &handles,
+        )
+        .unwrap();
+        assert_eq!(sequence.pattern().velocities[roll.drum_tracks[0]][1], 1.0);
+
+        let bass_cell = 2;
+        assert_eq!(sequence.pattern().velocities[roll.melodic_track][2], 0.0);
+        apply_authored(
+            &mut state,
+            Input::Grid(bass_cell, true),
+            sequence,
+            mapping,
+            &handles,
+        )
+        .unwrap();
+        apply_authored(
+            &mut state,
+            Input::Grid(bass_cell, false),
+            sequence,
+            mapping,
+            &handles,
+        )
+        .unwrap();
+        let pattern = sequence.pattern();
+        assert_eq!(pattern.velocities[roll.melodic_track][2], 0.85);
+        assert!((pattern.pitches_hz[roll.melodic_track][2] - midi_hz(36)).abs() < 0.01);
+        assert_eq!(pattern.gates[roll.melodic_track][2], 1.0);
+        let (leds, _) = piano_roll_led_frame(sequence, &state, roll, mapping);
+        assert_eq!(
+            leds[usize::from(bass_cell)],
+            LOSPEC500[crate::performance_ui::pitch_color(f64::from(midi_hz(36)))]
+        );
+    }
+
+    #[test]
     fn zoomed_piano_roll_distinguishes_full_partial_and_multiple_notes() {
         let sequence = SequencerControl::new("lab".into(), 120.0, 64, 4).unwrap();
         for name in ["Kick", "Snare", "Hat", "Bass"] {

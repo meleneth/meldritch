@@ -294,6 +294,13 @@ fn draw_pattern_grid(
         .performance()
         .ok_or("pattern grid requires a sequencer")?;
     let sequence = &performance.sequencer;
+    if let Some(roll) = performance
+        .apc
+        .as_ref()
+        .and_then(|mapping| mapping.piano_roll.as_ref())
+    {
+        return draw_piano_roll_grid(out, sequence, roll);
+    }
     let names = sequence.track_names();
     let patterns = sequence.pattern_names();
     let pattern = sequence.pattern();
@@ -337,7 +344,7 @@ fn draw_pattern_grid(
                 if track == selected_track { ">" } else { " " },
                 if sequence.muted(track) { "M" } else { " " },
                 if sequence.soloed(track) { "S" } else { " " },
-                name
+                fit_cell(name.to_owned(), 6)
             ))
         )
         .map_err(|e| e.to_string())?;
@@ -376,6 +383,115 @@ fn draw_pattern_grid(
         Print("\r\n1-8 toggle | [ ] bank | arrows select track/step | n/N viewed pattern | F1-F4 playing pattern\r\nd duplicate | ,/. rotate | +/- velocity | p/P pitch | g/G gate | C clear | S save | R reload\r\n")
     )
     .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn midi_note_name(note: u8) -> String {
+    const NAMES: [&str; 12] = [
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    ];
+    format!(
+        "{}{}",
+        NAMES[usize::from(note % 12)],
+        i16::from(note / 12) - 1
+    )
+}
+
+fn piano_roll_lines(
+    sequence: &crate::sequencer::SequencerControl,
+    roll: &crate::model::ApcPianoRoll,
+) -> Vec<String> {
+    let pattern = sequence.pattern();
+    let zoom = sequence.step_zoom();
+    let first = sequence.step_bank() * 8;
+    let current = sequence.current_step();
+    let mut lines = vec![format!(
+        "┌────────┬─────────┐  VIEW {:02}-{:02} · KEY {} · ZOOM {}",
+        first + 1,
+        (first + 8 * zoom).min(usize::from(pattern.lengths[roll.melodic_track])),
+        midi_note_name(sequence.key_root()),
+        zoom
+    )];
+    lines.push("│        │1234 5678│".into());
+    lines.push("├────────┼─────────┤".into());
+
+    let cells = |track: usize, pitch: Option<u8>| {
+        let length = usize::from(pattern.lengths[track]);
+        (0..8)
+            .map(|column| {
+                let start = first + column * zoom;
+                let end = (start + zoom).min(length);
+                let mut overlaps = 0;
+                let mut full = false;
+                for event_step in 0..length {
+                    if pattern.velocities[track][event_step] <= 0.0 {
+                        continue;
+                    }
+                    if let Some(note) = pitch {
+                        let event_note = (69.0
+                            + 12.0 * (pattern.pitches_hz[track][event_step] / 440.0).log2())
+                        .round() as u8;
+                        if event_note != note {
+                            continue;
+                        }
+                    }
+                    let event_end = if pitch.is_some() {
+                        event_step as f32 + pattern.gates[track][event_step].max(0.01)
+                    } else {
+                        event_step as f32 + 1.0
+                    };
+                    if event_step < end && event_end > start as f32 {
+                        overlaps += 1;
+                        full |= event_step <= start && event_end >= end as f32;
+                    }
+                }
+                let under_playhead = sequence.playing() && current >= start && current < end;
+                match (overlaps, full, under_playhead) {
+                    (0, _, false) => "·",
+                    (0, _, true) => "▏",
+                    (_, _, true) => "█",
+                    (1, true, false) => "◆",
+                    (1, false, false) => "◐",
+                    (_, _, false) => "✦",
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let row = |label: String, values: Vec<&str>| {
+        format!(
+            "│{}│{} {}│",
+            fit_cell(label, 8),
+            values[..4].concat(),
+            values[4..].concat()
+        )
+    };
+    let names = sequence.track_names();
+    for &track in &roll.drum_tracks {
+        lines.push(row(
+            names.get(track).cloned().unwrap_or_else(|| "DRUM".into()),
+            cells(track, None),
+        ));
+    }
+    lines.push("├────────┼─────────┤".into());
+    for scale_index in (0..5).rev() {
+        let note = sequence.key_root().saturating_add(roll.scale[scale_index]);
+        lines.push(row(
+            format!("BASS {}", midi_note_name(note)),
+            cells(roll.melodic_track, Some(note)),
+        ));
+    }
+    lines.push("└────────┴─────────┘  ◆ full  ◐ partial  ✦ multiple  █ playing".into());
+    lines
+}
+
+fn draw_piano_roll_grid(
+    out: &mut impl Write,
+    sequence: &crate::sequencer::SequencerControl,
+    roll: &crate::model::ApcPianoRoll,
+) -> Result<(), String> {
+    for line in piano_roll_lines(sequence, roll) {
+        queue!(out, Print("  "), Print(line), Print("\r\n")).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -1082,15 +1198,53 @@ mod tests {
 
     use super::{
         TuiKeyboard, control_focus_lines, dispatch_performance_binding, frame_lines,
-        navigation_key, terminal_color,
+        navigation_key, piano_roll_lines, terminal_color,
     };
     use crate::{
         compiler::compile,
         live_notes::live_note_queue,
         lua,
         midi::TimedMidiRouter,
+        model::ApcPianoRoll,
+        sequencer::SequencerControl,
         timed::{TimedNotePlan, TimedNoteState},
     };
+
+    #[test]
+    fn hybrid_drum_and_piano_roll_is_compact_aligned_and_musical() {
+        let sequence = SequencerControl::new("lab".into(), 118.0, 64, 4).unwrap();
+        for name in ["Kick", "Snare", "Closed Hat", "Bassline"] {
+            sequence.add_track(name.into()).unwrap();
+        }
+        sequence.set_key_root(36).unwrap();
+        sequence
+            .set_pattern_steps(0, 0, &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
+            .unwrap();
+        sequence.set_note(3, 0, 65.406_39, 0.9, 2.0).unwrap();
+        let lines = piano_roll_lines(
+            &sequence,
+            &ApcPianoRoll {
+                drum_tracks: [0, 1, 2],
+                melodic_track: 3,
+                scale: [0, 2, 3, 5, 7],
+            },
+        );
+        assert_eq!(lines.len(), 13);
+        assert!(lines[0].contains("KEY C2"));
+        assert!(lines.iter().any(|line| line.contains("Closed …")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("BASS C2") && line.contains('◆'))
+        );
+        for line in &lines[1..12] {
+            assert_eq!(line.chars().count(), 20);
+            assert!(matches!(line.chars().last(), Some('│' | '┤')));
+            if line.starts_with('│') {
+                assert_eq!(line.chars().last(), Some('│'));
+            }
+        }
+    }
 
     #[test]
     fn function_keys_are_delivered_as_authored_navigation_names() {

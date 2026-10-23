@@ -424,6 +424,22 @@ impl SequencerControl {
         pattern.velocities[track][step] = velocity;
         pattern.gates[track][step] = gate_steps;
         state.pending_revision = true;
+        self.set_status(if velocity > 0.0 {
+            format!(
+                "{} note {}: {:.2} Hz, velocity {:.2}, gate {:.2}",
+                self.track_names().get(track).cloned().unwrap_or_default(),
+                step + 1,
+                pitch_hz,
+                velocity,
+                gate_steps
+            )
+        } else {
+            format!(
+                "{} note {} cleared",
+                self.track_names().get(track).cloned().unwrap_or_default(),
+                step + 1
+            )
+        });
         Ok(())
     }
     pub fn pattern(&self) -> Pattern {
