@@ -12,12 +12,12 @@ use crate::event_bridge::{
     SubscriptionRegistry,
 };
 use crate::model::{
-    Action, Connection, Control, ControlPage, ControlScale, ControlSurface, Endpoint,
-    ExternalInput, ExternalParameter, ExternalPort, Graph, MidiButton, MidiButtonEdge,
-    MidiButtonMessage, MidiCc, MidiNotes, MidiPacket, MidiPoly, MidiPolyVoice, Module,
-    ModuleRuntime, Navigation, NavigationBinding, NavigationEvent, ParameterId, Performance,
-    PerformanceSurface, PerformanceTrackView, PolyOverflow, Screen, Subpatch, SubpatchInstance,
-    SurfaceAction, SurfaceButton, SurfaceButtonMode, Widget,
+    Action, Automation, AutomationInterpolation, Connection, Control, ControlPage, ControlScale,
+    ControlSurface, Endpoint, ExternalInput, ExternalParameter, ExternalPort, Graph, MidiButton,
+    MidiButtonEdge, MidiButtonMessage, MidiCc, MidiNotes, MidiPacket, MidiPoly, MidiPolyVoice,
+    Module, ModuleRuntime, Navigation, NavigationBinding, NavigationEvent, ParameterId,
+    Performance, PerformanceSurface, PerformanceTrackView, PolyOverflow, Screen, Subpatch,
+    SubpatchInstance, SurfaceAction, SurfaceButton, SurfaceButtonMode, Widget,
 };
 use crate::sample::{PreparedSample, SampleBank};
 use crate::sequencer::SequencerControl;
@@ -104,6 +104,22 @@ impl UserData for LuaSequencer {
                 .queue_pattern(pattern)
                 .map_err(mlua::Error::external)
         });
+        methods.add_method(
+            "queue_scene",
+            |_, this, (pattern, quantization): (usize, usize)| {
+                this.control
+                    .queue_scene(pattern, quantization)
+                    .map_err(mlua::Error::external)
+            },
+        );
+        methods.add_method(
+            "queue_clip",
+            |_, this, (track, pattern, quantization): (usize, usize, usize)| {
+                this.control
+                    .queue_clip(track, pattern, quantization)
+                    .map_err(mlua::Error::external)
+            },
+        );
         methods.add_method("copy_pattern", |_, this, (from, to): (usize, usize)| {
             this.control
                 .copy_pattern(from, to)
@@ -122,6 +138,24 @@ impl UserData for LuaSequencer {
             |_, this, (from, to, track): (usize, usize, usize)| {
                 this.control
                     .copy_pattern_track(from, to, track)
+                    .map_err(mlua::Error::external)
+            },
+        );
+        methods.add_method(
+            "set_scene_membership",
+            |_, this, (scene, clips): (usize, Table)| {
+                let mut parsed = Vec::new();
+                for pair in clips.pairs::<usize, Value>() {
+                    let (track, clip) = pair?;
+                    let clip = match clip {
+                        Value::Integer(value) if value >= 0 => Some(value as usize),
+                        Value::Nil | Value::Boolean(false) => None,
+                        _ => return Err(mlua::Error::external("invalid scene clip membership")),
+                    };
+                    parsed.push((track, clip));
+                }
+                this.control
+                    .set_scene_membership(scene, &parsed)
                     .map_err(mlua::Error::external)
             },
         );
@@ -168,6 +202,19 @@ impl UserData for LuaSequencer {
                 .set_arrangement(&parsed)
                 .map_err(mlua::Error::external)
         });
+        methods.add_method(
+            "set_timeline_arrangement",
+            |_, this, (name, entries, stop_step): (String, Table, Option<u64>)| {
+                let mut parsed = Vec::new();
+                for item in entries.sequence_values::<Table>() {
+                    let item = item?;
+                    parsed.push((item.get::<u64>(1)?, item.get::<usize>(2)?));
+                }
+                this.control
+                    .set_timeline_arrangement(name, &parsed, stop_step)
+                    .map_err(mlua::Error::external)
+            },
+        );
         methods.add_method("start", |_, this, ()| {
             this.control.start();
             Ok(())
@@ -220,7 +267,7 @@ function meldritch.graph()
   local graph = { modules = {}, instances = {}, connections = {}, normalizations = {},
     controls = {}, midi_ccs = {}, note_bindings = {}, poly_bindings = {}, external_inputs = {}, external_outputs = {},
     external_parameters = {}, screens = {}, actions = {}, midi_buttons = {}, midi_packets = {},
-    performance = nil, _navigation = nil, _devices = {}, _event_handles = {}, _control_surfaces = {} }
+    performance = nil, _navigation = nil, _devices = {}, _event_handles = {}, _control_surfaces = {}, automations = {} }
   function graph:devices(devices)
     assert(type(devices) == "table", "devices must be a table")
     assert(devices.audio_output == nil or
@@ -370,6 +417,9 @@ function meldritch.graph()
     end
     function screen:performance_status()
       table.insert(self.widgets, { kind = "performance_status" })
+    end
+    function screen:arrangement_status()
+      table.insert(self.widgets, { kind = "arrangement_status" })
     end
     function screen:pattern_grid()
       table.insert(self.widgets, { kind = "pattern_grid" })
@@ -650,16 +700,21 @@ local function decorate_scope(facade, scope, prefix)
   end
   function facade:sequencer(values)
     assert(type(values) == "table", "sequencer requires settings")
+    values.steps=values.steps or 128
     local native = meldritch._sequencer(self.name or prefix, values.bpm, values.steps, values.steps_per_beat)
     local tempo = scope:module(self:_id("sequencer_tempo"), "sequencer_tempo", { bpm = values.bpm }, meldritch._sequencer_tempo(native))
-    local sequence = { _native = native, _tracks = {}, _patterns = {}, _steps = values.steps,
+    local sequence = { _native = native, _tracks = {}, _patterns = {}, _clips = {}, _scenes = {},
+      _steps = values.steps or 16, _steps_per_beat = values.steps_per_beat,
       bpm = parameter(tempo, "bpm"), tempo = tempo.out }
     function sequence:track(name)
       assert(type(name) == "string" and name ~= "", "track name must be nonempty")
       local runtime = self._native:track(name)
       local track = runtime:borrow_track()
       self._tracks[name] = track
-      return scope:module(facade:_id("sequence_track"), "sequencer_track", {}, runtime)
+      local handle=scope:module(facade:_id("sequence_track"), "sequencer_track", {}, runtime)
+      handle._sequence=sequence;handle._track_name=name;handle._track_index=track
+      function handle:clip(clip_name,spec) return sequence:_clip(name,clip_name,spec or {}) end
+      return handle
     end
     function sequence:steps(name, values)
       local track = assert(self._tracks[name], "unknown sequencer track: " .. tostring(name))
@@ -678,7 +733,7 @@ local function decorate_scope(facade, scope, prefix)
         local track=assert(sequence._tracks[track_name],"unknown sequencer track: "..tostring(track_name))
         local pitches, gates, velocities = {}, {}, {}
         length = length or sequence._steps
-        assert(type(length)=="number" and length>=1 and length<=64 and length%1==0,"pattern length must be 1..64")
+        assert(type(length)=="number" and length>=1 and length<=128 and length%1==0,"pattern length must be 1..128")
         for step=1,length do pitches[step]=440;gates[step]=0.5;velocities[step]=0 end
         for _,event in ipairs(events) do
           assert(type(event.step)=="number" and event.step>=1 and event.step<=length,"note step is out of range")
@@ -693,6 +748,89 @@ local function decorate_scope(facade, scope, prefix)
         sequence._native:set_pattern_length(self.index,track,length)
       end
       return pattern
+    end
+    function sequence:_clip(track_name,name,spec)
+      assert(type(name)=="string" and name~="" and not self._clips[name],"clip name must be unique")
+      assert(type(spec)=="table","clip specification must be a table")
+      local track=assert(self._tracks[track_name],"unknown clip track: "..tostring(track_name))
+      local index=self._native:define_pattern("clip:"..name)
+      local clip={name=name,index=index,track=track,track_name=track_name,length=spec.length or self._steps}
+      assert(clip.length>=1 and clip.length<=128 and clip.length%1==0,"clip length must be 1..128")
+      function clip:steps(values)
+        assert(#values==self.length,"clip step data must match its declared length")
+        sequence._native:set_pattern_steps(self.index,self.track,values)
+      end
+      function clip:notes(events)
+        local pitches,gates,velocities={},{},{}
+        for step=1,self.length do pitches[step]=440;gates[step]=.5;velocities[step]=0 end
+        for _,event in ipairs(events) do
+          assert(event.step>=1 and event.step<=self.length,"clip note step is out of range")
+          pitches[event.step]=event.frequency or 440*2^((assert(event.note)-69)/12)
+          gates[event.step]=event.gate or .5;velocities[event.step]=event.velocity or 1
+        end
+        sequence._native:set_pattern_notes(self.index,self.track,pitches,gates,velocities)
+      end
+      clip.quantization=16
+      function clip:launch(quantization)
+        sequence._native:queue_clip(self.track,self.index,quantization or self.quantization)
+      end
+      if spec.steps then clip:steps(spec.steps)
+      elseif spec.notes then clip:notes(spec.notes)
+      else sequence._native:set_pattern_length(index,track,clip.length) end
+      self._clips[name]=clip
+      return clip
+    end
+    function sequence:scene(name,selections)
+      assert(type(name)=="string" and name~="" and not self._scenes[name],"scene name must be unique")
+      assert(type(selections)=="table","scene requires explicit track selections")
+      local scene=self:pattern(name)
+      local membership={}
+      for track_name,track in pairs(self._tracks) do
+        local clip=selections[track_name]
+        if clip~=nil and clip~=false then
+          assert(type(clip)=="table" and clip.track==track,"scene clip belongs to another track")
+          self._native:copy_pattern_track(clip.index,scene.index,track)
+          membership[track]=clip.index
+        else
+          membership[track]=false
+        end
+      end
+      self._native:set_scene_membership(scene.index,membership)
+      scene.quantization=16
+      function scene:launch(quantization) sequence._native:queue_scene(self.index,quantization or self.quantization) end
+      self._scenes[name]=scene
+      return scene
+    end
+    function sequence:timeline(name)
+      assert(type(name)=="string" and name~="","arrangement name must be nonempty")
+      local timeline={name=name,entries={}}
+      function timeline:at_bar(bar,scene)
+        local target=type(scene)=="table" and scene or assert(sequence._scenes[scene],"unknown scene: "..tostring(scene))
+        assert(type(bar)=="number" and bar>=1 and bar%1==0,"arrangement bar must be a positive integer")
+        self.entries[#self.entries+1]={(bar-1)*sequence._steps_per_beat*4,target.index}
+        return self
+      end
+      function timeline:stop_at_bar(bar)
+        assert(type(bar)=="number" and bar>=2 and bar%1==0,"stop bar must be an integer after bar 1")
+        sequence._native:set_timeline_arrangement(self.name,self.entries,(bar-1)*sequence._steps_per_beat*4)
+        self.stop_bar=bar;return self
+      end
+      function timeline:automation(spec)
+        assert(type(spec)=="table","automation requires a specification")
+        local target=type(spec.target)=="table" and spec.target.id or spec.target
+        assert(type(target)=="string" and target~="","automation target must be a control")
+        local interpolation=spec.interpolation or "linear"
+        assert(interpolation=="step" or interpolation=="linear" or interpolation=="smooth","invalid automation interpolation")
+        local lane={points={}}
+        function lane:at_bar(bar,value)
+          assert(type(bar)=="number" and bar>=1 and type(value)=="number","automation point requires bar and value")
+          self.points[#self.points+1]={(bar-1)*sequence._steps_per_beat*4,value};return self
+        end
+        facade._automations[#facade._automations+1]={native=sequence._native,target=target,
+          interpolation=interpolation,points=lane.points}
+        return lane
+      end
+      return timeline
     end
     function sequence:switch_pattern(name)
       self._native:queue_pattern(assert(self._patterns[name],"unknown pattern: "..tostring(name)))
@@ -787,10 +925,11 @@ function meldritch.instrument(name)
   local instrument = {
     name = name,
     _definition = definition,
-    _controls = {},
+    _controls = {}, _automations = {},
     _left = nil,
     _right = nil,
     _uses_notes = false,
+    _voice_mode = "poly",
     _actions = {},
     _midi_buttons = {},
     _midi_packets = {},
@@ -810,6 +949,11 @@ function meldritch.instrument(name)
   decorate_scope(instrument, definition, prefix)
 
   local ordinary_connect = instrument.connect
+  function instrument:voice_mode(mode)
+    assert(mode == "mono" or mode == "poly", "voice mode must be mono or poly")
+    self._voice_mode = mode
+    return self
+  end
   function instrument:connect(source, destination)
     if destination.direction == "terminal" then
       assert(source.direction == "output", "instrument output requires a signal output")
@@ -846,13 +990,14 @@ function meldritch.instrument(name)
       table.insert(self._controls, { id = spec.id, label = spec.label, target = spec.target,
         targets = targets,
         range = { min = spec.range[1], max = spec.range[2], scale = spec.curve } })
-      return
+      return {id=spec.id}
     end
     assert(type(label) == "string" and label ~= "", "control label must be nonempty")
     assert(type(target) == "table" and target.direction == "parameter",
       "instrument control must target a writable parameter")
     assert(type(range) == "table", "instrument control requires a range")
     table.insert(self._controls, { id = label, label = label, target = target, range = range })
+    return {id=label}
   end
 
   function instrument:screen(id, title)
@@ -944,6 +1089,7 @@ function meldritch.instrument(name)
     root._navigation = self._navigation
     root._event_handles = self._event_handles
     root._control_surfaces = definition._control_surfaces
+    root.automations = self._automations
     local terminal = root:module("output", "stereo_output")
     if self._uses_notes then
       assert(self._note_pitch and self._note_gate, "note instruments must connect pitch and gate")
@@ -951,7 +1097,9 @@ function meldritch.instrument(name)
       definition:parameter("note_gate", self._note_gate, "value")
       local velocity = self._note_velocity or definition:module("note_velocity", "constant", { value = 1.0 })
       definition:parameter("note_velocity", velocity, "value")
+    end
 
+    if self._uses_notes and self._voice_mode == "poly" then
       local voices = {}
       local bindings = {}
       for index = 1, 4 do
@@ -996,6 +1144,18 @@ function meldritch.instrument(name)
       local instance = root:instance("instrument", definition)
       root:connect(instance.left, terminal.left)
       root:connect(instance.right, terminal.right)
+      if self._uses_notes then
+        local pitch = "__mono_pitch"
+        local gate = "__mono_gate"
+        local velocity = "__mono_velocity"
+        root:control(pitch, instance, "note_pitch", { min = 8.0, max = 13000.0 })
+        root.controls[#root.controls].hidden = true
+        root:control(gate, instance, "note_gate", { min = 0.0, max = 1.0 })
+        root.controls[#root.controls].hidden = true
+        root:control(velocity, instance, "note_velocity", { min = 0.0, max = 1.0 })
+        root.controls[#root.controls].hidden = true
+        root:midi_notes(1, pitch, gate, velocity)
+      end
       for index, control in ipairs(self._controls) do
         control.range.label = control.label
         root:control(control.id, instance, exports[index], control.range)
@@ -1473,6 +1633,37 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
     graph.devices.apc_mini = devices
         .get::<Option<String>>("apc_mini")
         .map_err(|e| format!("apc_mini device: {e}"))?;
+    let automations: Table = table.get("automations").map_err(|e| e.to_string())?;
+    for automation in automations.sequence_values::<Table>() {
+        let automation = automation.map_err(|e| e.to_string())?;
+        let native: AnyUserData = automation.get("native").map_err(|e| e.to_string())?;
+        let native = native.borrow::<LuaSequencer>().map_err(|e| e.to_string())?;
+        let interpolation: String = automation.get("interpolation").map_err(|e| e.to_string())?;
+        let points: Table = automation.get("points").map_err(|e| e.to_string())?;
+        let mut parsed = Vec::new();
+        for point in points.sequence_values::<Table>() {
+            let point = point.map_err(|e| e.to_string())?;
+            parsed.push((
+                point.get::<u64>(1).map_err(|e| e.to_string())?,
+                point.get::<f64>(2).map_err(|e| e.to_string())?,
+            ));
+        }
+        graph.automations.push(Automation {
+            sequencer: Arc::clone(&native.control),
+            control_id: automation.get("target").map_err(|e| e.to_string())?,
+            interpolation: match interpolation.as_str() {
+                "step" => AutomationInterpolation::Step,
+                "linear" => AutomationInterpolation::Linear,
+                "smooth" => AutomationInterpolation::Smooth,
+                _ => {
+                    return Err(format!(
+                        "unknown automation interpolation '{interpolation}'"
+                    ));
+                }
+            },
+            points: parsed,
+        });
+    }
     if let Some(performance) = table
         .get::<Option<Table>>("performance")
         .map_err(|e| e.to_string())?
@@ -1511,6 +1702,30 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                     };
                     let pages = array("pages", 2)?;
                     let rows = array("performance_rows", 8)?;
+                    let scene_patterns = match apc
+                        .get::<Option<Table>>("scenes")
+                        .map_err(|e| e.to_string())?
+                    {
+                        Some(scenes) => {
+                            let names = native.control.pattern_names();
+                            scenes
+                                .sequence_values::<String>()
+                                .map(|name| {
+                                    let name = name.map_err(|e| e.to_string())?;
+                                    names
+                                        .iter()
+                                        .position(|candidate| candidate == &name)
+                                        .ok_or_else(|| {
+                                            format!("APC scene targets unknown scene '{name}'")
+                                        })
+                                })
+                                .collect::<Result<Vec<_>, String>>()?
+                        }
+                        None => Vec::new(),
+                    };
+                    if scene_patterns.len() > 8 {
+                        return Err("APC scenes accepts at most 8 scene names".into());
+                    }
                     let faders = array("faders", 8)?;
                     let fader_banks = match apc
                         .get::<Option<Table>>("fader_banks")
@@ -1597,6 +1812,12 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                     Ok::<_, String>(crate::model::ApcMapping {
                         pages: pages.try_into().unwrap(),
                         performance_rows: rows.try_into().unwrap(),
+                        scene_patterns,
+                        scene_quantization: apc
+                            .get::<Option<usize>>("scene_quantization")
+                            .map_err(|e| e.to_string())?
+                            .unwrap_or(16)
+                            .max(1),
                         fader_controls: faders.try_into().unwrap(),
                         fader_banks,
                         fader_bank: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -1721,6 +1942,7 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                 "performance_controls" => Widget::PerformanceControls,
                 "control_focus" => Widget::ControlFocus,
                 "performance_status" => Widget::PerformanceStatus,
+                "arrangement_status" => Widget::ArrangementStatus,
                 "pattern_grid" => Widget::PatternGrid,
                 "transport_status" => Widget::TransportStatus,
                 "performance_surface" => {
@@ -2021,7 +2243,7 @@ fn endpoint(table: Table) -> Result<Endpoint, String> {
 #[cfg(test)]
 mod tests {
     use super::{read, read_with_root};
-    use crate::compiler::compile_at_rate;
+    use crate::compiler::{RenderDiagnostics, compile_at_rate};
     use crate::model::{MidiButtonEdge, MidiButtonMessage};
     use std::{fs, io::Cursor};
 
@@ -2180,5 +2402,104 @@ mod tests {
         assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
         assert!(left.iter().any(|sample| sample.abs() > 0.001));
         assert!(right.iter().any(|sample| sample.abs() > 0.001));
+    }
+
+    #[test]
+    fn ghosts_arrangement_renders_all_tracks_and_automation_has_clear_ownership() {
+        let root =
+            std::env::temp_dir().join(format!("meldritch-ghosts-lua-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let mut wav = Cursor::new(Vec::new());
+        {
+            let mut writer = hound::WavWriter::new(
+                &mut wav,
+                hound::WavSpec {
+                    channels: 2,
+                    sample_rate: 800,
+                    bits_per_sample: 16,
+                    sample_format: hound::SampleFormat::Int,
+                },
+            )
+            .unwrap();
+            for frame in 0..96 {
+                let sample = if frame == 0 {
+                    26_000
+                } else if frame < 20 {
+                    5_000 - frame * 180
+                } else {
+                    0
+                };
+                writer.write_sample::<i16>(sample as i16).unwrap();
+                writer.write_sample::<i16>((-sample) as i16).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+        fs::write(root.join("fixture.wav"), wav.into_inner()).unwrap();
+        fs::write(
+            root.join("strudel.json"),
+            r#"{
+              "RolandTR909_bd":"fixture.wav", "RolandTR909_sd":"fixture.wav",
+              "RolandTR909_cp":"fixture.wav", "RolandTR909_hh":"fixture.wav",
+              "RolandTR909_oh":"fixture.wav", "RolandTR909_lt":"fixture.wav",
+              "RolandTR909_ht":"fixture.wav"
+            }"#,
+        )
+        .unwrap();
+        let source = include_str!("../../../examples/experiments/03_ghosts_in_the_machinery.lua")
+            .replace(
+                "source=\"strudel\",bank=\"RolandTR909\",cache=true",
+                "source=\"local\",manifest=\"strudel.json\",bank=\"RolandTR909\",cache=true",
+            );
+        let graph = read_with_root(&source, &root).unwrap();
+        assert_eq!(graph.automations.len(), 4);
+        let apc = graph.performance.as_ref().unwrap().apc.as_ref().unwrap();
+        assert_eq!(apc.scene_patterns.len(), 7);
+        assert_eq!(apc.scene_quantization, 16);
+
+        let mut ownership = compile_at_rate(&graph, 800.0).unwrap();
+        assert_eq!(ownership.midi_notes().len(), 1);
+        assert!(!ownership.has_poly_notes());
+        assert!(
+            ownership.order().len() < 64,
+            "live note mode duplicated the composition graph"
+        );
+        let cutoff = ownership.control_handle("bass_cutoff").unwrap();
+        let mut l = [0.0; 1];
+        let mut r = [0.0; 1];
+        ownership.process_stereo(&mut l, &mut r);
+        assert!((cutoff.effective_value() - 260.0).abs() < 1e-9);
+        cutoff.publish(777.0).unwrap();
+        ownership.process_stereo(&mut l, &mut r);
+        assert!((cutoff.effective_value() - 777.0).abs() < 1e-9);
+        cutoff.clear().unwrap();
+        ownership.process_stereo(&mut l, &mut r);
+        assert!(cutoff.effective_value() < 300.0);
+
+        let mut machine = compile_at_rate(&graph, 800.0).unwrap();
+        let frames = 181 * 800;
+        let mut left = vec![0.0; frames];
+        let mut right = vec![0.0; frames];
+        let mut diagnostics = RenderDiagnostics::default();
+        machine.process_stereo_diagnostic(&mut left, &mut right, &mut diagnostics);
+        assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
+        assert!(left.iter().any(|sample| sample.abs() > 0.001));
+        for name in [
+            "Kick",
+            "Snare + Clap",
+            "Hats",
+            "Break",
+            "Bass",
+            "Theme",
+            "Arp",
+            "Atmosphere",
+        ] {
+            diagnostics.expect_track_events(name, 1).unwrap();
+        }
+        let transport = &machine.sequencer_controls()[0];
+        assert!(!transport.playing());
+        assert!(transport.arrangement_status().unwrap().finished);
+        assert_eq!(transport.position_steps(), 1536);
+        fs::remove_dir_all(root).unwrap();
     }
 }

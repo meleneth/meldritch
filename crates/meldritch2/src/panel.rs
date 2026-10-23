@@ -34,15 +34,11 @@ pub(crate) struct PickupState {
 #[derive(Clone)]
 pub struct ControlRow {
     handle: ControlHandle,
-    authored_value: f64,
 }
 
 impl ControlRow {
-    pub(crate) fn new(handle: ControlHandle, authored_value: f64) -> Self {
-        Self {
-            handle,
-            authored_value,
-        }
+    pub(crate) fn new(handle: ControlHandle, _authored_value: f64) -> Self {
+        Self { handle }
     }
     pub fn id(&self) -> &str {
         self.handle.id()
@@ -57,7 +53,7 @@ impl ControlRow {
         self.handle.range()
     }
     pub fn value(&self) -> f64 {
-        self.handle.override_value().unwrap_or(self.authored_value)
+        self.handle.effective_value()
     }
     pub fn hardware_pickup(&self) -> i8 {
         self.handle.hardware_pickup()

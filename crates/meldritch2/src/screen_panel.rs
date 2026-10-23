@@ -25,6 +25,7 @@ pub(crate) enum WidgetView {
     PerformanceControls,
     ControlFocus,
     PerformanceStatus,
+    ArrangementStatus,
     PatternGrid,
     TransportStatus,
     PerformanceSurface(SurfaceView),
@@ -105,6 +106,7 @@ impl ScreenPanel {
                     Widget::PerformanceControls => WidgetView::PerformanceControls,
                     Widget::ControlFocus => WidgetView::ControlFocus,
                     Widget::PerformanceStatus => WidgetView::PerformanceStatus,
+                    Widget::ArrangementStatus => WidgetView::ArrangementStatus,
                     Widget::PatternGrid => WidgetView::PatternGrid,
                     Widget::TransportStatus => WidgetView::TransportStatus,
                     Widget::PerformanceSurface(surface) => {

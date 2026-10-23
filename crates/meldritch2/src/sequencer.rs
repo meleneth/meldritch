@@ -9,7 +9,7 @@ use crate::event_bridge::{EventKind, EventPayload, EventSource};
 
 /// Bounded prepared capacity; interfaces are free to project smaller viewports.
 pub const MAX_TRACKS: usize = 32;
-pub const MAX_STEPS: usize = 64;
+pub const MAX_STEPS: usize = 128;
 /// Index 255 remains the lock-free "none" sentinel.
 pub const MAX_PATTERNS: usize = 255;
 const NONE: u8 = u8::MAX;
@@ -39,7 +39,36 @@ impl Default for Pattern {
 struct PublishedPattern {
     names: Vec<String>,
     authored: Vec<Pattern>,
+    memberships: Vec<[u8; MAX_TRACKS]>,
     pending_revision: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct TimelineArrangement {
+    name: String,
+    entries: Vec<(u64, usize)>,
+    stop_step: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArrangementStatus {
+    pub name: String,
+    pub current_section: String,
+    pub upcoming_section: Option<String>,
+    pub current_scene: String,
+    pub pending_scene: Option<String>,
+    pub bar: u64,
+    pub beat: u32,
+    pub total_bars: Option<u64>,
+    pub finished: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClipStatus {
+    pub track: String,
+    pub clip: Option<String>,
+    pub position: usize,
+    pub length: usize,
 }
 
 /// Control-side state shared by Lua, TUI, MIDI and the compiled audio runtime.
@@ -68,6 +97,14 @@ pub struct SequencerControl {
     key_track: AtomicU8,
     status: Mutex<String>,
     arrangement: Mutex<Vec<(usize, u32)>>,
+    timeline: Mutex<TimelineArrangement>,
+    timeline_section: AtomicU8,
+    scene_quantization: AtomicU8,
+    queued_clips: [AtomicU8; MAX_TRACKS],
+    active_clip_overrides: [AtomicU8; MAX_TRACKS],
+    clip_quantizations: [AtomicU8; MAX_TRACKS],
+    clip_positions: [AtomicU8; MAX_TRACKS],
+    arrangement_finished: AtomicBool,
     position_steps: std::sync::atomic::AtomicU64,
     events: Arc<EventSource>,
 }
@@ -107,6 +144,7 @@ impl SequencerControl {
             pattern: Mutex::new(PublishedPattern {
                 names: vec!["Default".into()],
                 authored: vec![initial],
+                memberships: vec![[0; MAX_TRACKS]],
                 pending_revision: true,
             }),
             command: AtomicU8::new(1),
@@ -125,6 +163,14 @@ impl SequencerControl {
             key_track: AtomicU8::new(0),
             status: Mutex::new("Ready".into()),
             arrangement: Mutex::new(Vec::new()),
+            timeline: Mutex::new(TimelineArrangement::default()),
+            timeline_section: AtomicU8::new(0),
+            scene_quantization: AtomicU8::new(0),
+            queued_clips: std::array::from_fn(|_| AtomicU8::new(NONE)),
+            active_clip_overrides: std::array::from_fn(|_| AtomicU8::new(NONE)),
+            clip_quantizations: std::array::from_fn(|_| AtomicU8::new(0)),
+            clip_positions: std::array::from_fn(|_| AtomicU8::new(0)),
+            arrangement_finished: AtomicBool::new(false),
             position_steps: std::sync::atomic::AtomicU64::new(0),
             events,
         }))
@@ -178,6 +224,8 @@ impl SequencerControl {
         let mut pattern = Pattern::default();
         pattern.lengths.fill(self.steps as u8);
         state.authored.push(pattern);
+        let index = state.authored.len() as u8 - 1;
+        state.memberships.push([index; MAX_TRACKS]);
         Ok(state.names.len() - 1)
     }
     pub fn pattern_names(&self) -> Vec<String> {
@@ -185,6 +233,140 @@ impl SequencerControl {
             .lock()
             .map(|s| s.names.clone())
             .unwrap_or_default()
+    }
+
+    pub fn set_scene_membership(
+        &self,
+        scene: usize,
+        clips: &[(usize, Option<usize>)],
+    ) -> Result<(), String> {
+        let mut state = self
+            .pattern
+            .lock()
+            .map_err(|_| "sequencer pattern state poisoned")?;
+        if scene >= state.authored.len()
+            || clips.iter().any(|(track, clip)| {
+                *track >= self.track_count()
+                    || clip.is_some_and(|clip| clip >= state.authored.len())
+            })
+        {
+            return Err("scene membership references an unknown scene, track, or clip".into());
+        }
+        let membership = state.memberships.get_mut(scene).ok_or("unknown scene")?;
+        membership.fill(NONE);
+        for (track, clip) in clips {
+            membership[*track] = clip.map_or(NONE, |clip| clip as u8);
+        }
+        Ok(())
+    }
+
+    pub fn clip_status(&self) -> Vec<ClipStatus> {
+        let Ok(state) = self.pattern.lock() else {
+            return Vec::new();
+        };
+        let scene = self.active_pattern();
+        let Some(membership) = state.memberships.get(scene) else {
+            return Vec::new();
+        };
+        let tracks = self.track_names();
+        tracks
+            .into_iter()
+            .enumerate()
+            .map(|(track, name)| {
+                let live = self.active_clip_overrides[track].load(Ordering::Acquire);
+                let clip = if live == NONE {
+                    membership[track]
+                } else {
+                    live
+                };
+                let source = (clip != NONE).then_some(usize::from(clip));
+                let length = source
+                    .and_then(|clip| state.authored.get(clip))
+                    .map_or(1, |pattern| usize::from(pattern.lengths[track]).max(1));
+                ClipStatus {
+                    track: name,
+                    clip: source
+                        .and_then(|clip| state.names.get(clip))
+                        .map(|name| name.strip_prefix("clip:").unwrap_or(name).to_owned()),
+                    position: usize::from(self.clip_positions[track].load(Ordering::Acquire)) + 1,
+                    length,
+                }
+            })
+            .collect()
+    }
+
+    pub fn queue_clip(
+        &self,
+        track: usize,
+        pattern: usize,
+        quantization: usize,
+    ) -> Result<(), String> {
+        let state = self
+            .pattern
+            .lock()
+            .map_err(|_| "sequencer pattern state poisoned")?;
+        if track >= self.track_count()
+            || pattern >= state.authored.len()
+            || quantization == 0
+            || quantization > MAX_STEPS
+        {
+            return Err(format!(
+                "clip launch requires a known track and clip with quantization in 1..={MAX_STEPS}"
+            ));
+        }
+        self.clip_quantizations[track].store(quantization as u8, Ordering::Release);
+        self.queued_clips[track].store(pattern as u8, Ordering::Release);
+        self.set_status(format!(
+            "Clip queued: {} / {}",
+            self.track_names()[track],
+            state.names[pattern]
+        ));
+        Ok(())
+    }
+
+    pub fn queued_clip(&self, track: usize) -> Option<usize> {
+        self.queued_clips.get(track).and_then(|value| {
+            let value = value.load(Ordering::Acquire);
+            (value != NONE).then_some(usize::from(value))
+        })
+    }
+
+    pub fn active_clip(&self, track: usize) -> Option<usize> {
+        if track >= self.track_count() {
+            return None;
+        }
+        let live = self.active_clip_overrides[track].load(Ordering::Acquire);
+        if live != NONE {
+            return Some(usize::from(live));
+        }
+        let state = self.pattern.lock().ok()?;
+        let clip = *state.memberships.get(self.active_pattern())?.get(track)?;
+        (clip != NONE).then_some(usize::from(clip))
+    }
+
+    pub fn clip_choices(&self, track: usize) -> Vec<usize> {
+        if track >= self.track_count() {
+            return Vec::new();
+        }
+        let Ok(timeline) = self.timeline.lock() else {
+            return Vec::new();
+        };
+        let scene_patterns: Vec<_> = timeline.entries.iter().map(|(_, scene)| *scene).collect();
+        drop(timeline);
+        let Ok(state) = self.pattern.lock() else {
+            return Vec::new();
+        };
+        let mut choices = Vec::new();
+        for scene in scene_patterns {
+            let Some(membership) = state.memberships.get(scene) else {
+                continue;
+            };
+            let clip = membership[track];
+            if clip != NONE && !choices.contains(&usize::from(clip)) {
+                choices.push(usize::from(clip));
+            }
+        }
+        choices
     }
     pub fn set_pattern_steps(
         &self,
@@ -497,6 +679,84 @@ impl SequencerControl {
         self.active_pattern
             .store(sections[0].0 as u8, Ordering::Release);
         Ok(())
+    }
+
+    pub fn set_timeline_arrangement(
+        &self,
+        name: String,
+        entries: &[(u64, usize)],
+        stop_step: Option<u64>,
+    ) -> Result<(), String> {
+        let patterns = self.pattern_names().len();
+        if name.is_empty()
+            || entries.is_empty()
+            || entries[0].0 != 0
+            || entries.windows(2).any(|pair| pair[0].0 >= pair[1].0)
+            || entries.iter().any(|(_, scene)| *scene >= patterns)
+            || stop_step.is_some_and(|stop| stop <= entries.last().unwrap().0)
+        {
+            return Err("timeline arrangement requires a name, bar-1 scene, ordered positions, known scenes, and a later stop".into());
+        }
+        *self
+            .timeline
+            .lock()
+            .map_err(|_| "sequencer timeline state poisoned")? = TimelineArrangement {
+            name,
+            entries: entries.to_vec(),
+            stop_step,
+        };
+        self.timeline_section.store(0, Ordering::Release);
+        self.arrangement_finished.store(false, Ordering::Release);
+        self.active_pattern
+            .store(entries[0].1 as u8, Ordering::Release);
+        Ok(())
+    }
+
+    pub fn queue_scene(&self, pattern: usize, quantization: usize) -> Result<(), String> {
+        if pattern >= self.pattern_names().len() || quantization == 0 || quantization > MAX_STEPS {
+            return Err(format!(
+                "scene launch requires a known scene and quantization in 1..={MAX_STEPS}"
+            ));
+        }
+        self.scene_quantization
+            .store(quantization as u8, Ordering::Release);
+        self.queued_pattern.store(pattern as u8, Ordering::Release);
+        self.set_status(format!("Scene queued: {}", self.pattern_names()[pattern]));
+        Ok(())
+    }
+
+    pub fn arrangement_status(&self) -> Option<ArrangementStatus> {
+        let timeline = self.timeline.lock().ok()?.clone();
+        if timeline.entries.is_empty() {
+            return None;
+        }
+        let names = self.pattern_names();
+        let section = usize::from(self.timeline_section.load(Ordering::Acquire))
+            .min(timeline.entries.len() - 1);
+        let position = self.position_steps.load(Ordering::Acquire);
+        let steps_per_bar = u64::from(self.steps_per_beat) * 4;
+        let active = self.active_pattern();
+        let pending = self.queued_pattern.load(Ordering::Acquire);
+        Some(ArrangementStatus {
+            name: timeline.name,
+            current_section: names
+                .get(timeline.entries[section].1)
+                .cloned()
+                .unwrap_or_else(|| "?".into()),
+            upcoming_section: timeline
+                .entries
+                .get(section + 1)
+                .and_then(|(_, scene)| names.get(*scene))
+                .cloned(),
+            current_scene: names.get(active).cloned().unwrap_or_else(|| "?".into()),
+            pending_scene: (pending != NONE)
+                .then(|| names.get(usize::from(pending)).cloned())
+                .flatten(),
+            bar: position / steps_per_bar + 1,
+            beat: ((position % steps_per_bar) / u64::from(self.steps_per_beat)) as u32 + 1,
+            total_bars: timeline.stop_step.map(|step| step / steps_per_bar),
+            finished: self.arrangement_finished.load(Ordering::Acquire),
+        })
     }
     pub fn selected_track(&self) -> usize {
         usize::from(self.selected_track.load(Ordering::Acquire))
@@ -985,6 +1245,9 @@ impl SequencerControl {
             .map_err(|_| "sequencer pattern state poisoned")?;
         state.names = names;
         state.authored = patterns;
+        state.memberships = (0..state.authored.len())
+            .map(|index| [index as u8; MAX_TRACKS])
+            .collect();
         state.pending_revision = true;
         self.active_pattern.store(active as u8, Ordering::Release);
         self.viewed_pattern.store(viewed as u8, Ordering::Release);
@@ -1045,8 +1308,10 @@ pub(crate) struct SequencerRuntime {
     arrangement: Vec<(usize, u32)>,
     arrangement_section: usize,
     arrangement_repeats: u32,
+    timeline: TimelineArrangement,
     sample_position: u64,
     active_pattern: usize,
+    clip_launch_steps: [usize; MAX_TRACKS],
 }
 
 impl SequencerRuntime {
@@ -1057,6 +1322,11 @@ impl SequencerRuntime {
             .map(|value| value.clone())
             .unwrap_or_default();
         let active_pattern = control.active_pattern();
+        let timeline = control
+            .timeline
+            .lock()
+            .map(|value| value.clone())
+            .unwrap_or_default();
         Self {
             control,
             pattern: Pattern::default(),
@@ -1071,8 +1341,10 @@ impl SequencerRuntime {
             arrangement,
             arrangement_section: 0,
             arrangement_repeats: 0,
+            timeline,
             sample_position: 0,
             active_pattern,
+            clip_launch_steps: [0; MAX_TRACKS],
         }
     }
     pub fn begin_frame(&mut self, sample_rate: f64) {
@@ -1104,8 +1376,23 @@ impl SequencerRuntime {
             2 => self.control.playing.store(false, Ordering::Release),
             3 => {
                 self.step = 0;
+                self.clip_launch_steps.fill(0);
                 self.frames_until_step = 0.0;
                 self.control.position_steps.store(0, Ordering::Release);
+                self.control.timeline_section.store(0, Ordering::Release);
+                self.control
+                    .arrangement_finished
+                    .store(false, Ordering::Release);
+                for track in 0..self.control.track_count() {
+                    self.control.queued_clips[track].store(NONE, Ordering::Release);
+                    self.control.active_clip_overrides[track].store(NONE, Ordering::Release);
+                    self.control.clip_positions[track].store(0, Ordering::Release);
+                }
+                if let Some((_, scene)) = self.timeline.entries.first() {
+                    self.control
+                        .active_pattern
+                        .store(*scene as u8, Ordering::Release);
+                }
                 self.control.playing.store(true, Ordering::Release);
             }
             _ => {}
@@ -1115,6 +1402,30 @@ impl SequencerRuntime {
             return;
         }
         if self.frames_until_step <= 0.0 {
+            let position = self.control.position_steps.load(Ordering::Acquire);
+            if self.timeline.stop_step.is_some_and(|stop| position >= stop) {
+                self.control.playing.store(false, Ordering::Release);
+                self.control
+                    .arrangement_finished
+                    .store(true, Ordering::Release);
+                self.gates.fill(0.0);
+                self.audible_notes.fill(false);
+                return;
+            }
+            if let Some((section, (_, scene))) = self
+                .timeline
+                .entries
+                .iter()
+                .enumerate()
+                .find(|(_, (at, _))| *at == position)
+            {
+                self.control
+                    .timeline_section
+                    .store(section as u8, Ordering::Release);
+                self.control
+                    .active_pattern
+                    .store(*scene as u8, Ordering::Release);
+            }
             let cycle = self.pattern.lengths[..self.control.track_count()]
                 .iter()
                 .copied()
@@ -1138,24 +1449,33 @@ impl SequencerRuntime {
                         );
                     }
                 }
+            }
+            let quantization = usize::from(self.control.scene_quantization.load(Ordering::Acquire));
+            if (quantization == 0 && boundary)
+                || (quantization > 0 && position.is_multiple_of(quantization as u64))
+            {
                 let queued = self.control.queued_pattern.swap(NONE, Ordering::AcqRel);
                 if queued != NONE {
                     self.control.active_pattern.store(queued, Ordering::Release);
                 }
             }
+            let active_pattern = self.control.active_pattern();
+            let scene_changed = active_pattern != self.active_pattern;
             if let Ok(mut state) = self.control.pattern.try_lock() {
-                let active = self.control.active_pattern();
-                if (state.pending_revision || boundary || !self.initialized)
-                    && let Some(next) = state.authored.get(active)
+                if (state.pending_revision || scene_changed || !self.initialized)
+                    && let Some(next) = state.authored.get(active_pattern)
                 {
                     self.pattern = *next;
                     state.pending_revision = false;
                 }
             }
-            let active_pattern = self.control.active_pattern();
-            if active_pattern != self.active_pattern {
+            if scene_changed {
                 self.active_pattern = active_pattern;
                 self.step = 0;
+                self.clip_launch_steps.fill(0);
+                for track in 0..self.control.track_count() {
+                    self.control.active_clip_overrides[track].store(NONE, Ordering::Release);
+                }
                 self.control
                     .events
                     .publish(EventKind::PatternChanged, sample_position, || {
@@ -1163,6 +1483,25 @@ impl SequencerRuntime {
                             pattern: active_pattern as u8,
                         }
                     });
+            }
+            for track in 0..self.control.track_count() {
+                let queued = self.control.queued_clips[track].load(Ordering::Acquire);
+                let quantization =
+                    usize::from(self.control.clip_quantizations[track].load(Ordering::Acquire));
+                if queued != NONE
+                    && quantization > 0
+                    && position.is_multiple_of(quantization as u64)
+                    && let Ok(state) = self.control.pattern.try_lock()
+                    && let Some(source) = state.authored.get(usize::from(queued))
+                {
+                    self.pattern.velocities[track] = source.velocities[track];
+                    self.pattern.pitches_hz[track] = source.pitches_hz[track];
+                    self.pattern.gates[track] = source.gates[track];
+                    self.pattern.lengths[track] = source.lengths[track];
+                    self.clip_launch_steps[track] = self.step;
+                    self.control.queued_clips[track].store(NONE, Ordering::Release);
+                    self.control.active_clip_overrides[track].store(queued, Ordering::Release);
+                }
             }
             let cycle = self.pattern.lengths[..self.control.track_count()]
                 .iter()
@@ -1191,7 +1530,8 @@ impl SequencerRuntime {
                 });
             for track in 0..self.control.track_count() {
                 let length = usize::from(self.pattern.lengths[track]).max(1);
-                let track_step = self.step % length;
+                let track_step = self.step.wrapping_sub(self.clip_launch_steps[track]) % length;
+                self.control.clip_positions[track].store(track_step as u8, Ordering::Release);
                 let velocity = self.pattern.velocities[track][track_step] as f64;
                 self.velocities[track] = velocity;
                 if velocity > 0.0 {
@@ -1457,6 +1797,107 @@ mod tests {
         }
         assert_eq!(three, [0, 3, 6, 9, 12, 15]);
         assert_eq!(five, [0, 5, 10, 15]);
+    }
+
+    #[test]
+    fn timeline_scenes_launch_on_exact_steps_and_stop_cleanly() {
+        let control = SequencerControl::new("timeline".into(), 120.0, 128, 4).unwrap();
+        control.add_track("Pulse".into()).unwrap();
+        let a = control.define_pattern("A".into()).unwrap();
+        let b = control.define_pattern("B".into()).unwrap();
+        control.set_pattern_steps(a, 0, &[0.25, 0.0, 0.0]).unwrap();
+        control
+            .set_pattern_steps(b, 0, &[0.75, 0.0, 0.0, 0.0, 0.0])
+            .unwrap();
+        control
+            .set_timeline_arrangement("Test".into(), &[(0, a), (8, b)], Some(16))
+            .unwrap();
+        let mut runtime = SequencerRuntime::new(Arc::clone(&control));
+        let mut starts = Vec::new();
+        for frame in 0..17 {
+            runtime.begin_frame(8.0);
+            if runtime.trigger(0) > 0.0 {
+                starts.push((frame, runtime.trigger(0)));
+            }
+        }
+        assert_eq!(
+            starts,
+            [(0, 0.25), (3, 0.25), (6, 0.25), (8, 0.75), (13, 0.75)]
+        );
+        assert_eq!(control.arrangement_status().unwrap().current_section, "B");
+        assert!(control.arrangement_status().unwrap().finished);
+        assert!(!control.playing());
+        assert_eq!(runtime.gate(0), 0.0);
+    }
+
+    #[test]
+    fn live_scene_override_is_quantized_and_next_timeline_entry_reclaims_ownership() {
+        let control = SequencerControl::new("override".into(), 120.0, 32, 4).unwrap();
+        control.add_track("T".into()).unwrap();
+        let scheduled = control.define_pattern("Scheduled".into()).unwrap();
+        let live = control.define_pattern("Live".into()).unwrap();
+        let next = control.define_pattern("Next".into()).unwrap();
+        for (pattern, velocity) in [(scheduled, 0.2), (live, 0.6), (next, 0.9)] {
+            control.set_pattern_steps(pattern, 0, &[velocity]).unwrap();
+        }
+        control
+            .set_timeline_arrangement("Main".into(), &[(0, scheduled), (12, next)], Some(20))
+            .unwrap();
+        let mut runtime = SequencerRuntime::new(Arc::clone(&control));
+        runtime.begin_frame(8.0);
+        control.queue_scene(live, 4).unwrap();
+        for _ in 0..3 {
+            runtime.begin_frame(8.0);
+            assert_eq!(control.active_pattern(), scheduled);
+        }
+        runtime.begin_frame(8.0);
+        assert_eq!(control.active_pattern(), live);
+        for _ in 0..8 {
+            runtime.begin_frame(8.0);
+        }
+        assert_eq!(control.active_pattern(), next);
+    }
+
+    #[test]
+    fn quantized_clip_launch_starts_locally_at_zero_and_preserves_other_tracks() {
+        let control = SequencerControl::new("clips".into(), 120.0, 32, 4).unwrap();
+        control.add_track("A".into()).unwrap();
+        control.add_track("B".into()).unwrap();
+        let scene = control.define_pattern("Scene".into()).unwrap();
+        let alternate = control.define_pattern("clip:Alternate A".into()).unwrap();
+        control
+            .set_pattern_steps(scene, 0, &[0.2, 0.0, 0.0])
+            .unwrap();
+        control
+            .set_pattern_steps(scene, 1, &[0.4, 0.0, 0.0, 0.0, 0.0])
+            .unwrap();
+        control
+            .set_pattern_steps(alternate, 0, &[0.9, 0.0, 0.0, 0.0])
+            .unwrap();
+        control
+            .set_scene_membership(scene, &[(0, Some(scene)), (1, Some(scene))])
+            .unwrap();
+        control
+            .set_timeline_arrangement("Main".into(), &[(0, scene)], Some(16))
+            .unwrap();
+        let mut runtime = SequencerRuntime::new(Arc::clone(&control));
+        runtime.begin_frame(8.0);
+        assert_eq!(runtime.trigger(0), 0.2_f32 as f64);
+        assert_eq!(runtime.trigger(1), 0.4_f32 as f64);
+        control.queue_clip(0, alternate, 4).unwrap();
+        for _ in 0..3 {
+            runtime.begin_frame(8.0);
+            assert_eq!(control.active_clip(0), Some(scene));
+        }
+        runtime.begin_frame(8.0);
+        assert_eq!(runtime.trigger(0), 0.9_f32 as f64);
+        assert_eq!(control.active_clip(0), Some(alternate));
+        runtime.begin_frame(8.0);
+        assert_eq!(runtime.trigger(1), 0.4_f32 as f64);
+        for _ in 0..3 {
+            runtime.begin_frame(8.0);
+        }
+        assert_eq!(runtime.trigger(0), 0.9_f32 as f64);
     }
 
     #[test]

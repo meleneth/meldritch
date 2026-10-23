@@ -36,6 +36,94 @@ fn terminal_color(index: usize, mode: ColorMode) -> Option<Color> {
     }
 }
 
+fn print_palette(
+    out: &mut impl Write,
+    mode: ColorMode,
+    palette: usize,
+    bold: bool,
+    text: impl std::fmt::Display,
+) -> Result<(), String> {
+    if let Some(color) = terminal_color(palette, mode) {
+        queue!(out, SetForegroundColor(color)).map_err(|error| error.to_string())?;
+    }
+    queue!(
+        out,
+        SetAttribute(if bold {
+            Attribute::Bold
+        } else {
+            Attribute::NormalIntensity
+        }),
+        Print(text),
+        ResetColor
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[derive(Clone, Copy)]
+enum SemanticLine {
+    Controls,
+    Grid { row_color: usize },
+}
+
+fn print_semantic_line(
+    out: &mut impl Write,
+    mode: ColorMode,
+    text: &str,
+    style: SemanticLine,
+) -> Result<(), String> {
+    let chars = text.chars().collect::<Vec<_>>();
+    let classify = |index: usize, character: char| match style {
+        SemanticLine::Controls => match character {
+            '┌' | '┐' | '└' | '┘' | '├' | '┤' | '─' | '│' => (30, false),
+            '█' => (28, true),
+            '░' => (25, false),
+            '>' => (8, true),
+            '◆' => (20, true),
+            '↑' => (8, true),
+            '↓' => (37, true),
+            '1'..='9'
+                if chars.get(index + 1) == Some(&' ')
+                    && matches!(
+                        index.checked_sub(1).and_then(|i| chars.get(i)),
+                        Some('>' | ' ')
+                    ) =>
+            {
+                (14, true)
+            }
+            _ => (33, false),
+        },
+        SemanticLine::Grid { row_color } => match character {
+            '┌' | '┐' | '└' | '┘' | '├' | '┤' | '┬' | '┴' | '┼' | '─' | '│' => {
+                (30, false)
+            }
+            '█' => (41, true),
+            '◆' => (row_color, true),
+            '◐' => (row_color, false),
+            '✦' => (36, true),
+            '▏' => (27, true),
+            '·' => (25, false),
+            _ => (row_color, false),
+        },
+    };
+    let mut start = 0;
+    while start < chars.len() {
+        let current = classify(start, chars[start]);
+        let mut end = start + 1;
+        while end < chars.len() && classify(end, chars[end]) == current {
+            end += 1;
+        }
+        print_palette(
+            out,
+            mode,
+            current.0,
+            current.1,
+            chars[start..end].iter().collect::<String>(),
+        )?;
+        start = end;
+    }
+    Ok(())
+}
+
 fn fit_cell(mut text: String, width: usize) -> String {
     let count = text.chars().count();
     if count > width {
@@ -50,7 +138,12 @@ fn fit_cell(mut text: String, width: usize) -> String {
     text
 }
 
-fn control_focus_lines(panel: &Panel, terminal_width: usize) -> Vec<String> {
+fn control_focus_lines(
+    panel: &Panel,
+    apc: Option<&crate::model::ApcMapping>,
+    terminal_width: usize,
+    title: &str,
+) -> Vec<String> {
     let mut inner = terminal_width.saturating_sub(4).clamp(36, 98);
     let columns = usize::from(inner >= 72) + 1;
     if columns == 2 && inner.is_multiple_of(2) {
@@ -61,7 +154,7 @@ fn control_focus_lines(panel: &Panel, terminal_width: usize) -> Vec<String> {
     let mut lines = vec![format!("┌{}┐", "─".repeat(inner))];
     lines.push(format!(
         "│{}│",
-        fit_cell(" DELAY LAB CONTROLS".into(), inner)
+        fit_cell(format!(" {title} CONTROLS").to_uppercase(), inner)
     ));
     lines.push(format!("├{}┤", "─".repeat(inner)));
     let selected = panel.selected();
@@ -90,7 +183,24 @@ fn control_focus_lines(panel: &Panel, terminal_width: usize) -> Vec<String> {
                 },
                 _ => " ",
             };
-            let label = fit_cell(row.label().to_owned(), label_width);
+            let fader = apc.and_then(|mapping| {
+                let bank = mapping
+                    .fader_bank
+                    .load(std::sync::atomic::Ordering::Acquire)
+                    .min(mapping.fader_banks.len().saturating_sub(1));
+                mapping.fader_banks[bank]
+                    .iter()
+                    .position(|id| id == row.id())
+                    .map(|index| index + 1)
+                    .or_else(|| (mapping.master_control == row.id()).then_some(9))
+            });
+            let label = fit_cell(
+                fader.map_or_else(
+                    || row.label().to_owned(),
+                    |number| format!("{number} {}", row.label()),
+                ),
+                label_width,
+            );
             let marker = if selected == Some(index) { ">" } else { " " };
             cells.push(fit_cell(
                 format!(
@@ -289,6 +399,7 @@ fn draw_pattern_grid(
     output: &DeviceOutput,
     page: usize,
     selected_track: usize,
+    mode: ColorMode,
 ) -> Result<(), String> {
     let performance = output
         .performance()
@@ -304,6 +415,7 @@ fn draw_pattern_grid(
             sequence,
             roll,
             usize::from(terminal::size().map_or(80, |(width, _)| width)),
+            mode,
         );
     }
     let names = sequence.track_names();
@@ -400,6 +512,10 @@ fn midi_note_name(note: u8) -> String {
         NAMES[usize::from(note % 12)],
         i16::from(note / 12) - 1
     )
+}
+
+fn midi_note_hz(note: u8) -> f64 {
+    440.0 * 2.0_f64.powf((f64::from(note) - 69.0) / 12.0)
 }
 
 fn piano_roll_lines(
@@ -562,9 +678,26 @@ fn draw_piano_roll_grid(
     sequence: &crate::sequencer::SequencerControl,
     roll: &crate::model::ApcPianoRoll,
     terminal_width: usize,
+    mode: ColorMode,
 ) -> Result<(), String> {
-    for line in piano_roll_lines(sequence, roll, terminal_width) {
-        queue!(out, Print("  "), Print(line), Print("\r\n")).map_err(|e| e.to_string())?;
+    let drum_colors = [4, 7, 14];
+    for (index, line) in piano_roll_lines(sequence, roll, terminal_width)
+        .into_iter()
+        .enumerate()
+    {
+        queue!(out, Print("  ")).map_err(|e| e.to_string())?;
+        let row_color = match index {
+            3..=5 => drum_colors[index - 3],
+            7..=11 => {
+                let scale_index = 4 - (index - 7);
+                let note = sequence.key_root().saturating_add(roll.scale[scale_index]);
+                crate::performance_ui::pitch_color(midi_note_hz(note))
+            }
+            1 => 28,
+            _ => 31,
+        };
+        print_semantic_line(out, mode, &line, SemanticLine::Grid { row_color })?;
+        queue!(out, Print("\r\n")).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -663,6 +796,7 @@ fn draw(
     step_grid: Option<(usize, usize)>,
 ) -> Result<(), String> {
     let mut out = Vec::with_capacity(16 * 1024);
+    let mode = ColorMode::detect();
     if let Some(screens) = screens
         && let Some(WidgetView::PerformanceSurface(surface)) = screens
             .current()
@@ -682,24 +816,40 @@ fn draw(
             width,
             height,
         );
-        draw_frame(&mut out, &frame, ColorMode::detect())?;
+        draw_frame(&mut out, &frame, mode)?;
         return present_frame(out);
     }
-    queue!(
-        out,
-        Print("Meldritch 2 | "),
-        Print(&output.device_name),
-        Print(" | MIDI: "),
-        Print(midi_session.map_or("none", |session| session.port_name.as_str())),
-        Print(" | q: quit\r\n"),
-        Print("Up/Down: select  Left/Right: adjust  Home/End: bounds\r\n"),
-        Print(if screens.is_some() {
-            "Lua navigation keys switch screens  Enter: activate\r\n\r\n"
-        } else {
-            "\r\n"
-        })
-    )
-    .map_err(|error| error.to_string())?;
+    print_palette(&mut out, mode, 28, true, "MELDRITCH 2")?;
+    print_palette(&mut out, mode, 31, false, "  ◆  ")?;
+    print_palette(&mut out, mode, 40, true, &output.device_name)?;
+    print_palette(&mut out, mode, 31, false, "  │  MIDI ")?;
+    print_palette(
+        &mut out,
+        mode,
+        if midi_session.is_some() { 20 } else { 4 },
+        true,
+        midi_session.map_or("OFFLINE", |session| session.port_name.as_str()),
+    )?;
+    print_palette(&mut out, mode, 31, false, "  │  ")?;
+    print_palette(&mut out, mode, 37, true, "Q QUIT")?;
+    queue!(out, Print("\r\n")).map_err(|error| error.to_string())?;
+    print_palette(
+        &mut out,
+        mode,
+        32,
+        false,
+        "↑/↓ select  ←/→ adjust  Home/End bounds",
+    )?;
+    if screens.is_some() {
+        print_palette(
+            &mut out,
+            mode,
+            31,
+            false,
+            "  │  Lua navigation  Enter activate",
+        )?;
+    }
+    queue!(out, Print("\r\n\r\n")).map_err(|error| error.to_string())?;
     if screens.is_none()
         && let Some((page, selected_track)) = step_grid
     {
@@ -763,11 +913,9 @@ fn draw(
     if let Some(screens) = screens {
         let screen = screens.current();
         let (position, count) = screens.position();
-        queue!(
-            out,
-            Print(format!("{} ({position}/{count})\r\n\r\n", screen.title))
-        )
-        .map_err(|error| error.to_string())?;
+        print_palette(&mut out, mode, 36, true, &screen.title)?;
+        print_palette(&mut out, mode, 31, false, format!("  {position}/{count}"))?;
+        queue!(out, Print("\r\n\r\n")).map_err(|error| error.to_string())?;
         for (index, widget) in screen.widgets.iter().enumerate() {
             let marker = if screen.selected == Some(index) {
                 ">"
@@ -776,29 +924,34 @@ fn draw(
             };
             match widget {
                 WidgetView::Label(text) => {
-                    queue!(out, Print(format!("  {text}\r\n"))).map_err(|error| error.to_string())
+                    print_palette(&mut out, mode, 32, false, format!("  {text}"))?;
+                    queue!(out, Print("\r\n")).map_err(|error| error.to_string())
                 }
                 WidgetView::Control { label, row } => {
                     let (min, max) = row.range();
-                    queue!(
-                        out,
-                        Print(format!(
-                            "{marker} {label} = {:.4}  [{min:.4}, {max:.4}]\r\n",
+                    print_palette(
+                        &mut out,
+                        mode,
+                        if marker == ">" { 8 } else { 33 },
+                        marker == ">",
+                        format!(
+                            "{marker} {label} = {:.4}  [{min:.4}, {max:.4}]",
                             row.value()
-                        ))
-                    )
-                    .map_err(|error| error.to_string())
+                        ),
+                    )?;
+                    queue!(out, Print("\r\n")).map_err(|error| error.to_string())
                 }
                 WidgetView::Link { label, .. } => {
-                    queue!(out, Print(format!("{marker} {label} >\r\n")))
-                        .map_err(|error| error.to_string())
+                    print_palette(&mut out, mode, 36, true, format!("{marker} {label}  →"))?;
+                    queue!(out, Print("\r\n")).map_err(|error| error.to_string())
                 }
                 WidgetView::Button { label, .. } => {
-                    queue!(out, Print(format!("{marker} [{label}]\r\n")))
-                        .map_err(|error| error.to_string())
+                    print_palette(&mut out, mode, 28, true, format!("{marker} [{label}]"))?;
+                    queue!(out, Print("\r\n")).map_err(|error| error.to_string())
                 }
                 WidgetView::PerformanceControls => {
-                    queue!(out, Print("  Live controls\r\n")).map_err(|error| error.to_string())?;
+                    print_palette(&mut out, mode, 36, true, "  LIVE CONTROLS")?;
+                    queue!(out, Print("\r\n")).map_err(|error| error.to_string())?;
                     for (control_index, row) in panel.rows().iter().enumerate() {
                         let selected = if panel.selected() == Some(control_index) {
                             ">"
@@ -806,15 +959,19 @@ fn draw(
                             " "
                         };
                         let (min, max) = row.range();
-                        queue!(
-                            out,
-                            Print(format!(
-                                "{selected} {} = {:.4}  [{min:.4}, {max:.4}]\r\n",
+                        let active = selected == ">";
+                        print_palette(
+                            &mut out,
+                            mode,
+                            if active { 8 } else { 33 },
+                            active,
+                            format!(
+                                "{selected} {} = {:.4}  [{min:.4}, {max:.4}]",
                                 row.label(),
                                 row.value()
-                            ))
-                        )
-                        .map_err(|error| error.to_string())?;
+                            ),
+                        )?;
+                        queue!(out, Print("\r\n")).map_err(|error| error.to_string())?;
                     }
                     Ok(())
                 }
@@ -828,9 +985,12 @@ fn draw(
                         continue;
                     }
                     let width = terminal::size().map_or(80, |(width, _)| usize::from(width));
-                    for line in control_focus_lines(panel, width) {
-                        queue!(out, Print(line), Print("\r\n"))
-                            .map_err(|error| error.to_string())?;
+                    let apc = output
+                        .performance()
+                        .and_then(|performance| performance.apc.as_ref());
+                    for line in control_focus_lines(panel, apc, width, &screen.title) {
+                        print_semantic_line(&mut out, mode, &line, SemanticLine::Controls)?;
+                        queue!(out, Print("\r\n")).map_err(|error| error.to_string())?;
                     }
                     Ok(())
                 }
@@ -846,25 +1006,124 @@ fn draw(
                             .queued_pattern()
                             .and_then(|index| patterns.get(index))
                             .map_or(String::new(), |name| format!(" -> {name}"));
-                        queue!(
-                            out,
-                            Print(format!(
-                                "  {} | {:.0} BPM | {} | pattern {active}{queued} | step {:02}\r\n  {}\r\n",
-                                sequence.name,
-                                sequence.bpm(),
-                                if sequence.playing() {
-                                    "PLAYING"
-                                } else {
-                                    "STOPPED"
-                                },
-                                sequence.current_step() + 1,
-                                sequence.status()
-                            ))
-                        )
-                        .map_err(|error| error.to_string())
+                        print_palette(&mut out, mode, 31, false, "  ")?;
+                        print_palette(&mut out, mode, 40, true, &sequence.name)?;
+                        print_palette(&mut out, mode, 31, false, "  │  ")?;
+                        print_palette(
+                            &mut out,
+                            mode,
+                            if sequence.playing() { 20 } else { 4 },
+                            true,
+                            if sequence.playing() {
+                                "PLAYING"
+                            } else {
+                                "STOPPED"
+                            },
+                        )?;
+                        print_palette(&mut out, mode, 31, false, "  │  ")?;
+                        print_palette(
+                            &mut out,
+                            mode,
+                            14,
+                            true,
+                            format!("{:.0} BPM", sequence.bpm()),
+                        )?;
+                        print_palette(&mut out, mode, 31, false, "  │  PATTERN ")?;
+                        print_palette(&mut out, mode, 28, true, format!("{active}{queued}"))?;
+                        print_palette(&mut out, mode, 31, false, "  │  STEP ")?;
+                        print_palette(
+                            &mut out,
+                            mode,
+                            37,
+                            true,
+                            format!("{:02}", sequence.current_step() + 1),
+                        )?;
+                        queue!(out, Print("\r\n  ")).map_err(|error| error.to_string())?;
+                        print_palette(&mut out, mode, 32, false, sequence.status())?;
+                        queue!(out, Print("\r\n")).map_err(|error| error.to_string())?;
+                        Ok(())
                     } else {
                         queue!(out, Print("  Performance status unavailable\r\n"))
                             .map_err(|error| error.to_string())
+                    }
+                }
+                WidgetView::ArrangementStatus => {
+                    let sequence = &output
+                        .performance()
+                        .ok_or("arrangement status requires a sequencer")?
+                        .sequencer;
+                    if let Some(status) = sequence.arrangement_status() {
+                        print_palette(&mut out, mode, 36, true, format!("  {}", status.name))?;
+                        print_palette(&mut out, mode, 31, false, "  │  ")?;
+                        print_palette(&mut out, mode, 28, true, &status.current_section)?;
+                        if let Some(next) = &status.upcoming_section {
+                            print_palette(&mut out, mode, 31, false, "  →  ")?;
+                            print_palette(&mut out, mode, 32, false, next)?;
+                        }
+                        print_palette(&mut out, mode, 31, false, "  │  ")?;
+                        print_palette(
+                            &mut out,
+                            mode,
+                            14,
+                            true,
+                            format!("BAR {:02} · BEAT {}", status.bar, status.beat),
+                        )?;
+                        queue!(out, Print("\r\n  ")).map_err(|e| e.to_string())?;
+                        if let Some(total) = status.total_bars {
+                            let width = 48usize;
+                            let filled = ((status.bar.min(total) * width as u64) / total) as usize;
+                            print_palette(&mut out, mode, 28, true, "█".repeat(filled))?;
+                            print_palette(&mut out, mode, 25, false, "░".repeat(width - filled))?;
+                            print_palette(
+                                &mut out,
+                                mode,
+                                32,
+                                false,
+                                format!("  {:>3}%", status.bar.min(total) * 100 / total),
+                            )?;
+                        }
+                        queue!(out, Print("\r\n")).map_err(|e| e.to_string())?;
+                        let pending = status.pending_scene.as_deref().unwrap_or("—");
+                        print_palette(&mut out, mode, 31, false, "  SCENE ")?;
+                        print_palette(&mut out, mode, 20, true, &status.current_scene)?;
+                        print_palette(&mut out, mode, 31, false, "  │  PENDING ")?;
+                        print_palette(
+                            &mut out,
+                            mode,
+                            if status.pending_scene.is_some() {
+                                8
+                            } else {
+                                30
+                            },
+                            status.pending_scene.is_some(),
+                            pending,
+                        )?;
+                        queue!(out, Print("\r\n")).map_err(|e| e.to_string())?;
+                        for clip in sequence.clip_status() {
+                            print_palette(
+                                &mut out,
+                                mode,
+                                31,
+                                false,
+                                format!("  {:<12}", clip.track),
+                            )?;
+                            if let Some(name) = clip.clip {
+                                print_palette(&mut out, mode, 33, true, format!("{name:<18}"))?;
+                                print_palette(
+                                    &mut out,
+                                    mode,
+                                    28,
+                                    false,
+                                    format!("{:03}/{:03}", clip.position, clip.length),
+                                )?;
+                            } else {
+                                print_palette(&mut out, mode, 30, false, "— SILENT")?;
+                            }
+                            queue!(out, Print("\r\n")).map_err(|e| e.to_string())?;
+                        }
+                        Ok(())
+                    } else {
+                        print_palette(&mut out, mode, 4, true, "  NO ARRANGEMENT\r\n")
                     }
                 }
                 WidgetView::PatternGrid => {
@@ -873,6 +1132,7 @@ fn draw(
                         output,
                         step_grid.unwrap_or((0, 0)).0,
                         step_grid.unwrap_or((0, 0)).1,
+                        mode,
                     )?;
                     Ok(())
                 }
@@ -881,20 +1141,34 @@ fn draw(
                         .performance()
                         .ok_or("transport status requires a sequencer")?
                         .sequencer;
-                    queue!(
-                        out,
-                        Print(format!(
-                            "  {:.0} BPM | {} | current step {:02}\r\n",
-                            sequence.bpm(),
-                            if sequence.playing() {
-                                "PLAYING"
-                            } else {
-                                "STOPPED"
-                            },
-                            sequence.current_step() + 1
-                        ))
-                    )
-                    .map_err(|error| error.to_string())
+                    print_palette(
+                        &mut out,
+                        mode,
+                        14,
+                        true,
+                        format!("  {:.0} BPM", sequence.bpm()),
+                    )?;
+                    print_palette(&mut out, mode, 31, false, "  │  ")?;
+                    print_palette(
+                        &mut out,
+                        mode,
+                        if sequence.playing() { 20 } else { 4 },
+                        true,
+                        if sequence.playing() {
+                            "PLAYING"
+                        } else {
+                            "STOPPED"
+                        },
+                    )?;
+                    print_palette(&mut out, mode, 31, false, "  │  STEP ")?;
+                    print_palette(
+                        &mut out,
+                        mode,
+                        37,
+                        true,
+                        format!("{:02}", sequence.current_step() + 1),
+                    )?;
+                    queue!(out, Print("\r\n")).map_err(|error| error.to_string())
                 }
                 WidgetView::PerformanceSurface(_) => Ok(()),
                 WidgetView::EventActivity { label, state } => {
@@ -939,16 +1213,35 @@ fn draw(
             .map_err(|error| error.to_string())?;
         }
     }
-    queue!(
-        out,
-        Print(format!(
-            "\r\nStream errors: {} | Timed output errors: {} | MIDI input errors: {}\r\n",
-            output.stream_errors(),
-            output.timed_note_errors(),
-            midi_session.map_or(0, MidiInputSession::note_errors),
-        ))
-    )
-    .map_err(|error| error.to_string())?;
+    let stream_errors = output.stream_errors();
+    let timed_errors = output.timed_note_errors();
+    let midi_errors = midi_session.map_or(0, MidiInputSession::note_errors);
+    queue!(out, Print("\r\n")).map_err(|error| error.to_string())?;
+    print_palette(&mut out, mode, 31, false, "AUDIO ")?;
+    print_palette(
+        &mut out,
+        mode,
+        if stream_errors == 0 { 20 } else { 4 },
+        true,
+        stream_errors,
+    )?;
+    print_palette(&mut out, mode, 31, false, "  │  TIMED ")?;
+    print_palette(
+        &mut out,
+        mode,
+        if timed_errors == 0 { 20 } else { 4 },
+        true,
+        timed_errors,
+    )?;
+    print_palette(&mut out, mode, 31, false, "  │  MIDI ")?;
+    print_palette(
+        &mut out,
+        mode,
+        if midi_errors == 0 { 20 } else { 4 },
+        true,
+        midi_errors,
+    )?;
+    queue!(out, Print("\r\n")).map_err(|error| error.to_string())?;
     present_frame(out)
 }
 
@@ -1379,7 +1672,7 @@ mod tests {
             .collect();
         let panel = crate::panel::Panel::new(controls);
         for width in [80, 100, 120] {
-            let lines = control_focus_lines(&panel, width);
+            let lines = control_focus_lines(&panel, None, width, "Instrument");
             let expected = lines[0].chars().count();
             assert!(lines.iter().all(|line| line.chars().count() == expected));
             assert!(
@@ -1388,6 +1681,35 @@ mod tests {
                     .all(|line| line.ends_with(['┐', '│', '┤', '┘']))
             );
         }
+        let title = control_focus_lines(&panel, None, 100, "Ghosts in the Machinery").join("\n");
+        assert!(title.contains("GHOSTS IN THE MACHINERY CONTROLS"));
+        assert!(!title.contains("DELAY LAB"));
+    }
+
+    #[test]
+    fn focused_controls_show_their_active_apc_fader_number_inline() {
+        let graph = lua::read(include_str!(
+            "../../../examples/experiments/02_delay_feedback.lua"
+        ))
+        .unwrap();
+        let machine = compile(&graph).unwrap();
+        let controls = machine
+            .control_ids()
+            .map(|id| {
+                let handle = machine.control_handle(id).unwrap();
+                let value = machine.effective_value(handle.target()).unwrap();
+                (handle, value)
+            })
+            .collect();
+        let panel = crate::panel::Panel::new(controls);
+        let apc = graph.performance.as_ref().unwrap().apc.as_ref().unwrap();
+        apc.fader_bank
+            .store(1, std::sync::atomic::Ordering::Release);
+        let text = control_focus_lines(&panel, Some(apc), 120, "Delay Lab").join("\n");
+        assert!(text.contains("1 Left echo"));
+        assert!(text.contains("8 Delay mix"));
+        assert!(text.contains("9 Master"));
+        assert!(!text.contains("ACTIVE BANK"));
     }
 
     #[test]

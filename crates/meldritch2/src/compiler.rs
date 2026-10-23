@@ -10,8 +10,8 @@ use rayon::prelude::*;
 use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
 use crate::model::{
-    Action, Connection, ControlScale, Graph, MidiButton, MidiCc, MidiNotes, MidiPacket,
-    ModuleRuntime, Navigation, ParameterId, Screen, Widget,
+    Action, AutomationInterpolation, Connection, ControlScale, Graph, MidiButton, MidiCc,
+    MidiNotes, MidiPacket, ModuleRuntime, Navigation, ParameterId, Screen, Widget,
 };
 use crate::plaits::PlaitsRuntime;
 use crate::sample::PreparedSample;
@@ -414,6 +414,7 @@ pub struct ParameterHandle {
     id: ParameterId,
     cell: Arc<AtomicU64>,
     range: Option<(f64, f64)>,
+    observed: Arc<AtomicU64>,
 }
 
 impl ParameterHandle {
@@ -436,6 +437,11 @@ impl ParameterHandle {
     pub fn override_value(&self) -> Option<f64> {
         let bits = self.cell.load(Ordering::Acquire);
         (bits != NO_OVERRIDE).then(|| f64::from_bits(bits))
+    }
+
+    pub fn effective_value(&self) -> f64 {
+        self.override_value()
+            .unwrap_or_else(|| f64::from_bits(self.observed.load(Ordering::Acquire)))
     }
 }
 
@@ -484,6 +490,9 @@ impl ControlHandle {
     pub fn override_value(&self) -> Option<f64> {
         self.parameters[0].override_value()
     }
+    pub fn effective_value(&self) -> f64 {
+        self.parameters[0].effective_value()
+    }
     pub(crate) fn set_hardware_pickup(&self, direction: i8) {
         self.hardware_pickup
             .store(direction.clamp(-1, 2), Ordering::Release);
@@ -522,6 +531,7 @@ pub struct Machine {
     params: Vec<f64>,
     authored: Vec<f64>,
     published: Vec<Arc<AtomicU64>>,
+    observed: Vec<Arc<AtomicU64>>,
     param_ranges: Vec<Option<(f64, f64)>>,
     param_ids: BTreeMap<ParameterId, usize>,
     controls: BTreeMap<String, ControlBinding>,
@@ -543,6 +553,57 @@ pub struct Machine {
     sequencers: Vec<SequencerRuntime>,
     sequencer_controls: Vec<Arc<SequencerControl>>,
     level_ranges: Vec<std::ops::Range<usize>>,
+    automations: Vec<AutomationRuntime>,
+}
+
+#[derive(Debug)]
+struct AutomationRuntime {
+    sequencer: Arc<SequencerControl>,
+    targets: Vec<usize>,
+    interpolation: AutomationInterpolation,
+    points: Vec<(u64, f64)>,
+}
+
+impl AutomationRuntime {
+    fn value(&self, position: u64) -> f64 {
+        let next = self.points.partition_point(|(at, _)| *at <= position);
+        if next == 0 {
+            return self.points[0].1;
+        }
+        if next == self.points.len() || self.interpolation == AutomationInterpolation::Step {
+            return self.points[next - 1].1;
+        }
+        let (from_at, from) = self.points[next - 1];
+        let (to_at, to) = self.points[next];
+        let mut phase = (position - from_at) as f64 / (to_at - from_at) as f64;
+        if self.interpolation == AutomationInterpolation::Smooth {
+            phase = phase * phase * (3.0 - 2.0 * phase);
+        }
+        from + (to - from) * phase
+    }
+}
+
+#[cfg(test)]
+mod automation_runtime_tests {
+    use super::*;
+    use crate::sequencer::SequencerControl;
+
+    fn lane(interpolation: AutomationInterpolation) -> AutomationRuntime {
+        AutomationRuntime {
+            sequencer: SequencerControl::new("automation".into(), 120.0, 16, 4).unwrap(),
+            targets: vec![0],
+            interpolation,
+            points: vec![(0, 0.0), (8, 1.0)],
+        }
+    }
+
+    #[test]
+    fn step_linear_and_smooth_automation_are_deterministic() {
+        assert_eq!(lane(AutomationInterpolation::Step).value(4), 0.0);
+        assert_eq!(lane(AutomationInterpolation::Linear).value(4), 0.5);
+        assert!((lane(AutomationInterpolation::Smooth).value(2) - 0.15625).abs() < 1e-12);
+        assert_eq!(lane(AutomationInterpolation::Linear).value(8), 1.0);
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -761,7 +822,10 @@ fn validate_screens(
                     }
                 }
                 Widget::PerformanceControls | Widget::ControlFocus => {}
-                Widget::PerformanceStatus | Widget::PatternGrid | Widget::TransportStatus => {
+                Widget::PerformanceStatus
+                | Widget::ArrangementStatus
+                | Widget::PatternGrid
+                | Widget::TransportStatus => {
                     if !has_performance {
                         return Err(format!(
                             "screen '{}' uses a sequencer widget without a performance sequencer",
@@ -912,6 +976,14 @@ impl Machine {
                 f64::from_bits(bits)
             };
         }
+        for automation in &self.automations {
+            let value = automation.value(automation.sequencer.position_steps());
+            for &index in &automation.targets {
+                if self.published[index].load(Ordering::Acquire) == NO_OVERRIDE {
+                    self.params[index] = value;
+                }
+            }
+        }
         for pair in &mut self.note_pairs {
             let before = pair.state.epoch();
             if before & 1 == 0 {
@@ -939,6 +1011,9 @@ impl Machine {
             if let Some(index) = pair.velocity_index {
                 self.params[index] = pair.last_velocity;
             }
+        }
+        for (index, observed) in self.observed.iter().enumerate() {
+            observed.store(self.params[index].to_bits(), Ordering::Release);
         }
         // Tempo is control state observed by the sequencer before its first
         // frame. Publish it at the same buffer boundary as every other
@@ -1191,7 +1266,19 @@ impl Machine {
         self.param_ids.get(id).map(|&i| {
             let bits = self.published[i].load(Ordering::Acquire);
             if bits == NO_OVERRIDE {
-                self.authored[i]
+                if self
+                    .automations
+                    .iter()
+                    .any(|lane| lane.targets.contains(&i))
+                {
+                    f64::from_bits(self.observed[i].load(Ordering::Acquire))
+                } else if self.note_pairs.iter().any(|pair| {
+                    pair.pitch_index == i || pair.gate_index == i || pair.velocity_index == Some(i)
+                }) {
+                    self.params[i]
+                } else {
+                    self.authored[i]
+                }
             } else {
                 f64::from_bits(bits)
             }
@@ -1202,6 +1289,7 @@ impl Machine {
             id: id.clone(),
             cell: Arc::clone(&self.published[i]),
             range: self.param_ranges[i],
+            observed: Arc::clone(&self.observed[i]),
         })
     }
     pub fn control_ids(&self) -> impl Iterator<Item = &str> {
@@ -2041,7 +2129,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         for role in &apc.performance_rows {
             if !matches!(
                 role.as_str(),
-                "" | "pattern" | "mute" | "solo" | "track" | "restart"
+                "" | "pattern" | "scene" | "clip" | "mute" | "solo" | "track" | "restart"
             ) {
                 return Err(format!("unknown APC performance row role '{role}'"));
             }
@@ -2087,6 +2175,42 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             }
         }
     }
+    let automations = graph
+        .automations
+        .iter()
+        .map(|automation| {
+            let control = controls.get(&automation.control_id).ok_or_else(|| {
+                format!(
+                    "automation targets unknown control '{}'",
+                    automation.control_id
+                )
+            })?;
+            if automation.points.is_empty()
+                || automation
+                    .points
+                    .windows(2)
+                    .any(|pair| pair[0].0 >= pair[1].0)
+                || automation.points.iter().any(|(_, value)| {
+                    !value.is_finite() || *value < control.min || *value > control.max
+                })
+            {
+                return Err(format!(
+                    "automation '{}' requires ordered points inside {}..{}",
+                    automation.control_id, control.min, control.max
+                ));
+            }
+            let targets = std::iter::once(&control.target)
+                .chain(&control.additional_targets)
+                .map(|target| param_ids[target])
+                .collect();
+            Ok(AutomationRuntime {
+                sequencer: Arc::clone(&automation.sequencer),
+                targets,
+                interpolation: automation.interpolation,
+                points: automation.points.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     for surface in &graph.control_surfaces {
         if surface.id.is_empty() || surface.device != "stream_deck_xl" {
             return Err(format!(
@@ -2318,6 +2442,10 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         published: (0..params.len())
             .map(|_| Arc::new(AtomicU64::new(NO_OVERRIDE)))
             .collect(),
+        observed: params
+            .iter()
+            .map(|value| Arc::new(AtomicU64::new(value.to_bits())))
+            .collect(),
         params,
         param_ranges,
         param_ids,
@@ -2346,6 +2474,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         sequencers,
         sequencer_controls,
         level_ranges,
+        automations,
     })
 }
 

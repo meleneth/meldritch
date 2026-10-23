@@ -118,6 +118,13 @@ fn apc_rgb_chunk(start: u8, colors: &[[u8; 3]]) -> Result<Vec<u8>, String> {
     Ok(message)
 }
 
+fn dirty_rgb_chunks(sent: Option<&[[u8; 3]; 64]>, leds: &[[u8; 3]; 64]) -> [bool; 4] {
+    std::array::from_fn(|chunk| {
+        let start = chunk * 16;
+        sent.is_none_or(|sent| sent[start..start + 16] != leds[start..start + 16])
+    })
+}
+
 #[derive(Debug)]
 struct GridController {
     page: usize,
@@ -337,6 +344,33 @@ fn authored_led_frame(
                         [127, 90, 0]
                     } else {
                         [2, 2, 2]
+                    }
+                }
+                "scene" => {
+                    if let Some(pattern) = mapping.scene_patterns.get(column) {
+                        if sequence.active_pattern() == *pattern {
+                            [0, 127, 0]
+                        } else if sequence.queued_pattern() == Some(*pattern) {
+                            [127, 90, 0]
+                        } else {
+                            [2, 2, 2]
+                        }
+                    } else {
+                        [0, 0, 0]
+                    }
+                }
+                "clip" => {
+                    let track = sequence.selected_track();
+                    if let Some(pattern) = sequence.clip_choices(track).get(column) {
+                        if sequence.active_clip(track) == Some(*pattern) {
+                            [0, 100, 127]
+                        } else if sequence.queued_clip(track) == Some(*pattern) {
+                            [127, 90, 0]
+                        } else {
+                            [1, 3, 4]
+                        }
+                    } else {
+                        [0, 0, 0]
                     }
                 }
                 "mute" => {
@@ -565,11 +599,21 @@ fn refresh(
         || led_frame(sequence, state),
         |mapping| authored_led_frame(sequence, state, mapping),
     );
-    for (cell, rgb) in leds.iter().enumerate() {
-        if state.sent.as_ref().is_none_or(|sent| sent.0[cell] != *rgb) {
+    // Send complete 16-pad quadrants whenever any pad in that quadrant
+    // changes.  The APC can lose individual RGB messages during playhead
+    // animation, leaving old colors behind even though our diff cache thinks
+    // they arrived.  A bounded quadrant refresh is both substantially fewer
+    // MIDI messages and self-healing for every pad beside the changed one.
+    let dirty = dirty_rgb_chunks(state.sent.as_ref().map(|sent| &sent.0), &leds);
+    for (chunk, colors) in leds.chunks(16).enumerate() {
+        let start = chunk * 16;
+        if dirty[chunk] {
             output
-                .send(&apc_rgb(cell as u8, *rgb)?)
+                .send(&apc_rgb_chunk(start as u8, colors)?)
                 .map_err(|e| e.to_string())?;
+            if dirty[chunk + 1..].contains(&true) {
+                thread::sleep(Duration::from_millis(5));
+            }
         }
     }
     for (index, note) in BUTTON_NOTES.into_iter().enumerate() {
@@ -771,13 +815,13 @@ impl ApcSession {
 
 fn publish_fader(
     handle: &ControlHandle,
-    authored_value: f64,
+    _authored_value: f64,
     value: u8,
     pickup: &mut FaderPickup,
 ) -> Result<(), String> {
     let (min, max) = handle.range();
     let normalized = f64::from(value) / 127.0;
-    let current_value = handle.override_value().unwrap_or(authored_value);
+    let current_value = handle.effective_value();
     let current = if handle.scale() == crate::model::ControlScale::Logarithmic {
         (current_value / min).ln() / (max / min).ln()
     } else {
@@ -860,6 +904,19 @@ fn apply_authored(
                     Ok(())
                 } else if role == "restart" {
                     sequence.execute("restart")
+                } else if role == "scene" {
+                    if let Some(pattern) = mapping.scene_patterns.get(column) {
+                        sequence.queue_scene(*pattern, mapping.scene_quantization)
+                    } else {
+                        Ok(())
+                    }
+                } else if role == "clip" {
+                    let track = sequence.selected_track();
+                    if let Some(pattern) = sequence.clip_choices(track).get(column) {
+                        sequence.queue_clip(track, *pattern, mapping.scene_quantization)
+                    } else {
+                        Ok(())
+                    }
                 } else if (role == "pattern" && column >= sequence.pattern_names().len())
                     || matches!(role.as_str(), "mute" | "solo" | "track")
                         && column >= sequence.track_names().len()
@@ -915,6 +972,8 @@ mod tests {
                 String::new(),
                 String::new(),
             ],
+            scene_patterns: Vec::new(),
+            scene_quantization: 16,
             fader_controls: faders.clone(),
             fader_banks: vec![faders],
             fader_bank: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -970,6 +1029,18 @@ mod tests {
 
         let clear = apc_rgb_range(0, 63, [0, 0, 0]).unwrap();
         assert_eq!(&clear[5..9], &[0, 8, 0, 63]);
+    }
+
+    #[test]
+    fn rgb_diff_resends_the_complete_quadrant_containing_a_changed_pad() {
+        let before = [[2, 2, 2]; 64];
+        let mut after = before;
+        after[31] = [127, 0, 0];
+        assert_eq!(
+            dirty_rgb_chunks(Some(&before), &after),
+            [false, true, false, false]
+        );
+        assert_eq!(dirty_rgb_chunks(None, &after), [true; 4]);
     }
     #[test]
     fn arrow_buttons_navigate_tracks_and_all_sixteen_steps() {
@@ -1100,6 +1171,49 @@ mod tests {
         assert_eq!(leds[48], [127, 0, 0]);
         assert_eq!(leds[40], [127, 127, 0]);
         assert_eq!(leds[33], [0, 80, 127]);
+    }
+
+    #[test]
+    fn authored_scene_row_ignores_clip_storage_and_shows_pending_then_active() {
+        let sequence = SequencerControl::new("scenes".into(), 120.0, 32, 4).unwrap();
+        sequence.add_track("T".into()).unwrap();
+        sequence.define_pattern("clip:hidden".into()).unwrap();
+        let first = sequence.define_pattern("First".into()).unwrap();
+        let second = sequence.define_pattern("Second".into()).unwrap();
+        let mut mapping = authored_mapping("level");
+        mapping.performance_rows[0] = "scene".into();
+        mapping.scene_patterns = vec![first, second];
+        mapping.scene_quantization = 4;
+        let handles = BTreeMap::new();
+        let mut state = GridController::new();
+        apply_authored(
+            &mut state,
+            Input::Button(PAGE_B_NOTE),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        apply_authored(
+            &mut state,
+            Input::Grid(57, true),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        assert_eq!(sequence.queued_pattern(), Some(second));
+        assert_eq!(
+            authored_led_frame(&sequence, &state, &mapping).0[57],
+            [127, 90, 0]
+        );
+        let mut runtime = crate::sequencer::SequencerRuntime::new(Arc::clone(&sequence));
+        runtime.begin_frame(8.0);
+        assert_eq!(sequence.active_pattern(), second);
+        assert_eq!(
+            authored_led_frame(&sequence, &state, &mapping).0[57],
+            [0, 127, 0]
+        );
     }
 
     #[test]

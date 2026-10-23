@@ -144,6 +144,7 @@ pub enum Widget {
     PerformanceControls,
     ControlFocus,
     PerformanceStatus,
+    ArrangementStatus,
     PatternGrid,
     TransportStatus,
     PerformanceSurface(PerformanceSurface),
@@ -217,6 +218,22 @@ pub struct Graph {
     pub performance: Option<Performance>,
     pub actions: Vec<Action>,
     pub control_surfaces: Vec<ControlSurface>,
+    pub automations: Vec<Automation>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AutomationInterpolation {
+    Step,
+    Linear,
+    Smooth,
+}
+
+#[derive(Clone, Debug)]
+pub struct Automation {
+    pub sequencer: Arc<crate::sequencer::SequencerControl>,
+    pub control_id: String,
+    pub interpolation: AutomationInterpolation,
+    pub points: Vec<(u64, f64)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -292,6 +309,10 @@ pub struct PerformanceBinding {
 pub struct ApcMapping {
     pub pages: [String; 2],
     pub performance_rows: [String; 8],
+    /// Pattern indices exposed as the eight named scene launch pads.
+    pub scene_patterns: Vec<usize>,
+    /// Musical-step boundary used by APC scene launch requests.
+    pub scene_quantization: usize,
     /// The eight channel faders remain surface-authored.
     pub fader_controls: [String; 8],
     /// Authored banks for the eight channel faders. The first bank is also

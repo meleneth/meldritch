@@ -55,6 +55,7 @@ pub fn expand(graph: &Graph) -> Result<Graph, String> {
         performance: graph.performance.clone(),
         actions: graph.actions.clone(),
         control_surfaces: graph.control_surfaces.clone(),
+        automations: graph.automations.clone(),
         ..Graph::default()
     };
     let mut ids = BTreeSet::new();
