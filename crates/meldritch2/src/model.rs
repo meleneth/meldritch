@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::AtomicUsize};
 
 use crate::sample::PreparedSample;
 use crate::sequencer::SequencerControl;
@@ -294,6 +294,12 @@ pub struct ApcMapping {
     pub performance_rows: [String; 8],
     /// The eight channel faders remain surface-authored.
     pub fader_controls: [String; 8],
+    /// Authored banks for the eight channel faders. The first bank is also
+    /// retained in `fader_controls` for compatibility with existing surfaces.
+    pub fader_banks: Vec<[String; 8]>,
+    /// Shared presentation state so Lua-authored Stream Deck actions and the
+    /// APC adapter select the same bank without touching musical state.
+    pub fader_bank: Arc<AtomicUsize>,
     /// The physically separate far-right fader is always master volume.
     pub master_control: String,
     /// Optional authored hybrid drum/piano-roll projection of the sequencer.

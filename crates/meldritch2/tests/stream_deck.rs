@@ -203,6 +203,35 @@ fn delay_lab_surface_drives_real_controls_and_audio_without_hardware() {
         )
         .unwrap();
     assert_eq!(runtime.focused_control_id(), Some("feedback"));
+    let apc_mapping = graph.performance.as_ref().unwrap().apc.as_ref().unwrap();
+    assert_eq!(apc_mapping.fader_banks.len(), 3);
+    assert_eq!(
+        apc_mapping
+            .fader_bank
+            .load(std::sync::atomic::Ordering::Acquire),
+        0
+    );
+    adapter
+        .input(
+            &mut runtime,
+            ButtonEdge {
+                index: 25,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        apc_mapping
+            .fader_bank
+            .load(std::sync::atomic::Ordering::Acquire),
+        1
+    );
+    assert!(
+        adapter
+            .uploads
+            .iter()
+            .any(|(_, visual)| { visual.id == "faders_delay" || visual.id == "bass_faders_delay" })
+    );
     let sequence = graph.performance.as_ref().unwrap().sequencer.clone();
     adapter
         .input(

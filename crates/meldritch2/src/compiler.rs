@@ -2051,6 +2051,13 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 return Err(format!("APC fader targets unknown control '{id}'"));
             }
         }
+        for bank in &apc.fader_banks {
+            for id in bank {
+                if !controls.contains_key(id) {
+                    return Err(format!("APC fader bank targets unknown control '{id}'"));
+                }
+            }
+        }
         if !controls.contains_key(&apc.master_control) {
             return Err(format!(
                 "APC master fader targets unknown control '{}'",

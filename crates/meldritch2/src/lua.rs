@@ -1512,6 +1512,34 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                     let pages = array("pages", 2)?;
                     let rows = array("performance_rows", 8)?;
                     let faders = array("faders", 8)?;
+                    let fader_banks = match apc
+                        .get::<Option<Table>>("fader_banks")
+                        .map_err(|e| e.to_string())?
+                    {
+                        Some(banks) => {
+                            let parsed = banks
+                                .sequence_values::<Table>()
+                                .map(|bank| {
+                                    let values = bank
+                                        .map_err(|e| e.to_string())?
+                                        .sequence_values::<String>()
+                                        .collect::<Result<Vec<_>, _>>()
+                                        .map_err(|e| e.to_string())?;
+                                    if values.len() != 8 {
+                                        return Err(
+                                            "each APC fader bank requires 8 entries".to_string()
+                                        );
+                                    }
+                                    Ok(values.try_into().unwrap())
+                                })
+                                .collect::<Result<Vec<[String; 8]>, String>>()?;
+                            if parsed.is_empty() {
+                                return Err("APC fader_banks must not be empty".into());
+                            }
+                            parsed
+                        }
+                        None => vec![faders.clone().try_into().unwrap()],
+                    };
                     let optional_array = |field: &str| -> Result<[String; 8], String> {
                         match apc.get::<Option<Table>>(field).map_err(|e| e.to_string())? {
                             Some(_) => array(field, 8).map(|values| values.try_into().unwrap()),
@@ -1570,6 +1598,8 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                         pages: pages.try_into().unwrap(),
                         performance_rows: rows.try_into().unwrap(),
                         fader_controls: faders.try_into().unwrap(),
+                        fader_banks,
+                        fader_bank: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                         master_control,
                         piano_roll,
                         track_button_commands: optional_array("track_buttons")?,

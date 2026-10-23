@@ -126,6 +126,7 @@ struct GridController {
     clear_armed: Option<Instant>,
     sent: Option<([[u8; 3]; 64], [bool; 16])>,
     held_note: Option<(u8, usize, f32)>,
+    fader_bank: usize,
     fader_pickups: [FaderPickup; 9],
 }
 
@@ -143,6 +144,7 @@ impl GridController {
             clear_armed: None,
             sent: None,
             held_note: None,
+            fader_bank: 0,
             fader_pickups: [FaderPickup::default(); 9],
         }
     }
@@ -395,18 +397,31 @@ fn piano_roll_led_frame(
     let mut leds = [[[2, 2, 2]; 8]; 8];
     for row in 0..3 {
         let track = roll.drum_tracks[row];
+        let length = usize::from(pattern.lengths[track]).max(1);
         for column in 0..8 {
             let start = first + column * zoom;
-            let end = (start + zoom).min(usize::from(pattern.lengths[track]));
+            let end = start + zoom;
             let hits = (start..end)
-                .filter(|step| pattern.velocities[track][*step] > 0.0)
+                .filter(|step| pattern.velocities[track][*step % length] > 0.0)
                 .count();
-            leds[row][column] = if hits > 1 {
+            let base = if hits > 1 {
                 LOSPEC500[15]
             } else if hits == 1 {
                 LOSPEC500[[4, 8, 20][row]]
             } else {
                 LOSPEC500[0]
+            };
+            leds[row][column] = if sequence.playing()
+                && sequence.current_step() >= start
+                && sequence.current_step() < end
+            {
+                if hits == 0 {
+                    LOSPEC500[26]
+                } else {
+                    LOSPEC500[41]
+                }
+            } else {
+                base
             };
         }
     }
@@ -435,7 +450,7 @@ fn piano_roll_led_frame(
                     full |= event_step <= start && event_end >= end as f32;
                 }
             }
-            leds[row][column] = if events > 1 {
+            let base = if events > 1 {
                 LOSPEC500[36]
             } else if full {
                 base
@@ -444,6 +459,18 @@ fn piano_roll_led_frame(
             } else {
                 LOSPEC500[0]
             };
+            leds[row][column] = if sequence.playing()
+                && sequence.current_step() >= start
+                && sequence.current_step() < end
+            {
+                if events == 0 {
+                    LOSPEC500[26]
+                } else {
+                    LOSPEC500[41]
+                }
+            } else {
+                base
+            };
         }
     }
     if let Some((cell, _, _)) = state.held_note {
@@ -451,32 +478,29 @@ fn piano_roll_led_frame(
         let column = usize::from(cell % 8);
         leds[row][column] = LOSPEC500[14];
     }
-    if sequence.playing() {
-        let current = sequence.current_step();
-        if current >= first && current < first + 8 * zoom {
-            let column = (current - first) / zoom;
-            for row in 0..8 {
-                leds[row][column] = if leds[row][column] == LOSPEC500[0] {
-                    LOSPEC500[26]
-                } else {
-                    LOSPEC500[41]
-                };
-            }
-        }
-    }
     let mut physical = [[0; 3]; 64];
     for (row, cells) in leds.iter().enumerate() {
         for (column, color) in cells.iter().enumerate() {
             physical[(7 - row) * 8 + column] = *color;
         }
     }
-    let active = |command: &str| command == "transport" && sequence.playing();
+    let active = |command: &str| {
+        if command == "transport" {
+            sequence.playing()
+        } else if let Some(bank) = command.strip_prefix("faders:bank:") {
+            bank.parse::<usize>().ok() == Some(state.fader_bank)
+        } else {
+            false
+        }
+    };
     let mut buttons = [false; 16];
     for (index, command) in mapping.track_button_commands.iter().enumerate() {
-        buttons[index] = active(command) || !command.is_empty();
+        buttons[index] =
+            active(command) || (!command.is_empty() && !command.starts_with("faders:bank:"));
     }
     for (index, command) in mapping.scene_button_commands.iter().enumerate() {
-        buttons[8 + index] = active(command) || !command.is_empty();
+        buttons[8 + index] =
+            active(command) || (!command.is_empty() && !command.starts_with("faders:bank:"));
     }
     (physical, buttons)
 }
@@ -534,6 +558,9 @@ fn refresh(
     state: &mut GridController,
     mapping: Option<&crate::model::ApcMapping>,
 ) -> Result<(), String> {
+    if let Some(mapping) = mapping {
+        sync_fader_bank(state, mapping);
+    }
     let (leds, buttons) = mapping.map_or_else(
         || led_frame(sequence, state),
         |mapping| authored_led_frame(sequence, state, mapping),
@@ -558,6 +585,44 @@ fn refresh(
     }
     state.sent = Some((leds, buttons));
     Ok(())
+}
+
+fn sync_fader_bank(state: &mut GridController, mapping: &crate::model::ApcMapping) {
+    let bank = mapping
+        .fader_bank
+        .load(Ordering::Acquire)
+        .min(mapping.fader_banks.len().saturating_sub(1));
+    if state.fader_bank != bank {
+        state.fader_bank = bank;
+        state.fader_pickups[..8].fill(FaderPickup::default());
+    }
+}
+
+fn apply_fader_bank_command(
+    state: &mut GridController,
+    mapping: &crate::model::ApcMapping,
+    command: &str,
+) -> Result<bool, String> {
+    let next = if let Some(bank) = command.strip_prefix("faders:bank:") {
+        Some(
+            bank.parse::<usize>()
+                .map_err(|_| "invalid APC fader bank")?,
+        )
+    } else if command == "faders:next" {
+        Some((state.fader_bank + 1) % mapping.fader_banks.len())
+    } else if command == "faders:previous" {
+        Some((state.fader_bank + mapping.fader_banks.len() - 1) % mapping.fader_banks.len())
+    } else {
+        None
+    };
+    let Some(next) = next else { return Ok(false) };
+    if next >= mapping.fader_banks.len() {
+        return Err(format!("APC fader bank {next} is out of range"));
+    }
+    mapping.fader_bank.store(next, Ordering::Release);
+    sync_fader_bank(state, mapping);
+    state.sent = None;
+    Ok(true)
 }
 
 fn shutdown_color(cell: usize, frame: usize) -> [u8; 3] {
@@ -757,7 +822,7 @@ fn apply_authored(
                 } else {
                     ""
                 };
-                return if command.is_empty() {
+                return if command.is_empty() || apply_fader_bank_command(state, mapping, command)? {
                     Ok(())
                 } else {
                     sequence.execute(command)
@@ -810,7 +875,7 @@ fn apply_authored(
             let id = if index == 8 {
                 &mapping.master_control
             } else {
-                &mapping.fader_controls[usize::from(index)]
+                &mapping.fader_banks[state.fader_bank][usize::from(index)]
             };
             let (handle, authored_value) = handles
                 .get(id)
@@ -837,6 +902,7 @@ mod tests {
     use crate::model::ApcMapping;
 
     fn authored_mapping(control: &str) -> ApcMapping {
+        let faders = std::array::from_fn(|_| control.into());
         ApcMapping {
             pages: ["steps".into(), "performance".into()],
             performance_rows: [
@@ -849,7 +915,9 @@ mod tests {
                 String::new(),
                 String::new(),
             ],
-            fader_controls: std::array::from_fn(|_| control.into()),
+            fader_controls: faders.clone(),
+            fader_banks: vec![faders],
+            fader_bank: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             master_control: control.into(),
             piano_roll: None,
             track_button_commands: std::array::from_fn(|_| String::new()),
@@ -1146,6 +1214,21 @@ mod tests {
             leds[usize::from(bass_cell)],
             LOSPEC500[crate::performance_ui::pitch_color(f64::from(midi_hz(36)))]
         );
+
+        let mut runtime = crate::sequencer::SequencerRuntime::new(Arc::clone(sequence));
+        for _ in 0..100 {
+            runtime.begin_frame(8.0);
+            if sequence.current_step() == 16 {
+                break;
+            }
+        }
+        assert_eq!(sequence.current_step(), 16);
+        sequence.set_step_bank(2).unwrap();
+        let (wrapped, _) = piano_roll_led_frame(sequence, &state, roll, mapping);
+        assert_eq!(
+            wrapped[56], LOSPEC500[41],
+            "the 16-step kick row must show its wrapped playhead during bass step 17"
+        );
     }
 
     #[test]
@@ -1278,6 +1361,30 @@ mod tests {
         .unwrap();
         machine.process(&mut rendered);
         assert_eq!(rendered, vec![0.0; 480]);
+
+        mapping
+            .fader_banks
+            .push(std::array::from_fn(|_| "master".into()));
+        assert!(apply_fader_bank_command(&mut state, &mapping, "faders:bank:1").unwrap());
+        assert_eq!(state.fader_bank, 1);
+        handles["master"].0.publish(0.5).unwrap();
+        apply_authored(
+            &mut state,
+            Input::Fader(0, 0),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        apply_authored(
+            &mut state,
+            Input::Fader(0, 64),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        assert!((handles["master"].0.override_value().unwrap() - 64.0 / 127.0).abs() < 1e-9);
     }
 
     #[test]

@@ -424,7 +424,7 @@ fn piano_roll_lines(
     let mut cell_count = 8.min(remaining_cells);
     for candidate in (8..=remaining_cells.min(64)).step_by(8) {
         let group_gaps = candidate.saturating_sub(1) / 4;
-        if 11 + candidate * 2 + group_gaps <= available {
+        if 11 + candidate + group_gaps <= available {
             cell_count = candidate;
         }
     }
@@ -434,7 +434,7 @@ fn piano_roll_lines(
     let border = format!("┌────────┬{}┐", "─".repeat(grid_width));
     let last = (first + cell_count * zoom).min(max_length);
     let metadata = format!(
-        "  VIEW {:02}-{:02} · KEY {} · ZOOM {}",
+        "  {:02}-{:02} · {} · Z{}",
         first + 1,
         last,
         midi_note_name(sequence.key_root()),
@@ -480,30 +480,34 @@ fn piano_roll_lines(
         (0..cell_count)
             .map(|column| {
                 let start = first + column * zoom;
-                let end = (start + zoom).min(length);
+                let end = start + zoom;
                 let mut overlaps = 0;
                 let mut full = false;
-                for event_step in 0..length {
-                    if pattern.velocities[track][event_step] <= 0.0 {
-                        continue;
-                    }
-                    if let Some(note) = pitch {
+                if let Some(note) = pitch {
+                    for event_step in 0..length {
+                        if pattern.velocities[track][event_step] <= 0.0 {
+                            continue;
+                        }
                         let event_note = (69.0
                             + 12.0 * (pattern.pitches_hz[track][event_step] / 440.0).log2())
                         .round() as u8;
                         if event_note != note {
                             continue;
                         }
+                        let event_end =
+                            event_step as f32 + pattern.gates[track][event_step].max(0.01);
+                        if event_step < end && event_end > start as f32 {
+                            overlaps += 1;
+                            full |= event_step <= start && event_end >= end as f32;
+                        }
                     }
-                    let event_end = if pitch.is_some() {
-                        event_step as f32 + pattern.gates[track][event_step].max(0.01)
-                    } else {
-                        event_step as f32 + 1.0
-                    };
-                    if event_step < end && event_end > start as f32 {
-                        overlaps += 1;
-                        full |= event_step <= start && event_end >= end as f32;
+                } else {
+                    for global_step in start..end {
+                        if pattern.velocities[track][global_step % length.max(1)] > 0.0 {
+                            overlaps += 1;
+                        }
                     }
+                    full = zoom == 1 && overlaps == 1;
                 }
                 let under_playhead = sequence.playing() && current >= start && current < end;
                 match (overlaps, full, under_playhead) {
@@ -545,7 +549,7 @@ fn piano_roll_lines(
         ));
     }
     let mut bottom = format!("└────────┴{}┘", "─".repeat(grid_width));
-    let legend = "  ◆ full  ◐ partial  ✦ multiple  █ playing";
+    let legend = "  ◆FULL ◐PART ✦MULT █PLAY";
     if bottom.chars().count() + legend.chars().count() <= terminal_width.saturating_sub(2) {
         bottom.push_str(legend);
     }
@@ -1309,7 +1313,7 @@ mod tests {
                 .any(|line| line.contains("BASS C2") && line.contains('◆'))
         );
         for line in &lines[1..12] {
-            assert_eq!(line.chars().count(), 64);
+            assert_eq!(line.chars().count(), 50);
             assert!(matches!(line.chars().last(), Some('│' | '┤')));
             if line.starts_with('│') {
                 assert_eq!(line.chars().last(), Some('│'));
@@ -1318,6 +1322,22 @@ mod tests {
         let wide = piano_roll_lines(&sequence, &roll, 120);
         assert!(wide[1].contains("01 02 03 04  05"));
         assert_eq!(wide[1].chars().count(), 114);
+
+        let mut runtime = crate::sequencer::SequencerRuntime::new(sequence.clone());
+        for _ in 0..100 {
+            runtime.begin_frame(8.0);
+            if sequence.current_step() == 16 {
+                break;
+            }
+        }
+        assert_eq!(sequence.current_step(), 16);
+        let wrapped = piano_roll_lines(&sequence, &roll, 80);
+        assert!(
+            wrapped
+                .iter()
+                .any(|line| line.starts_with("│Kick    │") && line.contains('█')),
+            "the repeating kick row must retain the global playhead during bass step 17"
+        );
     }
 
     #[test]

@@ -165,6 +165,20 @@ impl SurfaceRuntime {
                         .ok_or("surface control selection requires a performance focus")?
                         .select_id(id)?;
                     self.invalidated = true;
+                } else if let Some(bank) = command.strip_prefix("faders:bank:") {
+                    let bank = bank
+                        .parse::<usize>()
+                        .map_err(|_| "invalid APC fader bank")?;
+                    let mapping = self
+                        .performance
+                        .as_ref()
+                        .and_then(|performance| performance.apc.as_ref())
+                        .ok_or("fader bank selection requires an APC mapping")?;
+                    if bank >= mapping.fader_banks.len() {
+                        return Err(format!("APC fader bank {bank} is out of range"));
+                    }
+                    mapping.fader_bank.store(bank, Ordering::Release);
+                    self.invalidated = true;
                 } else {
                     self.performance
                         .as_ref()
@@ -193,6 +207,14 @@ impl SurfaceRuntime {
                     .selected()
                     .and_then(|index| focus.rows().get(index))
                     .is_some_and(|row| row.id() == id),
+            );
+        }
+        if let Some(SurfaceAction::Command(command)) = button.press.as_ref()
+            && let Some(bank) = command.strip_prefix("faders:bank:")
+        {
+            let mapping = self.performance.as_ref()?.apc.as_ref()?;
+            return Some(
+                bank.parse::<usize>().ok() == Some(mapping.fader_bank.load(Ordering::Acquire)),
             );
         }
         let SurfaceAction::Control { id, value } = button.press.as_ref()? else {
