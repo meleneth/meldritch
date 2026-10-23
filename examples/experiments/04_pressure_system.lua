@@ -157,8 +157,6 @@ local found=meldritch.samples {source="remote",bank="Pressure",cache=true,
   manifest="samples/pressure-system-meta.json",
   base_url="https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/",
   version="251c0be57d5d1b3242b91f53e0cde62ab1cb42d9"}
-local tr=meldritch.samples {source="strudel",bank="RolandTR909",cache=true}
-
 local acoustic=instrument:mixer {inputs=8,headroom=.24}
 local function sampled_hit(track_name,sample,gain,slot,settings)
   settings=settings or {};settings.sample=sample;settings.gain=gain
@@ -196,8 +194,12 @@ local function drum_sample(track_name,sample,gain,slot,settings)
   instrument:connect(player.left,drum_bus.input[slot].left);instrument:connect(player.right,drum_bus.input[slot].right)
   return player
 end
-local electro=drum_sample("Electro Kick",tr:load("bd",0),.72,3,{rate=.82})
-local clap=drum_sample("Clap",tr:load("cp",0),.42,4,{rate=.94})
+local electro=instrument:plaits {model="bass_drum",harmonics=.42,timbre=.68,morph=.56}
+instrument:connect(track["Electro Kick"].gate,electro.gate);instrument:connect(track["Electro Kick"].velocity,electro.velocity)
+instrument:connect(electro.main,drum_bus.input[3].left);instrument:connect(electro.main,drum_bus.input[3].right)
+local clap=instrument:plaits {model="snare_drum",harmonics=.56,timbre=.72,morph=.44}
+instrument:connect(track.Clap.gate,clap.gate);instrument:connect(track.Clap.velocity,clap.velocity)
+instrument:connect(clap.main,drum_bus.input[4].left);instrument:connect(clap.aux,drum_bus.input[4].right)
 local hydraulic=drum_sample("Hydraulic",found:load("hydraulic",0),.44,5,{start=.02,finish=.68,rate=.74})
 local impact=drum_sample("Impact",found:load("impact",0),.5,6,{start=.0,finish=.92,rate=.68})
 
