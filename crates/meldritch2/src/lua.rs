@@ -2785,8 +2785,8 @@ mod tests {
         assert_ne!(deep, broken);
         assert!(deep.iter().any(|offset| *offset > 0.1));
         assert!(forward.iter().any(|offset| *offset < 0.0));
-        assert!(broken.iter().any(|offset| *offset > 0.15));
-        assert!(broken.iter().any(|offset| *offset < -0.1));
+        assert!(broken.iter().any(|offset| *offset >= 0.08));
+        assert!(broken.iter().any(|offset| *offset <= -0.05));
 
         let frames = 368 * 800;
         let mut left = vec![0.0; frames];

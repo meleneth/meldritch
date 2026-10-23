@@ -24,7 +24,7 @@ local track={};for _,name in ipairs(names) do track[name]=sequence:track(name) e
 -- Fractions of a sixteenth note. These are stable relationships, not jitter.
 sequence:groove("deep",{0,.05,.13,.03,-.05,.07,.15,.02,-.02,.06,.12,.01,-.06,.08,.16,.025})
 sequence:groove("forward",{0,.025,.075,-.01,-.085,.035,.09,-.025,-.035,.025,.07,-.02,-.09,.035,.10,-.015})
-sequence:groove("broken",{0,.12,-.10,.04,-.13,.17,-.06,.11,-.08,.15,-.14,.07,-.11,.19,-.04,.13})
+sequence:groove("broken",{0,.08,-.04,.03,-.06,.10,-.03,.07,-.04,.09,-.05,.04,-.07,.11,-.02,.08})
 sequence:groove("straight",{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0})
 
 local function ev(step,velocity,offset) return {step=step,velocity=velocity,offset=offset or 0} end
@@ -55,21 +55,20 @@ local oar_forward=drum("Oar Chop A","Oar answer: forward",64,"forward",{
   ev(4,.34),ev(7,.48),ev(12,.4),ev(16,.58),ev(20,.36),ev(23,.54),ev(28,.42),ev(31,.68),
   ev(36,.38),ev(39,.56),ev(44,.4),ev(48,.62),ev(52,.42),ev(55,.58),ev(60,.5),ev(63,.76)})
 local oar_broken=drum("Oar Chop A","Oar answer: broken",64,"broken",{
-  ev(3,.42),ev(8,.56),ev(14,.38),ev(17,.62),ev(22,.34),ev(27,.58),ev(32,.7),ev(35,.4),
-  ev(41,.64),ev(46,.36),ev(50,.54),ev(57,.46),ev(59,.62),ev(64,.78)})
+  ev(7,.42),ev(16,.58),ev(23,.38),ev(31,.64),ev(39,.44),ev(48,.62),ev(55,.4),ev(63,.7)})
 local oar_low=drum("Oar Chop B","Oar body",64,"deep",{ev(11,.34),ev(27,.46),ev(43,.38),ev(59,.52)})
 local oar_low_forward=drum("Oar Chop B","Oar body: push",64,"forward",{
   ev(11,.4),ev(15,.28),ev(27,.52),ev(31,.34),ev(43,.46),ev(47,.3),ev(59,.58),ev(63,.4)})
 local reverse_sparse=drum("Reverse Oar","Reverse water",128,"broken",{ev(30,.42),ev(62,.5),ev(94,.46),ev(126,.62)})
-local reverse_busy=drum("Reverse Oar","Reverse water: hiccup",64,"broken",{ev(14,.36),ev(30,.48),ev(46,.4),ev(54,.3),ev(60,.5),ev(63,.64)})
+local reverse_busy=drum("Reverse Oar","Reverse water: lift",64,"broken",{ev(30,.38),ev(62,.54)})
 
 local kick_deep=drum("Kick","Kick: deep pocket",64,"deep",repeat_events(64,16,{ev(1,1),ev(7,.68),ev(11,.42),ev(16,.78,-.03)}))
 local kick_forward=drum("Kick","Kick: forward motion",64,"forward",{
   ev(1,1),ev(7,.72),ev(11,.5),ev(15,.56),ev(16,.8),ev(17,1),ev(23,.74),ev(27,.48),ev(31,.86),
   ev(33,1),ev(39,.7),ev(43,.52),ev(47,.62),ev(49,.96),ev(55,.76),ev(59,.48),ev(63,.84)})
 local kick_broken=drum("Kick","Kick: broken pocket",64,"broken",{
-  ev(1,1),ev(6,.58),ev(11,.72),ev(16,.8),ev(19,.56),ev(25,.92),ev(30,.68),ev(35,.5),
-  ev(38,.72),ev(43,.84),ev(48,.62),ev(51,.56),ev(57,.9),ev(62,.76)})
+  ev(1,1),ev(7,.66),ev(11,.5),ev(16,.78),ev(17,1),ev(23,.7),ev(27,.52),ev(31,.62),ev(32,.82),
+  ev(33,1),ev(39,.68),ev(43,.54),ev(46,.48),ev(48,.8),ev(49,1),ev(55,.72),ev(59,.56),ev(62,.64),ev(64,.88)})
 local kick_exit=drum("Kick","Kick: footsteps out",128,"deep",{
   ev(1,1),ev(7,.66),ev(16,.76),ev(17,.94),ev(23,.62),ev(32,.7),ev(33,.86),ev(39,.58),
   ev(48,.64),ev(49,.78),ev(64,.58),ev(65,.68),ev(81,.56),ev(97,.42)})
@@ -77,7 +76,7 @@ local kick_exit=drum("Kick","Kick: footsteps out",128,"deep",{
 local snare_deep=drum("Snare","Snare: behind the shoulder",64,"deep",repeat_events(64,16,{ev(5,.92),ev(13,1,.07)}))
 local snare_forward=drum("Snare","Snare: pulling ahead",64,"forward",repeat_events(64,16,{ev(5,.96,-.025),ev(13,1,-.02),ev(16,.3)}))
 local snare_broken=drum("Snare","Snare: wrong doorway",64,"broken",{
-  ev(5,.94),ev(12,.46),ev(14,.88),ev(21,.96),ev(29,.72),ev(31,.42),ev(37,1),ev(44,.5),ev(46,.9),ev(53,.94),ev(61,.78),ev(64,.48)})
+  ev(5,.96),ev(13,1),ev(21,.96),ev(29,1),ev(37,1),ev(45,1),ev(53,1),ev(61,1),ev(63,.34)})
 local snare_exit=drum("Snare","Snare: last shoulders",128,"deep",{ev(5,.9),ev(13,1),ev(21,.88),ev(29,.96),ev(37,.82),ev(45,.9),ev(53,.74),ev(61,.82),ev(77,.68),ev(93,.54)})
 
 local ghost_deep=drum("Ghost","Ghost: conversation",64,"deep",{
@@ -85,18 +84,21 @@ local ghost_deep=drum("Ghost","Ghost: conversation",64,"deep",{
   ev(36,.2),ev(42,.26),ev(47,.18),ev(52,.24),ev(58,.3),ev(60,.18),ev(63,.38)})
 local ghost_forward=drum("Ghost","Ghost: elbows",64,"forward",repeat_events(64,16,{ev(3,.18),ev(4,.3),ev(8,.16),ev(10,.26),ev(12,.2),ev(15,.4),ev(16,.28)}))
 local ghost_broken=drum("Ghost","Ghost: tripwire",64,"broken",{
-  ev(3,.26),ev(8,.18),ev(10,.38),ev(15,.22),ev(18,.3),ev(22,.18),ev(24,.42),ev(28,.24),
-  ev(34,.34),ev(39,.2),ev(42,.4),ev(47,.22),ev(50,.32),ev(56,.2),ev(59,.44),ev(63,.28)})
+  ev(4,.18),ev(10,.3),ev(12,.16),ev(16,.36),ev(20,.2),ev(26,.32),ev(28,.18),ev(32,.4),
+  ev(36,.2),ev(42,.34),ev(44,.18),ev(48,.42),ev(52,.22),ev(58,.36),ev(60,.2),ev(63,.46)})
 
 local hats_deep=drum("Hats","Hats: lazy hinge",64,"deep",repeat_events(64,8,{ev(1,.42),ev(3,.3),ev(5,.52),ev(7,.34)}))
 local hats_forward=drum("Hats","Hats: rolling hinge",64,"forward",repeat_events(64,8,{ev(1,.5),ev(3,.38),ev(5,.62),ev(7,.44),ev(8,.22)}))
 local hats_broken=drum("Hats","Hats: dropped teeth",64,"broken",{
-  ev(1,.48),ev(3,.3),ev(6,.56),ev(8,.34),ev(11,.44),ev(14,.62),ev(16,.28),ev(19,.5),ev(22,.36),ev(24,.6),ev(27,.42),ev(30,.66),ev(32,.3),ev(35,.48),ev(38,.32),ev(41,.58),ev(43,.38),ev(46,.64),ev(49,.44),ev(52,.6),ev(54,.34),ev(57,.7),ev(60,.42),ev(63,.62)})
+  ev(1,.48),ev(3,.32),ev(5,.58),ev(7,.36),ev(9,.46),ev(11,.34),ev(13,.6),ev(15,.4),
+  ev(17,.5),ev(19,.34),ev(21,.62),ev(23,.38),ev(25,.48),ev(27,.36),ev(29,.64),ev(31,.46),ev(32,.24),
+  ev(33,.52),ev(35,.36),ev(37,.64),ev(39,.4),ev(41,.5),ev(43,.38),ev(45,.66),ev(47,.44),
+  ev(49,.54),ev(51,.38),ev(53,.68),ev(55,.42),ev(57,.52),ev(59,.4),ev(61,.7),ev(63,.5),ev(64,.3)})
 local hats_exit=drum("Hats","Hats: evaporating",128,"deep",{ev(1,.44),ev(3,.3),ev(5,.52),ev(7,.34),ev(9,.42),ev(11,.28),ev(13,.5),ev(15,.32),ev(17,.4),ev(21,.46),ev(25,.38),ev(29,.44),ev(33,.36),ev(41,.4),ev(49,.32),ev(65,.26),ev(81,.2)})
 local open_deep=drum("Open Hat","Open hat: exhale",64,"deep",{ev(12,.34),ev(28,.42),ev(44,.36),ev(60,.48)})
 local open_forward=drum("Open Hat","Open hat: shoulders",64,"forward",{ev(8,.28),ev(16,.42),ev(24,.32),ev(32,.5),ev(40,.3),ev(48,.46),ev(56,.36),ev(64,.56)})
 local tamb_forward=drum("Tambourine","Tambourine: shoes",64,"forward",repeat_events(64,8,{ev(3,.26),ev(7,.4)}))
-local tamb_broken=drum("Tambourine","Tambourine: stumble",64,"broken",{ev(4,.3),ev(7,.42),ev(13,.34),ev(16,.46),ev(20,.28),ev(25,.44),ev(31,.5),ev(36,.3),ev(42,.46),ev(48,.34),ev(53,.42),ev(59,.52),ev(63,.6)})
+local tamb_broken=drum("Tambourine","Tambourine: running feet",64,"broken",{ev(3,.28),ev(7,.42),ev(11,.3),ev(15,.46),ev(19,.3),ev(23,.44),ev(27,.34),ev(31,.5),ev(35,.32),ev(39,.46),ev(43,.34),ev(47,.52),ev(51,.34),ev(55,.5),ev(59,.4),ev(63,.58)})
 
 -- Bass answers the kick: roots reinforce steps 1/17, fifths avoid the snare,
 -- and steps 16/32 anticipate the next bar. Gates deliberately cross selected
@@ -120,14 +122,14 @@ local bass_forward=notes("Bass","Bass: forward motion",128,"forward",{
   {step=97,note=41,velocity=.96,gate=2},{step=103,note=48,velocity=.7,gate=.55},{step=107,note=45,velocity=.84,gate=.8},{step=112,note=36,velocity=.82,gate=.45,offset=-.06},
   {step=113,note=36,velocity=1,gate=2.4},{step=119,note=43,velocity=.72,gate=.55},{step=123,note=41,velocity=.88,gate=.9},{step=127,note=33,velocity=.72,gate=.5},{step=128,note=36,velocity=.84,gate=.45,offset=-.05}})
 local bass_broken=notes("Bass","Bass: broken pocket",128,"broken",{
-  {step=1,note=38,velocity=1,gate=1.8},{step=6,note=45,velocity=.7,gate=.5},{step=11,note=38,velocity=.82,gate=1},{step=16,note=36,velocity=.78,gate=.45},
-  {step=19,note=38,velocity=.9,gate=1.4},{step=25,note=34,velocity=1,gate=2.5},{step=30,note=41,velocity=.72,gate=.55},
-  {step=35,note=38,velocity=.86,gate=1},{step=38,note=45,velocity=.68,gate=.45},{step=43,note=50,velocity=.82,gate=.8},{step=48,note=36,velocity=.78,gate=.5},
-  {step=51,note=41,velocity=.88,gate=1.3},{step=57,note=36,velocity=.94,gate=2},{step=62,note=33,velocity=.74,gate=.5},
-  {step=65,note=38,velocity=1,gate=2},{step=70,note=45,velocity=.66,gate=.45},{step=75,note=38,velocity=.82,gate=.8},{step=80,note=36,velocity=.76,gate=.45},
-  {step=83,note=38,velocity=.9,gate=1.4},{step=89,note=41,velocity=.96,gate=2.2},{step=94,note=48,velocity=.7,gate=.5},
-  {step=99,note=36,velocity=.88,gate=1},{step=102,note=43,velocity=.68,gate=.45},{step=107,note=41,velocity=.84,gate=.8},{step=112,note=33,velocity=.76,gate=.5},
-  {step=115,note=38,velocity=.92,gate=1.2},{step=121,note=36,velocity=1,gate=2},{step=126,note=33,velocity=.78,gate=.5}})
+  {step=1,note=38,velocity=1,gate=2.2},{step=7,note=38,velocity=.68,gate=.6},{step=11,note=45,velocity=.82,gate=.9},{step=15,note=50,velocity=.76,gate=.45},{step=16,note=36,velocity=.72,gate=.4},
+  {step=17,note=38,velocity=1,gate=1.8},{step=23,note=45,velocity=.72,gate=.55},{step=27,note=41,velocity=.84,gate=.8},{step=31,note=50,velocity=.8,gate=.45},{step=32,note=45,velocity=.72,gate=.4},
+  {step=33,note=38,velocity=1,gate=2},{step=39,note=50,velocity=.72,gate=.55},{step=43,note=45,velocity=.86,gate=.8},{step=46,note=53,velocity=.7,gate=.4},{step=48,note=50,velocity=.82,gate=.45},
+  {step=49,note=34,velocity=1,gate=2.2},{step=55,note=41,velocity=.72,gate=.55},{step=59,note=46,velocity=.86,gate=.8},{step=62,note=53,velocity=.74,gate=.4},{step=64,note=46,velocity=.82,gate=.45},
+  {step=65,note=38,velocity=1,gate=1.8},{step=71,note=45,velocity=.72,gate=.55},{step=75,note=50,velocity=.88,gate=.8},{step=78,note=53,velocity=.72,gate=.4},{step=80,note=50,velocity=.84,gate=.45},
+  {step=81,note=38,velocity=1,gate=1.7},{step=87,note=50,velocity=.74,gate=.55},{step=91,note=45,velocity=.88,gate=.75},{step=94,note=53,velocity=.74,gate=.4},{step=96,note=50,velocity=.86,gate=.45},
+  {step=97,note=41,velocity=1,gate=1.8},{step=103,note=48,velocity=.74,gate=.55},{step=107,note=53,velocity=.9,gate=.75},{step=110,note=55,velocity=.74,gate=.4},{step=112,note=53,velocity=.86,gate=.45},
+  {step=113,note=36,velocity=1,gate=2},{step=119,note=43,velocity=.76,gate=.55},{step=123,note=48,velocity=.9,gate=.75},{step=126,note=55,velocity=.78,gate=.4},{step=127,note=52,velocity=.72,gate=.35},{step=128,note=50,velocity=.88,gate=.4}})
 local bass_exit=notes("Bass","Bass: weight leaving",128,"deep",{{step=1,note=38,velocity=.9,gate=3},{step=16,note=36,velocity=.7,gate=.6,offset=-.04},{step=17,note=38,velocity=.84,gate=3},{step=33,note=34,velocity=.78,gate=4},{step=49,note=38,velocity=.7,gate=5},{step=65,note=26,velocity=.6,gate=8},{step=97,note=26,velocity=.38,gate=16}})
 
 local breath_deep=drum("Breath Hook","Breath: two syllables",128,"deep",{ev(15,.44),ev(47,.5),ev(79,.46),ev(111,.56)})
@@ -148,12 +150,12 @@ local pocket_a=scene("Deep Pocket A",{["Performed Break A"]=performed_a,["Oar Ch
 local pocket_b=scene("Deep Pocket B",{["Performed Break B"]=performed_b,["Oar Chop A"]=oar_deep,["Oar Chop B"]=oar_low,Kick=kick_deep,Snare=snare_deep,Ghost=ghost_deep,Hats=hats_deep,["Open Hat"]=open_deep,Bass=bass_deep,["Breath Hook"]=breath_deep,Typing=typing_deep,["Two Note"]=two_note})
 local forward_a=scene("Forward Motion A",{["Performed Break B"]=performed_b,["Oar Chop A"]=oar_forward,["Oar Chop B"]=oar_low_forward,Kick=kick_forward,Snare=snare_forward,Ghost=ghost_forward,Hats=hats_forward,["Open Hat"]=open_forward,Tambourine=tamb_forward,Bass=bass_forward,["Breath Hook"]=breath_forward,["Two Note"]=two_note})
 local forward_b=scene("Forward Motion B",{["Performed Break A"]=performed_a,["Oar Chop A"]=oar_forward,["Oar Chop B"]=oar_low_forward,["Reverse Oar"]=reverse_sparse,Kick=kick_forward,Snare=snare_forward,Ghost=ghost_forward,Hats=hats_forward,["Open Hat"]=open_forward,Tambourine=tamb_forward,Bass=bass_forward,["Breath Hook"]=breath_forward,Typing=typing_deep,["Two Note"]=two_note_push})
-local broken_entry=scene("Broken Entry",{["Oar Chop A"]=oar_broken,["Reverse Oar"]=reverse_busy,Kick=kick_broken,Snare=snare_broken,Ghost=ghost_broken,Hats=hats_broken,Tambourine=tamb_broken,Bass=bass_broken,["Reverse Breath"]=breath_reverse,Typing=typing_broken})
-local broken_pocket=scene("Broken Pocket",{["Oar Chop A"]=oar_broken,["Oar Chop B"]=oar_low,["Reverse Oar"]=reverse_busy,Kick=kick_broken,Snare=snare_broken,Ghost=ghost_broken,Hats=hats_broken,["Open Hat"]=open_deep,Tambourine=tamb_broken,Bass=bass_broken,["Reverse Breath"]=breath_reverse,Typing=typing_broken,["Two Note"]=two_note})
+local broken_entry=scene("Stroke Ignition",{["Performed Break B"]=performed_b,["Oar Chop A"]=oar_broken,["Reverse Oar"]=reverse_busy,Kick=kick_broken,Snare=snare_broken,Ghost=ghost_broken,Hats=hats_broken,["Open Hat"]=open_forward,Tambourine=tamb_broken,Bass=bass_broken,["Breath Hook"]=breath_forward,["Two Note"]=two_note_push})
+local broken_pocket=scene("Rower's High",{["Performed Break A"]=performed_a,["Oar Chop A"]=oar_broken,["Oar Chop B"]=oar_low_forward,["Reverse Oar"]=reverse_busy,Kick=kick_broken,Snare=snare_broken,Ghost=ghost_broken,Hats=hats_broken,["Open Hat"]=open_forward,Tambourine=tamb_broken,Bass=bass_broken,["Breath Hook"]=breath_forward,Typing=typing_deep,["Two Note"]=two_note_push})
 local bare=scene("Bare Hands",{["Performed Break A"]=performed_a,["Oar Chop A"]=oar_deep,Kick=kick_deep,Snare=snare_deep,Bass=bass_deep,["Breath Hook"]=breath_deep})
 local reassembly=scene("Reassembly",{["Performed Break A"]=performed_a,["Oar Chop A"]=oar_deep,["Oar Chop B"]=oar_low,Kick=kick_deep,Snare=snare_deep,Ghost=ghost_deep,Hats=hats_deep,["Open Hat"]=open_deep,Bass=bass_deep,["Breath Hook"]=breath_deep,Typing=typing_deep})
 local release_a=scene("Full Release A",{["Performed Break B"]=performed_b,["Oar Chop A"]=oar_forward,["Oar Chop B"]=oar_low_forward,Kick=kick_forward,Snare=snare_forward,Ghost=ghost_deep,Hats=hats_forward,["Open Hat"]=open_forward,Tambourine=tamb_forward,Bass=bass_forward,["Breath Hook"]=breath_forward,Typing=typing_deep,["Two Note"]=two_note_push})
-local release_b=scene("Full Release B",{["Performed Break A"]=performed_a,["Oar Chop A"]=oar_forward,["Oar Chop B"]=oar_low_forward,["Reverse Oar"]=reverse_sparse,Kick=kick_forward,Snare=snare_forward,Ghost=ghost_forward,Hats=hats_forward,["Open Hat"]=open_forward,Tambourine=tamb_forward,Bass=bass_forward,["Breath Hook"]=breath_forward,["Reverse Breath"]=breath_reverse,Typing=typing_deep,["Two Note"]=two_note_push})
+local release_b=scene("Full Release B",{["Performed Break A"]=performed_a,["Oar Chop A"]=oar_forward,["Oar Chop B"]=oar_low_forward,["Reverse Oar"]=reverse_sparse,Kick=kick_forward,Snare=snare_forward,Ghost=ghost_forward,Hats=hats_forward,["Open Hat"]=open_forward,Tambourine=tamb_forward,Bass=bass_broken,["Breath Hook"]=breath_forward,["Reverse Breath"]=breath_reverse,Typing=typing_deep,["Two Note"]=two_note_push})
 local exit=scene("Walk Away",{["Performed Break A"]=performed_sparse,["Oar Chop A"]=oar_deep,Kick=kick_exit,Snare=snare_exit,Hats=hats_exit,Bass=bass_exit,["Breath Hook"]=breath_deep})
 
 local arrangement=sequence:timeline("Weight Transfer 05")
@@ -238,19 +240,19 @@ local hook_tone=control("hook_tone","Two-note color",hook_filter.cutoff,{320,700
 local master_level=control("master_level","Master volume",master.headroom,{.05,.75})
 local master_threshold=control("master_threshold","Glue threshold",comp.threshold,{-32,-5});local master_ratio=control("master_ratio","Glue ratio",comp.ratio,{1,8});local master_attack=control("master_attack","Glue attack",comp.attack,{.003,.12},nil,"log");local master_release=control("master_release","Glue release",comp.release,{.04,.8},nil,"log");local ending_fade=control("ending_fade","Arrangement fade",final_l.gain,{0,1},{final_r.gain})
 
-arrangement:automation {target=break_level,interpolation="smooth"}:at_bar(1,.44):at_bar(9,.68):at_bar(41,.76):at_bar(72,.58):at_bar(73,.12):at_bar(104,.08):at_bar(105,.54):at_bar(137,.76):at_bar(169,.48):at_bar(177,.18)
-arrangement:automation {target=chop_level,interpolation="linear"}:at_bar(1,.34):at_bar(25,.48):at_bar(57,.66):at_bar(73,.78):at_bar(96,.6):at_bar(105,.3):at_bar(137,.62):at_bar(153,.76):at_bar(169,.32)
-arrangement:automation {target=drum_dirt,interpolation="smooth"}:at_bar(1,.8):at_bar(9,2.2):at_bar(41,3.8):at_bar(65,5.4):at_bar(73,2.4):at_bar(96,4.6):at_bar(105,1.6):at_bar(137,4.2):at_bar(160,6):at_bar(169,2):at_bar(177,.6)
-arrangement:automation {target=bass_cutoff,interpolation="smooth"}:at_bar(1,280):at_bar(9,620):at_bar(41,1100):at_bar(72,2200):at_bar(73,480):at_bar(104,1600):at_bar(105,420):at_bar(137,1200):at_bar(160,2600):at_bar(169,680):at_bar(177,180)
-arrangement:automation {target=bass_decay,interpolation="linear"}:at_bar(1,.3):at_bar(9,.22):at_bar(41,.14):at_bar(73,.09):at_bar(105,.26):at_bar(137,.13):at_bar(169,.28)
+arrangement:automation {target=break_level,interpolation="smooth"}:at_bar(1,.44):at_bar(9,.68):at_bar(41,.76):at_bar(72,.66):at_bar(73,.72):at_bar(85,.8):at_bar(104,.76):at_bar(105,.54):at_bar(137,.76):at_bar(169,.48):at_bar(177,.18)
+arrangement:automation {target=chop_level,interpolation="linear"}:at_bar(1,.34):at_bar(25,.48):at_bar(57,.66):at_bar(73,.48):at_bar(85,.56):at_bar(104,.62):at_bar(105,.3):at_bar(137,.62):at_bar(153,.76):at_bar(169,.32)
+arrangement:automation {target=drum_dirt,interpolation="smooth"}:at_bar(1,.8):at_bar(9,2.2):at_bar(41,3.8):at_bar(65,5.4):at_bar(73,3.2):at_bar(96,4.8):at_bar(104,5.4):at_bar(105,1.6):at_bar(137,4.2):at_bar(160,6):at_bar(169,2):at_bar(177,.6)
+arrangement:automation {target=bass_cutoff,interpolation="smooth"}:at_bar(1,280):at_bar(9,620):at_bar(41,1100):at_bar(72,2200):at_bar(73,1200):at_bar(85,1800):at_bar(104,3000):at_bar(105,420):at_bar(137,1200):at_bar(160,2600):at_bar(169,680):at_bar(177,180)
+arrangement:automation {target=bass_decay,interpolation="linear"}:at_bar(1,.3):at_bar(9,.22):at_bar(41,.14):at_bar(73,.16):at_bar(96,.11):at_bar(105,.26):at_bar(137,.13):at_bar(169,.28)
 arrangement:automation {target=detail_tone,interpolation="smooth"}:at_bar(1,480):at_bar(40,1800):at_bar(72,5200):at_bar(96,860):at_bar(120,2600):at_bar(152,6200):at_bar(169,1200):at_bar(177,320)
-arrangement:automation {target=detail_feedback,interpolation="linear"}:at_bar(1,.42):at_bar(41,.28):at_bar(72,.56):at_bar(96,.72):at_bar(105,.26):at_bar(137,.34):at_bar(168,.62):at_bar(169,.3):at_bar(176,.68)
-arrangement:automation {target=hook_tone,interpolation="smooth"}:at_bar(1,900):at_bar(41,1800):at_bar(72,3600):at_bar(105,760):at_bar(137,2200):at_bar(168,4800):at_bar(177,520)
+arrangement:automation {target=detail_feedback,interpolation="linear"}:at_bar(1,.42):at_bar(41,.28):at_bar(72,.5):at_bar(96,.46):at_bar(105,.26):at_bar(137,.34):at_bar(168,.62):at_bar(169,.3):at_bar(176,.68)
+arrangement:automation {target=hook_tone,interpolation="smooth"}:at_bar(1,900):at_bar(41,1800):at_bar(72,3600):at_bar(96,4600):at_bar(104,5200):at_bar(105,760):at_bar(137,2200):at_bar(168,4800):at_bar(177,520)
 arrangement:automation {target=ending_fade,interpolation="smooth"}:at_bar(1,1):at_bar(169,1):at_bar(173,.78):at_bar(176,.24):at_bar(177,0)
 
 instrument:performance {layout="step_grid",sequencer=sequence,project_file="05_the_weight_of_moving.lua",
   keys={Space="transport",s="start",x="stop",r="restart",Up="track:up",Down="track:down",Left="step:previous",Right="step:next",["["]="bank:previous",["]"]="bank:next",m="mute",o="solo",j="control:next",k="control:previous",h="control:decrease",l="control:increase",["1"]="toggle:1",["2"]="toggle:2",["3"]="toggle:3",["4"]="toggle:4",["5"]="toggle:5",["6"]="toggle:6",["7"]="toggle:7",["8"]="toggle:8"},
-  apc={pages={"steps","performance"},performance_rows={"scene","mute","solo","track","restart","clip","",""},scenes={"Crank","Deep Pocket A","Forward Motion A","Broken Pocket","Bare Hands","Reassembly","Full Release A","Walk Away"},scene_quantization=16,
+  apc={pages={"steps","performance"},performance_rows={"scene","mute","solo","track","restart","clip","",""},scenes={"Crank","Deep Pocket A","Forward Motion A","Rower's High","Bare Hands","Reassembly","Full Release A","Walk Away"},scene_quantization=16,
     faders={"break_level","chop_level","drum_dirt","bass_cutoff","bass_decay","detail_tone","detail_feedback","hook_tone"},fader_banks={{"break_level","chop_level","drum_dirt","bass_cutoff","bass_decay","detail_tone","detail_feedback","hook_tone"},{"master_threshold","master_ratio","master_attack","master_release","break_level","bass_cutoff","drum_dirt","detail_feedback"}},scene_buttons={"transport","restart","faders:bank:0","faders:bank:1","","","",""},master="master_level"},
   focus={controls={"break_level","chop_level","drum_dirt","bass_cutoff","bass_decay","detail_tone","detail_feedback","hook_tone"},midi_ccs={{channel=1,number=74},{channel=1,number=71},{channel=1,number=76},{channel=1,number=77}}}}
 
