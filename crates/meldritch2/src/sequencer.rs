@@ -19,6 +19,9 @@ pub struct Pattern {
     pub velocities: [[f32; MAX_STEPS]; MAX_TRACKS],
     pub pitches_hz: [[f32; MAX_STEPS]; MAX_TRACKS],
     pub gates: [[f32; MAX_STEPS]; MAX_TRACKS],
+    /// Stable displacement from the nominal step in fractions of one step.
+    /// Negative values are scheduled with one-step lookahead.
+    pub offsets: [[f32; MAX_STEPS]; MAX_TRACKS],
     /// Authored loop length for each track. The executor wraps every track
     /// independently; this is musical state, not a viewport size.
     pub lengths: [u8; MAX_TRACKS],
@@ -30,6 +33,7 @@ impl Default for Pattern {
             velocities: [[0.0; MAX_STEPS]; MAX_TRACKS],
             pitches_hz: [[440.0; MAX_STEPS]; MAX_TRACKS],
             gates: [[0.5; MAX_STEPS]; MAX_TRACKS],
+            offsets: [[0.0; MAX_STEPS]; MAX_TRACKS],
             lengths: [16; MAX_TRACKS],
         }
     }
@@ -392,8 +396,38 @@ impl SequencerControl {
             return Err("track is out of range".into());
         }
         target.velocities[track].fill(0.0);
+        target.offsets[track].fill(0.0);
         target.velocities[track][..values.len()].copy_from_slice(values);
         target.lengths[track] = values.len() as u8;
+        state.pending_revision = true;
+        Ok(())
+    }
+    pub fn set_pattern_offsets(
+        &self,
+        pattern: usize,
+        track: usize,
+        values: &[f32],
+    ) -> Result<(), String> {
+        if track >= self.track_names().len() {
+            return Err("track is out of range".into());
+        }
+        let mut state = self
+            .pattern
+            .lock()
+            .map_err(|_| "sequencer pattern state poisoned")?;
+        let target = state.authored.get_mut(pattern).ok_or("unknown pattern")?;
+        let length = usize::from(target.lengths[track]);
+        if values.len() != length
+            || values
+                .iter()
+                .any(|offset| !offset.is_finite() || !(-0.49..=0.49).contains(offset))
+        {
+            return Err(format!(
+                "timing offsets must match the track length and be finite step fractions in -0.49..0.49"
+            ));
+        }
+        target.offsets[track].fill(0.0);
+        target.offsets[track][..length].copy_from_slice(values);
         state.pending_revision = true;
         Ok(())
     }
@@ -506,6 +540,7 @@ impl SequencerControl {
         target.velocities[track] = source.velocities[track];
         target.pitches_hz[track] = source.pitches_hz[track];
         target.gates[track] = source.gates[track];
+        target.offsets[track] = source.offsets[track];
         target.lengths[track] = source.lengths[track];
         state.pending_revision = true;
         Ok(())
@@ -544,6 +579,7 @@ impl SequencerControl {
         pattern.velocities[track][..length].rotate_right(right);
         pattern.pitches_hz[track][..length].rotate_right(right);
         pattern.gates[track][..length].rotate_right(right);
+        pattern.offsets[track][..length].rotate_right(right);
         state.pending_revision = true;
         Ok(())
     }
@@ -1098,10 +1134,11 @@ impl SequencerControl {
                     let velocity = pattern.velocities[track][step];
                     if velocity > 0.0 {
                         lua.push_str(&format!(
-                            "{{step={},velocity={velocity:?},pitch={:?},gate={:?}}},",
+                            "{{step={},velocity={velocity:?},pitch={:?},gate={:?},offset={:?}}},",
                             step + 1,
                             pattern.pitches_hz[track][step],
-                            pattern.gates[track][step]
+                            pattern.gates[track][step],
+                            pattern.offsets[track][step]
                         ));
                     }
                 }
@@ -1184,6 +1221,10 @@ impl SequencerControl {
                     let velocity: f32 = event.get("velocity").map_err(|e| e.to_string())?;
                     let pitch: f32 = event.get("pitch").map_err(|e| e.to_string())?;
                     let gate: f32 = event.get("gate").map_err(|e| e.to_string())?;
+                    let offset: f32 = event
+                        .get::<Option<f32>>("offset")
+                        .map_err(|e| e.to_string())?
+                        .unwrap_or(0.0);
                     if step == 0
                         || step > length
                         || !velocity.is_finite()
@@ -1192,6 +1233,8 @@ impl SequencerControl {
                         || !(1.0..=24_000.0).contains(&pitch)
                         || !gate.is_finite()
                         || !(0.0..=MAX_STEPS as f32).contains(&gate)
+                        || !offset.is_finite()
+                        || !(-0.49..=0.49).contains(&offset)
                     {
                         return Err(format!(
                             "saved pattern '{name}' track '{track_name}' contains an invalid event"
@@ -1200,6 +1243,7 @@ impl SequencerControl {
                     pattern.velocities[track][step - 1] = velocity;
                     pattern.pitches_hz[track][step - 1] = pitch;
                     pattern.gates[track][step - 1] = gate;
+                    pattern.offsets[track][step - 1] = offset;
                 }
             }
             names.push(name);
@@ -1299,7 +1343,7 @@ pub(crate) struct SequencerRuntime {
     pattern: Pattern,
     step: usize,
     frames_until_step: f64,
-    trigger_step: Option<usize>,
+    triggered: [bool; MAX_TRACKS],
     initialized: bool,
     gates: [f64; MAX_TRACKS],
     pitches: [f64; MAX_TRACKS],
@@ -1312,6 +1356,15 @@ pub(crate) struct SequencerRuntime {
     sample_position: u64,
     active_pattern: usize,
     clip_launch_steps: [usize; MAX_TRACKS],
+    scheduled: [[Option<ScheduledEvent>; 2]; MAX_TRACKS],
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScheduledEvent {
+    due: u64,
+    pitch: f64,
+    velocity: f64,
+    gate_frames: f64,
 }
 
 impl SequencerRuntime {
@@ -1332,7 +1385,7 @@ impl SequencerRuntime {
             pattern: Pattern::default(),
             step: 0,
             frames_until_step: 0.0,
-            trigger_step: None,
+            triggered: [false; MAX_TRACKS],
             initialized: false,
             gates: [0.0; MAX_TRACKS],
             pitches: [440.0; MAX_TRACKS],
@@ -1345,6 +1398,64 @@ impl SequencerRuntime {
             sample_position: 0,
             active_pattern,
             clip_launch_steps: [0; MAX_TRACKS],
+            scheduled: [[None; 2]; MAX_TRACKS],
+        }
+    }
+    fn clear_scheduled(&mut self) {
+        self.scheduled.fill([None; 2]);
+    }
+    fn clear_scheduled_track(&mut self, track: usize) {
+        self.scheduled[track].fill(None);
+    }
+    fn schedule_step(&mut self, track: usize, step: usize, due: u64, step_frames: f64) {
+        let velocity = self.pattern.velocities[track][step] as f64;
+        if velocity <= 0.0 {
+            return;
+        }
+        let event = ScheduledEvent {
+            due,
+            pitch: self.pattern.pitches_hz[track][step] as f64,
+            velocity,
+            gate_frames: self.pattern.gates[track][step] as f64 * step_frames,
+        };
+        let slot = self.scheduled[track]
+            .iter_mut()
+            .find(|slot| slot.is_none())
+            .expect("two bounded timing regions permit at most two pending events per track");
+        *slot = Some(event);
+    }
+    fn dispatch_due(&mut self, sample_position: u64) {
+        for track in 0..self.control.track_count() {
+            for slot in &mut self.scheduled[track] {
+                let Some(event) = *slot else { continue };
+                if event.due > sample_position {
+                    continue;
+                }
+                *slot = None;
+                self.pitches[track] = event.pitch;
+                self.velocities[track] = event.velocity;
+                self.gates[track] = event.gate_frames;
+                self.triggered[track] = true;
+                if self.control.track_enabled(track) {
+                    self.audible_notes[track] = true;
+                    self.control
+                        .events
+                        .publish(EventKind::NoteOn, sample_position, || EventPayload::Note {
+                            track: track as u8,
+                            pitch: event.pitch,
+                            velocity: event.velocity,
+                        });
+                    self.control
+                        .events
+                        .publish(EventKind::VoiceTriggered, sample_position, || {
+                            EventPayload::Note {
+                                track: track as u8,
+                                pitch: event.pitch,
+                                velocity: event.velocity,
+                            }
+                        });
+                }
+            }
         }
     }
     pub fn begin_frame(&mut self, sample_rate: f64) {
@@ -1373,11 +1484,15 @@ impl SequencerRuntime {
                     self.frames_until_step = 0.0;
                 }
             }
-            2 => self.control.playing.store(false, Ordering::Release),
+            2 => {
+                self.control.playing.store(false, Ordering::Release);
+                self.clear_scheduled();
+            }
             3 => {
                 self.step = 0;
                 self.clip_launch_steps.fill(0);
                 self.frames_until_step = 0.0;
+                self.clear_scheduled();
                 self.control.position_steps.store(0, Ordering::Release);
                 self.control.timeline_section.store(0, Ordering::Release);
                 self.control
@@ -1397,7 +1512,7 @@ impl SequencerRuntime {
             }
             _ => {}
         }
-        self.trigger_step = None;
+        self.triggered.fill(false);
         if !self.control.playing.load(Ordering::Acquire) {
             return;
         }
@@ -1410,6 +1525,7 @@ impl SequencerRuntime {
                     .store(true, Ordering::Release);
                 self.gates.fill(0.0);
                 self.audible_notes.fill(false);
+                self.clear_scheduled();
                 return;
             }
             if let Some((section, (_, scene))) = self
@@ -1461,13 +1577,18 @@ impl SequencerRuntime {
             }
             let active_pattern = self.control.active_pattern();
             let scene_changed = active_pattern != self.active_pattern;
+            let mut pattern_reloaded = false;
             if let Ok(mut state) = self.control.pattern.try_lock() {
                 if (state.pending_revision || scene_changed || !self.initialized)
                     && let Some(next) = state.authored.get(active_pattern)
                 {
                     self.pattern = *next;
                     state.pending_revision = false;
+                    pattern_reloaded = true;
                 }
+            }
+            if pattern_reloaded {
+                self.clear_scheduled();
             }
             if scene_changed {
                 self.active_pattern = active_pattern;
@@ -1484,6 +1605,7 @@ impl SequencerRuntime {
                         }
                     });
             }
+            let mut clip_launched = [false; MAX_TRACKS];
             for track in 0..self.control.track_count() {
                 let queued = self.control.queued_clips[track].load(Ordering::Acquire);
                 let quantization =
@@ -1497,10 +1619,15 @@ impl SequencerRuntime {
                     self.pattern.velocities[track] = source.velocities[track];
                     self.pattern.pitches_hz[track] = source.pitches_hz[track];
                     self.pattern.gates[track] = source.gates[track];
+                    self.pattern.offsets[track] = source.offsets[track];
                     self.pattern.lengths[track] = source.lengths[track];
+                    clip_launched[track] = true;
                     self.clip_launch_steps[track] = self.step;
                     self.control.queued_clips[track].store(NONE, Ordering::Release);
                     self.control.active_clip_overrides[track].store(queued, Ordering::Release);
+                }
+                if clip_launched[track] {
+                    self.clear_scheduled_track(track);
                 }
             }
             let cycle = self.pattern.lengths[..self.control.track_count()]
@@ -1511,7 +1638,6 @@ impl SequencerRuntime {
                 .unwrap_or(1)
                 .max(1);
             let display_step = self.step % cycle;
-            self.trigger_step = Some(display_step);
             self.control
                 .current_step
                 .store(display_step as u8, Ordering::Release);
@@ -1528,33 +1654,37 @@ impl SequencerRuntime {
                         position,
                     }
                 });
+            let next_position = position.saturating_add(1);
+            let next_is_timeline_boundary = self
+                .timeline
+                .entries
+                .iter()
+                .any(|(at, _)| *at == next_position)
+                || self.timeline.stop_step == Some(next_position);
             for track in 0..self.control.track_count() {
                 let length = usize::from(self.pattern.lengths[track]).max(1);
                 let track_step = self.step.wrapping_sub(self.clip_launch_steps[track]) % length;
                 self.control.clip_positions[track].store(track_step as u8, Ordering::Release);
-                let velocity = self.pattern.velocities[track][track_step] as f64;
-                self.velocities[track] = velocity;
-                if velocity > 0.0 {
-                    self.pitches[track] = self.pattern.pitches_hz[track][track_step] as f64;
-                    self.gates[track] = self.pattern.gates[track][track_step] as f64 * step_frames;
-                    if self.control.track_enabled(track) {
-                        self.audible_notes[track] = true;
-                        let pitch = self.pitches[track];
-                        self.control
-                            .events
-                            .publish(EventKind::NoteOn, sample_position, || EventPayload::Note {
-                                track: track as u8,
-                                pitch,
-                                velocity,
-                            });
-                        self.control.events.publish(
-                            EventKind::VoiceTriggered,
-                            sample_position,
-                            || EventPayload::Note {
-                                track: track as u8,
-                                pitch,
-                                velocity,
-                            },
+                let offset = self.pattern.offsets[track][track_step] as f64;
+                if offset >= 0.0 || pattern_reloaded || clip_launched[track] {
+                    let displaced = (offset.max(0.0) * step_frames).round() as u64;
+                    self.schedule_step(
+                        track,
+                        track_step,
+                        sample_position.saturating_add(displaced),
+                        step_frames,
+                    );
+                }
+                if !next_is_timeline_boundary {
+                    let next_step = (track_step + 1) % length;
+                    let next_offset = self.pattern.offsets[track][next_step] as f64;
+                    if next_offset < 0.0 {
+                        let displaced = ((1.0 + next_offset) * step_frames).round() as u64;
+                        self.schedule_step(
+                            track,
+                            next_step,
+                            sample_position.saturating_add(displaced),
+                            step_frames,
                         );
                     }
                 }
@@ -1564,13 +1694,18 @@ impl SequencerRuntime {
             self.frames_until_step += step_frames;
             self.initialized = true;
         }
+        self.dispatch_due(sample_position);
         self.frames_until_step -= 1.0;
     }
     pub fn trigger(&self, track: usize) -> f64 {
         if !self.control.track_enabled(track) {
             return 0.0;
         }
-        self.trigger_step.map_or(0.0, |_| self.velocities[track])
+        if self.triggered[track] {
+            self.velocities[track]
+        } else {
+            0.0
+        }
     }
     pub(crate) fn track_count(&self) -> usize {
         self.control.track_count()
@@ -1636,6 +1771,77 @@ mod tests {
             }
         }
         assert_eq!(events, vec![(0, 0), (0, 1), (200, 0)]);
+    }
+    #[test]
+    fn positive_and_negative_offsets_are_sample_accurate_and_ordered() {
+        let control = SequencerControl::new("groove".into(), 60.0, 4, 4).unwrap();
+        control.add_track("A".into()).unwrap();
+        control.add_track("B".into()).unwrap();
+        control
+            .set_pattern_steps(0, 0, &[0.4, 0.6, 0.8, 1.0])
+            .unwrap();
+        control
+            .set_pattern_offsets(0, 0, &[0.2, -0.2, 0.0, 0.48])
+            .unwrap();
+        control
+            .set_pattern_steps(0, 1, &[0.0, 0.6, 0.8, 0.0])
+            .unwrap();
+        control
+            .set_pattern_offsets(0, 1, &[0.0, -0.2, 0.0, 0.0])
+            .unwrap();
+        let mut runtime = SequencerRuntime::new(control);
+        let mut events = Vec::new();
+        for frame in 0..110 {
+            runtime.begin_frame(100.0);
+            for track in 0..2 {
+                if runtime.trigger(track) > 0.0 {
+                    events.push((frame, track, runtime.trigger(track)));
+                }
+            }
+        }
+        assert_eq!(
+            events,
+            [
+                (5, 0, 0.4_f32 as f64),
+                (20, 0, 0.6_f32 as f64),
+                (20, 1, 0.6_f32 as f64),
+                (50, 0, 0.8_f32 as f64),
+                (50, 1, 0.8_f32 as f64),
+                (87, 0, 1.0),
+                (105, 0, 0.4_f32 as f64),
+            ]
+        );
+    }
+    #[test]
+    fn negative_loop_offsets_use_lookahead_but_scene_starts_clamp_to_the_boundary() {
+        let control = SequencerControl::new("boundaries".into(), 60.0, 4, 4).unwrap();
+        control.add_track("Pulse".into()).unwrap();
+        let first = control.define_pattern("First".into()).unwrap();
+        let next = control.define_pattern("Next".into()).unwrap();
+        control
+            .set_pattern_steps(first, 0, &[0.25, 0.0, 0.0, 0.0])
+            .unwrap();
+        control
+            .set_pattern_offsets(first, 0, &[-0.2, 0.0, 0.0, 0.0])
+            .unwrap();
+        control
+            .set_pattern_steps(next, 0, &[0.75, 0.0, 0.0, 0.0])
+            .unwrap();
+        control
+            .set_pattern_offsets(next, 0, &[-0.2, 0.0, 0.0, 0.0])
+            .unwrap();
+        control
+            .set_timeline_arrangement("Main".into(), &[(0, first), (8, next)], Some(12))
+            .unwrap();
+        let mut runtime = SequencerRuntime::new(control);
+        let mut events = Vec::new();
+        for frame in 0..260 {
+            runtime.begin_frame(100.0);
+            if runtime.trigger(0) > 0.0 {
+                events.push((frame, runtime.trigger(0)));
+            }
+        }
+        assert_eq!(events, [(0, 0.25), (95, 0.25), (200, 0.75)]);
     }
     #[test]
     fn tempo_stop_restart_and_boundary_edits_are_coherent() {

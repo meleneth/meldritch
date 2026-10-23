@@ -93,6 +93,17 @@ impl UserData for LuaSequencer {
                     .map_err(mlua::Error::external)
             },
         );
+        methods.add_method(
+            "set_pattern_offsets",
+            |_, this, (pattern, track, values): (usize, usize, Table)| {
+                let values = values
+                    .sequence_values::<f32>()
+                    .collect::<mlua::Result<Vec<_>>>()?;
+                this.control
+                    .set_pattern_offsets(pattern, track, &values)
+                    .map_err(mlua::Error::external)
+            },
+        );
         methods.add_method("set_pattern_notes", |_, this, (pattern, track, pitches, gates, velocities): (usize, usize, Table, Table, Table)| {
             let pitches=pitches.sequence_values::<f32>().collect::<mlua::Result<Vec<_>>>()?;
             let gates=gates.sequence_values::<f32>().collect::<mlua::Result<Vec<_>>>()?;
@@ -713,8 +724,29 @@ local function decorate_scope(facade, scope, prefix)
     local native = meldritch._sequencer(self.name or prefix, values.bpm, values.steps, values.steps_per_beat)
     local tempo = scope:module(self:_id("sequencer_tempo"), "sequencer_tempo", { bpm = values.bpm }, meldritch._sequencer_tempo(native))
     local sequence = { _native = native, _tracks = {}, _patterns = {}, _clips = {}, _scenes = {},
-      _steps = values.steps or 16, _steps_per_beat = values.steps_per_beat,
+      _grooves = {}, _steps = values.steps or 16, _steps_per_beat = values.steps_per_beat,
       bpm = parameter(tempo, "bpm"), tempo = tempo.out }
+    function sequence:groove(name,offsets)
+      assert(type(name)=="string" and name~="" and self._grooves[name]==nil,"groove name must be unique")
+      assert(type(offsets)=="table" and #offsets>0,"groove requires one or more offsets")
+      local copy={}
+      for i,value in ipairs(offsets) do
+        assert(type(value)=="number" and value>=-.49 and value<=.49,"groove offsets must be in -0.49..0.49 steps")
+        copy[i]=value
+      end
+      self._grooves[name]=copy;return copy
+    end
+    local function event_offsets(events,length,groove)
+      local offsets={};for step=1,length do offsets[step]=0 end
+      local template=groove and assert(sequence._grooves[groove],"unknown groove: "..tostring(groove)) or nil
+      for _,event in ipairs(events) do
+        local value=event.offset or 0
+        if template then value=value+template[((event.step-1)%#template)+1] end
+        assert(value>=-.49 and value<=.49,"combined event timing offset must be in -0.49..0.49 steps")
+        offsets[event.step]=value
+      end
+      return offsets
+    end
     function sequence:track(name)
       assert(type(name) == "string" and name ~= "", "track name must be nonempty")
       local runtime = self._native:track(name)
@@ -751,6 +783,7 @@ local function decorate_scope(facade, scope, prefix)
           pitches[event.step]=pitch;gates[event.step]=event.gate or 0.5;velocities[event.step]=event.velocity or 1.0
         end
         sequence._native:set_pattern_notes(self.index,track,pitches,gates,velocities)
+        sequence._native:set_pattern_offsets(self.index,track,event_offsets(events,length,nil))
       end
       function pattern:length(track_name, length)
         local track=assert(sequence._tracks[track_name],"unknown sequencer track: "..tostring(track_name))
@@ -769,6 +802,15 @@ local function decorate_scope(facade, scope, prefix)
         assert(#values==self.length,"clip step data must match its declared length")
         sequence._native:set_pattern_steps(self.index,self.track,values)
       end
+      function clip:events(events,groove)
+        local velocities={};for step=1,self.length do velocities[step]=0 end
+        for _,event in ipairs(events) do
+          assert(type(event.step)=="number" and event.step>=1 and event.step<=self.length,"timed event step is out of range")
+          velocities[event.step]=event.velocity or 1
+        end
+        sequence._native:set_pattern_steps(self.index,self.track,velocities)
+        sequence._native:set_pattern_offsets(self.index,self.track,event_offsets(events,self.length,groove))
+      end
       function clip:notes(events)
         local pitches,gates,velocities={},{},{}
         for step=1,self.length do pitches[step]=440;gates[step]=.5;velocities[step]=0 end
@@ -778,12 +820,14 @@ local function decorate_scope(facade, scope, prefix)
           gates[event.step]=event.gate or .5;velocities[event.step]=event.velocity or 1
         end
         sequence._native:set_pattern_notes(self.index,self.track,pitches,gates,velocities)
+        sequence._native:set_pattern_offsets(self.index,self.track,event_offsets(events,self.length,spec.groove))
       end
       clip.quantization=16
       function clip:launch(quantization)
         sequence._native:queue_clip(self.track,self.index,quantization or self.quantization)
       end
-      if spec.steps then clip:steps(spec.steps)
+      if spec.events then clip:events(spec.events,spec.groove)
+      elseif spec.steps then clip:steps(spec.steps)
       elseif spec.notes then clip:notes(spec.notes)
       else sequence._native:set_pattern_length(index,track,clip.length) end
       self._clips[name]=clip
@@ -857,7 +901,9 @@ local function decorate_scope(facade, scope, prefix)
         length=length or sequence._steps;local pitches,gates,velocities={},{},{}
         for step=1,length do pitches[step]=440;gates[step]=.5;velocities[step]=0 end
         for _,event in ipairs(events) do local pitch=event.frequency or 440*2^((assert(event.note)-69)/12);pitches[event.step]=pitch;gates[event.step]=event.gate or .5;velocities[event.step]=event.velocity or 1 end
-        sequence._native:set_pattern_notes(index,assert(sequence._tracks[track_name],"unknown track"),pitches,gates,velocities)
+        local track=assert(sequence._tracks[track_name],"unknown track")
+        sequence._native:set_pattern_notes(index,track,pitches,gates,velocities)
+        sequence._native:set_pattern_offsets(index,track,event_offsets(events,length,nil))
       end
       function pattern:length(track_name,length) sequence._native:set_pattern_length(index,assert(sequence._tracks[track_name],"unknown track"),length) end
       return pattern
@@ -2646,6 +2692,153 @@ mod tests {
         assert!(!transport.playing());
         assert!(transport.arrangement_status().unwrap().finished);
         assert_eq!(transport.position_steps(), 3328);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn weight_of_moving_preserves_distinct_grooves_and_finishes_cleanly() {
+        let root =
+            std::env::temp_dir().join(format!("meldritch-weight-lua-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let mut wav = Cursor::new(Vec::new());
+        {
+            let mut writer = hound::WavWriter::new(
+                &mut wav,
+                hound::WavSpec {
+                    channels: 2,
+                    sample_rate: 800,
+                    bits_per_sample: 16,
+                    sample_format: hound::SampleFormat::Int,
+                },
+            )
+            .unwrap();
+            for frame in 0..160 {
+                let sample = if frame == 0 {
+                    27_000
+                } else if frame < 64 {
+                    9_000 - frame * 120
+                } else {
+                    0
+                };
+                writer.write_sample::<i16>(sample as i16).unwrap();
+                writer.write_sample::<i16>((-sample) as i16).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+        fs::write(root.join("fixture.wav"), wav.into_inner()).unwrap();
+        fs::write(
+            root.join("samples.json"),
+            r#"{
+              "Weight_kick":["fixture.wav","fixture.wav","fixture.wav","fixture.wav","fixture.wav"],
+              "Weight_snare":["fixture.wav","fixture.wav","fixture.wav","fixture.wav","fixture.wav"],
+              "Weight_snare_edge":["fixture.wav","fixture.wav","fixture.wav"],
+              "Weight_hat_closed":["fixture.wav","fixture.wav","fixture.wav","fixture.wav"],
+              "Weight_hat_open":["fixture.wav","fixture.wav","fixture.wav","fixture.wav"],
+              "Weight_tambourine":["fixture.wav","fixture.wav","fixture.wav","fixture.wav"],
+              "Weight_rowing":["fixture.wav","fixture.wav","fixture.wav","fixture.wav","fixture.wav"],
+              "Weight_typing":"fixture.wav", "Weight_breath":"fixture.wav"
+            }"#,
+        )
+        .unwrap();
+        let source = include_str!("../../../examples/experiments/05_the_weight_of_moving.lua")
+            .replace(
+                r#"local avl=meldritch.samples {source="remote",bank="Weight",cache=true,
+  manifest="samples/weight-avl.json",
+  base_url="https://raw.githubusercontent.com/studiorack/avl-drumkits/b06cb2c27359cbc68a830a82bddced05bd73d1a0/",
+  version="b06cb2c27359cbc68a830a82bddced05bd73d1a0"}"#,
+                r#"local avl=meldritch.samples {source="local",manifest="samples.json",bank="Weight",cache=true}"#,
+            )
+            .replace(
+                r#"local found=meldritch.samples {source="remote",bank="Weight",cache=true,
+  manifest="samples/weight-meta.json",
+  base_url="https://raw.githubusercontent.com/facebookincubator/Meta-open-sound/251c0be57d5d1b3242b91f53e0cde62ab1cb42d9/",
+  version="251c0be57d5d1b3242b91f53e0cde62ab1cb42d9"}"#,
+                r#"local found=meldritch.samples {source="local",manifest="samples.json",bank="Weight",cache=true}"#,
+            );
+        let graph = read_with_root(&source, &root).unwrap();
+        assert_eq!(graph.automations.len(), 9);
+        let apc = graph.performance.as_ref().unwrap().apc.as_ref().unwrap();
+        assert_eq!(apc.scene_patterns.len(), 8);
+        assert_eq!(apc.scene_quantization, 16);
+
+        let mut machine = compile_at_rate(&graph, 800.0).unwrap();
+        let sequencer = &machine.sequencer_controls()[0];
+        let pattern_names = sequencer.pattern_names();
+        let pattern_named = |name: &str| {
+            let index = pattern_names
+                .iter()
+                .position(|pattern| pattern == name)
+                .unwrap_or_else(|| panic!("missing pattern {name}; have {pattern_names:?}"));
+            sequencer.pattern_at(index).unwrap()
+        };
+        let kick_track = sequencer
+            .track_names()
+            .iter()
+            .position(|name| name == "Kick")
+            .unwrap();
+        let deep = pattern_named("clip:Kick: deep pocket").offsets[kick_track];
+        let forward = pattern_named("clip:Kick: forward motion").offsets[kick_track];
+        let broken = pattern_named("clip:Kick: broken pocket").offsets[kick_track];
+        assert_ne!(deep, forward);
+        assert_ne!(forward, broken);
+        assert_ne!(deep, broken);
+        assert!(deep.iter().any(|offset| *offset > 0.1));
+        assert!(forward.iter().any(|offset| *offset < 0.0));
+        assert!(broken.iter().any(|offset| *offset > 0.15));
+        assert!(broken.iter().any(|offset| *offset < -0.1));
+
+        let frames = 368 * 800;
+        let mut left = vec![0.0; frames];
+        let mut right = vec![0.0; frames];
+        let mut diagnostics = RenderDiagnostics::default();
+        machine.process_stereo_diagnostic(&mut left, &mut right, &mut diagnostics);
+        assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
+        for name in [
+            "Performed Break A",
+            "Performed Break B",
+            "Oar Chop A",
+            "Oar Chop B",
+            "Reverse Oar",
+            "Kick",
+            "Snare",
+            "Ghost",
+            "Hats",
+            "Open Hat",
+            "Tambourine",
+            "Bass",
+            "Breath Hook",
+            "Reverse Breath",
+            "Typing",
+            "Two Note",
+        ] {
+            diagnostics.expect_track_events(name, 1).unwrap();
+        }
+        for player in 1..=14 {
+            diagnostics
+                .expect_output(&format!("instrument/sample_player_{player}"), 0, 1e-8)
+                .unwrap();
+        }
+        let rms = |start: usize, end: usize| {
+            let energy: f64 = left[start..end]
+                .iter()
+                .zip(&right[start..end])
+                .map(|(left, right)| left * left + right * right)
+                .sum();
+            (energy / (2 * (end - start)) as f64).sqrt()
+        };
+        let opening = rms(0, 16 * 800);
+        let deep_pocket = rms(20 * 800, 48 * 800);
+        let disruption = rms(152 * 800, 196 * 800);
+        let release = rms(290 * 800, 332 * 800);
+        assert!(opening > 1e-8, "opening must contain actual signal");
+        assert!(deep_pocket > 1e-8, "deep pocket must contain actual signal");
+        assert!(disruption > 1e-8, "disruption must contain actual signal");
+        assert!(release > 1e-8, "release must contain actual signal");
+        let transport = &machine.sequencer_controls()[0];
+        assert!(!transport.playing());
+        assert!(transport.arrangement_status().unwrap().finished);
+        assert_eq!(transport.position_steps(), 2816);
         fs::remove_dir_all(root).unwrap();
     }
 }

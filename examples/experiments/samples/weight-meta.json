@@ -1,0 +1,11 @@
+{
+  "Weight_rowing": [
+    "corpora/oculus-audio-pack/ogg/BOATRow_RowboatOarRowing_OS_01.ogg",
+    "corpora/oculus-audio-pack/ogg/BOATRow_RowboatOarRowing_OS_02.ogg",
+    "corpora/oculus-audio-pack/ogg/BOATRow_RowboatOarRowing_OS_03.ogg",
+    "corpora/oculus-audio-pack/ogg/BOATRow_RowboatOarRowing_OS_04.ogg",
+    "corpora/oculus-audio-pack/ogg/BOATRow_RowboatOarRowing_OS_05.ogg"
+  ],
+  "Weight_typing": "corpora/oculus-audio-pack/ogg/UIClick_KeyboardTyping_OS_01.ogg",
+  "Weight_breath": "corpora/oculus-audio-pack/ogg/HMNBrth_FemaleBreathing_OS_01.ogg"
+}

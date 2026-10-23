@@ -1,0 +1,44 @@
+{
+  "Weight_kick": [
+    "Samples/36-Pearl22Kick-1.flac",
+    "Samples/36-Pearl22Kick-2.flac",
+    "Samples/36-Pearl22Kick-3.flac",
+    "Samples/36-Pearl22Kick-4.flac",
+    "Samples/36-Pearl22Kick-5.flac"
+  ],
+  "Weight_snare": [
+    "Samples/38-PearlSnare2-1.flac",
+    "Samples/38-PearlSnare2-2.flac",
+    "Samples/38-PearlSnare2-3.flac",
+    "Samples/38-PearlSnare2-4.flac",
+    "Samples/38-PearlSnare2-5.flac"
+  ],
+  "Weight_snare_edge": [
+    "Samples/40-PearlSnare2Edge-1.flac",
+    "Samples/40-PearlSnare2Edge-2.flac",
+    "Samples/40-PearlSnare2Edge-3.flac",
+    "Samples/40-PearlSnare2Edge-4.flac",
+    "Samples/40-PearlSnare2Edge-5.flac"
+  ],
+  "Weight_hat_closed": [
+    "Samples/42-SabianRockHatClosed-1.flac",
+    "Samples/42-SabianRockHatClosed-2.flac",
+    "Samples/42-SabianRockHatClosed-3.flac",
+    "Samples/42-SabianRockHatClosed-4.flac",
+    "Samples/42-SabianRockHatClosed-5.flac"
+  ],
+  "Weight_hat_open": [
+    "Samples/46-SabianRockHatSemiOpen-1.flac",
+    "Samples/46-SabianRockHatSemiOpen-2.flac",
+    "Samples/46-SabianRockHatSemiOpen-3.flac",
+    "Samples/46-SabianRockHatSemiOpen-4.flac",
+    "Samples/46-SabianRockHatSemiOpen-5.flac"
+  ],
+  "Weight_tambourine": [
+    "Samples/54-Tambourine-1.flac",
+    "Samples/54-Tambourine-2.flac",
+    "Samples/54-Tambourine-3.flac",
+    "Samples/54-Tambourine-4.flac",
+    "Samples/54-Tambourine-5.flac"
+  ]
+}
