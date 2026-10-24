@@ -2841,4 +2841,77 @@ mod tests {
         assert_eq!(transport.position_steps(), 2816);
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn shape_of_standing_still_evolves_continuously_and_finishes_cleanly() {
+        let source =
+            include_str!("../../../examples/experiments/06_the_shape_of_standing_still.lua")
+                // The physical percussion models require a normal audio rate; low-rate
+                // composition verification substitutes engines covered independently.
+                .replace(r#"model="bass_drum""#, r#"model="fm""#)
+                .replace(r#"model="hihat""#, r#"model="waveshaping""#)
+                .replace("frequency=1174.66", "frequency=174.66");
+        let graph = read(&source).unwrap();
+        assert_eq!(graph.automations.len(), 12);
+        let apc = graph.performance.as_ref().unwrap().apc.as_ref().unwrap();
+        assert_eq!(apc.scene_patterns.len(), 6);
+        assert_eq!(apc.scene_quantization, 16);
+
+        let mut machine = compile_at_rate(&graph, 800.0).unwrap();
+        let frames = 412 * 800;
+        let mut left = vec![0.0; frames];
+        let mut right = vec![0.0; frames];
+        let mut diagnostics = RenderDiagnostics::default();
+        machine.process_stereo_diagnostic(&mut left, &mut right, &mut diagnostics);
+        assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
+        for name in ["Low Pulse", "Dust", "Harmonic Gate", "Three Notes"] {
+            diagnostics.expect_track_events(name, 1).unwrap();
+        }
+        for module in [
+            "instrument/oscillator_1",
+            "instrument/oscillator_2",
+            "instrument/plaits_1",
+            "instrument/plaits_2",
+            "instrument/oscillator_3",
+            "instrument/oscillator_4",
+        ] {
+            diagnostics.expect_output(module, 0, 1e-8).unwrap();
+        }
+        let rms = |start: usize, end: usize| {
+            let energy: f64 = left[start..end]
+                .iter()
+                .zip(&right[start..end])
+                .map(|(left, right)| left * left + right * right)
+                .sum();
+            (energy / (2 * (end - start)) as f64).sqrt()
+        };
+        let field = rms(8 * 800, 48 * 800);
+        let recognition = rms(128 * 800, 172 * 800);
+        let instability = rms(218 * 800, 262 * 800);
+        let transcendence = rms(302 * 800, 346 * 800);
+        let afterimage = rms(380 * 800, 404 * 800);
+        assert!(field > 1e-8, "the unsequenced drone must be audible alone");
+        assert!(recognition > 1e-8);
+        assert!(instability > 1e-8);
+        assert!(transcendence > 1e-8);
+        assert!(afterimage > 1e-8);
+        assert_ne!(field, instability, "the drone must not remain static");
+        assert_ne!(
+            instability, transcendence,
+            "the destination must transform it"
+        );
+        // Re-evaluate the authored source so transport/control ownership starts
+        // from the same pristine state instead of sharing the completed run.
+        let replica_graph = read(&source).unwrap();
+        let mut replica = compile_at_rate(&replica_graph, 800.0).unwrap();
+        let mut replica_left = vec![0.0; 180 * 800];
+        let mut replica_right = vec![0.0; 180 * 800];
+        replica.process_stereo(&mut replica_left, &mut replica_right);
+        assert_eq!(replica_left, left[..replica_left.len()]);
+        assert_eq!(replica_right, right[..replica_right.len()]);
+        let transport = &machine.sequencer_controls()[0];
+        assert!(!transport.playing());
+        assert!(transport.arrangement_status().unwrap().finished);
+        assert_eq!(transport.position_steps(), 2560);
+    }
 }
