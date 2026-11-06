@@ -49,6 +49,11 @@ struct LuaVst3(Arc<crate::vst3::Spec>);
 struct LuaWebServer(Rc<RefCell<crate::web::Application>>);
 #[derive(Clone)]
 struct LuaWebPerformance(Rc<RefCell<crate::web::Application>>);
+#[derive(Clone)]
+struct LuaWebPlane {
+    application: Rc<RefCell<crate::web::Application>>,
+    id: String,
+}
 impl UserData for LuaSample {}
 impl UserData for LuaSequencerTrack {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
@@ -169,6 +174,39 @@ impl UserData for LuaWebServer {
 
 impl UserData for LuaWebPerformance {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("plane", |lua, this, spec: Table| {
+            let id: String = spec.get("id")?;
+            if id.is_empty() {
+                return Err(mlua::Error::external("control plane id must not be empty"));
+            }
+            let roles: std::collections::BTreeSet<String> = spec
+                .get::<Table>("roles")?
+                .sequence_values::<String>()
+                .collect::<mlua::Result<_>>()?;
+            let read_only_roles: std::collections::BTreeSet<String> = spec
+                .get::<Option<Table>>("read_only_roles")?
+                .map(|roles| roles.sequence_values::<String>().collect())
+                .transpose()?
+                .unwrap_or_default();
+            let plane = crate::web::ControlPlane {
+                id: id.clone(),
+                label: spec
+                    .get::<Option<String>>("label")?
+                    .unwrap_or_else(|| id.clone()),
+                layout: spec.get("layout")?,
+                roles,
+                read_only_roles,
+                controls: Vec::new(),
+            };
+            let planes = Rc::clone(&this.0.borrow().planes);
+            if planes.borrow_mut().insert(id.clone(), plane).is_some() {
+                return Err(mlua::Error::external("duplicate control plane id"));
+            }
+            lua.create_userdata(LuaWebPlane {
+                application: Rc::clone(&this.0),
+                id,
+            })
+        });
         methods.add_method("set", |lua, this, (name, value): (String, Value)| {
             use mlua::LuaSerdeExt;
             let value = lua.from_value::<serde_json::Value>(value)?;
@@ -299,6 +337,160 @@ impl UserData for LuaWebPerformance {
                 .get_mut(&role)
                 .ok_or_else(|| mlua::Error::external(format!("unknown performer role '{role}'")))?;
             assignment.controls = controls;
+            Ok(())
+        });
+        methods.add_method("assign_plane", |_, this, (id, spec): (String, Table)| {
+            let roles: std::collections::BTreeSet<String> = spec
+                .get::<Table>("roles")?
+                .sequence_values::<String>()
+                .collect::<mlua::Result<_>>()?;
+            let read_only_roles: std::collections::BTreeSet<String> = spec
+                .get::<Option<Table>>("read_only_roles")?
+                .map(|roles| roles.sequence_values::<String>().collect())
+                .transpose()?
+                .unwrap_or_default();
+            let application = this.0.borrow();
+            for role in roles.iter().chain(&read_only_roles) {
+                if !application.roles.borrow().contains_key(role) {
+                    return Err(mlua::Error::external(format!(
+                        "plane assignment references unknown performer role '{role}'"
+                    )));
+                }
+            }
+            let planes = Rc::clone(&application.planes);
+            drop(application);
+            let mut planes = planes.borrow_mut();
+            let plane = planes
+                .get_mut(&id)
+                .ok_or_else(|| mlua::Error::external(format!("unknown control plane '{id}'")))?;
+            plane.roles = roles;
+            plane.read_only_roles = read_only_roles;
+            Ok(())
+        });
+    }
+}
+
+impl UserData for LuaWebPlane {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        for (method, kind) in [("fader", "fader"), ("knob", "knob")] {
+            methods.add_method(method, move |_, this, spec: Table| {
+                let id: String = spec.get("id")?;
+                let target: String = spec.get("target")?;
+                if id.is_empty() {
+                    return Err(mlua::Error::external("plane control id must not be empty"));
+                }
+                let min = spec.get::<Option<f64>>("min")?.unwrap_or(0.0);
+                let max = spec.get::<Option<f64>>("max")?.unwrap_or(1.0);
+                let scale = spec
+                    .get::<Option<String>>("scale")?
+                    .unwrap_or_else(|| "linear".into());
+                if !matches!(scale.as_str(), "linear" | "log")
+                    || min >= max
+                    || (scale == "log" && min <= 0.0)
+                {
+                    return Err(mlua::Error::external(
+                        "range control requires a valid linear/log range",
+                    ));
+                }
+                let label = spec
+                    .get::<Option<String>>("label")?
+                    .unwrap_or_else(|| id.clone());
+                let mut app = this.application.borrow_mut();
+                if app.controls.contains_key(&id) {
+                    return Err(mlua::Error::external("duplicate performance control id"));
+                }
+                app.controls.insert(
+                    id.clone(),
+                    crate::web::PerformanceControl {
+                        name: id.clone(),
+                        label: label.clone(),
+                        group: Some(this.id.clone()),
+                        kind: crate::web::ControlKind::Continuous,
+                        target: target.clone(),
+                        min,
+                        max,
+                        choices: Vec::new(),
+                        changed: None,
+                    },
+                );
+                let planes = Rc::clone(&app.planes);
+                drop(app);
+                planes
+                    .borrow_mut()
+                    .get_mut(&this.id)
+                    .unwrap()
+                    .controls
+                    .push(crate::web::PlaneControl::Range {
+                        id,
+                        label,
+                        target,
+                        kind,
+                        min,
+                        max,
+                        scale,
+                        unit: spec.get("unit")?,
+                    });
+                Ok(())
+            });
+        }
+        methods.add_method("step_sequencer", |_, this, spec: Table| {
+            let id: String = spec.get("id")?;
+            if id.is_empty() {
+                return Err(mlua::Error::external("plane control id must not be empty"));
+            }
+            let track: Table = spec.get("track")?;
+            let sequence: Table = track.get("_sequence")?;
+            let native: AnyUserData = sequence.get("_native")?;
+            let native = native.borrow::<LuaSequencer>()?;
+            let track_index: usize = track.get("_track_index")?;
+            let pattern: Table = spec.get("pattern")?;
+            let pattern_index: usize = pattern.get("index")?;
+            let steps = spec.get::<Option<usize>>("steps")?.unwrap_or(16);
+            if steps != 16 {
+                return Err(mlua::Error::external(
+                    "initial step sequencer requires exactly 16 steps",
+                ));
+            }
+            let label = spec
+                .get::<Option<String>>("label")?
+                .unwrap_or_else(|| id.clone());
+            let planes = Rc::clone(&this.application.borrow().planes);
+            let mut planes = planes.borrow_mut();
+            let plane = planes.get_mut(&this.id).unwrap();
+            if plane.controls.iter().any(|control| control.id() == id) {
+                return Err(mlua::Error::external("duplicate plane control id"));
+            }
+            plane.controls.push(crate::web::PlaneControl::Steps {
+                id,
+                label,
+                sequencer: Arc::clone(&native.control),
+                track: track_index,
+                pattern: pattern_index,
+                steps,
+            });
+            Ok(())
+        });
+        methods.add_method("trigger", |_, this, spec: Table| {
+            let id: String = spec.get("id")?;
+            if id.is_empty() {
+                return Err(mlua::Error::external("plane control id must not be empty"));
+            }
+            let label = spec
+                .get::<Option<String>>("label")?
+                .unwrap_or_else(|| id.clone());
+            let callback: Function = spec.get("triggered")?;
+            let planes = Rc::clone(&this.application.borrow().planes);
+            let mut planes = planes.borrow_mut();
+            let plane = planes.get_mut(&this.id).unwrap();
+            if plane.controls.iter().any(|control| control.id() == id) {
+                return Err(mlua::Error::external("duplicate plane control id"));
+            }
+            plane.controls.push(crate::web::PlaneControl::Trigger {
+                id,
+                label,
+                callback,
+                serial: Rc::new(std::cell::Cell::new(0)),
+            });
             Ok(())
         });
     }

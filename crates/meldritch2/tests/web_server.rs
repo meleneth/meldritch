@@ -40,6 +40,20 @@ performance:control("level", {
 })
 performance:role("performer", { controls = { "level" } })
 performance:role("viewer", { controls = {} })
+local plane = performance:plane {
+  id = "main", label = "Main", roles = { "performer" },
+  read_only_roles = { "viewer" },
+}
+plane:fader {
+  id = "plane_level", label = "Level", target = "level",
+  min = 0.0, max = 1.0,
+}
+performance:assign("performer", { "level", "plane_level" })
+server:post("/promote-plane", function()
+  performance:assign("viewer", { "plane_level" })
+  performance:assign_plane("main", { roles = { "performer", "viewer" } })
+  return { role = "viewer" }
+end)
 server:credential("viewer-secret-token", "viewer")
 server:post("/lua-set", function(request)
   performance:set("level", request.json.value)
@@ -372,6 +386,8 @@ fn two_websockets_share_ordered_authoritative_state_and_change_audio_control() {
                 let initial_a: Value = serde_json::from_str(first_a.to_text().unwrap()).unwrap();
                 let initial_b: Value = serde_json::from_str(first_b.to_text().unwrap()).unwrap();
                 assert_eq!(initial_a, initial_b);
+                assert!(!initial_a["epoch"].as_str().unwrap().is_empty());
+                assert_eq!(initial_a["state"]["planes"][0]["id"], "main");
                 a.send(Message::Text(
                     json!({"type":"control.set","name":"level","value":0.75})
                         .to_string()
@@ -387,6 +403,7 @@ fn two_websockets_share_ordered_authoritative_state_and_change_audio_control() {
                         .unwrap();
                 assert_eq!(update_a, update_b);
                 assert_eq!(update_a["revision"], 1);
+                assert!(update_a["state"].get("planes").is_none());
                 assert_eq!(update_a["state"]["controls"]["level"]["value"], 0.75);
                 external_control.publish(0.25).unwrap();
                 let external_a: Value =
@@ -449,6 +466,238 @@ fn two_websockets_share_ordered_authoritative_state_and_change_audio_control() {
 }
 
 #[test]
+fn lua_planes_project_by_role_and_edit_the_real_sequencer() {
+    let source =
+        include_str!("../examples/71-control-planes.lua").replace("port = 8080", "port = 0");
+    let mut program =
+        lua::read_program_with_root(&source, std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+            .unwrap();
+    let mut machine = compile(program.graph()).unwrap();
+    let controls = machine
+        .control_ids()
+        .map(|id| {
+            let handle = machine.control_handle(id).unwrap();
+            let value = handle.effective_value();
+            (handle, value)
+        })
+        .collect();
+    let address = program
+        .events_mut()
+        .start_server(controls)
+        .unwrap()
+        .unwrap();
+
+    let client = thread::spawn(move || {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async move {
+                let (mut socket, _) = connect_async(format!("ws://{address}/performance"))
+                    .await
+                    .unwrap();
+                let guest: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(guest["state"]["planes"], json!([]));
+                socket
+                    .send(Message::Text(
+                        json!({"type":"authenticate","token":"drummer-demo-token"})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+                let session: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(session, json!({"type":"session","role":"drummer"}));
+                let snapshot: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(snapshot["state"]["planes"].as_array().unwrap().len(), 1);
+                assert_eq!(snapshot["state"]["planes"][0]["id"], "rhythm");
+                assert_eq!(snapshot["state"]["planes"][0]["read_only"], false);
+
+                socket
+                .send(Message::Text(
+                    json!({"type":"step.toggle","plane":"rhythm","control":"kick_pattern","step":1})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+                let toggled: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(toggled["revision"], 1);
+                assert_eq!(
+                    toggled["state"]["values"]["rhythm/kick_pattern"]["steps"][1],
+                    true
+                );
+
+                socket
+                    .send(Message::Text(
+                        json!({"type":"trigger.fire","plane":"rhythm","control":"kick_fill"})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+                let triggered: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(triggered["revision"], 2);
+                assert_eq!(
+                    triggered["state"]["values"]["rhythm/kick_fill"]["serial"],
+                    1
+                );
+
+                let (mut synth, _) = connect_async(format!("ws://{address}/performance"))
+                    .await
+                    .unwrap();
+                synth.next().await.unwrap().unwrap();
+                synth
+                    .send(Message::Text(
+                        json!({"type":"authenticate","token":"synth-demo-token"})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+                synth.next().await.unwrap().unwrap();
+                let synth_schema: Value =
+                    serde_json::from_str(synth.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(synth_schema["state"]["planes"][0]["id"], "synthesis");
+                synth
+                    .send(Message::Text(
+                        json!({"type":"control.set","name":"filter_cutoff","value":2400.0})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+                synth.next().await.unwrap().unwrap();
+                synth
+                    .send(Message::Text(
+                        json!({"type":"control.set","name":"filter_resonance","value":0.8})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+                synth.next().await.unwrap().unwrap();
+            })
+    });
+    poll_thread(&mut program, client);
+    let sequencer = &machine.sequencer_controls()[0];
+    let main = sequencer
+        .pattern_names()
+        .iter()
+        .position(|name| name == "Main")
+        .unwrap();
+    let pattern = sequencer.pattern_at(main).unwrap();
+    assert_eq!(
+        pattern.velocities[0][3], 1.0,
+        "FILL must mutate authored music"
+    );
+    assert_eq!(
+        machine
+            .control_handle("filter_cutoff")
+            .unwrap()
+            .override_value(),
+        Some(2400.0)
+    );
+    assert_eq!(
+        machine
+            .control_handle("filter_resonance")
+            .unwrap()
+            .override_value(),
+        Some(0.8)
+    );
+    let mut audio = [0.0; 4096];
+    machine.process(&mut audio);
+    assert!(audio.iter().any(|sample| sample.abs() > 1e-5));
+    assert_eq!(
+        program.events_mut().server_diagnostics().unwrap().revision,
+        4
+    );
+}
+
+#[test]
+fn read_only_projection_is_enforced_and_live_role_reassignment_is_revisioned() {
+    let (mut program, machine, address) = start();
+    let client = thread::spawn(move || {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async move {
+                let (mut socket, _) = connect_async(format!("ws://{address}/performance"))
+                    .await
+                    .unwrap();
+                socket.next().await.unwrap().unwrap();
+                socket
+                    .send(Message::Text(
+                        json!({"type":"authenticate","token":"viewer-secret-token"})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+                socket.next().await.unwrap().unwrap();
+                let projected: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(projected["state"]["planes"][0]["read_only"], true);
+                socket
+                    .send(Message::Text(
+                        json!({"type":"control.set","name":"plane_level","value":0.4})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+                let rejected: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(rejected["type"], "error");
+
+                let status = tokio::task::spawn_blocking(move || {
+                    agent()
+                        .post(format!("http://{address}/promote-plane"))
+                        .send_empty()
+                        .unwrap()
+                        .status()
+                        .as_u16()
+                })
+                .await
+                .unwrap();
+                assert_eq!(status, 200);
+                let reassigned: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(reassigned["schema_revision"], 2);
+                assert_eq!(reassigned["state"]["planes"][0]["read_only"], false);
+                socket
+                    .send(Message::Text(
+                        json!({"type":"control.set","name":"plane_level","value":0.4})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+                let accepted: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(accepted["state"]["values"]["main/plane_level"], 0.4);
+            })
+    });
+    poll_thread(&mut program, client);
+    assert_eq!(
+        machine.control_handle("level").unwrap().override_value(),
+        Some(0.4)
+    );
+}
+
+#[test]
 fn drop_demo_is_browser_discovered_and_changes_the_real_audio_graph() {
     let source =
         include_str!("../examples/70-network-performance.lua").replace("port = 8080", "port = 0");
@@ -481,7 +730,7 @@ fn drop_demo_is_browser_discovered_and_changes_the_real_audio_graph() {
             .unwrap()
     });
     let html = poll_thread(&mut program, root);
-    assert!(html.contains("id=\"controls\""));
+    assert!(html.contains("id=\"app\""));
     assert!(
         !html.contains("Bass Level"),
         "control model must come from the composition snapshot"

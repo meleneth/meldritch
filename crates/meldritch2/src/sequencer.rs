@@ -501,6 +501,27 @@ impl SequencerControl {
         ));
         Ok(())
     }
+    pub fn toggle_pattern(&self, pattern: usize, track: usize, step: usize) -> Result<(), String> {
+        if track >= self.track_names().len() || step >= MAX_STEPS {
+            return Err("sequencer cell is out of range".into());
+        }
+        let mut state = self
+            .pattern
+            .lock()
+            .map_err(|_| "sequencer pattern state poisoned")?;
+        let target = state.authored.get_mut(pattern).ok_or("unknown pattern")?;
+        let length = usize::from(target.lengths[track]);
+        if step >= length {
+            return Err("sequencer step is beyond the pattern length".into());
+        }
+        target.velocities[track][step] = if target.velocities[track][step] > 0.0 {
+            0.0
+        } else {
+            1.0
+        };
+        state.pending_revision = true;
+        Ok(())
+    }
     pub fn clear_track(&self, track: usize) -> Result<(), String> {
         let mut state = self
             .pattern

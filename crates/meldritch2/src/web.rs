@@ -1,7 +1,7 @@
 //! Bounded asynchronous HTTP/WebSocket transport for the UI-thread Lua owner.
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet},
     net::{IpAddr, SocketAddr},
     rc::Rc,
@@ -11,7 +11,7 @@ use std::{
         mpsc::{self, SyncSender, TrySendError},
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use axum::{
@@ -32,6 +32,7 @@ use serde_json::{Value, json};
 use tokio::sync::{broadcast, oneshot};
 
 use crate::compiler::ControlHandle;
+use crate::sequencer::SequencerControl;
 
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
 pub const DEFAULT_BODY_LIMIT: usize = 64 * 1024;
@@ -109,6 +110,51 @@ pub struct Role {
 }
 
 #[derive(Clone)]
+pub struct ControlPlane {
+    pub id: String,
+    pub label: String,
+    pub layout: Option<String>,
+    pub roles: BTreeSet<String>,
+    pub read_only_roles: BTreeSet<String>,
+    pub controls: Vec<PlaneControl>,
+}
+#[derive(Clone)]
+pub enum PlaneControl {
+    Range {
+        id: String,
+        label: String,
+        target: String,
+        kind: &'static str,
+        min: f64,
+        max: f64,
+        scale: String,
+        unit: Option<String>,
+    },
+    Steps {
+        id: String,
+        label: String,
+        sequencer: Arc<SequencerControl>,
+        track: usize,
+        pattern: usize,
+        steps: usize,
+    },
+    Trigger {
+        id: String,
+        label: String,
+        callback: Function,
+        serial: Rc<Cell<u64>>,
+    },
+}
+
+impl PlaneControl {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Range { id, .. } | Self::Steps { id, .. } | Self::Trigger { id, .. } => id,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct Application {
     pub config: ServerConfig,
     pub routes: Vec<Route>,
@@ -118,6 +164,7 @@ pub struct Application {
     pub roles: Rc<RefCell<BTreeMap<String, Role>>>,
     pub credentials: BTreeMap<String, String>,
     pub anonymous_role: Option<String>,
+    pub planes: Rc<RefCell<BTreeMap<String, ControlPlane>>>,
     runtime: Rc<RefCell<PerformanceRuntime>>,
 }
 
@@ -125,6 +172,7 @@ pub struct Application {
 struct PerformanceRuntime {
     handles: BTreeMap<String, ControlHandle>,
     observed: BTreeMap<String, f64>,
+    observed_planes: BTreeMap<String, u64>,
 }
 
 impl Application {
@@ -138,6 +186,7 @@ impl Application {
             roles: Rc::new(RefCell::new(BTreeMap::new())),
             credentials: BTreeMap::new(),
             anonymous_role: None,
+            planes: Rc::new(RefCell::new(BTreeMap::new())),
             runtime: Rc::new(RefCell::new(PerformanceRuntime::default())),
         }
     }
@@ -267,10 +316,16 @@ impl Application {
         handle
             .publish(resolved)
             .map_err(DispatchError::bad_request)?;
-        self.runtime
-            .borrow_mut()
-            .observed
-            .insert(name.to_owned(), resolved);
+        let aliases = self
+            .controls
+            .iter()
+            .filter(|(_, control)| control.target == definition.target)
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        let mut runtime = self.runtime.borrow_mut();
+        for alias in aliases {
+            runtime.observed.insert(alias, resolved);
+        }
         Ok(())
     }
 
@@ -293,7 +348,45 @@ impl Application {
             .map(ControlHandle::effective_value)
     }
 
-    fn snapshot(&self, revision: u64) -> Value {
+    fn schema_fingerprint(&self) -> String {
+        Value::Array(self.plane_definitions()).to_string()
+    }
+
+    fn plane_definitions(&self) -> Vec<Value> {
+        self.planes
+            .borrow()
+            .values()
+            .map(|plane| {
+                let controls = plane
+                    .controls
+                    .iter()
+                    .map(|control| match control {
+                        PlaneControl::Range {
+                            id,
+                            label,
+                            kind,
+                            min,
+                            max,
+                            scale,
+                            unit,
+                            ..
+                        } => json!({"id":id,"label":label,"kind":kind,"min":min,"max":max,"scale":scale,"unit":unit}),
+                        PlaneControl::Steps { id,label,steps,.. } => json!({"id":id,"label":label,"kind":"step_sequencer","step_count":steps}),
+                        PlaneControl::Trigger { id,label,.. } => json!({"id":id,"label":label,"kind":"trigger"}),
+                    })
+                    .collect::<Vec<_>>();
+                json!({"id":plane.id,"label":plane.label,"layout":plane.layout,"roles":plane.roles,"read_only_roles":plane.read_only_roles,"controls":controls})
+            })
+            .collect()
+    }
+
+    fn snapshot(
+        &self,
+        revision: u64,
+        epoch: &str,
+        schema_revision: u64,
+        include_schema: bool,
+    ) -> Value {
         let runtime = self.runtime.borrow();
         let controls = self
             .controls
@@ -335,11 +428,130 @@ impl Application {
                 )
             })
             .collect::<serde_json::Map<_, _>>();
+        let definitions = self.plane_definitions();
+        let planes = self.planes.borrow();
+        let mut values = serde_json::Map::new();
+        for plane in planes.values() {
+            for control in &plane.controls {
+                let (id, value) = match control {
+                    PlaneControl::Range {
+                        id, target, min, ..
+                    } => (
+                        id,
+                        json!(
+                            runtime
+                                .handles
+                                .get(target)
+                                .map_or(*min, ControlHandle::effective_value)
+                        ),
+                    ),
+                    PlaneControl::Steps {
+                        id,
+                        sequencer,
+                        track,
+                        pattern,
+                        steps,
+                        ..
+                    } => {
+                        let authored = sequencer.pattern_at(*pattern).unwrap_or_default();
+                        let enabled = (0..*steps)
+                            .map(|step| authored.velocities[*track][step] > 0.0)
+                            .collect::<Vec<_>>();
+                        (
+                            id,
+                            json!({"steps":enabled,"position":sequencer.current_step()}),
+                        )
+                    }
+                    PlaneControl::Trigger { id, serial, .. } => {
+                        (id, json!({"serial":serial.get()}))
+                    }
+                };
+                values.insert(format!("{}/{}", plane.id, id), value);
+            }
+        }
+        let mut state = json!({ "name": self.name, "controls": controls, "values": values });
+        if include_schema {
+            state["planes"] = Value::Array(definitions);
+        }
         json!({
-            "type": "state.snapshot",
+            "type": if include_schema { "state.snapshot" } else { "state.updated" },
+            "epoch": epoch,
             "revision": revision,
-            "state": { "name": self.name, "controls": controls }
+            "schema_version": 1,
+            "schema_revision": schema_revision,
+            "state": state
         })
+    }
+
+    fn plane_action(
+        &mut self,
+        _lua: &mlua::Lua,
+        role: Option<&str>,
+        message: &Value,
+    ) -> Result<(), DispatchError> {
+        let plane_id = message
+            .get("plane")
+            .and_then(Value::as_str)
+            .ok_or_else(|| DispatchError::bad_request("plane command requires plane"))?;
+        let control_id = message
+            .get("control")
+            .and_then(Value::as_str)
+            .ok_or_else(|| DispatchError::bad_request("plane command requires control"))?;
+        let planes = self.planes.borrow();
+        let plane = planes
+            .get(plane_id)
+            .ok_or_else(|| DispatchError::not_found("unknown control plane"))?;
+        if !role.is_some_and(|role| plane.roles.contains(role)) {
+            return Err(DispatchError::forbidden(
+                "control plane is not assigned to this performer",
+            ));
+        }
+        let control = plane
+            .controls
+            .iter()
+            .find(|control| match control {
+                PlaneControl::Range { id, .. }
+                | PlaneControl::Steps { id, .. }
+                | PlaneControl::Trigger { id, .. } => id == control_id,
+            })
+            .cloned()
+            .ok_or_else(|| DispatchError::not_found("unknown plane control"))?;
+        drop(planes);
+        match (message.get("type").and_then(Value::as_str), control) {
+            (
+                Some("step.toggle"),
+                PlaneControl::Steps {
+                    sequencer,
+                    track,
+                    pattern,
+                    steps,
+                    ..
+                },
+            ) => {
+                let step = message
+                    .get("step")
+                    .and_then(Value::as_u64)
+                    .and_then(|v| usize::try_from(v).ok())
+                    .filter(|v| *v < steps)
+                    .ok_or_else(|| DispatchError::bad_request("invalid sequencer step"))?;
+                sequencer
+                    .toggle_pattern(pattern, track, step)
+                    .map_err(DispatchError::bad_request)
+            }
+            (
+                Some("trigger.fire"),
+                PlaneControl::Trigger {
+                    callback, serial, ..
+                },
+            ) => {
+                callback.call::<()>(()).map_err(lua_error)?;
+                serial.set(serial.get().wrapping_add(1));
+                Ok(())
+            }
+            _ => Err(DispatchError::bad_request(
+                "command does not match plane control type",
+            )),
+        }
     }
 
     fn poll_external_changes(&mut self) -> bool {
@@ -353,7 +565,58 @@ impl Application {
                 changed = true;
             }
         }
+        for value in self.plane_observations() {
+            match runtime.observed_planes.entry(value.0) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(value.1);
+                }
+                std::collections::btree_map::Entry::Occupied(mut entry)
+                    if *entry.get() != value.1 =>
+                {
+                    entry.insert(value.1);
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
         changed
+    }
+
+    fn plane_observations(&self) -> Vec<(String, u64)> {
+        let mut values = Vec::new();
+        for plane in self.planes.borrow().values() {
+            for control in &plane.controls {
+                let value = match control {
+                    PlaneControl::Steps {
+                        id,
+                        sequencer,
+                        track,
+                        pattern,
+                        steps,
+                        ..
+                    } => {
+                        let authored = sequencer.pattern_at(*pattern).unwrap_or_default();
+                        let mut value = sequencer.current_step() as u64;
+                        for step in 0..(*steps).min(56) {
+                            if authored.velocities[*track][step] > 0.0 {
+                                value |= 1_u64 << (step + 8);
+                            }
+                        }
+                        (format!("{}/{}", plane.id, id), value)
+                    }
+                    PlaneControl::Trigger { id, serial, .. } => {
+                        (format!("{}/{}", plane.id, id), serial.get())
+                    }
+                    PlaneControl::Range { .. } => continue,
+                };
+                values.push(value);
+            }
+        }
+        values
+    }
+
+    fn sync_plane_observations(&self) {
+        self.runtime.borrow_mut().observed_planes = self.plane_observations().into_iter().collect();
     }
 }
 
@@ -482,6 +745,7 @@ struct Shared {
     next_client: Arc<AtomicU64>,
     websocket_path: Option<String>,
     connection_shutdown: broadcast::Sender<()>,
+    epoch: Arc<str>,
 }
 
 #[derive(Clone)]
@@ -494,6 +758,8 @@ pub struct ControlExecutor {
     application: Application,
     receiver: mpsc::Receiver<Dispatch>,
     shared: Shared,
+    schema_fingerprint: String,
+    schema_revision: u64,
 }
 
 impl ControlExecutor {
@@ -511,7 +777,9 @@ impl ControlExecutor {
             self.dispatch(lua, dispatch);
             processed += 1;
         }
-        if self.application.poll_external_changes() {
+        if self.application.poll_external_changes()
+            || self.application.schema_fingerprint() != self.schema_fingerprint
+        {
             self.publish();
         }
         if processed > 0 {
@@ -587,6 +855,24 @@ impl ControlExecutor {
                             });
                         }
                     }
+                } else if matches!(
+                    message.get("type").and_then(Value::as_str),
+                    Some("step.toggle" | "trigger.fire")
+                ) {
+                    match self
+                        .application
+                        .plane_action(lua, client.role.as_deref(), &message)
+                    {
+                        Ok(()) => self.publish(),
+                        Err(error) => {
+                            let message = error.message.clone();
+                            self.log_dispatch_error("WebSocket plane command", error);
+                            let _ = self.shared.updates.send(Outbound {
+                                target: Some(client.id),
+                                value: Arc::new(json!({"type":"error","error":message})),
+                            });
+                        }
+                    }
                 } else if let Some(callback) = self
                     .application
                     .websocket
@@ -623,7 +909,11 @@ impl ControlExecutor {
 
     fn call_http(&mut self, lua: &mlua::Lua, request: &ParsedRequest) -> HttpResponse {
         if request.route == "/api/state" {
-            return HttpResponse::json(200, (**self.shared.snapshot.read().unwrap()).clone());
+            let snapshot = Arc::clone(&self.shared.snapshot.read().unwrap());
+            return HttpResponse::json(
+                200,
+                project_snapshot(&snapshot, request.role.as_deref(), &snapshot),
+            );
         }
         if request.route == "/api/control/{name}" && request.method == "POST" {
             let Some(name) = request.params.get("name") else {
@@ -678,17 +968,39 @@ impl ControlExecutor {
     }
 
     fn publish(&mut self) {
+        self.application.sync_plane_observations();
         let revision = self
             .shared
             .diagnostics
             .revision
             .fetch_add(1, Ordering::AcqRel)
             + 1;
-        let snapshot = Arc::new(self.application.snapshot(revision));
+        let fingerprint = self.application.schema_fingerprint();
+        let schema_changed = fingerprint != self.schema_fingerprint;
+        if schema_changed {
+            self.schema_fingerprint = fingerprint;
+            self.schema_revision += 1;
+        }
+        let snapshot = Arc::new(self.application.snapshot(
+            revision,
+            &self.shared.epoch,
+            self.schema_revision,
+            true,
+        ));
         *self.shared.snapshot.write().unwrap() = Arc::clone(&snapshot);
+        let update = if schema_changed {
+            snapshot
+        } else {
+            Arc::new(self.application.snapshot(
+                revision,
+                &self.shared.epoch,
+                self.schema_revision,
+                false,
+            ))
+        };
         let _ = self.shared.updates.send(Outbound {
             target: None,
-            value: snapshot,
+            value: update,
         });
         self.shared
             .diagnostics
@@ -777,7 +1089,17 @@ pub fn start(application: Application) -> Result<(ServerSession, ControlExecutor
     let (updates, _) = broadcast::channel(64);
     let (connection_shutdown, _) = broadcast::channel(1);
     let diagnostics = Arc::new(AtomicDiagnostics::default());
-    let initial = Arc::new(application.snapshot(0));
+    let epoch: Arc<str> = format!(
+        "{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    )
+    .into();
+    let schema_fingerprint = application.schema_fingerprint();
+    let initial = Arc::new(application.snapshot(0, &epoch, 1, true));
     let shared = Shared {
         queue: sender,
         snapshot: Arc::new(RwLock::new(initial)),
@@ -793,6 +1115,7 @@ pub fn start(application: Application) -> Result<(ServerSession, ControlExecutor
             .as_ref()
             .map(|websocket| normalize_path(&websocket.path)),
         connection_shutdown: connection_shutdown.clone(),
+        epoch,
     };
     let network = shared.clone();
     let network_spec = NetworkSpec::from_application(&application);
@@ -843,6 +1166,8 @@ pub fn start(application: Application) -> Result<(ServerSession, ControlExecutor
             application,
             receiver,
             shared,
+            schema_fingerprint,
+            schema_revision: 1,
         },
     ))
 }
@@ -899,8 +1224,8 @@ async fn run_server(
     let mut router = Router::new()
         .route("/", get(index))
         .route("/api/browser-config", get(browser_config))
-        .route("/meldritch.css", get(css))
-        .route("/meldritch.js", get(javascript));
+        .route("/assets/app.css", get(css))
+        .route("/assets/app.js", get(javascript));
     for (method, path) in spec.routes {
         let handler = match method {
             Method::GET => MethodRouter::new().get(http),
@@ -931,7 +1256,7 @@ async fn run_server(
 async fn index() -> impl IntoResponse {
     (
         [("content-type", "text/html; charset=utf-8")],
-        include_str!("../web/index.html"),
+        include_str!("../web/dist/index.html"),
     )
 }
 async fn browser_config(State(shared): State<Shared>) -> impl IntoResponse {
@@ -940,13 +1265,13 @@ async fn browser_config(State(shared): State<Shared>) -> impl IntoResponse {
 async fn css() -> impl IntoResponse {
     (
         [("content-type", "text/css; charset=utf-8")],
-        include_str!("../web/meldritch.css"),
+        include_str!("../web/dist/assets/app.css"),
     )
 }
 async fn javascript() -> impl IntoResponse {
     (
         [("content-type", "text/javascript; charset=utf-8")],
-        include_str!("../web/meldritch.js"),
+        include_str!("../web/dist/assets/app.js"),
     )
 }
 
@@ -1070,7 +1395,12 @@ async fn websocket_loop(socket: WebSocket, shared: Shared, remote: SocketAddr) {
     );
     let mut updates = shared.updates.subscribe();
     let mut shutdown = shared.connection_shutdown.subscribe();
-    let initial = Arc::clone(&shared.snapshot.read().unwrap());
+    let initial_full = Arc::clone(&shared.snapshot.read().unwrap());
+    let initial = Arc::new(project_snapshot(
+        &initial_full,
+        client.role.as_deref(),
+        &initial_full,
+    ));
     let mut revision = initial.get("revision").and_then(Value::as_u64).unwrap_or(0);
     let (mut sink, mut stream) = socket.split();
     if sink
@@ -1097,14 +1427,17 @@ async fn websocket_loop(socket: WebSocket, shared: Shared, remote: SocketAddr) {
                     if update.target.is_none_or(|target| target == id) {
                         let next = update.value.get("revision").and_then(Value::as_u64);
                         if next.is_none_or(|next| next > revision) {
-                            if sink.send(Message::Text(update.value.to_string().into())).await.is_err() { break; }
+                            let schema = Arc::clone(&shared.snapshot.read().unwrap());
+                            let projected = project_snapshot(&update.value, client.role.as_deref(), &schema);
+                            if sink.send(Message::Text(projected.to_string().into())).await.is_err() { break; }
                             if let Some(next) = next { revision = next; }
                         }
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     shared.diagnostics.dropped_messages.fetch_add(1, Ordering::Relaxed);
-                    let snapshot = Arc::clone(&shared.snapshot.read().unwrap());
+                    let schema = Arc::clone(&shared.snapshot.read().unwrap());
+                    let snapshot = Arc::new(project_snapshot(&schema, client.role.as_deref(), &schema));
                     revision = snapshot.get("revision").and_then(Value::as_u64).unwrap_or(revision);
                     if sink.send(Message::Text(snapshot.to_string().into())).await.is_err() { break; }
                 }
@@ -1119,6 +1452,9 @@ async fn websocket_loop(socket: WebSocket, shared: Shared, remote: SocketAddr) {
                     if message.get("type").and_then(Value::as_str) == Some("authenticate") {
                         client.role = message.get("token").and_then(Value::as_str).and_then(|token| shared.credentials.get(token).cloned());
                         let _ = sink.send(Message::Text(json!({"type":"session","role":client.role}).to_string().into())).await;
+                        let schema = Arc::clone(&shared.snapshot.read().unwrap());
+                        let snapshot = project_snapshot(&schema, client.role.as_deref(), &schema);
+                        let _ = sink.send(Message::Text(snapshot.to_string().into())).await;
                     } else if enqueue(&shared, Dispatch::Message { client: client.clone(), message }).is_err() {
                         let _ = sink.send(Message::Text(json!({"type":"error","error":"Lua request queue is full"}).to_string().into())).await;
                         break;
@@ -1136,6 +1472,66 @@ async fn websocket_loop(socket: WebSocket, shared: Shared, remote: SocketAddr) {
         .diagnostics
         .active_websockets
         .fetch_sub(1, Ordering::Relaxed);
+}
+
+fn project_snapshot(snapshot: &Value, role: Option<&str>, schema: &Value) -> Value {
+    let mut projected = snapshot.clone();
+    let allowed = schema
+        .pointer("/state/planes")
+        .and_then(Value::as_array)
+        .map(|planes| {
+            planes
+                .iter()
+                .filter(|plane| {
+                    ["roles", "read_only_roles"].iter().any(|field| {
+                        plane
+                            .get(field)
+                            .and_then(Value::as_array)
+                            .is_some_and(|roles| {
+                                roles.iter().any(|candidate| candidate.as_str() == role)
+                            })
+                    })
+                })
+                .filter_map(|plane| plane.get("id").and_then(Value::as_str).map(str::to_owned))
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    if let Some(planes) = projected
+        .pointer_mut("/state/planes")
+        .and_then(Value::as_array_mut)
+    {
+        planes.retain(|plane| {
+            plane
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| allowed.contains(id))
+        });
+        for plane in planes {
+            let writable = plane
+                .get("roles")
+                .and_then(Value::as_array)
+                .is_some_and(|roles| roles.iter().any(|candidate| candidate.as_str() == role));
+            plane["read_only"] = Value::Bool(!writable);
+            if let Some(controls) = plane.get_mut("controls").and_then(Value::as_array_mut) {
+                for control in controls {
+                    control["read_only"] = Value::Bool(!writable);
+                }
+            }
+            if let Some(plane) = plane.as_object_mut() {
+                plane.remove("read_only_roles");
+            }
+        }
+    }
+    if let Some(values) = projected
+        .pointer_mut("/state/values")
+        .and_then(Value::as_object_mut)
+    {
+        values.retain(|key, _| {
+            key.split_once('/')
+                .is_some_and(|(plane, _)| allowed.contains(plane))
+        });
+    }
+    projected
 }
 
 fn enqueue(shared: &Shared, dispatch: Dispatch) -> Result<(), ()> {
@@ -1272,6 +1668,26 @@ fn validate_application(application: &Application) -> Result<(), String> {
             }
         }
     }
+    for plane in application.planes.borrow().values() {
+        for role in plane.roles.iter().chain(&plane.read_only_roles) {
+            if !application.roles.borrow().contains_key(role) {
+                return Err(format!(
+                    "control plane '{}' references unknown performer role '{role}'",
+                    plane.id
+                ));
+            }
+        }
+        let mut ids = BTreeSet::new();
+        for control in &plane.controls {
+            if !ids.insert(control.id()) {
+                return Err(format!(
+                    "control plane '{}' contains duplicate control ID '{}'",
+                    plane.id,
+                    control.id()
+                ));
+            }
+        }
+    }
     let mut routes = BTreeSet::new();
     for route in &application.routes {
         let key = (route.method.clone(), normalize_path(&route.path));
@@ -1280,8 +1696,8 @@ fn validate_application(application: &Application) -> Result<(), String> {
         }
         if matches!(
             key.1.as_str(),
-            "/" | "/meldritch.css"
-                | "/meldritch.js"
+            "/" | "/assets/app.css"
+                | "/assets/app.js"
                 | "/api/browser-config"
                 | "/api/state"
                 | "/api/control/{name}"

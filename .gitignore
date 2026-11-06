@@ -19,6 +19,7 @@ Thumbs.db
 
 # Documentation dependencies and generated site
 /node_modules/
+**/node_modules/
 /docs/.vitepress/cache/
 /docs/.vitepress/dist/
 /.vitepress/cache/
