@@ -170,11 +170,13 @@ which makes the effect persistent and visible to every client. Lua can call
 handler. Changes published by MIDI, the TUI, or another control surface are
 observed from the same handle on the next owner-loop pass.
 
-Each committed observed change increments one process-local `u64` revision and
-broadcasts a complete `state.snapshot`. A new or reconnected client subscribes
-before its initial snapshot is read, ignores older revisions, and receives a
-fresh snapshot if it falls behind. Full snapshots deliberately avoid patch-gap
-and initial-snapshot races in this milestone.
+Each committed observed change increments one process-local `u64` revision.
+Every server run also has an `epoch`; clients discard stale revision state when
+the epoch changes. Initial/recovery messages contain the typed plane schema,
+while ordinary `state.updated` messages contain values only. Schema mutations
+increment `schema_revision` and send a fresh projected schema. A client that
+detects a revision gap reconnects for a complete snapshot instead of guessing
+at missing state. A lagging socket is likewise sent the current full snapshot.
 
 HTTP clients may read `/api/state` and post JSON `{ "value": ... }` to
 `/api/control/:name`. WebSocket clients send:
@@ -183,10 +185,115 @@ HTTP clients may read `/api/state` and post JSON `{ "value": ... }` to
 {"type":"control.set","name":"bass_filter","value":0.72}
 ```
 
-The built-in browser fetches its WebSocket path, renders the published control
-metadata, sends structured changes, and always replaces its display with the
-latest authoritative snapshot. It has no song, synthesizer, or plugin-specific
-model. Its controls have touch-sized targets and responsive layout.
+The built-in Vue 3 browser fetches its WebSocket path and Pinia maintains the
+authoritative projection, connection state, revision/epoch tracking, pending
+interactions, and reconnect recovery. Components contain no song, synthesizer,
+or plugin-specific behavior.
+
+## Lua control planes
+
+A plane is a role-projected view over existing musical targets; it is not an
+instrument, sequencer, or browser-owned control system. Planes may combine
+targets from multiple subsystems and two planes may point at the same target.
+
+```lua
+local rhythm = performance:plane {
+  id = "rhythm", label = "Rhythm",
+  roles = { "drummer", "leader" },
+  read_only_roles = { "observer" },
+}
+rhythm:step_sequencer {
+  id = "kick_pattern", label = "Kick", steps = 16,
+  track = kick_track, pattern = pattern,
+}
+rhythm:trigger {
+  id = "fill", label = "FILL",
+  triggered = function() pattern:steps("kick", fill_steps) end,
+}
+
+local synthesis = performance:plane {
+  id = "synthesis", label = "Synthesizer",
+  roles = { "synth", "leader" },
+  read_only_roles = { "observer" },
+}
+synthesis:fader {
+  id = "filter_cutoff", label = "Cutoff", target = "filter_cutoff",
+  min = 20, max = 20000, scale = "log", unit = "Hz",
+}
+synthesis:knob {
+  id = "resonance", label = "Resonance", target = "resonance",
+  min = 0, max = 1,
+}
+```
+
+IDs are stable wire identities and must be nonempty and unique in their
+scope. Faders and knobs bind existing compiled control IDs, so changes from
+MIDI, automation, Lua, another browser, or the TUI converge on the same value.
+The initial library supports linear/logarithmic faders and knobs, a single-row
+16-step editor, and event-semantic triggers. Trigger publications carry an
+increasing serial; they are not transient booleans.
+
+The step editor mutates the sequencer's authored pattern on the Lua/control
+thread. The existing audio sequencer adopts its pending pattern revision at a
+scheduling boundary without rebuilding the graph. The browser never schedules
+notes or owns a musical clock. Current step observations are sampled on the
+owner loop and published only when the step changes.
+
+Plane visibility is projected by Rust before data reaches a socket. `roles`
+may see and mutate a plane; `read_only_roles` may see it but all commands are
+still rejected server-side. `performance:assign_plane(id, spec)` can replace
+those assignments at runtime; the next owner-loop pass publishes a revisioned
+schema. Hiding or disabling a Vue component is only presentation, never the
+authorization boundary.
+
+WebSocket plane commands are deliberately small and typed:
+
+```json
+{"type":"step.toggle","plane":"rhythm","control":"kick_pattern","step":7}
+{"type":"trigger.fire","plane":"rhythm","control":"fill"}
+```
+
+Range controls continue to use `control.set` with their stable control ID.
+
+## Vue and Pinia workflow
+
+The frontend source is isolated in `crates/meldritch2/frontend`. For local UI
+development, start the composition on port 8080 and run:
+
+```sh
+cd crates/meldritch2/frontend
+npm install
+npm run dev
+```
+
+Vite proxies `/api` and `/performance`. Production does not require Node: run
+`npm run build` to generate `crates/meldritch2/web/dist`, which Rust embeds with
+`include_str!`. Run `npm test` for the Vitest/Vue Test Utils suite. The control
+registry selects components solely from the versioned server schema, so adding
+another composition plane requires Lua changes only.
+
+The store distinguishes optimistic pending values from confirmed values.
+Fader and knob drags are rate-limited to roughly 30 updates/second and always
+send the final value. Pointer, touch, and keyboard input use native accessible
+controls; responsive CSS reduces the step grid to four columns on narrow
+screens.
+
+## Two-performer demonstration
+
+The complete native-DSP demonstration needs no plugins or MIDI hardware:
+
+```sh
+cargo run -p meldritch2 -- perform \
+  crates/meldritch2/examples/71-control-planes.lua
+```
+
+Open the printed address in separate tabs/devices and join with
+`drummer-demo-token`, `synth-demo-token`, `leader-demo-token`, or
+`observer-demo-token`. The drummer edits the real kick pattern and fires a
+fill; the synth performer changes an audible SVF cutoff and resonance; the
+leader receives both planes; the observer receives read-only projections.
+Reconnection restores the current schema, pattern, controls, trigger serials,
+and revision.
 
 ## Performer roles and credentials
 
@@ -244,13 +351,15 @@ duration. These are atomics read outside the audio path; no separate telemetry
 stack is introduced.
 
 The server currently runs only with the interactive `perform` owner loop. It
-does not provide TLS, durable sessions, incremental state patches, database
-storage, or process isolation for Lua. A CPU-bound Lua handler stalls other Lua
-control work until it returns, though audio continues independently. Choose a
-handler timeout that reports this condition and keep handlers short.
+does not provide TLS, durable sessions, arbitrary step counts/rows, per-step
+velocity editing, a browser arrangement editor, database storage, or process
+isolation for Lua. A CPU-bound Lua handler stalls other Lua control work until
+it returns, though audio continues independently. Choose a handler timeout
+that reports this condition and keep handlers short.
 
 Run the actual transport and retained-Lua integration tests with:
 
 ```sh
 cargo test -p meldritch2 --test web_server
+cd crates/meldritch2/frontend && npm test && npm run build
 ```
