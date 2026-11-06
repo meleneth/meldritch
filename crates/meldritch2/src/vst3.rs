@@ -213,6 +213,7 @@ pub struct Instance {
     active_note: Option<u8>,
     failed: bool,
     offline_fallback: bool,
+    previous_tempo: f64,
 }
 
 impl std::fmt::Debug for Instance {
@@ -292,6 +293,7 @@ impl Instance {
             active_note: None,
             failed: false,
             offline_fallback: false,
+            previous_tempo: 120.0,
         })
     }
 
@@ -329,17 +331,29 @@ impl Instance {
         pitch: &[f64],
         gate: &[f64],
         velocity: &[f64],
+        tempo: &[f64],
         parameter_values: &[f64],
         output: &mut [f64],
     ) {
         let frames = pitch.len();
         debug_assert_eq!(gate.len(), frames);
         debug_assert_eq!(velocity.len(), frames);
+        debug_assert_eq!(tempo.len(), frames);
         debug_assert_eq!(output.len(), frames * 2);
         if self.failed || frames == 0 || frames > MAX_BLOCK_SIZE {
             output.fill(0.0);
             self.failed |= frames > MAX_BLOCK_SIZE;
             return;
+        }
+
+        let tempo = tempo[0];
+        if tempo.is_finite() && tempo > 0.0 && tempo.to_bits() != self.previous_tempo.to_bits() {
+            if self.plugin.set_tempo(tempo).is_err() {
+                self.failed = true;
+                output.fill(0.0);
+                return;
+            }
+            self.previous_tempo = tempo;
         }
 
         for (index, ((&id, previous), &value)) in self

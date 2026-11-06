@@ -1167,9 +1167,14 @@ impl Machine {
                     delay.process(inputs, params, self.sample_rate, outputs)
                 }
                 OpProcessor::Plaits(plaits) => plaits.process(inputs, params, outputs),
-                OpProcessor::Vst3(plugin) => {
-                    plugin.process(&inputs[0..1], &inputs[1..2], &inputs[2..3], params, outputs)
-                }
+                OpProcessor::Vst3(plugin) => plugin.process(
+                    &inputs[0..1],
+                    &inputs[1..2],
+                    &inputs[2..3],
+                    &inputs[3..4],
+                    params,
+                    outputs,
+                ),
                 OpProcessor::SequencerTrack { sequencer, track } => {
                     let runtime = &self.sequencers[*sequencer];
                     outputs[0] = runtime.trigger(*track);
@@ -1233,9 +1238,14 @@ impl Machine {
                     delay.process(inputs, params, self.sample_rate, outputs)
                 }
                 OpProcessor::Plaits(plaits) => plaits.process(inputs, params, outputs),
-                OpProcessor::Vst3(plugin) => {
-                    plugin.process(&inputs[0..1], &inputs[1..2], &inputs[2..3], params, outputs)
-                }
+                OpProcessor::Vst3(plugin) => plugin.process(
+                    &inputs[0..1],
+                    &inputs[1..2],
+                    &inputs[2..3],
+                    &inputs[3..4],
+                    params,
+                    outputs,
+                ),
                 OpProcessor::SequencerTrack { sequencer, track } => {
                     let runtime = &self.sequencers[*sequencer];
                     outputs[0] = runtime.trigger(*track);
@@ -1457,6 +1467,26 @@ impl Machine {
             OpProcessor::Vst3(plugin) => plugin.save_state(),
             _ => Err(format!("module '{module}' is not a VST3 plugin")),
         }
+    }
+
+    pub fn failed_vst3_modules(&self) -> impl Iterator<Item = &str> {
+        self.ops
+            .iter()
+            .zip(&self.op_ids)
+            .filter_map(|(op, id)| match &op.processor {
+                OpProcessor::Vst3(plugin) if plugin.failed() => Some(id.as_str()),
+                _ => None,
+            })
+    }
+
+    pub fn realtime_fallback_vst3_modules(&self) -> impl Iterator<Item = &str> {
+        self.ops
+            .iter()
+            .zip(&self.op_ids)
+            .filter_map(|(op, id)| match &op.processor {
+                OpProcessor::Vst3(plugin) if plugin.offline_fallback() => Some(id.as_str()),
+                _ => None,
+            })
     }
 }
 
@@ -1777,11 +1807,13 @@ fn process_offline_op(
         }
         let (pitch, rest) = inputs.split_at_mut(frames);
         let (gate, rest) = rest.split_at_mut(frames);
-        let velocity = &rest[..frames];
+        let (velocity, rest) = rest.split_at_mut(frames);
+        let tempo = &rest[..frames];
         plugin.process(
             pitch,
             gate,
             velocity,
+            tempo,
             params,
             &mut outputs[..frames * output_count],
         );

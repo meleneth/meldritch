@@ -73,9 +73,10 @@ fn native_plugin_vertical_slice_covers_discovery_lifecycle_events_parameters_and
     let mut gate = vec![0.0; frames];
     gate[17..80].fill(1.0);
     let velocity = vec![0.8; frames];
+    let tempo = vec![120.0; frames];
     let mut output = vec![f64::NAN; frames * 2];
     let mut plugin = Instance::new(&spec, 48_000.0).expect("create fixture instance");
-    plugin.process(&pitch, &gate, &velocity, &[0.5], &mut output);
+    plugin.process(&pitch, &gate, &velocity, &tempo, &[0.5], &mut output);
     assert!(!plugin.failed());
     assert_eq!(energy(&output[..17 * 2]), 0.0);
     assert!(energy(&output[18 * 2..80 * 2]) > 0.001);
@@ -94,6 +95,7 @@ fn native_plugin_vertical_slice_covers_discovery_lifecycle_events_parameters_and
         &pitch,
         &full_gate,
         &velocity,
+        &tempo,
         &[restored.parameters[0].normalized],
         &mut restored_output,
     );
@@ -129,6 +131,7 @@ local right = instrument:drive {{ amount = 1.5, output_gain = 0.8 }}
 instrument:connect(notes.pitch, synth.pitch)
 instrument:connect(notes.gate, synth.gate)
 instrument:connect(notes.velocity, synth.velocity)
+instrument:connect(sequence.tempo, synth.tempo)
 instrument:connect(synth.left, left.input)
 instrument:connect(synth.right, right.input)
 instrument:connect(left.out, instrument.output.left)

@@ -28,6 +28,12 @@ pub const CONTRACT: Contract = Contract {
             fan_in: FanIn::One,
             unconnected: Some(1.0),
         },
+        InputPort {
+            name: "tempo",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(120.0),
+        },
     ],
     outputs: &[
         OutputPort {

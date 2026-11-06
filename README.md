@@ -68,6 +68,17 @@ general signal domains, coherent structural automation, topology capture, and
 adaptive controller projection remain intended capabilities rather than
 implemented claims.
 
+## Native Linux VST3 instruments
+
+Meldritch 2 can host native Linux VST3 instruments inside the existing audio
+graph. VST3 output routes through ordinary Meldritch effects and buses in both
+real-time playback and offline rendering; sequencer pitch, gate, velocity, and
+tempo retain their within-block timing. Discovery uses stable VST3 class IDs,
+while Lua exposes metadata, normalized parameters, and opaque state.
+
+See [docs/vst3.md](docs/vst3.md) for setup, the source-built test instrument,
+the executable demo, architecture, and current limitations.
+
 The executable Lua corpus lives in `crates/meldritch2/examples/`. Its focused
 acceptance guide is in [examples/ACCEPTANCE.md](examples/ACCEPTANCE.md).
 

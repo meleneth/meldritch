@@ -24,6 +24,7 @@ local right = instrument:drive { amount = 1.7, output_gain = 0.8 }
 instrument:connect(notes.pitch, synth.pitch)
 instrument:connect(notes.gate, synth.gate)
 instrument:connect(notes.velocity, synth.velocity)
+instrument:connect(sequence.tempo, synth.tempo)
 instrument:connect(synth.left, left.input)
 instrument:connect(synth.right, right.input)
 instrument:connect(left.out, instrument.output.left)
