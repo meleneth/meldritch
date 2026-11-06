@@ -608,10 +608,9 @@ impl ControlExecutor {
                     .websocket
                     .as_ref()
                     .and_then(|ws| ws.disconnected.clone())
+                    && let Err(error) = callback.call::<()>(json_to_lua(lua, &json!(client)))
                 {
-                    if let Err(error) = callback.call::<()>(json_to_lua(lua, &json!(client))) {
-                        self.log_callback_error("WebSocket disconnected", error);
-                    }
+                    self.log_callback_error("WebSocket disconnected", error);
                 }
             }
         }

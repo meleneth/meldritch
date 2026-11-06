@@ -46,7 +46,7 @@ server:post("/lua-set", function(request)
   return { value = performance:value("level") }
 end)
 server:post("/slow-set", function(request)
-  local deadline = os.clock() + 0.55
+  local deadline = os.clock() + 0.8
   while os.clock() < deadline do end
   performance:set("level", request.json.value)
   return { value = performance:value("level") }
@@ -315,8 +315,8 @@ fn bounded_queue_rejects_overload_and_started_timeout_has_defined_commit_policy(
         .into_iter()
         .map(|request| request.join().unwrap())
         .collect::<Vec<_>>();
-    assert!(statuses.iter().any(|status| *status == 200));
-    assert!(statuses.iter().any(|status| *status == 503));
+    assert!(statuses.contains(&200));
+    assert!(statuses.contains(&503));
     assert!(program.events_mut().server_diagnostics().unwrap().rejected > 0);
 
     let url = format!("http://{address}/slow-set");
