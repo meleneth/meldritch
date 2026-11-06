@@ -1,6 +1,9 @@
 use std::{
+    cell::RefCell,
     collections::BTreeMap,
+    net::SocketAddr,
     path::{Path, PathBuf},
+    rc::Rc,
     sync::Arc,
 };
 
@@ -42,6 +45,10 @@ struct LuaSequencerTempo(Arc<SequencerControl>);
 struct LuaPlaitsModel(crate::plaits::PlaitsModel);
 #[derive(Clone, Debug)]
 struct LuaVst3(Arc<crate::vst3::Spec>);
+#[derive(Clone)]
+struct LuaWebServer(Rc<RefCell<crate::web::Application>>);
+#[derive(Clone)]
+struct LuaWebPerformance(Rc<RefCell<crate::web::Application>>);
 impl UserData for LuaSample {}
 impl UserData for LuaSequencerTrack {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
@@ -82,6 +89,184 @@ impl UserData for LuaVst3 {
                 .sequence_values::<u8>()
                 .collect::<mlua::Result<Vec<_>>>()?;
             Arc::make_mut(&mut this.0).state = Some(state);
+            Ok(())
+        });
+    }
+}
+
+impl UserData for LuaWebServer {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        for method in ["get", "post", "put", "patch", "delete"] {
+            let verb = method.to_owned();
+            methods.add_method(
+                method,
+                move |_, this, (path, handler): (String, Function)| {
+                    if !path.starts_with('/') {
+                        return Err(mlua::Error::external(
+                            "HTTP route paths must start with '/'",
+                        ));
+                    }
+                    let method = verb
+                        .to_ascii_uppercase()
+                        .parse()
+                        .map_err(mlua::Error::external)?;
+                    this.0.borrow_mut().routes.push(crate::web::Route {
+                        method,
+                        path,
+                        handler,
+                    });
+                    Ok(())
+                },
+            );
+        }
+        methods.add_method(
+            "websocket",
+            |_, this, (path, callbacks): (String, Table)| {
+                if !path.starts_with('/') {
+                    return Err(mlua::Error::external("WebSocket path must start with '/'"));
+                }
+                let mut application = this.0.borrow_mut();
+                if application.websocket.is_some() {
+                    return Err(mlua::Error::external(
+                        "only one WebSocket endpoint is supported",
+                    ));
+                }
+                application.websocket = Some(crate::web::WebSocketCallbacks {
+                    path,
+                    connected: callbacks.get("connected")?,
+                    message: callbacks.get("message")?,
+                    disconnected: callbacks.get("disconnected")?,
+                });
+                Ok(())
+            },
+        );
+        methods.add_method("performance", |lua, this, spec: Table| {
+            let mut application = this.0.borrow_mut();
+            application.name = spec
+                .get::<Option<String>>("name")?
+                .unwrap_or_else(|| "Meldritch Performance".into());
+            drop(application);
+            lua.create_userdata(LuaWebPerformance(Rc::clone(&this.0)))
+        });
+        methods.add_method("credential", |_, this, (token, role): (String, String)| {
+            if token.len() < 12 {
+                return Err(mlua::Error::external(
+                    "performer credentials must contain at least 12 characters",
+                ));
+            }
+            let mut application = this.0.borrow_mut();
+            if application
+                .credentials
+                .insert(token, role.clone())
+                .is_some()
+            {
+                return Err(mlua::Error::external("duplicate performer credential"));
+            }
+            Ok(())
+        });
+    }
+}
+
+impl UserData for LuaWebPerformance {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("set", |lua, this, (name, value): (String, Value)| {
+            use mlua::LuaSerdeExt;
+            let value = lua.from_value::<serde_json::Value>(value)?;
+            this.0
+                .borrow_mut()
+                .set_control_from_lua(&name, value)
+                .map_err(mlua::Error::external)
+        });
+        methods.add_method("value", |_, this, name: String| {
+            this.0.borrow().control_value(&name).ok_or_else(|| {
+                mlua::Error::external(format!("unknown performance control '{name}'"))
+            })
+        });
+        methods.add_method("control", |_, this, (name, spec): (String, Table)| {
+            if name.is_empty() {
+                return Err(mlua::Error::external(
+                    "performance control name must not be empty",
+                ));
+            }
+            let kind = match spec.get::<String>("type")?.as_str() {
+                "continuous" => crate::web::ControlKind::Continuous,
+                "toggle" => crate::web::ControlKind::Toggle,
+                "trigger" => crate::web::ControlKind::Trigger,
+                "choice" => crate::web::ControlKind::Choice,
+                other => {
+                    return Err(mlua::Error::external(format!(
+                        "unknown performance control type '{other}'"
+                    )));
+                }
+            };
+            let choices = spec
+                .get::<Option<Table>>("choices")?
+                .map(|choices| {
+                    choices
+                        .sequence_values::<String>()
+                        .collect::<mlua::Result<Vec<_>>>()
+                })
+                .transpose()?
+                .unwrap_or_default();
+            if kind == crate::web::ControlKind::Choice && choices.is_empty() {
+                return Err(mlua::Error::external(
+                    "choice controls require nonempty choices",
+                ));
+            }
+            let min = spec.get::<Option<f64>>("min")?.unwrap_or(0.0);
+            let max = spec.get::<Option<f64>>("max")?.unwrap_or(1.0);
+            if !min.is_finite() || !max.is_finite() || min >= max {
+                return Err(mlua::Error::external(
+                    "performance control range must be finite and increasing",
+                ));
+            }
+            let definition = crate::web::PerformanceControl {
+                label: spec
+                    .get::<Option<String>>("label")?
+                    .unwrap_or_else(|| name.clone()),
+                group: spec.get("group")?,
+                kind,
+                target: spec.get("target")?,
+                min,
+                max,
+                choices,
+                changed: spec.get("changed")?,
+                name: name.clone(),
+            };
+            if this
+                .0
+                .borrow_mut()
+                .controls
+                .insert(name, definition)
+                .is_some()
+            {
+                return Err(mlua::Error::external("duplicate performance control"));
+            }
+            Ok(())
+        });
+        methods.add_method("role", |_, this, (name, spec): (String, Table)| {
+            let value: Value = spec.get("controls")?;
+            let controls = match value {
+                Value::String(value) if value.to_str()? == "*" => None,
+                Value::Table(table) => Some(
+                    table
+                        .sequence_values::<String>()
+                        .collect::<mlua::Result<_>>()?,
+                ),
+                _ => {
+                    return Err(mlua::Error::external(
+                        "role controls must be '*' or a list of control names",
+                    ));
+                }
+            };
+            let mut application = this.0.borrow_mut();
+            if application
+                .roles
+                .insert(name, crate::web::Role { controls })
+                .is_some()
+            {
+                return Err(mlua::Error::external("duplicate performer role"));
+            }
             Ok(())
         });
     }
@@ -1351,6 +1536,8 @@ pub struct EventOwner {
     runtime: EventRuntime,
     _root: Table,
     lua: Lua,
+    web_application: Option<crate::web::Application>,
+    web_runtime: Option<(crate::web::ServerSession, crate::web::ControlExecutor)>,
 }
 
 impl EventOwner {
@@ -1374,6 +1561,36 @@ impl EventOwner {
     }
     pub fn active_subscriptions(&self) -> usize {
         self.runtime.active_subscriptions()
+    }
+    pub fn start_server(
+        &mut self,
+        controls: Vec<(crate::compiler::ControlHandle, f64)>,
+    ) -> Result<Option<SocketAddr>, String> {
+        if self.web_runtime.is_some() {
+            return Err("embedded server is already running".into());
+        }
+        let Some(mut application) = self.web_application.take() else {
+            return Ok(None);
+        };
+        application.attach_controls(controls)?;
+        self.web_application = Some(application.clone());
+        let (session, executor) = crate::web::start(application)?;
+        let address = session.address();
+        self.web_runtime = Some((session, executor));
+        Ok(Some(address))
+    }
+    pub fn dispatch_server(&mut self) {
+        if let Some((_, executor)) = &mut self.web_runtime {
+            executor.poll(&self.lua, 64);
+        }
+    }
+    pub fn server_diagnostics(&self) -> Option<crate::web::Diagnostics> {
+        self.web_runtime
+            .as_ref()
+            .map(|(session, _)| session.diagnostics())
+    }
+    pub fn stop_server(&mut self) {
+        self.web_runtime.take();
     }
 }
 
@@ -1454,6 +1671,53 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
     meldritch
         .set("include", include)
         .map_err(|e| e.to_string())?;
+    let web_applications = Rc::new(RefCell::new(
+        Vec::<Rc<RefCell<crate::web::Application>>>::new(),
+    ));
+    let registered_web_applications = Rc::clone(&web_applications);
+    let server = lua
+        .create_function(move |lua, spec: Table| {
+            if !registered_web_applications.borrow().is_empty() {
+                return Err(mlua::Error::external(
+                    "a composition may define only one embedded server",
+                ));
+            }
+            let mut config = crate::web::ServerConfig::default();
+            config.host = spec.get::<Option<String>>("host")?.unwrap_or(config.host);
+            config.port = spec.get::<Option<u16>>("port")?.unwrap_or(config.port);
+            config.queue_capacity = spec
+                .get::<Option<usize>>("queue_capacity")?
+                .unwrap_or(config.queue_capacity);
+            config.body_limit = spec
+                .get::<Option<usize>>("body_limit")?
+                .unwrap_or(config.body_limit);
+            config.message_limit = spec
+                .get::<Option<usize>>("message_limit")?
+                .unwrap_or(config.message_limit);
+            config.max_connections = spec
+                .get::<Option<usize>>("max_connections")?
+                .unwrap_or(config.max_connections);
+            config.timeout = std::time::Duration::from_millis(
+                spec.get::<Option<u64>>("timeout_ms")?
+                    .unwrap_or(crate::web::DEFAULT_TIMEOUT_MS),
+            );
+            if let Some(origins) = spec.get::<Option<Table>>("allowed_origins")? {
+                config.allowed_origins = origins
+                    .sequence_values::<String>()
+                    .collect::<mlua::Result<_>>()?;
+            }
+            let mut application = crate::web::Application::new(config);
+            application.anonymous_role = spec.get("anonymous_role")?;
+            let application = Rc::new(RefCell::new(application));
+            registered_web_applications
+                .borrow_mut()
+                .push(Rc::clone(&application));
+            lua.create_userdata(LuaWebServer(application))
+        })
+        .map_err(|error| error.to_string())?;
+    meldritch
+        .set("server", server)
+        .map_err(|error| error.to_string())?;
     let root = project_root.to_path_buf();
     let samples = lua
         .create_function(move |lua, spec: Table| {
@@ -1609,12 +1873,18 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
     let (screen_specs, lifecycle) = screen_runtime(&table)?;
     drop(definitions);
     drop(meldritch);
+    let web_application = web_applications
+        .borrow()
+        .first()
+        .map(|application| application.borrow().clone());
     Ok(Program {
         graph,
         events: EventOwner {
             runtime: EventRuntime::new(subscriptions, screen_specs, lifecycle),
             _root: table,
             lua,
+            web_application,
+            web_runtime: None,
         },
     })
 }

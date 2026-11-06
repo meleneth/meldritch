@@ -23,6 +23,7 @@ pub mod timed;
 pub mod tui;
 mod units;
 pub mod vst3;
+pub mod web;
 
 #[cfg(test)]
 mod tests {

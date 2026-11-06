@@ -1251,6 +1251,11 @@ pub fn perform(
     mut keyboard: Option<TuiKeyboard>,
     mut events: Option<&mut crate::lua::EventOwner>,
 ) -> Result<(), String> {
+    if let Some(events) = &mut events
+        && let Some(address) = events.start_server(output.controls())?
+    {
+        eprintln!("Meldritch performance server listening on http://{address}");
+    }
     let mut apc = match (output.apc_mini(), output.performance()) {
         (Some(name), Some(performance)) => Some(crate::apc::ApcSession::start(
             name.to_owned(),
@@ -1325,6 +1330,7 @@ pub fn perform(
         }
         if let Some(events) = &mut events {
             events.dispatch();
+            events.dispatch_server();
             for error in events.take_errors() {
                 if callback_errors.len() < 32 {
                     callback_errors.push(error);
@@ -1548,6 +1554,9 @@ pub fn perform(
             "control-surface shutdown failed:\n{}",
             shutdown_errors.join("\n")
         ));
+    }
+    if let Some(events) = &mut events {
+        events.stop_server();
     }
     if callback_errors.is_empty() {
         Ok(())
