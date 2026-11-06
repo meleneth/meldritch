@@ -259,14 +259,46 @@ impl UserData for LuaWebPerformance {
                     ));
                 }
             };
-            let mut application = this.0.borrow_mut();
+            let application = this.0.borrow();
             if application
                 .roles
+                .borrow_mut()
                 .insert(name, crate::web::Role { controls })
                 .is_some()
             {
                 return Err(mlua::Error::external("duplicate performer role"));
             }
+            Ok(())
+        });
+        methods.add_method("assign", |_, this, (role, controls): (String, Value)| {
+            let controls = match controls {
+                Value::String(value) if value.to_str()? == "*" => None,
+                Value::Table(table) => Some(
+                    table
+                        .sequence_values::<String>()
+                        .collect::<mlua::Result<_>>()?,
+                ),
+                _ => {
+                    return Err(mlua::Error::external(
+                        "role assignment must be '*' or a list of control names",
+                    ));
+                }
+            };
+            let application = this.0.borrow();
+            if let Some(names) = &controls {
+                for name in names {
+                    if !application.controls.contains_key(name) {
+                        return Err(mlua::Error::external(format!(
+                            "role assignment references unknown performance control '{name}'"
+                        )));
+                    }
+                }
+            }
+            let mut roles = application.roles.borrow_mut();
+            let assignment = roles
+                .get_mut(&role)
+                .ok_or_else(|| mlua::Error::external(format!("unknown performer role '{role}'")))?;
+            assignment.controls = controls;
             Ok(())
         });
     }

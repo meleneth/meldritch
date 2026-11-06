@@ -51,6 +51,10 @@ server:post("/slow-set", function(request)
   performance:set("level", request.json.value)
   return { value = performance:value("level") }
 end)
+server:post("/promote-viewer", function()
+  performance:assign("viewer", "*")
+  return { role = "viewer" }
+end)
 return graph
 "#;
 
@@ -220,6 +224,29 @@ fn transport_limits_errors_permissions_port_conflicts_and_restart_are_explicit()
         machine.control_handle("level").unwrap().override_value(),
         None
     );
+
+    let promote_url = format!("http://{address}/promote-viewer");
+    let promote = thread::spawn(move || {
+        agent()
+            .post(&promote_url)
+            .send_empty()
+            .unwrap()
+            .status()
+            .as_u16()
+    });
+    assert_eq!(poll_thread(&mut program, promote), 200);
+    let allowed_url = format!("http://{address}/api/control/level");
+    let allowed = thread::spawn(move || {
+        agent()
+            .post(&allowed_url)
+            .header("authorization", "Bearer viewer-secret-token")
+            .content_type("application/json")
+            .send("{\"value\":0.9}")
+            .unwrap()
+            .status()
+            .as_u16()
+    });
+    assert_eq!(poll_thread(&mut program, allowed), 200);
 
     let occupied = APP.replace("port = 0", &format!("port = {}", address.port()));
     let mut conflict =

@@ -79,6 +79,18 @@ while Lua exposes metadata, normalized parameters, and opaque state.
 See [docs/vst3.md](docs/vst3.md) for setup, the source-built test instrument,
 the executable demo, architecture, and current limitations.
 
+## Browser performance server
+
+Lua compositions can embed a bounded asynchronous HTTP and WebSocket server.
+Axum and Tokio own transport work while the existing UI-owner Lua state
+serially handles application behavior and publishes through ordinary
+Meldritch controls. A responsive built-in browser renders composition-defined
+continuous, toggle, trigger, and choice controls; authoritative full snapshots
+keep multiple browsers on one monotonically revisioned state.
+
+See [docs/server.md](docs/server.md) for the Lua API, thread model, roles,
+security limits, protocol behavior, and the executable **DROP** demonstration.
+
 The executable Lua corpus lives in `crates/meldritch2/examples/`. Its focused
 acceptance guide is in [examples/ACCEPTANCE.md](examples/ACCEPTANCE.md).
 

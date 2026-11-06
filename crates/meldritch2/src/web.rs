@@ -115,7 +115,7 @@ pub struct Application {
     pub websocket: Option<WebSocketCallbacks>,
     pub name: String,
     pub controls: BTreeMap<String, PerformanceControl>,
-    pub roles: BTreeMap<String, Role>,
+    pub roles: Rc<RefCell<BTreeMap<String, Role>>>,
     pub credentials: BTreeMap<String, String>,
     pub anonymous_role: Option<String>,
     runtime: Rc<RefCell<PerformanceRuntime>>,
@@ -135,7 +135,7 @@ impl Application {
             websocket: None,
             name: "Meldritch Performance".into(),
             controls: BTreeMap::new(),
-            roles: BTreeMap::new(),
+            roles: Rc::new(RefCell::new(BTreeMap::new())),
             credentials: BTreeMap::new(),
             anonymous_role: None,
             runtime: Rc::new(RefCell::new(PerformanceRuntime::default())),
@@ -177,7 +177,7 @@ impl Application {
     }
 
     fn permitted(&self, role: Option<&str>, control: &str) -> bool {
-        role.and_then(|name| self.roles.get(name))
+        role.and_then(|name| self.roles.borrow().get(name).cloned())
             .is_some_and(|role| {
                 role.controls
                     .as_ref()
@@ -577,7 +577,14 @@ impl ControlExecutor {
                         });
                     match result {
                         Ok(()) => self.publish(),
-                        Err(error) => self.log_dispatch_error("WebSocket control", error),
+                        Err(error) => {
+                            let message = error.message.clone();
+                            self.log_dispatch_error("WebSocket control", error);
+                            let _ = self.shared.updates.send(Outbound {
+                                target: Some(client.id),
+                                value: Arc::new(json!({"type":"error", "error":message})),
+                            });
+                        }
                     }
                 } else if let Some(callback) = self
                     .application
@@ -1122,19 +1129,27 @@ async fn websocket_loop(socket: WebSocket, shared: Shared, remote: SocketAddr) {
 }
 
 fn enqueue(shared: &Shared, dispatch: Dispatch) -> Result<(), ()> {
+    shared
+        .diagnostics
+        .queue_depth
+        .fetch_add(1, Ordering::Relaxed);
     match shared.queue.try_send(dispatch) {
-        Ok(()) => {
+        Ok(()) => Ok(()),
+        Err(TrySendError::Full(_)) => {
             shared
                 .diagnostics
                 .queue_depth
-                .fetch_add(1, Ordering::Relaxed);
-            Ok(())
-        }
-        Err(TrySendError::Full(_)) => {
+                .fetch_sub(1, Ordering::Relaxed);
             shared.diagnostics.rejected.fetch_add(1, Ordering::Relaxed);
             Err(())
         }
-        Err(TrySendError::Disconnected(_)) => Err(()),
+        Err(TrySendError::Disconnected(_)) => {
+            shared
+                .diagnostics
+                .queue_depth
+                .fetch_sub(1, Ordering::Relaxed);
+            Err(())
+        }
     }
 }
 
@@ -1225,18 +1240,18 @@ fn validate_application(application: &Application) -> Result<(), String> {
         );
     }
     if let Some(role) = &application.anonymous_role
-        && !application.roles.contains_key(role)
+        && !application.roles.borrow().contains_key(role)
     {
         return Err(format!("anonymous_role references unknown role '{role}'"));
     }
     for role in application.credentials.values() {
-        if !application.roles.contains_key(role) {
+        if !application.roles.borrow().contains_key(role) {
             return Err(format!(
                 "performer credential references unknown role '{role}'"
             ));
         }
     }
-    for (name, role) in &application.roles {
+    for (name, role) in application.roles.borrow().iter() {
         if let Some(controls) = &role.controls {
             for control in controls {
                 if !application.controls.contains_key(control) {
