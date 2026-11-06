@@ -5,6 +5,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
 npm --prefix crates/meldritch2/frontend test
+npm --prefix crates/meldritch2/frontend run format:check
 npm --prefix crates/meldritch2/frontend run build
 cargo fmt -p meldritch2 -- --check
 cargo clippy -p meldritch2 --all-targets

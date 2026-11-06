@@ -1,2 +1,85 @@
-<script setup lang="ts">import{ref}from'vue';import type{RangeControl}from'../../types/protocol';const p=defineProps<{control:RangeControl}>();const emit=defineEmits<{change:[number]}>();const start=ref<{y:number;n:number}|null>(null);let last=0,latest=0;const normalized=()=>p.control.scale==='log'?(Math.log(p.control.value)-Math.log(p.control.min))/(Math.log(p.control.max)-Math.log(p.control.min)):(p.control.value-p.control.min)/(p.control.max-p.control.min);const mapped=(n:number)=>p.control.scale==='log'?Math.exp(Math.log(p.control.min)+(Math.log(p.control.max)-Math.log(p.control.min))*n):p.control.min+(p.control.max-p.control.min)*n;function down(e:PointerEvent){start.value={y:e.clientY,n:normalized()};latest=p.control.value;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)}function move(e:PointerEvent){if(!start.value)return;const n=Math.max(0,Math.min(1,start.value.n+(start.value.y-e.clientY)/160));latest=mapped(n);const now=performance.now();if(now-last>33){last=now;emit('change',latest)}}function up(){if(start.value)emit('change',latest);start.value=null}function key(e:KeyboardEvent){const d=e.key==='ArrowUp'||e.key==='ArrowRight'?1:e.key==='ArrowDown'||e.key==='ArrowLeft'?-1:0;if(d){e.preventDefault();emit('change',mapped(Math.max(0,Math.min(1,normalized()+d/100))))}}const angle=()=>-135+270*normalized()</script>
-<template><div class="knob"><label>{{control.label}}</label><button :disabled="control.read_only" :aria-label="control.label" :aria-valuemin="control.min" :aria-valuemax="control.max" :aria-valuenow="control.value" role="slider" @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up" @keydown="key"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40"/><line x1="50" y1="50" x2="50" y2="17" :transform="`rotate(${angle()} 50 50)`"/></svg></button><output>{{control.value.toFixed(2)}} {{control.unit}}</output></div></template>
+<script setup lang="ts">
+import { ref } from "vue";
+import type { RangeControl } from "../../types/protocol";
+const p = defineProps<{ control: RangeControl }>();
+const emit = defineEmits<{ change: [number] }>();
+const start = ref<{ y: number; n: number } | null>(null);
+let last = 0,
+  latest = 0;
+const normalized = () =>
+  p.control.scale === "log"
+    ? (Math.log(p.control.value) - Math.log(p.control.min)) /
+      (Math.log(p.control.max) - Math.log(p.control.min))
+    : (p.control.value - p.control.min) / (p.control.max - p.control.min);
+const mapped = (n: number) =>
+  p.control.scale === "log"
+    ? Math.exp(
+        Math.log(p.control.min) +
+          (Math.log(p.control.max) - Math.log(p.control.min)) * n,
+      )
+    : p.control.min + (p.control.max - p.control.min) * n;
+function down(e: PointerEvent) {
+  start.value = { y: e.clientY, n: normalized() };
+  latest = p.control.value;
+  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+}
+function move(e: PointerEvent) {
+  if (!start.value) return;
+  const n = Math.max(
+    0,
+    Math.min(1, start.value.n + (start.value.y - e.clientY) / 160),
+  );
+  latest = mapped(n);
+  const now = performance.now();
+  if (now - last > 33) {
+    last = now;
+    emit("change", latest);
+  }
+}
+function up() {
+  if (start.value) emit("change", latest);
+  start.value = null;
+}
+function key(e: KeyboardEvent) {
+  const d =
+    e.key === "ArrowUp" || e.key === "ArrowRight"
+      ? 1
+      : e.key === "ArrowDown" || e.key === "ArrowLeft"
+        ? -1
+        : 0;
+  if (d) {
+    e.preventDefault();
+    emit("change", mapped(Math.max(0, Math.min(1, normalized() + d / 100))));
+  }
+}
+const angle = () => -135 + 270 * normalized();
+</script>
+<template>
+  <div class="knob">
+    <label>{{ control.label }}</label
+    ><button
+      :disabled="control.read_only"
+      :aria-label="control.label"
+      :aria-valuemin="control.min"
+      :aria-valuemax="control.max"
+      :aria-valuenow="control.value"
+      role="slider"
+      @pointerdown="down"
+      @pointermove="move"
+      @pointerup="up"
+      @pointercancel="up"
+      @keydown="key"
+    >
+      <svg viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="40" />
+        <line
+          x1="50"
+          y1="50"
+          x2="50"
+          y2="17"
+          :transform="`rotate(${angle()} 50 50)`"
+        />
+      </svg></button
+    ><output>{{ control.value.toFixed(2) }} {{ control.unit }}</output>
+  </div>
+</template>
