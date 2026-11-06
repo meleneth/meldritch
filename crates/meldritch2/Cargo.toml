@@ -23,7 +23,11 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 ureq.workspace = true
+vst3-host.workspace = true
 
 [[bin]]
 name = "meldritch2"
 path = "src/main.rs"
+
+[dev-dependencies]
+meldritch-vst3-fixture = { path = "../meldritch-vst3-fixture" }

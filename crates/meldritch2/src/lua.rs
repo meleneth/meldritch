@@ -40,6 +40,8 @@ struct LuaSequencerTrack {
 struct LuaSequencerTempo(Arc<SequencerControl>);
 #[derive(Clone, Copy, Debug)]
 struct LuaPlaitsModel(crate::plaits::PlaitsModel);
+#[derive(Clone, Debug)]
+struct LuaVst3(Arc<crate::vst3::Spec>);
 impl UserData for LuaSample {}
 impl UserData for LuaSequencerTrack {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
@@ -48,6 +50,72 @@ impl UserData for LuaSequencerTrack {
 }
 impl UserData for LuaSequencerTempo {}
 impl UserData for LuaPlaitsModel {}
+impl UserData for LuaVst3 {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("descriptor", |lua, this, ()| {
+            descriptor_table(lua, &this.0.descriptor)
+        });
+        methods.add_method("parameters", |lua, this, ()| parameter_table(lua, &this.0));
+        methods.add_method_mut("set_parameter", |_, this, (id, value): (u32, f64)| {
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                return Err(mlua::Error::external(
+                    "VST3 parameter value must be finite and normalized to 0..1",
+                ));
+            }
+            let parameter = this
+                .0
+                .parameters
+                .iter()
+                .find(|parameter| parameter.id == id)
+                .ok_or_else(|| mlua::Error::external(format!("unknown VST3 parameter ID {id}")))?;
+            if parameter.read_only {
+                return Err(mlua::Error::external(format!(
+                    "VST3 parameter {} ('{}') is read-only",
+                    id, parameter.name
+                )));
+            }
+            Arc::make_mut(&mut this.0).initial_values.insert(id, value);
+            Ok(())
+        });
+        methods.add_method_mut("load_state", |_, this, bytes: Table| {
+            let state = bytes
+                .sequence_values::<u8>()
+                .collect::<mlua::Result<Vec<_>>>()?;
+            Arc::make_mut(&mut this.0).state = Some(state);
+            Ok(())
+        });
+    }
+}
+
+fn descriptor_table(lua: &Lua, descriptor: &crate::vst3::Descriptor) -> mlua::Result<Table> {
+    let table = lua.create_table()?;
+    table.set("id", descriptor.class_id.clone())?;
+    table.set("name", descriptor.name.clone())?;
+    table.set("vendor", descriptor.vendor.clone())?;
+    table.set("category", descriptor.category.clone())?;
+    table.set("version", descriptor.version.clone())?;
+    table.set("instrument", descriptor.instrument)?;
+    table.set("path", descriptor.path.to_string_lossy().into_owned())?;
+    Ok(table)
+}
+
+fn parameter_table(lua: &Lua, spec: &crate::vst3::Spec) -> mlua::Result<Table> {
+    let result = lua.create_table()?;
+    for (index, parameter) in spec.parameters.iter().enumerate() {
+        let item = lua.create_table()?;
+        item.set("id", parameter.id)?;
+        item.set("key", crate::vst3::Spec::parameter_name(parameter.id))?;
+        item.set("name", parameter.name.clone())?;
+        item.set("value", spec.initial_value(parameter))?;
+        item.set("default", parameter.default)?;
+        item.set("unit", parameter.unit.clone())?;
+        item.set("steps", parameter.step_count)?;
+        item.set("automatable", parameter.automatable)?;
+        item.set("read_only", parameter.read_only)?;
+        result.set(index + 1, item)?;
+    }
+    Ok(result)
+}
 impl UserData for LuaSampleBank {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("load", |lua, this, (name, variant): (String, usize)| {
@@ -655,6 +723,28 @@ local function decorate_scope(facade, scope, prefix)
       timbre = handle.timbre_mod, morph = handle.morph_mod,
     })
   end
+  function facade:vst3(values)
+    assert(type(values) == "table" and type(values.plugin) == "string",
+      "vst3 requires plugin = stable class ID or unique display name")
+    local runtime = meldritch._vst3(values)
+    local handle = scope:module(values.id or self:_id("vst3"), "vst3", {}, runtime)
+    handle.out = { left = handle.left, right = handle.right, direction = "stereo_output" }
+    handle.parameters = {}
+    for _, info in ipairs(runtime:parameters()) do
+      handle.parameters[info.id] = parameter(handle, info.key)
+    end
+    function handle:set_parameter(id, value)
+      runtime:set_parameter(id, value)
+      return self
+    end
+    function handle:load_state(bytes)
+      runtime:load_state(bytes)
+      return self
+    end
+    function handle:parameter_info() return runtime:parameters() end
+    function handle:descriptor() return runtime:descriptor() end
+    return handle
+  end
   function facade:adsr(values)
     local handle = scope:module(self:_id("adsr"), "adsr", copy_values(values,
       { "attack", "decay", "sustain", "release" }))
@@ -1232,6 +1322,27 @@ pub fn read(script: &str) -> Result<Graph, String> {
     read_with_root(script, &root)
 }
 
+fn lua_path_list(paths: Option<Table>, root: &Path) -> mlua::Result<Vec<PathBuf>> {
+    let Some(paths) = paths else {
+        return Ok(Vec::new());
+    };
+    paths
+        .sequence_values::<String>()
+        .map(|path| {
+            let path = PathBuf::from(path?);
+            Ok(if path.is_absolute() {
+                path
+            } else {
+                root.join(path)
+            })
+        })
+        .collect()
+}
+
+fn lua_vst3_paths(spec: &Table, root: &Path) -> mlua::Result<Vec<PathBuf>> {
+    lua_path_list(spec.get::<Option<Table>>("paths")?, root)
+}
+
 pub fn read_with_root(script: &str, project_root: &Path) -> Result<Graph, String> {
     read_program_with_root(script, project_root).map(Program::into_graph)
 }
@@ -1380,6 +1491,38 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
         .map_err(|e| e.to_string())?;
     meldritch
         .set("samples", samples)
+        .map_err(|e| e.to_string())?;
+    let vst3_root = project_root.to_path_buf();
+    let vst3 = lua
+        .create_function(move |lua, spec: Table| {
+            let selector: String = spec.get("plugin")?;
+            let paths = lua_vst3_paths(&spec, &vst3_root)?;
+            let mut loaded = crate::vst3::load(&selector, &paths).map_err(mlua::Error::external)?;
+            if let Some(state) = spec.get::<Option<Table>>("state")? {
+                loaded.state = Some(
+                    state
+                        .sequence_values::<u8>()
+                        .collect::<mlua::Result<Vec<_>>>()?,
+                );
+            }
+            lua.create_userdata(LuaVst3(Arc::new(loaded)))
+        })
+        .map_err(|e| e.to_string())?;
+    meldritch.set("_vst3", vst3).map_err(|e| e.to_string())?;
+    let discovery_root = project_root.to_path_buf();
+    let vst3_plugins = lua
+        .create_function(move |lua, paths: Option<Table>| {
+            let paths = lua_path_list(paths, &discovery_root)?;
+            let plugins = crate::vst3::discover(&paths).map_err(mlua::Error::external)?;
+            let result = lua.create_table()?;
+            for (index, plugin) in plugins.iter().enumerate() {
+                result.set(index + 1, descriptor_table(lua, plugin)?)?;
+            }
+            Ok(result)
+        })
+        .map_err(|e| e.to_string())?;
+    meldritch
+        .set("vst3_plugins", vst3_plugins)
         .map_err(|e| e.to_string())?;
     let plaits_model = lua
         .create_function(|lua, name: String| {
@@ -2154,6 +2297,9 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                     .map_err(|e| e.to_string())?
                     .0,
             ),
+            Some(value) if value.is::<LuaVst3>() => ModuleRuntime::Vst3(Arc::clone(
+                &value.borrow::<LuaVst3>().map_err(|e| e.to_string())?.0,
+            )),
             Some(_) => return Err("unknown module runtime payload".into()),
         };
         graph.modules.push(Module {

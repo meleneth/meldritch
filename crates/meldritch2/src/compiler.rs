@@ -40,6 +40,7 @@ enum OpProcessor {
         track: usize,
     },
     SequencerTempo(Arc<SequencerControl>),
+    Vst3(crate::vst3::Instance),
 }
 
 const MAX_DELAY_SECONDS: f64 = 4.0;
@@ -575,6 +576,53 @@ pub struct Machine {
     sequencer_controls: Vec<Arc<SequencerControl>>,
     level_ranges: Vec<std::ops::Range<usize>>,
     automations: Vec<AutomationRuntime>,
+    block_scratch: Option<BlockScratch>,
+}
+
+#[derive(Debug)]
+struct BlockScratch {
+    slot_buffers: Vec<Vec<f64>>,
+    op_outputs: Vec<Vec<f64>>,
+    op_inputs: Vec<Vec<f64>>,
+    op_params: Vec<Vec<f64>>,
+    sequencer_ops: Vec<usize>,
+}
+
+impl BlockScratch {
+    fn new(machine: &Machine, block_size: usize) -> Self {
+        Self {
+            slot_buffers: (0..machine.slots.len())
+                .map(|_| vec![0.0; block_size])
+                .collect(),
+            op_outputs: machine
+                .ops
+                .iter()
+                .map(|op| vec![0.0; block_size * op.outputs.len()])
+                .collect(),
+            op_inputs: machine
+                .ops
+                .iter()
+                .map(|op| vec![0.0; block_size * op.inputs.len().max(1)])
+                .collect(),
+            op_params: machine
+                .ops
+                .iter()
+                .map(|op| vec![0.0; op.params.len()])
+                .collect(),
+            sequencer_ops: machine
+                .ops
+                .iter()
+                .enumerate()
+                .filter_map(|(index, op)| {
+                    matches!(
+                        op.processor,
+                        OpProcessor::SequencerTrack { .. } | OpProcessor::SequencerTempo(_)
+                    )
+                    .then_some(index)
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1049,6 +1097,14 @@ impl Machine {
     }
 
     pub(crate) fn process_prepared(&mut self, buffer: &mut [f64]) {
+        if let Some(mut scratch) = self.block_scratch.take() {
+            for chunk in buffer.chunks_mut(crate::vst3::MAX_BLOCK_SIZE) {
+                process_machine_block(self, &mut scratch, chunk.len());
+                chunk.copy_from_slice(&scratch.slot_buffers[self.output_slots[0]][..chunk.len()]);
+            }
+            self.block_scratch = Some(scratch);
+            return;
+        }
         for sample in buffer {
             self.process_one();
             *sample = self.slots[self.output_slots[0]];
@@ -1057,6 +1113,18 @@ impl Machine {
 
     pub(crate) fn process_stereo_prepared(&mut self, left: &mut [f64], right: &mut [f64]) {
         assert_eq!(left.len(), right.len());
+        if let Some(mut scratch) = self.block_scratch.take() {
+            for (left, right) in left
+                .chunks_mut(crate::vst3::MAX_BLOCK_SIZE)
+                .zip(right.chunks_mut(crate::vst3::MAX_BLOCK_SIZE))
+            {
+                process_machine_block(self, &mut scratch, left.len());
+                left.copy_from_slice(&scratch.slot_buffers[self.output_slots[0]][..left.len()]);
+                right.copy_from_slice(&scratch.slot_buffers[self.output_slots[1]][..right.len()]);
+            }
+            self.block_scratch = Some(scratch);
+            return;
+        }
         for (left, right) in left.iter_mut().zip(right) {
             self.process_one();
             *left = self.slots[self.output_slots[0]];
@@ -1099,6 +1167,9 @@ impl Machine {
                     delay.process(inputs, params, self.sample_rate, outputs)
                 }
                 OpProcessor::Plaits(plaits) => plaits.process(inputs, params, outputs),
+                OpProcessor::Vst3(plugin) => {
+                    plugin.process(&inputs[0..1], &inputs[1..2], &inputs[2..3], params, outputs)
+                }
                 OpProcessor::SequencerTrack { sequencer, track } => {
                     let runtime = &self.sequencers[*sequencer];
                     outputs[0] = runtime.trigger(*track);
@@ -1162,6 +1233,9 @@ impl Machine {
                     delay.process(inputs, params, self.sample_rate, outputs)
                 }
                 OpProcessor::Plaits(plaits) => plaits.process(inputs, params, outputs),
+                OpProcessor::Vst3(plugin) => {
+                    plugin.process(&inputs[0..1], &inputs[1..2], &inputs[2..3], params, outputs)
+                }
                 OpProcessor::SequencerTrack { sequencer, track } => {
                     let runtime = &self.sequencers[*sequencer];
                     outputs[0] = runtime.trigger(*track);
@@ -1364,6 +1438,89 @@ impl Machine {
     pub fn sequencer_controls(&self) -> &[Arc<SequencerControl>] {
         &self.sequencer_controls
     }
+
+    pub fn set_offline_processing(&mut self) {
+        for op in &mut self.ops {
+            if let OpProcessor::Vst3(plugin) = &mut op.processor {
+                plugin.set_offline();
+            }
+        }
+    }
+
+    pub fn vst3_state(&self, module: &str) -> Result<Vec<u8>, String> {
+        let index = self
+            .op_ids
+            .iter()
+            .position(|id| id == module)
+            .ok_or_else(|| format!("unknown module '{module}'"))?;
+        match &self.ops[index].processor {
+            OpProcessor::Vst3(plugin) => plugin.save_state(),
+            _ => Err(format!("module '{module}' is not a VST3 plugin")),
+        }
+    }
+}
+
+fn process_machine_block(machine: &mut Machine, scratch: &mut BlockScratch, frames: usize) {
+    debug_assert!(
+        scratch
+            .slot_buffers
+            .first()
+            .is_none_or(|buffer| frames <= buffer.len())
+    );
+    for (op, values) in machine.ops.iter().zip(&mut scratch.op_params) {
+        for (target, index) in values.iter_mut().zip(&op.params) {
+            *target = machine.params[*index];
+        }
+    }
+    for frame in 0..frames {
+        for sequencer in &mut machine.sequencers {
+            sequencer.begin_frame(machine.sample_rate);
+        }
+        for &op_index in &scratch.sequencer_ops {
+            let op = &mut machine.ops[op_index];
+            let outputs = &mut scratch.op_outputs[op_index];
+            match &mut op.processor {
+                OpProcessor::SequencerTrack { sequencer, track } => {
+                    let runtime = &machine.sequencers[*sequencer];
+                    let base = frame * 5;
+                    outputs[base] = runtime.trigger(*track);
+                    outputs[base + 1] = runtime.pitch(*track);
+                    outputs[base + 2] = runtime.gate(*track);
+                    outputs[base + 3] = runtime.velocity(*track);
+                    outputs[base + 4] = runtime.enabled(*track);
+                }
+                OpProcessor::SequencerTempo(control) => {
+                    let bpm = scratch.op_params[op_index][0];
+                    control.bpm.store(bpm.to_bits(), Ordering::Release);
+                    outputs[frame] = bpm;
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+    for range in machine.level_ranges.clone() {
+        for op_index in range.clone() {
+            process_offline_op(
+                &mut machine.ops[op_index],
+                &mut scratch.op_inputs[op_index],
+                &scratch.op_params[op_index],
+                &mut scratch.op_outputs[op_index],
+                &scratch.slot_buffers,
+                machine.sample_rate,
+                frames,
+            );
+        }
+        for op_index in range {
+            let op = &machine.ops[op_index];
+            let outputs = &scratch.op_outputs[op_index];
+            let output_count = op.outputs.len();
+            for (output, slot) in op.outputs.clone().enumerate() {
+                for frame in 0..frames {
+                    scratch.slot_buffers[slot][frame] = outputs[frame * output_count + output];
+                }
+            }
+        }
+    }
 }
 
 /// Block-oriented executor for file rendering. The live callback continues to
@@ -1391,10 +1548,22 @@ pub struct OfflineRenderProfile {
 }
 
 impl OfflineRenderer {
-    pub fn new(machine: Machine, block_size: usize, workers: usize) -> Result<Self, String> {
+    pub fn new(mut machine: Machine, block_size: usize, workers: usize) -> Result<Self, String> {
         if block_size == 0 || workers == 0 {
             return Err("offline renderer requires positive block size and worker count".into());
         }
+        if block_size > crate::vst3::MAX_BLOCK_SIZE
+            && machine
+                .ops
+                .iter()
+                .any(|op| matches!(op.processor, OpProcessor::Vst3(_)))
+        {
+            return Err(format!(
+                "VST3 processing supports block sizes up to {} frames, got {block_size}",
+                crate::vst3::MAX_BLOCK_SIZE
+            ));
+        }
+        machine.set_offline_processing();
         let pool = (workers > 1)
             .then(|| {
                 rayon::ThreadPoolBuilder::new()
@@ -1415,7 +1584,7 @@ impl OfflineRenderer {
         let op_inputs = machine
             .ops
             .iter()
-            .map(|op| vec![0.0; op.inputs.len()])
+            .map(|op| vec![0.0; block_size * op.inputs.len().max(1)])
             .collect();
         let op_params = machine
             .ops
@@ -1593,6 +1762,32 @@ fn process_offline_op(
         return;
     }
     let output_count = op.outputs.len();
+    if let OpProcessor::Vst3(plugin) = &mut op.processor {
+        for (input_index, input) in op.inputs.iter().enumerate() {
+            for frame in 0..frames {
+                inputs[input_index * frames + frame] = if input.sources.is_empty() {
+                    input.unconnected
+                } else {
+                    input
+                        .sources
+                        .iter()
+                        .fold(0.0, |sum, source| sum + slots[*source][frame])
+                };
+            }
+        }
+        let (pitch, rest) = inputs.split_at_mut(frames);
+        let (gate, rest) = rest.split_at_mut(frames);
+        let velocity = &rest[..frames];
+        plugin.process(
+            pitch,
+            gate,
+            velocity,
+            params,
+            &mut outputs[..frames * output_count],
+        );
+        return;
+    }
+    let inputs = &mut inputs[..op.inputs.len()];
     for frame in 0..frames {
         for (target, input) in inputs.iter_mut().zip(&op.inputs) {
             *target = if input.sources.is_empty() {
@@ -1618,6 +1813,7 @@ fn process_offline_op(
                 delay.process(inputs, params, sample_rate, frame_outputs)
             }
             OpProcessor::Plaits(plaits) => plaits.process(inputs, params, frame_outputs),
+            OpProcessor::Vst3(_) => unreachable!("VST3 block path returned above"),
             OpProcessor::SequencerTrack { .. } | OpProcessor::SequencerTempo(_) => unreachable!(),
         }
     }
@@ -1644,12 +1840,21 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         let contract = contract::find(&module.kind)
             .ok_or_else(|| format!("unknown module type '{}'", module.kind))?;
         for (name, value) in &module.values {
-            let param = contract
-                .params
-                .iter()
-                .find(|p| p.name == name)
-                .ok_or_else(|| format!("{}.{} is not a parameter", module.id, name))?;
-            validate_parameter_value(&ParameterId::new(&module.id, name), param.range, *value)?;
+            let range = match &module.runtime {
+                ModuleRuntime::Vst3(spec) if spec.parameter_id(name).is_some() => Some((0.0, 1.0)),
+                ModuleRuntime::Vst3(_) => {
+                    return Err(format!("{}.{} is not a VST3 parameter", module.id, name));
+                }
+                _ => {
+                    contract
+                        .params
+                        .iter()
+                        .find(|p| p.name == name)
+                        .ok_or_else(|| format!("{}.{} is not a parameter", module.id, name))?
+                        .range
+                }
+            };
+            validate_parameter_value(&ParameterId::new(&module.id, name), range, *value)?;
         }
     }
     let output_slots: Vec<usize> = graph
@@ -1819,11 +2024,27 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
     for &i in &schedule {
         let module = &graph.modules[i];
         let c = contract::find(&module.kind).expect("module checked");
-        for p in c.params {
-            let index = params.len();
-            params.push(*module.values.get(p.name).unwrap_or(&p.default));
-            param_ranges.push(p.range);
-            param_ids.insert(ParameterId::new(&module.id, p.name), index);
+        if let ModuleRuntime::Vst3(spec) = &module.runtime {
+            for parameter in &spec.parameters {
+                let name = crate::vst3::Spec::parameter_name(parameter.id);
+                let index = params.len();
+                params.push(
+                    module
+                        .values
+                        .get(&name)
+                        .copied()
+                        .unwrap_or_else(|| spec.initial_value(parameter)),
+                );
+                param_ranges.push(Some((0.0, 1.0)));
+                param_ids.insert(ParameterId::new(&module.id, name), index);
+            }
+        } else {
+            for p in c.params {
+                let index = params.len();
+                params.push(*module.values.get(p.name).unwrap_or(&p.default));
+                param_ranges.push(p.range);
+                param_ids.insert(ParameterId::new(&module.id, p.name), index);
+            }
         }
     }
     let mut controls = BTreeMap::new();
@@ -2362,11 +2583,23 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 }
             })
             .collect();
-        let params = c
-            .params
-            .iter()
-            .map(|p| param_ids[&ParameterId::new(&module.id, p.name)])
-            .collect();
+        let params = match &module.runtime {
+            ModuleRuntime::Vst3(spec) => spec
+                .parameters
+                .iter()
+                .map(|parameter| {
+                    param_ids[&ParameterId::new(
+                        &module.id,
+                        crate::vst3::Spec::parameter_name(parameter.id),
+                    )]
+                })
+                .collect(),
+            _ => c
+                .params
+                .iter()
+                .map(|p| param_ids[&ParameterId::new(&module.id, p.name)])
+                .collect(),
+        };
         let processor = if matches!(module.runtime, ModuleRuntime::Contract) {
             match module.kind.as_str() {
                 "delay" => OpProcessor::Delay(DelayRuntime::new(sample_rate)?),
@@ -2401,6 +2634,9 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 ModuleRuntime::SequencerTempo(sequencer) if module.kind == "sequencer_tempo" => {
                     OpProcessor::SequencerTempo(Arc::clone(sequencer))
                 }
+                ModuleRuntime::Vst3(spec) if module.kind == "vst3" => {
+                    OpProcessor::Vst3(crate::vst3::Instance::new(spec, sample_rate)?)
+                }
                 _ => {
                     return Err(format!(
                         "module '{}' has incompatible runtime data",
@@ -2431,7 +2667,10 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         .cloned()
         .map(SequencerRuntime::new)
         .collect();
-    Ok(Machine {
+    let has_vst3 = ops
+        .iter()
+        .any(|op| matches!(op.processor, OpProcessor::Vst3(_)));
+    let mut machine = Machine {
         revision: Arc::new(()),
         ops,
         slots: vec![0.0; slot_count],
@@ -2455,7 +2694,11 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 .map(|m| contract::find(&m.kind)
                     .expect("module checked")
                     .params
-                    .len())
+                    .len()
+                    .max(match &m.runtime {
+                        ModuleRuntime::Vst3(spec) => spec.parameters.len(),
+                        _ => 0,
+                    }))
                 .max()
                 .unwrap_or(0)
         ],
@@ -2496,7 +2739,12 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         sequencer_controls,
         level_ranges,
         automations,
-    })
+        block_scratch: None,
+    };
+    if has_vst3 {
+        machine.block_scratch = Some(BlockScratch::new(&machine, crate::vst3::MAX_BLOCK_SIZE));
+    }
+    Ok(machine)
 }
 
 #[derive(Default)]

@@ -34,3 +34,4 @@ pub mod svf;
 pub mod switch;
 pub mod triangle;
 pub mod vca;
+pub mod vst3;

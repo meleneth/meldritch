@@ -28,7 +28,7 @@ fn render_wav(graph: &Graph, path: &str, seconds: f64, mode: RenderMode) -> Resu
     const BLOCK: usize = 1_024;
     let frames = (seconds * f64::from(RATE)).ceil() as usize;
     let preparation_started = Instant::now();
-    let machine = compile_at_rate(graph, f64::from(RATE))?;
+    let mut machine = compile_at_rate(graph, f64::from(RATE))?;
     let preparation = preparation_started.elapsed();
     let mode = match mode {
         // Small graphs benchmark faster on the scalar reference. Larger
@@ -42,7 +42,10 @@ fn render_wav(graph: &Graph, path: &str, seconds: f64, mode: RenderMode) -> Resu
         selected => selected,
     };
     let (mut scalar, mut block) = match mode {
-        RenderMode::Scalar => (Some(machine), None),
+        RenderMode::Scalar => {
+            machine.set_offline_processing();
+            (Some(machine), None)
+        }
         RenderMode::Block { workers } => {
             (None, Some(OfflineRenderer::new(machine, BLOCK, workers)?))
         }

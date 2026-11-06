@@ -29,6 +29,7 @@ pub enum ModuleRuntime {
         track: usize,
     },
     SequencerTempo(Arc<SequencerControl>),
+    Vst3(Arc<crate::vst3::Spec>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

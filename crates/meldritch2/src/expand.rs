@@ -166,6 +166,16 @@ fn validate_authored_value(
     name: &str,
     value: f64,
 ) -> Result<(), String> {
+    if let crate::model::ModuleRuntime::Vst3(spec) = &module.runtime {
+        if spec.parameter_id(name).is_none() {
+            return Err(format!("{}.{} is not a VST3 parameter", module.id, name));
+        }
+        return validate_parameter_value(
+            &ParameterId::new(&module.id, name),
+            Some((0.0, 1.0)),
+            value,
+        );
+    }
     let contract = contract::find(&module.kind)
         .ok_or_else(|| format!("unknown module type '{}'", module.kind))?;
     let parameter = contract
@@ -249,6 +259,22 @@ fn expand_scope(
         if !ids.insert(qualified.clone()) {
             return Err(format!("duplicate expanded module ID '{qualified}'"));
         }
+        let mut parameters = contract
+            .params
+            .iter()
+            .map(|parameter| {
+                (
+                    parameter.name.to_owned(),
+                    ParameterId::new(&qualified, parameter.name),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        if let crate::model::ModuleRuntime::Vst3(spec) = &module.runtime {
+            parameters.extend(spec.parameters.iter().map(|parameter| {
+                let name = crate::vst3::Spec::parameter_name(parameter.id);
+                (name.clone(), ParameterId::new(&qualified, name))
+            }));
+        }
         let ports = Ports {
             inputs: contract
                 .inputs
@@ -276,16 +302,7 @@ fn expand_scope(
                     )
                 })
                 .collect(),
-            parameters: contract
-                .params
-                .iter()
-                .map(|parameter| {
-                    (
-                        parameter.name.to_owned(),
-                        ParameterId::new(&qualified, parameter.name),
-                    )
-                })
-                .collect(),
+            parameters,
         };
         let mut module = module.clone();
         module.id = qualified;

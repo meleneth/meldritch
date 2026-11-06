@@ -51,7 +51,7 @@ pub struct Contract {
 
 pub type ProcessFn = fn(&mut [f64], &[f64], &[f64], f64, &mut [f64]);
 
-const CONTRACTS: [Contract; 36] = [
+const CONTRACTS: [Contract; 37] = [
     crate::units::constant::CONTRACT,
     crate::units::gain::CONTRACT,
     crate::units::output::CONTRACT,
@@ -88,6 +88,7 @@ const CONTRACTS: [Contract; 36] = [
     crate::units::sequencer_track::CONTRACT,
     crate::units::sequencer_tempo::CONTRACT,
     crate::units::stereo_mixer8::CONTRACT,
+    crate::units::vst3::CONTRACT,
 ];
 
 pub fn all() -> &'static [Contract] {
