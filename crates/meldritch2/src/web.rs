@@ -481,6 +481,7 @@ struct Shared {
     next_request: Arc<AtomicU64>,
     next_client: Arc<AtomicU64>,
     websocket_path: Option<String>,
+    connection_shutdown: broadcast::Sender<()>,
 }
 
 #[derive(Clone)]
@@ -737,6 +738,7 @@ pub struct ServerSession {
     shutdown: Option<oneshot::Sender<()>>,
     thread: Option<thread::JoinHandle<Result<(), String>>>,
     diagnostics: Arc<AtomicDiagnostics>,
+    connection_shutdown: broadcast::Sender<()>,
 }
 
 impl ServerSession {
@@ -750,6 +752,7 @@ impl ServerSession {
         self.finish()
     }
     fn finish(&mut self) -> Result<(), String> {
+        let _ = self.connection_shutdown.send(());
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -772,6 +775,7 @@ pub fn start(application: Application) -> Result<(ServerSession, ControlExecutor
     validate_application(&application)?;
     let (sender, receiver) = mpsc::sync_channel(application.config.queue_capacity);
     let (updates, _) = broadcast::channel(64);
+    let (connection_shutdown, _) = broadcast::channel(1);
     let diagnostics = Arc::new(AtomicDiagnostics::default());
     let initial = Arc::new(application.snapshot(0));
     let shared = Shared {
@@ -788,6 +792,7 @@ pub fn start(application: Application) -> Result<(ServerSession, ControlExecutor
             .websocket
             .as_ref()
             .map(|websocket| normalize_path(&websocket.path)),
+        connection_shutdown: connection_shutdown.clone(),
     };
     let network = shared.clone();
     let network_spec = NetworkSpec::from_application(&application);
@@ -832,6 +837,7 @@ pub fn start(application: Application) -> Result<(ServerSession, ControlExecutor
             shutdown: Some(shutdown_tx),
             thread: Some(thread),
             diagnostics,
+            connection_shutdown,
         },
         ControlExecutor {
             application,
@@ -1063,6 +1069,7 @@ async fn websocket_loop(socket: WebSocket, shared: Shared, remote: SocketAddr) {
         },
     );
     let mut updates = shared.updates.subscribe();
+    let mut shutdown = shared.connection_shutdown.subscribe();
     let initial = Arc::clone(&shared.snapshot.read().unwrap());
     let mut revision = initial.get("revision").and_then(Value::as_u64).unwrap_or(0);
     let (mut sink, mut stream) = socket.split();
@@ -1081,6 +1088,10 @@ async fn websocket_loop(socket: WebSocket, shared: Shared, remote: SocketAddr) {
     heartbeat.tick().await;
     loop {
         tokio::select! {
+            _ = shutdown.recv() => {
+                let _ = sink.send(Message::Close(None)).await;
+                break;
+            }
             update = updates.recv() => match update {
                 Ok(update) => {
                     if update.target.is_none_or(|target| target == id) {

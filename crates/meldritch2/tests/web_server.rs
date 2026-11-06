@@ -269,7 +269,25 @@ fn transport_limits_errors_permissions_port_conflicts_and_restart_are_explicit()
             .contains("failed to bind")
     );
 
+    let (connected, ready) = std::sync::mpsc::sync_channel(1);
+    let websocket_url = format!("ws://{address}/performance");
+    let active_client = thread::spawn(move || {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async move {
+                let (mut socket, _) = connect_async(websocket_url).await.unwrap();
+                let _snapshot = socket.next().await.unwrap().unwrap();
+                connected.send(()).unwrap();
+                let closing = socket.next().await;
+                assert!(
+                    closing.is_none()
+                        || matches!(closing, Some(Ok(Message::Close(_))) | Some(Err(_)))
+                );
+            });
+    });
+    ready.recv_timeout(Duration::from_secs(2)).unwrap();
     program.events_mut().stop_server();
+    active_client.join().unwrap();
     let controls = machine
         .control_ids()
         .map(|id| {
