@@ -30,6 +30,22 @@ function render(
 }
 
 describe("control registry", () => {
+  it("renders an authoritative mute toggle and emits its inverse state", async () => {
+    const changes: Array<[string, boolean]> = [];
+    const view = render(
+      ControlRenderer,
+      { control: { id: "bass_mute", label: "BASS MUTE", kind: "toggle", value: false } },
+      { onSetToggle: (id: string, value: boolean) => changes.push([id, value]) },
+    );
+    const button = view.root.querySelector("button") as HTMLButtonElement;
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    expect(button.textContent).toContain("LIVE");
+    button.click();
+    await nextTick();
+    expect(changes).toEqual([["bass_mute", true]]);
+    view.unmount();
+  });
+
   it("collapses a performance station without discarding its schema", async () => {
     const view = render(PerformancePlane, {
       plane: { id: "bass", label: "SERUM // BASS", roles: ["bass"], controls: [] },

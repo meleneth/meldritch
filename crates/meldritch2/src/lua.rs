@@ -372,7 +372,11 @@ impl UserData for LuaWebPerformance {
 
 impl UserData for LuaWebPlane {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        for (method, kind) in [("fader", "fader"), ("knob", "knob")] {
+        for (method, kind, control_kind) in [
+            ("fader", "fader", crate::web::ControlKind::Continuous),
+            ("knob", "knob", crate::web::ControlKind::Continuous),
+            ("toggle", "toggle", crate::web::ControlKind::Toggle),
+        ] {
             methods.add_method(method, move |_, this, spec: Table| {
                 let id: String = spec.get("id")?;
                 let target: String = spec.get("target")?;
@@ -405,7 +409,7 @@ impl UserData for LuaWebPlane {
                         name: id.clone(),
                         label: label.clone(),
                         group: Some(this.id.clone()),
-                        kind: crate::web::ControlKind::Continuous,
+                        kind: control_kind,
                         target: target.clone(),
                         min,
                         max,
@@ -1660,6 +1664,10 @@ local function decorate_scope(facade, scope, prefix)
   function facade:gain(values)
     local handle=scope:module(self:_id("gain"),"gain",copy_values(values,{"gain"}))
     handle.gain=parameter(handle,"gain");return handle
+  end
+  function facade:mute(values)
+    local handle=scope:module(self:_id("mute"),"mute",copy_values(values,{"muted"}))
+    handle.muted=parameter(handle,"muted");return handle
   end
   function facade:mixer(values)
     values = values or {}

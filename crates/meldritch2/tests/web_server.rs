@@ -1106,4 +1106,63 @@ fn pressure_system_roles_resolve_to_public_controls_and_server_starts() {
         .expect("start Pressure System server")
         .expect("Pressure System listener");
     assert_eq!(address.ip().to_string(), "127.0.0.1");
+    let client = thread::spawn(move || {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async move {
+                let (mut socket, _) = connect_async(format!("ws://{address}/performance"))
+                    .await
+                    .unwrap();
+                socket.next().await.unwrap().unwrap();
+                socket
+                    .send(Message::Text(
+                        json!({"type":"authenticate","token":"pressure-conductor"})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+                socket.next().await.unwrap().unwrap();
+                let snapshot: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                let master = snapshot["state"]["planes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|plane| plane["id"] == "master")
+                    .unwrap();
+                let controls = master["controls"].as_array().unwrap();
+                let expected = [
+                    "master_mute_drums",
+                    "master_mute_bass",
+                    "master_mute_lead",
+                    "master_mute_drone",
+                ];
+                for (control, expected) in controls.iter().zip(expected) {
+                    assert_eq!(control["id"], expected);
+                    assert_eq!(control["kind"], "toggle");
+                }
+                socket
+                    .send(Message::Text(
+                        json!({"type":"control.set","name":"master_mute_bass","value":true})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+                let update: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(update["state"]["values"]["master/master_mute_bass"], true);
+            })
+    });
+    poll_thread(&mut program, client);
+    assert_eq!(
+        machine
+            .control_handle("master_mute_bass")
+            .unwrap()
+            .override_value(),
+        Some(1.0)
+    );
 }

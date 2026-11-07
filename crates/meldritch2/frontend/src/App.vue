@@ -12,6 +12,8 @@ const store = usePerformanceStore(),
 onMounted(() => store.connect());
 const set = (plane: string, id: string, value: number) =>
   store.send({ type: "control.set", name: id, value }, id, value);
+const setToggle = (plane: string, id: string, value: boolean) =>
+  store.send({ type: "control.set", name: id, value }, id, value);
 const toggle = (plane: string, id: string, step: number) =>
   store.send({ type: "step.toggle", plane, control: id, step });
 const fire = (plane: string, id: string) =>
@@ -48,12 +50,37 @@ const setAdsr = (
 ) => store.send({ type: "adsr.set", plane, control, parameter, value });
 const selectPreset = (plane: string, control: string, preset: number) =>
   store.send({ type: "preset.select", plane, control, preset });
-const toggleDrum = (plane: string, control: string, row: string, pattern: number, step: number) =>
+const toggleDrum = (
+  plane: string,
+  control: string,
+  row: string,
+  pattern: number,
+  step: number,
+) =>
   store.send({ type: "drum.hit.toggle", plane, control, row, pattern, step });
-const setDrumVelocity = (plane: string, control: string, row: string, pattern: number, step: number, velocity: number) =>
-  store.send({ type: "drum.hit.velocity", plane, control, row, pattern, step, velocity });
-const muteDrum = (plane: string, control: string, row: string, muted: boolean) =>
-  store.send({ type: "drum.mute", plane, control, row, muted });
+const setDrumVelocity = (
+  plane: string,
+  control: string,
+  row: string,
+  pattern: number,
+  step: number,
+  velocity: number,
+) =>
+  store.send({
+    type: "drum.hit.velocity",
+    plane,
+    control,
+    row,
+    pattern,
+    step,
+    velocity,
+  });
+const muteDrum = (
+  plane: string,
+  control: string,
+  row: string,
+  muted: boolean,
+) => store.send({ type: "drum.mute", plane, control, row, muted });
 </script>
 <template>
   <header class="top">
@@ -77,6 +104,7 @@ const muteDrum = (plane: string, control: string, row: string, muted: boolean) =
       :key="plane.id"
       :plane="plane"
       @set="(id, value) => set(plane.id, id, value)"
+      @set-toggle="(id, value) => setToggle(plane.id, id, value)"
       @toggle="(id, step) => toggle(plane.id, id, step)"
       @fire="(id) => fire(plane.id, id)"
       @note-create="
@@ -94,8 +122,13 @@ const muteDrum = (plane: string, control: string, row: string, muted: boolean) =
       "
       @adsr="(id, parameter, value) => setAdsr(plane.id, id, parameter, value)"
       @preset="(id, preset) => selectPreset(plane.id, id, preset)"
-      @drum-toggle="(id, row, pattern, step) => toggleDrum(plane.id, id, row, pattern, step)"
-      @drum-velocity="(id, row, pattern, step, velocity) => setDrumVelocity(plane.id, id, row, pattern, step, velocity)"
+      @drum-toggle="
+        (id, row, pattern, step) => toggleDrum(plane.id, id, row, pattern, step)
+      "
+      @drum-velocity="
+        (id, row, pattern, step, velocity) =>
+          setDrumVelocity(plane.id, id, row, pattern, step, velocity)
+      "
       @drum-mute="(id, row, muted) => muteDrum(plane.id, id, row, muted)"
     />
     <p v-if="!store.visiblePlanes.length" class="empty">

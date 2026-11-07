@@ -493,6 +493,13 @@ fn pressure_system_hosts_isolated_instruments_and_lsp_master_chain() {
             "missing {control}"
         );
     }
+    let part_mutes = [
+        "master_mute_drums",
+        "master_mute_bass",
+        "master_mute_lead",
+        "master_mute_drone",
+    ]
+    .map(|id| machine.control_handle(id).expect("master part mute"));
 
     let mut renderer = OfflineRenderer::new(machine, 1024, 2).expect("Pressure renderer");
     let mut left = vec![0.0; 48_000 * 2];
@@ -501,6 +508,7 @@ fn pressure_system_hosts_isolated_instruments_and_lsp_master_chain() {
         renderer.process_stereo(left, right);
     }
     assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
+    let audible_energy = energy(&left) + energy(&right);
     assert!(
         energy(&left) > 0.001,
         "Pressure System left channel is silent"
@@ -508,6 +516,28 @@ fn pressure_system_hosts_isolated_instruments_and_lsp_master_chain() {
     assert!(
         energy(&right) > 0.001,
         "Pressure System right channel is silent"
+    );
+    for mute in part_mutes {
+        mute.publish(1.0).expect("engage part mute");
+    }
+    let mut muted_left = vec![f64::NAN; 48_000];
+    let mut muted_right = vec![f64::NAN; 48_000];
+    for (left, right) in muted_left
+        .chunks_mut(1024)
+        .zip(muted_right.chunks_mut(1024))
+    {
+        renderer.process_stereo(left, right);
+    }
+    assert!(
+        muted_left
+            .iter()
+            .chain(&muted_right)
+            .all(|sample| sample.is_finite())
+    );
+    let muted_energy = energy(&muted_left[24_000..]) + energy(&muted_right[24_000..]);
+    assert!(
+        muted_energy < audible_energy * 0.001,
+        "master part mutes must suppress every instrument before the master chain; audible={audible_energy}, muted={muted_energy}"
     );
 }
 

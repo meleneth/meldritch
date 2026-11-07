@@ -11,6 +11,7 @@ defineProps<{ plane: Plane }>();
 const collapsed = ref(false);
 defineEmits<{
   set: [string, number];
+  setToggle: [string, boolean];
   toggle: [string, number];
   fire: [string];
   noteCreate: [string, number, Omit<NoteEvent, "id">];
@@ -46,6 +47,7 @@ defineEmits<{
         <ControlRenderer
           :control="control"
           @set="(id, value) => $emit('set', id, value)"
+          @set-toggle="(id, value) => $emit('setToggle', id, value)"
           @toggle="$emit('toggle', control.id, $event)"
           @fire="$emit('fire', control.id)"
           @note-create="

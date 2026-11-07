@@ -15,10 +15,12 @@ import PianoRoll from "./controls/PianoRoll.vue";
 import Presets from "./controls/PresetSelector.vue";
 import Steps from "./controls/StepSequencer.vue";
 import Trigger from "./controls/TriggerControl.vue";
+import Toggle from "./controls/ToggleControl.vue";
 import DrumGrid from "./controls/DrumGrid.vue";
 defineProps<{ control: ControlDefinition }>();
 defineEmits<{
   set: [string, number];
+  setToggle: [string, boolean];
   adsr: [AdsrParameter["name"], number];
   toggle: [number];
   fire: [];
@@ -49,6 +51,10 @@ defineEmits<{
     v-else-if="control.kind === 'trigger'"
     :control="control"
     @fire="$emit('fire')"
+  /><Toggle
+    v-else-if="control.kind === 'toggle'"
+    :control="control"
+    @change="$emit('setToggle', control.id, $event)"
   />
   <PianoRoll
     v-else-if="control.kind === 'piano_roll'"
@@ -61,7 +67,9 @@ defineEmits<{
     v-else-if="control.kind === 'drum_grid'"
     :control="control as DrumGridControl"
     @toggle="(row, step) => $emit('drumToggle', row, step)"
-    @velocity="(row, step, velocity) => $emit('drumVelocity', row, step, velocity)"
+    @velocity="
+      (row, step, velocity) => $emit('drumVelocity', row, step, velocity)
+    "
     @mute="(row, muted) => $emit('drumMute', row, muted)"
   />
   <Adsr

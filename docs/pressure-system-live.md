@@ -54,6 +54,14 @@ Use one of the composition-issued credentials in the browser's Join field:
 | `pressure-drums` | Drummer | PULSE grid, velocity, lane mutes, grooves, synthesis |
 | `pressure-observer` | Observer | Read-only projection of every station |
 
+The first four controls in the Conductor's Master station are authoritative
+`DRUMS`, `BASS`, `LEAD`, and `DRONE` mutes. They multiply the corresponding
+stereo branch to silence immediately before the mixer, while the instrument
+continues processing and retains notes and plugin state. This makes diagnostic
+soloing practical without reinitializing a VST3 instance: mute three branches,
+listen to the remaining part, then restore them. The state is synchronized to
+every browser and Rust enforces the Conductor-only mutation permission.
+
 The browser contains no song-specific code. Lua declares the stations and
 controls, Rust filters them by role and publishes revisioned authoritative
 state, Pinia reconciles it, and Vue selects the reusable piano-roll, drum-grid,

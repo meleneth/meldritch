@@ -269,6 +269,27 @@ main {
   transform: translateY(0.3rem);
   box-shadow: 0 0.1rem #681818;
 }
+.toggle-control {
+  width: 100%;
+  min-height: 6rem;
+  border: 2px solid #4f9b69;
+  border-radius: 0.8rem;
+  background: #193023;
+  color: #d8ffe3;
+  font-size: 1rem;
+  font-weight: 800;
+}
+.toggle-control span {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+}
+.toggle-control.on {
+  border-color: #f05a4f;
+  background: #561f20;
+  color: white;
+}
 .piano-roll,
 .adsr,
 .patterns {

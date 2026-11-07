@@ -22,6 +22,8 @@ export const usePerformanceStore = defineStore("performance", () => {
         if (value === undefined) return control;
         if (control.kind === "fader" || control.kind === "knob")
           return { ...control, value: Number(value) };
+        if (control.kind === "toggle")
+          return { ...control, value: Boolean(value) };
         if (control.kind === "step_sequencer") {
           const state = value as { steps: boolean[]; position: number | null };
           return { ...control, steps: state.steps, position: state.position };
@@ -34,8 +36,19 @@ export const usePerformanceStore = defineStore("performance", () => {
           return { ...control, ...state };
         }
         if (control.kind === "drum_grid") {
-          const state = value as { current_kit: string; pattern: number; rows: typeof control.state_rows; position: number | null };
-          return { ...control, current_kit: state.current_kit, pattern: state.pattern, state_rows: state.rows, position: state.position };
+          const state = value as {
+            current_kit: string;
+            pattern: number;
+            rows: typeof control.state_rows;
+            position: number | null;
+          };
+          return {
+            ...control,
+            current_kit: state.current_kit,
+            pattern: state.pattern,
+            state_rows: state.rows,
+            position: state.position,
+          };
         }
         if (control.kind === "adsr")
           return { ...control, values: value as Record<string, number> };

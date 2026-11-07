@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 38);
+        assert_eq!(contract::all().len(), 39);
         let vst3_effect = contract::find("vst3_effect").unwrap();
         assert_eq!(vst3_effect.inputs[0].name, "input_left");
         assert_eq!(vst3_effect.inputs[1].name, "input_right");

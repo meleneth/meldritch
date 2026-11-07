@@ -13,6 +13,10 @@ export interface RangeControl extends BaseControl {
   scale: Scale;
   value: number;
 }
+export interface ToggleControl extends BaseControl {
+  kind: "toggle";
+  value: boolean;
+}
 export interface StepControl extends BaseControl {
   kind: "step_sequencer";
   step_count: number;
@@ -23,9 +27,22 @@ export interface TriggerControl extends BaseControl {
   kind: "trigger";
   serial: number;
 }
-export interface DrumHit { id: number; step: number; velocity: number; duration: number }
-export interface DrumRowDefinition { id: string; label: string; note: number }
-export interface DrumRowState { id: string; muted: boolean; hits: DrumHit[] }
+export interface DrumHit {
+  id: number;
+  step: number;
+  velocity: number;
+  duration: number;
+}
+export interface DrumRowDefinition {
+  id: string;
+  label: string;
+  note: number;
+}
+export interface DrumRowState {
+  id: string;
+  muted: boolean;
+  hits: DrumHit[];
+}
 export interface DrumGridControl extends BaseControl {
   kind: "drum_grid";
   kit: string;
@@ -88,6 +105,7 @@ export interface PresetControl extends BaseControl {
 }
 export type ControlDefinition =
   | RangeControl
+  | ToggleControl
   | StepControl
   | TriggerControl
   | DrumGridControl
@@ -120,9 +138,30 @@ export type Command =
   | { type: "control.set"; name: string; value: number | boolean | string }
   | { type: "step.toggle"; plane: string; control: string; step: number }
   | { type: "trigger.fire"; plane: string; control: string }
-  | { type: "drum.hit.toggle"; plane: string; control: string; pattern: number; row: string; step: number }
-  | { type: "drum.hit.velocity"; plane: string; control: string; pattern: number; row: string; step: number; velocity: number }
-  | { type: "drum.mute"; plane: string; control: string; row: string; muted: boolean }
+  | {
+      type: "drum.hit.toggle";
+      plane: string;
+      control: string;
+      pattern: number;
+      row: string;
+      step: number;
+    }
+  | {
+      type: "drum.hit.velocity";
+      plane: string;
+      control: string;
+      pattern: number;
+      row: string;
+      step: number;
+      velocity: number;
+    }
+  | {
+      type: "drum.mute";
+      plane: string;
+      control: string;
+      row: string;
+      muted: boolean;
+    }
   | ({
       type: "note.create" | "note.update";
       plane: string;

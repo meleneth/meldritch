@@ -179,10 +179,22 @@ instrument:connect(kit.voices[1].track.gate,duck_l.sidechain); instrument:connec
 bind(control_ids.bass,"duck_depth","Kick Duck",duck_l.depth,0,1,{duck_r.depth})
 bind(control_ids.bass,"duck_release","Duck Release",duck_l.release,.001,3,{duck_r.release})
 
+local function part_mute(id,label,source)
+  local left=instrument:mute {muted=0}
+  local right=instrument:mute {muted=0}
+  instrument:connect(source.left,left.input);instrument:connect(source.right,right.input)
+  bind(control_ids.master,"master_mute_"..id,label.." Mute",left.muted,0,1,{right.muted})
+  return {left=left.out,right=right.out,direction="stereo_output"}
+end
+local muted_drums=part_mute("drums","DRUMS",pulse.out)
+local muted_bass=part_mute("bass","BASS",{left=duck_l.out,right=duck_r.out,direction="stereo_output"})
+local muted_lead=part_mute("lead","LEAD",lead.out)
+local muted_drone=part_mute("drone","DRONE",drone.out)
+
 local mix=instrument:mixer {inputs=8,headroom=.55}
-instrument:connect(pulse.out,mix.input[1])
-instrument:connect(duck_l.out,mix.input[2].left); instrument:connect(duck_r.out,mix.input[2].right)
-instrument:connect(lead.out,mix.input[3]); instrument:connect(drone.out,mix.input[4])
+instrument:connect(muted_drums,mix.input[1])
+instrument:connect(muted_bass,mix.input[2])
+instrument:connect(muted_lead,mix.input[3]); instrument:connect(muted_drone,mix.input[4])
 
 local compressor=instrument:vst3_effect {id="master_compressor",plugin=LSP_COMPRESSOR,paths=plugin_paths}
 local limiter=instrument:vst3_effect {id="master_limiter",plugin=LSP_LIMITER,paths=plugin_paths}
@@ -266,6 +278,7 @@ for _,item in ipairs({{"pulse_kick_freq","Kick Pitch"},{"pulse_kick_level","Kick
 drum_plane:trigger {id="IMPACT",label="IMPACT / FILL",triggered=function() drum_sequence:command("pattern:4") end}
 
 local master_plane=performance:plane {id="master",label="MASTER // LSP DYNAMICS",roles={"conductor"},read_only_roles={"observer"}}
+for _,item in ipairs({{"master_mute_drums","DRUMS"},{"master_mute_bass","BASS"},{"master_mute_lead","LEAD"},{"master_mute_drone","DRONE"}}) do master_plane:toggle {id=item[1],label=item[2].." MUTE",target=item[1],min=0,max=1} end
 for _,item in ipairs({{"compressor_threshold","Compressor Threshold"},{"compressor_ratio","Ratio"},{"compressor_attack","Attack"},{"compressor_release","Release"},{"compressor_knee","Knee"},{"compressor_makeup","Makeup"},{"compressor_bypass","Comp Bypass"},{"limiter_threshold","Limiter Ceiling"},{"limiter_lookahead","Lookahead"},{"limiter_release","Limiter Release"},{"limiter_bypass","Limiter Bypass"}}) do master_plane:knob {id=item[1],label=item[2],target=item[1],min=0,max=1} end
 
 local macro_plane=performance:plane {id="macros",label="PRESSURE SYSTEM // MACROS",roles={"conductor"},read_only_roles={"observer"}}

@@ -543,16 +543,24 @@ impl Application {
             for control in &plane.controls {
                 let (id, value) = match control {
                     PlaneControl::Range {
-                        id, target, min, ..
-                    } => (
                         id,
-                        json!(
-                            runtime
-                                .handles
-                                .get(target)
-                                .map_or(*min, ControlHandle::effective_value)
-                        ),
-                    ),
+                        target,
+                        kind,
+                        min,
+                        max,
+                        ..
+                    } => {
+                        let raw = runtime
+                            .handles
+                            .get(target)
+                            .map_or(*min, ControlHandle::effective_value);
+                        let value = if *kind == "toggle" {
+                            Value::Bool((raw - max).abs() < (raw - min).abs())
+                        } else {
+                            json!(raw)
+                        };
+                        (id, value)
+                    }
                     PlaneControl::Steps {
                         id,
                         sequencer,
