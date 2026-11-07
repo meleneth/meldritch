@@ -63,7 +63,7 @@ server:post("/lua-set", function(request)
   return { value = performance:value("level") }
 end)
 server:post("/slow-set", function(request)
-  local deadline = os.clock() + 0.8
+  local deadline = os.clock() + 1.5
   while os.clock() < deadline do end
   performance:set("level", request.json.value)
   return { value = performance:value("level") }
