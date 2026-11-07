@@ -50,6 +50,76 @@ fn energy(samples: &[f64]) -> f64 {
 }
 
 #[test]
+fn installed_serum_supports_real_notes_parameters_audio_and_teardown() {
+    const SERUM_ID: &str = "56534558667350736572756D20320000";
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
+    let root = PathBuf::from(home).join(".vst3");
+    if !root.join("Serum2.vst3").is_dir() {
+        eprintln!("Serum 2 is not installed; skipping conditional integration test");
+        return;
+    }
+    let mut spec = vst3::load(SERUM_ID, &[root]).expect("inspect installed Serum 2");
+    assert_eq!(spec.descriptor.name, "Serum 2");
+    assert_eq!(spec.descriptor.vendor, "Xfer Records");
+    assert!(spec.descriptor.instrument);
+    assert!(spec.parameters.len() >= 2_600);
+    for (id, name) in [
+        (0, "Main Vol"),
+        (1_000_039, "A WT Pos"),
+        (2_000_003, "Filter 1 Freq"),
+        (2_000_004, "Filter 1 Res"),
+        (7_000_000, "Macro 1"),
+    ] {
+        assert_eq!(
+            spec.parameters
+                .iter()
+                .find(|parameter| parameter.id == id)
+                .map(|parameter| parameter.name.as_str()),
+            Some(name),
+            "Serum parameter metadata changed for stable ID {id}"
+        );
+    }
+    spec.initial_values.insert(0, 0.5);
+    spec.initial_values.insert(2_000_000, 1.0);
+    spec.initial_values.insert(2_000_001, 1.0);
+    spec.initial_values.insert(2_000_003, 0.62);
+    let values = spec
+        .parameters
+        .iter()
+        .map(|parameter| spec.initial_value(parameter))
+        .collect::<Vec<_>>();
+    let frames = 1_024;
+    let pitch = vec![261.625_565; frames];
+    let gate = vec![1.0; frames];
+    let velocity = vec![0.85; frames];
+    let tempo = vec![116.0; frames];
+    let mut extra = vec![0.0; frames * 9];
+    extra[..frames].fill(329.627_557);
+    extra[frames..frames * 2].fill(1.0);
+    extra[frames * 2..frames * 3].fill(0.72);
+    let mut serum = Instance::new(&spec, 48_000.0).expect("instantiate Serum 2");
+    let mut output = vec![0.0; frames * 2];
+    let mut total_energy = 0.0;
+    for _ in 0..6 {
+        serum.process(
+            [&pitch, &gate, &velocity, &tempo, &extra],
+            &values,
+            &mut output,
+        );
+        assert!(output.iter().all(|sample| sample.is_finite()));
+        total_energy += energy(&output);
+    }
+    assert!(!serum.failed());
+    assert!(
+        total_energy > 0.001,
+        "Serum produced silence for a two-note chord"
+    );
+    drop(serum);
+}
+
+#[test]
 fn native_plugin_vertical_slice_covers_discovery_lifecycle_events_parameters_and_state() {
     let directory = fixture_directory().clone();
     let paths = [directory];
@@ -74,9 +144,14 @@ fn native_plugin_vertical_slice_covers_discovery_lifecycle_events_parameters_and
     gate[17..80].fill(1.0);
     let velocity = vec![0.8; frames];
     let tempo = vec![120.0; frames];
+    let extra_notes = vec![0.0; frames * 9];
     let mut output = vec![f64::NAN; frames * 2];
     let mut plugin = Instance::new(&spec, 48_000.0).expect("create fixture instance");
-    plugin.process(&pitch, &gate, &velocity, &tempo, &[0.5], &mut output);
+    plugin.process(
+        [&pitch, &gate, &velocity, &tempo, &extra_notes],
+        &[0.5],
+        &mut output,
+    );
     assert!(!plugin.failed());
     assert_eq!(energy(&output[..17 * 2]), 0.0);
     assert!(energy(&output[18 * 2..80 * 2]) > 0.001);
@@ -92,10 +167,7 @@ fn native_plugin_vertical_slice_covers_discovery_lifecycle_events_parameters_and
     let full_gate = vec![1.0; frames];
     let mut restored_output = vec![0.0; frames * 2];
     plugin.process(
-        &pitch,
-        &full_gate,
-        &velocity,
-        &tempo,
+        [&pitch, &full_gate, &velocity, &tempo, &extra_notes],
         &[restored.parameters[0].normalized],
         &mut restored_output,
     );

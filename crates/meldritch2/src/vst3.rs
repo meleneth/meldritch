@@ -210,7 +210,7 @@ pub struct Instance {
     parameters: Vec<u32>,
     previous_parameters: Vec<f64>,
     restored_baseline: Option<Vec<f64>>,
-    active_note: Option<u8>,
+    active_notes: [Option<u8>; 4],
     failed: bool,
     offline_fallback: bool,
     previous_tempo: f64,
@@ -269,6 +269,8 @@ impl Instance {
                     spec.descriptor.name
                 )
             })?;
+        }
+        if spec.state.is_some() {
             for (previous, id) in previous_parameters.iter_mut().zip(&parameters) {
                 *previous = plugin.get_parameter(*id).map_err(|error| {
                     format!(
@@ -290,7 +292,7 @@ impl Instance {
             parameters,
             previous_parameters,
             restored_baseline,
-            active_note: None,
+            active_notes: [None; 4],
             failed: false,
             offline_fallback: false,
             previous_tempo: 120.0,
@@ -328,18 +330,17 @@ impl Instance {
 
     pub fn process(
         &mut self,
-        pitch: &[f64],
-        gate: &[f64],
-        velocity: &[f64],
-        tempo: &[f64],
+        note_inputs: [&[f64]; 5],
         parameter_values: &[f64],
         output: &mut [f64],
     ) {
+        let [pitch, gate, velocity, tempo, extra_note_inputs] = note_inputs;
         let frames = pitch.len();
         debug_assert_eq!(gate.len(), frames);
         debug_assert_eq!(velocity.len(), frames);
         debug_assert_eq!(tempo.len(), frames);
         debug_assert_eq!(output.len(), frames * 2);
+        debug_assert_eq!(extra_note_inputs.len(), frames * 9);
         if self.failed || frames == 0 || frames > MAX_BLOCK_SIZE {
             output.fill(0.0);
             self.failed |= frames > MAX_BLOCK_SIZE;
@@ -383,55 +384,75 @@ impl Instance {
             }
         }
 
-        let channel = MidiChannel::Ch1;
+        let channels = [
+            MidiChannel::Ch1,
+            MidiChannel::Ch2,
+            MidiChannel::Ch3,
+            MidiChannel::Ch4,
+        ];
         for frame in 0..frames {
-            let gated = gate[frame].is_finite() && gate[frame] > 0.0;
-            let note = frequency_to_note(pitch[frame]);
-            match (self.active_note, gated) {
-                (None, true) => {
-                    let event = MidiEvent::NoteOn {
-                        channel,
-                        note,
-                        velocity: normalized_velocity(velocity[frame]),
-                    };
-                    if self.plugin.send_midi_event_at(event, frame as i32).is_err() {
-                        self.failed = true;
-                        break;
+            for (lane, channel) in channels.iter().copied().enumerate() {
+                let (lane_pitch, lane_gate, lane_velocity) = if lane == 0 {
+                    (pitch[frame], gate[frame], velocity[frame])
+                } else {
+                    let base = (lane - 1) * frames * 3;
+                    (
+                        extra_note_inputs[base + frame],
+                        extra_note_inputs[base + frames + frame],
+                        extra_note_inputs[base + frames * 2 + frame],
+                    )
+                };
+                let gated = lane_gate.is_finite() && lane_gate > 0.0;
+                let note = frequency_to_note(lane_pitch);
+                match (self.active_notes[lane], gated) {
+                    (None, true) => {
+                        let event = MidiEvent::NoteOn {
+                            channel,
+                            note,
+                            velocity: normalized_velocity(lane_velocity),
+                        };
+                        if self.plugin.send_midi_event_at(event, frame as i32).is_err() {
+                            self.failed = true;
+                            break;
+                        }
+                        self.active_notes[lane] = Some(note);
                     }
-                    self.active_note = Some(note);
-                }
-                (Some(active), false) => {
-                    let event = MidiEvent::NoteOff {
-                        channel,
-                        note: active,
-                        velocity: 0,
-                    };
-                    if self.plugin.send_midi_event_at(event, frame as i32).is_err() {
-                        self.failed = true;
-                        break;
+                    (Some(active), false) => {
+                        let event = MidiEvent::NoteOff {
+                            channel,
+                            note: active,
+                            velocity: 0,
+                        };
+                        if self.plugin.send_midi_event_at(event, frame as i32).is_err() {
+                            self.failed = true;
+                            break;
+                        }
+                        self.active_notes[lane] = None;
                     }
-                    self.active_note = None;
-                }
-                (Some(active), true) if active != note => {
-                    let off = MidiEvent::NoteOff {
-                        channel,
-                        note: active,
-                        velocity: 0,
-                    };
-                    let on = MidiEvent::NoteOn {
-                        channel,
-                        note,
-                        velocity: normalized_velocity(velocity[frame]),
-                    };
-                    if self.plugin.send_midi_event_at(off, frame as i32).is_err()
-                        || self.plugin.send_midi_event_at(on, frame as i32).is_err()
-                    {
-                        self.failed = true;
-                        break;
+                    (Some(active), true) if active != note => {
+                        let off = MidiEvent::NoteOff {
+                            channel,
+                            note: active,
+                            velocity: 0,
+                        };
+                        let on = MidiEvent::NoteOn {
+                            channel,
+                            note,
+                            velocity: normalized_velocity(lane_velocity),
+                        };
+                        if self.plugin.send_midi_event_at(off, frame as i32).is_err()
+                            || self.plugin.send_midi_event_at(on, frame as i32).is_err()
+                        {
+                            self.failed = true;
+                            break;
+                        }
+                        self.active_notes[lane] = Some(note);
                     }
-                    self.active_note = Some(note);
+                    _ => {}
                 }
-                _ => {}
+            }
+            if self.failed {
+                break;
             }
         }
         if self.failed {

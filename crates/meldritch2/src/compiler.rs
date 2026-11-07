@@ -1168,10 +1168,13 @@ impl Machine {
                 }
                 OpProcessor::Plaits(plaits) => plaits.process(inputs, params, outputs),
                 OpProcessor::Vst3(plugin) => plugin.process(
-                    &inputs[0..1],
-                    &inputs[1..2],
-                    &inputs[2..3],
-                    &inputs[3..4],
+                    [
+                        &inputs[0..1],
+                        &inputs[1..2],
+                        &inputs[2..3],
+                        &inputs[3..4],
+                        &inputs[4..13],
+                    ],
                     params,
                     outputs,
                 ),
@@ -1239,10 +1242,13 @@ impl Machine {
                 }
                 OpProcessor::Plaits(plaits) => plaits.process(inputs, params, outputs),
                 OpProcessor::Vst3(plugin) => plugin.process(
-                    &inputs[0..1],
-                    &inputs[1..2],
-                    &inputs[2..3],
-                    &inputs[3..4],
+                    [
+                        &inputs[0..1],
+                        &inputs[1..2],
+                        &inputs[2..3],
+                        &inputs[3..4],
+                        &inputs[4..13],
+                    ],
                     params,
                     outputs,
                 ),
@@ -1808,12 +1814,15 @@ fn process_offline_op(
         let (pitch, rest) = inputs.split_at_mut(frames);
         let (gate, rest) = rest.split_at_mut(frames);
         let (velocity, rest) = rest.split_at_mut(frames);
-        let tempo = &rest[..frames];
+        let (tempo, extra_note_inputs) = rest.split_at_mut(frames);
         plugin.process(
-            pitch,
-            gate,
-            velocity,
-            tempo,
+            [
+                pitch,
+                gate,
+                velocity,
+                tempo,
+                &extra_note_inputs[..frames * 9],
+            ],
             params,
             &mut outputs[..frames * output_count],
         );

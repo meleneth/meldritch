@@ -34,6 +34,60 @@ pub const CONTRACT: Contract = Contract {
             fan_in: FanIn::One,
             unconnected: Some(120.0),
         },
+        InputPort {
+            name: "pitch_2",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(440.0),
+        },
+        InputPort {
+            name: "gate_2",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(0.0),
+        },
+        InputPort {
+            name: "velocity_2",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(1.0),
+        },
+        InputPort {
+            name: "pitch_3",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(440.0),
+        },
+        InputPort {
+            name: "gate_3",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(0.0),
+        },
+        InputPort {
+            name: "velocity_3",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(1.0),
+        },
+        InputPort {
+            name: "pitch_4",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(440.0),
+        },
+        InputPort {
+            name: "gate_4",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(0.0),
+        },
+        InputPort {
+            name: "velocity_4",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(1.0),
+        },
     ],
     outputs: &[
         OutputPort {
