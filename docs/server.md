@@ -229,9 +229,10 @@ synthesis:knob {
 IDs are stable wire identities and must be nonempty and unique in their
 scope. Faders and knobs bind existing compiled control IDs, so changes from
 MIDI, automation, Lua, another browser, or the TUI converge on the same value.
-The initial library supports linear/logarithmic faders and knobs, a single-row
-16-step editor, and event-semantic triggers. Trigger publications carry an
-increasing serial; they are not transient booleans.
+The schema-v2 library supports linear/logarithmic faders and knobs, a
+single-row 16-step editor, event-semantic triggers, a piano roll, ADSR editor,
+and pattern selector. Trigger publications carry an increasing serial; they
+are not transient booleans.
 
 The step editor mutates the sequencer's authored pattern on the Lua/control
 thread. The existing audio sequencer adopts its pending pattern revision at a
@@ -255,6 +256,83 @@ WebSocket plane commands are deliberately small and typed:
 
 Range controls continue to use `control.set` with their stable control ID.
 
+### Notes, envelopes, and patterns
+
+One logical note track is a bounded group of one to four existing sequencer
+tracks. This supplies chords without adding another scheduler:
+
+```lua
+local bass = sequence:note_track("Bass", { voices = 3 })
+local verse = sequence:pattern("Verse")
+verse:notes(bass, {
+  { id=1, step=1, pitch="C2", velocity=110, duration=3 },
+  { id=2, step=5, pitch=43,   velocity=96,  duration=2 },
+}, 16)
+
+plane:piano_roll {
+  id="bass_notes", label="Bass", track=bass, steps=16,
+  pitch_min=36, pitch_max=60,
+}
+plane:pattern_selector {
+  id="patterns", label="Patterns", sequencer=sequence, boundary="bar",
+}
+```
+
+Lua steps are one-based; wire and Rust steps are zero-based. Pitch accepts MIDI
+0–127 or note names such as `C4`, `F#3`, and `Bb2` (`C4` is MIDI 60). Velocity
+is 1–127 and duration is a positive count of sequencer steps wholly contained
+in the pattern. IDs are positive and unique within a logical track/pattern.
+Rests are simply steps without notes. Multiple events may share a step.
+
+The compiler assigns notes deterministically to the lowest free voice lane. If
+a later note exceeds configured polyphony it steals the oldest sounding lane
+(lowest lane breaks ties) and closes that note's gate at the replacement step.
+A same-step chord larger than the configured voice count is rejected instead
+of silently dropping notes. At most four voices and 256 note events are
+accepted per logical track. The existing sequencer publishes note-on/off edges;
+stop, restart, and pattern changes clear gates and scheduled work. A pattern
+change inserts a single low sample before a logical note lane's first event so
+ADSR modules retrigger deterministically.
+
+ADSR controls bind four ordinary compiled control targets, so hardware, Lua,
+automation, and browsers share the same parameter identities:
+
+```lua
+plane:adsr {
+  id="amp_envelope", label="Amplitude ADSR",
+  attack="amp_attack", decay="amp_decay",
+  sustain="amp_sustain", release="amp_release",
+}
+```
+
+Attack, decay, and release are seconds (logarithmic UI ranges); sustain is
+linear 0–1. Note-on begins attack, then decay reaches sustain. Note-off latches
+a release slope from the envelope's current level, including during attack or
+decay, so the configured release time is meaningful and click-resistant.
+Changes to attack/decay/sustain affect subsequent samples; an in-progress
+release retains its latched slope until the next gate edge.
+
+Pattern selection accepts `immediate`, `beat`, `bar`, or `cycle`. “Immediate”
+means the next sequencer step boundary, not an arbitrary audio sample. The
+server publishes `pending` separately and changes `active` only after the audio
+sequencer commits the switch. Piano-roll edits are prepared on the serialized
+Lua owner, then the complete immutable pattern revision is adopted at a step
+boundary. Concurrent accepted edits therefore use FIFO server-dispatch order;
+there is no partially visible pattern and no browser clock.
+
+The corresponding commands are:
+
+```json
+{"type":"note.create","plane":"rhythm","control":"bass_notes","pattern":0,"step":4,"pitch":48,"velocity":100,"duration":2}
+{"type":"note.update","plane":"rhythm","control":"bass_notes","pattern":0,"id":7,"step":4,"pitch":50,"velocity":92,"duration":3}
+{"type":"note.delete","plane":"rhythm","control":"bass_notes","pattern":0,"id":7}
+{"type":"pattern.select","plane":"rhythm","control":"patterns","pattern":1,"boundary":"bar"}
+{"type":"adsr.set","plane":"synthesis","control":"amp_envelope","parameter":"attack","value":0.02}
+```
+
+Rust revalidates every field and role independently of the Vue interface.
+Unauthorized clients neither receive hidden plane state nor mutate it.
+
 ## Vue and Pinia workflow
 
 The frontend source is isolated in `crates/meldritch2/frontend`. For local UI
@@ -268,8 +346,9 @@ npm run dev
 
 Vite proxies `/api` and `/performance`. Production does not require Node: run
 `npm run build` to generate `crates/meldritch2/web/dist`, which Rust embeds with
-`include_str!`. Run `npm test` for the Vitest/Vue Test Utils suite. The control
-registry selects components solely from the versioned server schema, so adding
+`include_str!`. Run `npm test` for the lightweight native-Vue Vitest suite and
+`npm run typecheck` for Vue/TypeScript validation. The control registry selects
+components solely from the versioned server schema, so adding
 another composition plane requires Lua changes only.
 
 The store distinguishes optimistic pending values from confirmed values.
@@ -294,6 +373,25 @@ fill; the synth performer changes an audible SVF cutoff and resonance; the
 leader receives both planes; the observer receives read-only projections.
 Reconnection restores the current schema, pattern, controls, trigger serials,
 and revision.
+
+The pitched-note demonstration adds two named patterns, chords, editable bass
+and lead piano rolls, amplitude/filter ADSRs, and quantized selection:
+
+```sh
+cargo run -p meldritch2 -- perform \
+  crates/meldritch2/examples/72-note-performance.lua
+```
+
+Use the same four demo credentials. `drummer-demo-token` receives the kick,
+bass, fill and pattern surface; `synth-demo-token` receives the chord roll,
+both envelopes and filter controls; `leader-demo-token` receives both planes;
+`observer-demo-token` receives both read-only. An offline reference render is:
+
+```sh
+cargo run -p meldritch2 -- render \
+  crates/meldritch2/examples/72-note-performance.lua \
+  /tmp/meldritch-72-note-performance.wav 8
+```
 
 ## Performer roles and credentials
 
@@ -351,9 +449,11 @@ duration. These are atomics read outside the audio path; no separate telemetry
 stack is introduced.
 
 The server currently runs only with the interactive `perform` owner loop. It
-does not provide TLS, durable sessions, arbitrary step counts/rows, per-step
-velocity editing, a browser arrangement editor, database storage, or process
-isolation for Lua. A CPU-bound Lua handler stalls other Lua control work until
+does not provide TLS, durable sessions, arbitrary piano-roll step counts,
+cross-cycle notes, per-note automation, a browser arrangement editor, database
+storage, or process isolation for Lua. Logical note metadata is composition
+state and is not yet included in the older canonical sequencer project-save
+format. A CPU-bound Lua handler stalls other Lua control work until
 it returns, though audio continues independently. Choose a handler timeout
 that reports this condition and keep handlers short.
 
@@ -361,5 +461,5 @@ Run the actual transport and retained-Lua integration tests with:
 
 ```sh
 cargo test -p meldritch2 --test web_server
-cd crates/meldritch2/frontend && npm test && npm run build
+cd crates/meldritch2/frontend && npm test && npm run typecheck && npm run build
 ```
