@@ -305,6 +305,15 @@ plane:adsr {
 }
 ```
 
+For plugin-owned envelopes whose VST3 parameters are normalized, set
+`normalized=true`. The same ADSR component then projects four linear 0–1
+parameters and does not imply that Meldritch owns or adds an envelope:
+
+```lua
+plane:adsr {id="kick_envelope",label="Kick Envelope",normalized=true,
+  attack="kick_a",decay="kick_d",sustain="kick_s",release="kick_r"}
+```
+
 Attack, decay, and release are seconds (logarithmic UI ranges); sustain is
 linear 0–1. Note-on begins attack, then decay reaches sustain. Note-off latches
 a release slope from the envelope's current level, including during attack or
@@ -360,22 +369,24 @@ second clock or scheduler:
 local kit = sequence:drum_kit {
   name="TimeKit",
   voices={
-    {id="kick",label="Kick",note=24},
-    {id="snare",label="Snare",note=26},
-    {id="closed_hat",label="Closed Hat",note=30},
+    {id="kick",label="Kick",note=36,channel=10},
+    {id="snare",label="Snare",note=38,channel=10},
+    {id="closed_hat",label="Closed Hat",note=42,channel=10},
   },
 }
 pattern:drums(kit, {
   kick={{step=1,velocity=127},{step=5,velocity=110}},
   snare={{step=5,velocity=118},{step=13,velocity=124}},
 },16)
+local plugin=instrument:vst3 {plugin=class_id,midi_channels={10,10,10}}
 plugin:connect_drum_kit(kit)
 plane:drum_grid {id="drums",label="Drums",kit=kit,steps=16}
 ```
 
 The Vue drum grid projects authoritative hits, MIDI velocity, lane mute,
 active pattern, and the coarse engine playhead. Clicking an empty cell adds a
-hit; selecting one exposes velocity; double-click removes it. Mute suppresses
+hit; selecting one exposes velocity and a touch-friendly Remove button;
+double-click also removes it. Mute suppresses
 future note-ons for only that lane and lowers its gate at the next engine
 frame. Rust authorizes and serializes every edit through the existing pattern
 mutation boundary. The browser never schedules notes.
@@ -386,6 +397,24 @@ Run `examples/74-geonkick-performance.lua` with `meldritch2 perform`, open
 `GEONKICK_KIT` override the user-local installation paths. Drummer and Serum
 roles receive independent planes; leader receives both plus arrangement;
 observer receives read-only projections.
+
+Example `75-pulse-performance.lua` applies the same generic surface to four
+PULSE Drum Synth parts. It exposes the drum grid, per-hit velocity and mute,
+bar-quantized patterns, 16 curated synthesis knobs, and four plugin-owned ADSR
+panels. The `drummer` and `synth` roles remain isolated; `leader` receives both
+and `observer` receives read-only projections. Serum 2 is used when available,
+with an explicit native Plaits fallback when it is absent:
+
+```sh
+cargo run -p meldritch2 -- perform crates/meldritch2/examples/75-pulse-performance.lua
+```
+
+Open `http://127.0.0.1:8080` and use `drummer-demo-token`,
+`synth-demo-token`, `leader-demo-token`, or `observer-demo-token`. PULSE
+parameter commands are ordinary authorized `control.set` or `adsr.set`
+mutations and arrive at the plugin at the next audio block boundary. Pattern
+edits still adopt atomically at sequencer step boundaries; the browser owns no
+clock.
 
 ## Vue and Pinia workflow
 

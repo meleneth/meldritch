@@ -65,6 +65,7 @@ The module fits the existing instrument DSL:
 local synth = instrument:vst3 {
   plugin = "0123456789ABCDEFFEDCBA9876543210", -- stable class ID preferred
   -- paths = { "/opt/my-plugins" },
+  -- midi_channels = { 10, 10, 10, 10 }, -- one channel per note lane
 }
 
 instrument:connect(notes.pitch, synth.pitch)
@@ -90,13 +91,16 @@ local cutoff = synth:parameter(2000003) -- stable numeric ID
 ```
 
 `parameter` accepts a numeric ID or an exact, unambiguous plugin-reported
-name. Numeric IDs should be persisted in compositions. Each lane is sent on a
-separate VST3 event channel, so overlapping pitches and deterministic lane
-steals generate paired note-off/note-on events without stuck notes.
+name. Numeric IDs should be persisted in compositions. Lanes default to MIDI
+channels 1 through 8. `midi_channels` can assign any channel 1–16 to each
+connected lane, including sharing channel 10 for a General MIDI drum kit.
+Overlapping pitches and deterministic lane steals generate paired
+note-off/note-on events without stuck notes.
 
 Each parameter table contains its numeric `id`, stable graph `key`, display
-`name`, normalized current and default values, unit, step count, automation
-flag, and read-only flag. The graph parameter key is `parameter_<id>`; controls
+`name`, normalized current and default values, plugin-formatted `display`, unit,
+step count, automation/read-only/bypass flags, and raw VST3 flags. The graph
+parameter key is `parameter_<id>`; controls
 and the existing automation system target that key, so no plugin-specific
 cutoff/envelope vocabulary is invented.
 
@@ -119,7 +123,7 @@ The adapter currently:
   processing buffers;
 - negotiates a no-input, stereo-output instrument at the engine sample rate;
 - accepts blocks up to 1024 frames and rejects larger configurations clearly;
-- schedules note-on, note-off, velocity, channels 1–4, and host-assigned note
+- schedules note-on, note-off, velocity, configured channels 1–16, and host-assigned note
   identity at exact offsets in the upcoming block;
 - sends a note-off before a changed-pitch note-on and therefore handles notes
   beginning and ending within the same block;
@@ -244,6 +248,65 @@ Geonkick's editor; Meldritch provides note velocity, lane mute, pattern, and
 kit-state control. The TimeKit mapping used by example 74 is explicit: kick
 24, snare 26, clap 27, alternate snare 28, closed hat 30, hat 32, open hat 34,
 and shaker 58. These are preset mappings, not assumed General MIDI values.
+
+## PULSE Drum Synth 0.1.0
+
+Meldritch has been validated against the native Linux build from the official
+[PULSE source](https://github.com/audiodestrukt/pulse-vst), upstream commit
+`220db4657abe391edecece9df79c275b9491567d`. Build JUCE and PULSE into the
+user-local VST3 directory:
+
+```sh
+git clone https://github.com/audiodestrukt/pulse-vst.git
+git -C pulse-vst checkout 220db4657abe391edecece9df79c275b9491567d
+git clone --depth 1 https://github.com/juce-framework/JUCE.git pulse-vst/JUCE
+cmake -S pulse-vst -B pulse-build -DCMAKE_BUILD_TYPE=Release
+cmake --build pulse-build --parallel 2
+```
+
+The upstream post-build step installs `PULSE Drum Synth.vst3` under
+`$HOME/.vst3`. The discovered class is `ABCDEF019182FAEB506C7365506C6473`,
+vendor `Pulse`, version `0.1.0`, category `Instrument|Synth`, with one stereo
+output and one event input. It exposes 2,245 controller entries: 164 writable
+part parameters plus bypass are automatable; 2,080 JUCE MIDI-controller mapping
+entries are non-automatable. Meldritch only polls the writable automatable
+subset in the audio callback.
+
+PULSE accepts either channels 1–4 (one part per channel) or General MIDI notes
+36/38/42/46 on channel 10 for kick, snare, hat, and percussion. Example 75 uses
+the latter explicitly:
+
+```lua
+local pulse=instrument:vst3 {
+  plugin="ABCDEF019182FAEB506C7365506C6473",
+  midi_channels={10,10,10,10},
+}
+local kit=sequence:drum_kit {voices={
+  {id="kick",note=36,channel=10}, {id="snare",note=38,channel=10},
+  {id="hat",note=42,channel=10}, {id="percussion",note=46,channel=10},
+}}
+pulse:connect_drum_kit(kit)
+```
+
+PULSE source IDs such as `p1_syn_lvl` are not VST3 parameter numbers. Example
+75 asserts the plugin-reported numeric IDs and binds those ordinary VST3
+parameters to Meldritch controls. Values remain normalized 0–1; the
+plugin-formatted `display` string provides its engineering representation.
+Envelope editors target PULSE's own Env2/Env3 attack, decay, sustain, and
+release parameters—Meldritch does not add another synthesis envelope.
+
+Opaque state round-trips through the existing VST3 state interface. A trusted
+startup state may be selected with `PULSE_STATE=/path/to/state` and is read on
+the control thread under the 16 MiB state-file limit. Example 75 defaults to a
+self-contained synthesis-only configuration, so it has no sample paths to
+lose. Browser clients never submit filesystem paths.
+
+Run the performance and conditional real-plugin test with:
+
+```sh
+cargo run -p meldritch2 -- perform crates/meldritch2/examples/75-pulse-performance.lua
+MELDRITCH_TEST_PULSE=1 cargo test -p meldritch2 --test vst3_host installed_pulse
+```
 
 ## Current boundaries
 
