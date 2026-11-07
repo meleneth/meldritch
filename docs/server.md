@@ -416,6 +416,11 @@ mutations and arrive at the plugin at the next audio block boundary. Pattern
 edits still adopt atomically at sequencer step boundaries; the browser owns no
 clock.
 
+Set `PULSE_DISABLE_SERUM=1` to force the native Plaits synthesis fallback.
+This is useful for a PULSE-only session and also avoids Serum's factory-context
+`IRunLoop` diagnostic; the diagnostic does not indicate a failed headless audio
+instance.
+
 ## Vue and Pinia workflow
 
 The frontend source is isolated in `crates/meldritch2/frontend`. For local UI

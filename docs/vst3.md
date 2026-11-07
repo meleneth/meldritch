@@ -204,9 +204,12 @@ deterministically reconstructed on composition reload. Exact factory-preset
 loading remains unavailable until Xfer exposes a supported non-GUI interface.
 
 Serum logs an `IRunLoop` warning because the current host does not provide GUI
-event-loop facilities. Native DSP, notes, parameters, state, real-time playback,
-and offline rendering have been validated despite that warning. Editor
-embedding is intentionally out of scope.
+event-loop facilities through the factory host context. The host library does
+provide the editor-frame run loop, but Serum queries the factory context first.
+Native DSP, notes, parameters, state, real-time playback, and offline rendering
+have been validated despite the diagnostic. Editor embedding is intentionally
+out of scope. Example 75 accepts `PULSE_DISABLE_SERUM=1` when a warning-free
+PULSE-only session is preferred.
 
 ## Geonkick 3.9 drum kits
 

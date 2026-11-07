@@ -112,9 +112,9 @@ local initial = variant == "dark" and {
 for name, value in pairs(initial) do pulse:set_parameter(ids[name],value) end
 
 local drum_control_ids = {}
-local function pulse_control(name,label)
+local function pulse_control(name,label,public)
   instrument:control {id=name,label=label,target=pulse:parameter(ids[name]),range={0,1}}
-  drum_control_ids[#drum_control_ids+1]=name
+  if public ~= false then drum_control_ids[#drum_control_ids+1]=name end
 end
 for _, control in ipairs({
   {"kick_freq","Kick Pitch"},{"kick_level","Kick Oscillator"},{"kick_noise","Kick Noise"},{"kick_volume","Kick Level"},
@@ -123,12 +123,18 @@ for _, control in ipairs({
   {"perc_freq","Perc Pitch"},{"perc_wave","Perc Waveform"},{"perc_noise","Perc Noise"},{"perc_volume","Perc Level"},
 }) do pulse_control(control[1],control[2]) end
 for _, part in ipairs({"kick","snare","hat","perc"}) do
-  for _, suffix in ipairs({"a","d","s","r"}) do pulse_control(part .. "_" .. suffix,part .. " envelope " .. suffix) end
+  for _, suffix in ipairs({"a","d","s","r"}) do
+    -- ADSR commands are authorized through their public plane controls below;
+    -- these target IDs are internal compiled controls, not role-visible IDs.
+    pulse_control(part .. "_" .. suffix,part .. " envelope " .. suffix,false)
+  end
 end
 
 -- Serum coexists when installed; a native voice preserves the complete demo
 -- and the synth-performer role on systems that only have PULSE.
-local serum_ok, serum = pcall(function()
+local serum_enabled = os.getenv("PULSE_DISABLE_SERUM") ~= "1"
+local serum_ok, serum = false, "disabled by PULSE_DISABLE_SERUM"
+if serum_enabled then serum_ok, serum = pcall(function()
   local plugin = instrument:vst3 {plugin=SERUM}
   plugin:connect_track(synth_track,sequence)
   plugin:set_parameter(0,.44)
@@ -136,17 +142,20 @@ local serum_ok, serum = pcall(function()
   plugin:set_parameter(2000004,.26)
   return plugin
 end)
+end
 local synth_output
 if serum_ok then
   instrument:control {id="synth_tone",label="Serum Cutoff",target=serum:parameter(2000003),range={0,1}}
   instrument:control {id="synth_color",label="Serum Resonance",target=serum:parameter(2000004),range={0,1}}
   synth_output=serum.out
 else
-  io.stderr:write("Serum 2 unavailable; using native Plaits fallback: " .. tostring(serum) .. "\n")
+  io.stderr:write("Using native Plaits fallback: " .. tostring(serum) .. "\n")
   local voice=instrument:plaits {model="fm",frequency=110,harmonics=.45,timbre=.55,morph=.35}
   local env=instrument:adsr {attack=.004,decay=.18,sustain=.45,release=.12}
   local amp=instrument:vca {}
-  instrument:connect(synth_track.voices[1].pitch,voice.frequency)
+  instrument:connect(synth_track.voices[1].pitch,voice.pitch)
+  instrument:connect(synth_track.voices[1].gate,voice.gate)
+  instrument:connect(synth_track.voices[1].velocity,voice.velocity)
   instrument:connect(synth_track.voices[1].gate,env.gate)
   instrument:connect(voice.out,amp.input); instrument:connect(env.out,amp.cv)
   instrument:control {id="synth_tone",label="Native Timbre",target=voice.timbre,range={0,1}}
