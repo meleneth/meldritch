@@ -7,6 +7,7 @@ import AdsrControl from "./controls/AdsrControl.vue";
 import PatternSelector from "./controls/PatternSelector.vue";
 import PresetSelector from "./controls/PresetSelector.vue";
 import DrumGrid from "./controls/DrumGrid.vue";
+import PerformancePlane from "./PerformancePlane.vue";
 
 function render(
   component: Component,
@@ -29,6 +30,25 @@ function render(
 }
 
 describe("control registry", () => {
+  it("collapses a performance station without discarding its schema", async () => {
+    const view = render(PerformancePlane, {
+      plane: { id: "bass", label: "SERUM // BASS", roles: ["bass"], controls: [] },
+    });
+    const station = view.root.querySelector("section") as HTMLElement;
+    const grid = view.root.querySelector(".plane-grid") as HTMLElement;
+    const button = view.root.querySelector(".plane-collapse") as HTMLButtonElement;
+    expect(station.dataset.station).toBe("bass");
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    button.click();
+    await nextTick();
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    expect(grid.style.display).toBe("none");
+    button.click();
+    await nextTick();
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    view.unmount();
+  });
+
   it("renders and dispatches sequencer edits", async () => {
     const edits: number[] = [];
     const view = render(
