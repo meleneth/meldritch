@@ -59,10 +59,14 @@ pub struct Parameter {
     pub step_count: i32,
     pub automatable: bool,
     pub read_only: bool,
+    /// Plugin-formatted representation of the current normalized value.
+    pub display: String,
+    pub bypass: bool,
+    pub flags: u32,
 }
 
-impl From<vst3_host::parameters::Parameter> for Parameter {
-    fn from(parameter: vst3_host::parameters::Parameter) -> Self {
+impl Parameter {
+    fn from_host(parameter: vst3_host::parameters::Parameter, display: String) -> Self {
         Self {
             id: parameter.id,
             name: parameter.name,
@@ -72,6 +76,9 @@ impl From<vst3_host::parameters::Parameter> for Parameter {
             step_count: parameter.step_count,
             automatable: parameter.can_automate,
             read_only: parameter.is_read_only,
+            display,
+            bypass: parameter.is_bypass,
+            flags: parameter.flags,
         }
     }
 }
@@ -85,6 +92,8 @@ pub struct Spec {
     /// Activate and retain every output bus. Multi-output instruments such as
     /// Geonkick require every advertised bus to be present during processing.
     pub activate_all_outputs: bool,
+    /// Human-readable MIDI channel (1..=16) assigned to each logical note lane.
+    pub midi_channels: [u8; NOTE_LANES],
 }
 
 impl Spec {
@@ -191,18 +200,23 @@ pub fn inspect(descriptor: Descriptor) -> Result<Spec, String> {
                 descriptor.name
             )
         })?;
-    let parameters = plugin
+    let host_parameters = plugin
         .get_parameters()
-        .map_err(|error| format!("failed to enumerate '{}': {error}", descriptor.name))?
-        .into_iter()
-        .map(Parameter::from)
-        .collect();
+        .map_err(|error| format!("failed to enumerate '{}': {error}", descriptor.name))?;
+    let mut parameters = Vec::with_capacity(host_parameters.len());
+    for parameter in host_parameters {
+        let display = plugin
+            .format_parameter(parameter.id, parameter.value)
+            .unwrap_or_else(|_| parameter.format_value(parameter.value));
+        parameters.push(Parameter::from_host(parameter, display));
+    }
     Ok(Spec {
         descriptor,
         parameters,
         initial_values: BTreeMap::new(),
         state: None,
         activate_all_outputs: false,
+        midi_channels: [1, 2, 3, 4, 5, 6, 7, 8],
     })
 }
 
@@ -213,10 +227,11 @@ pub fn load(selector: &str, paths: &[PathBuf]) -> Result<Spec, String> {
 pub struct Instance {
     plugin: Plugin,
     buffers: ProcessingBuffers,
-    parameters: Vec<u32>,
+    parameters: Vec<(usize, u32)>,
     previous_parameters: Vec<f64>,
     restored_baseline: Option<Vec<f64>>,
     active_notes: [Option<u8>; NOTE_LANES],
+    midi_channels: [MidiChannel; NOTE_LANES],
     failed: bool,
     offline_fallback: bool,
     previous_tempo: f64,
@@ -259,18 +274,22 @@ impl Instance {
             })?;
         let mut parameters = Vec::with_capacity(spec.parameters.len());
         let mut previous_parameters = Vec::with_capacity(spec.parameters.len());
-        for parameter in &spec.parameters {
+        for (index, parameter) in spec.parameters.iter().enumerate() {
             let value = spec.initial_value(parameter);
-            if !parameter.read_only {
+            if !parameter.read_only
+                && (parameter.automatable || spec.initial_values.contains_key(&parameter.id))
+            {
                 plugin.set_parameter(parameter.id, value).map_err(|error| {
                     format!(
                         "failed to initialize VST3 parameter {} on '{}': {error}",
                         parameter.id, spec.descriptor.name
                     )
                 })?;
+                if parameter.automatable {
+                    parameters.push((index, parameter.id));
+                    previous_parameters.push(value);
+                }
             }
-            parameters.push(parameter.id);
-            previous_parameters.push(value);
         }
         let restored_baseline = spec.state.as_ref().map(|_| previous_parameters.clone());
         if let Some(state) = &spec.state {
@@ -282,7 +301,7 @@ impl Instance {
             })?;
         }
         if spec.state.is_some() {
-            for (previous, id) in previous_parameters.iter_mut().zip(&parameters) {
+            for (previous, (_, id)) in previous_parameters.iter_mut().zip(&parameters) {
                 *previous = plugin.get_parameter(*id).map_err(|error| {
                     format!(
                         "failed to read restored VST3 parameter {id} on '{}': {error}",
@@ -318,6 +337,18 @@ impl Instance {
                 spec.descriptor.name
             )
         })?;
+        let mut midi_channels = [MidiChannel::Ch1; NOTE_LANES];
+        for (lane, channel) in spec.midi_channels.iter().copied().enumerate() {
+            midi_channels[lane] = channel
+                .checked_sub(1)
+                .and_then(MidiChannel::from_index)
+                .ok_or_else(|| {
+                    format!(
+                        "VST3 MIDI channel for lane {} must be in 1..16, got {channel}",
+                        lane + 1
+                    )
+                })?;
+        }
         Ok(Self {
             plugin,
             buffers,
@@ -325,6 +356,7 @@ impl Instance {
             previous_parameters,
             restored_baseline,
             active_notes: [None; NOTE_LANES],
+            midi_channels,
             failed: false,
             offline_fallback: false,
             previous_tempo: 120.0,
@@ -389,17 +421,17 @@ impl Instance {
             self.previous_tempo = tempo;
         }
 
-        for (index, ((&id, previous), &value)) in self
+        for (active_index, (&(parameter_index, id), previous)) in self
             .parameters
             .iter()
             .zip(&mut self.previous_parameters)
-            .zip(parameter_values)
             .enumerate()
         {
+            let value = parameter_values[parameter_index];
             if self
                 .restored_baseline
                 .as_ref()
-                .is_some_and(|baseline| value.to_bits() == baseline[index].to_bits())
+                .is_some_and(|baseline| value.to_bits() == baseline[active_index].to_bits())
             {
                 continue;
             }
@@ -412,22 +444,12 @@ impl Instance {
                 *previous = value;
             }
             if let Some(baseline) = &mut self.restored_baseline {
-                baseline[index] = f64::NAN;
+                baseline[active_index] = f64::NAN;
             }
         }
 
-        let channels = [
-            MidiChannel::Ch1,
-            MidiChannel::Ch2,
-            MidiChannel::Ch3,
-            MidiChannel::Ch4,
-            MidiChannel::Ch5,
-            MidiChannel::Ch6,
-            MidiChannel::Ch7,
-            MidiChannel::Ch8,
-        ];
         for frame in 0..frames {
-            for (lane, channel) in channels.iter().copied().enumerate() {
+            for (lane, channel) in self.midi_channels.iter().copied().enumerate() {
                 let (lane_pitch, lane_gate, lane_velocity) = if lane == 0 {
                     (pitch[frame], gate[frame], velocity[frame])
                 } else {
@@ -600,10 +622,14 @@ mod tests {
                 step_count: 0,
                 automatable: true,
                 read_only: false,
+                display: "50 %".into(),
+                bypass: false,
+                flags: 0,
             }],
             initial_values: BTreeMap::new(),
             state: None,
             activate_all_outputs: false,
+            midi_channels: [1, 2, 3, 4, 5, 6, 7, 8],
         };
         assert_eq!(Spec::parameter_name(42), "parameter_42");
         assert_eq!(spec.parameter_id("parameter_42"), Some(42));

@@ -49,6 +49,125 @@ fn energy(samples: &[f64]) -> f64 {
     samples.iter().map(|sample| sample * sample).sum()
 }
 
+fn parameter_id(spec: &vst3::Spec, name: &str) -> u32 {
+    spec.parameters
+        .iter()
+        .find(|parameter| parameter.name == name)
+        .unwrap_or_else(|| panic!("missing VST3 parameter '{name}'"))
+        .id
+}
+
+#[test]
+fn installed_pulse_exposes_automation_routes_gm_drums_and_restores_state() {
+    const PULSE_ID: &str = "ABCDEF019182FAEB506C7365506C6473";
+    if std::env::var_os("MELDRITCH_TEST_PULSE").is_none() {
+        eprintln!("set MELDRITCH_TEST_PULSE=1 to run the installed PULSE test");
+        return;
+    }
+    let root = PathBuf::from(std::env::var_os("HOME").expect("HOME")).join(".vst3");
+    let mut spec = vst3::load(PULSE_ID, &[root]).expect("inspect installed PULSE");
+    assert_eq!(spec.descriptor.name, "PULSE Drum Synth");
+    assert_eq!(spec.descriptor.vendor, "Pulse");
+    assert_eq!(spec.descriptor.version, "0.1.0");
+    assert_eq!(spec.descriptor.category, "Instrument|Synth");
+    assert!(spec.descriptor.instrument);
+    assert_eq!(spec.parameters.len(), 2_245);
+    assert_eq!(
+        spec.parameters
+            .iter()
+            .filter(|value| value.automatable)
+            .count(),
+        165
+    );
+    for (id, name) in [
+        (1_709_986_221, "KICK Synth Level"),
+        (1_469_782_605, "KICK Synth Freq"),
+        (1_387_348_517, "KICK Noise Level"),
+        (337_125_320, "KICK Env2 D"),
+    ] {
+        let parameter = spec
+            .parameters
+            .iter()
+            .find(|parameter| parameter.id == id)
+            .unwrap_or_else(|| panic!("missing stable PULSE parameter {id}"));
+        assert_eq!(parameter.name, name);
+        assert!(parameter.automatable);
+        assert!(!parameter.read_only);
+        assert!(!parameter.display.is_empty());
+    }
+
+    for (name, value) in [
+        ("KICK S1 Level", 0.0),
+        ("KICK S2 Level", 0.0),
+        ("KICK Synth Level", 0.9),
+        ("KICK Noise Level", 0.0),
+        ("KICK Volume", 0.8),
+    ] {
+        spec.initial_values.insert(parameter_id(&spec, name), value);
+    }
+    spec.midi_channels = [10, 10, 10, 10, 5, 6, 7, 8];
+
+    let render = |spec: &vst3::Spec, frequency: f64| {
+        let mut configured = spec.clone();
+        configured
+            .initial_values
+            .insert(parameter_id(&configured, "KICK Synth Freq"), frequency);
+        let mut values = configured
+            .parameters
+            .iter()
+            .map(|parameter| configured.initial_value(parameter))
+            .collect::<Vec<_>>();
+        let frames = 1_024;
+        let pitch = vec![65.406_391; frames]; // GM kick note 36
+        let velocity = vec![0.9; frames];
+        let tempo = vec![124.0; frames];
+        let extra = vec![0.0; frames * vst3::EXTRA_NOTE_INPUTS];
+        let mut output = Vec::with_capacity(frames * 2 * 8);
+        let mut plugin = Instance::new(&configured, 48_000.0).expect("instantiate PULSE");
+        for block in 0..8 {
+            let gate = vec![if block % 2 == 0 { 1.0 } else { 0.0 }; frames];
+            let mut block_output = vec![0.0; frames * 2];
+            if block == 4 {
+                values[configured
+                    .parameters
+                    .iter()
+                    .position(|parameter| parameter.id == parameter_id(&configured, "KICK Env2 D"))
+                    .unwrap()] = 0.8;
+            }
+            plugin.process(
+                [&pitch, &gate, &velocity, &tempo, &extra],
+                &values,
+                &mut block_output,
+            );
+            assert!(block_output.iter().all(|sample| sample.is_finite()));
+            output.extend(block_output);
+        }
+        assert!(!plugin.failed());
+        let state = plugin.save_state().expect("save PULSE state");
+        (output, state)
+    };
+
+    let (low, state) = render(&spec, 0.12);
+    let (high, _) = render(&spec, 0.78);
+    assert!(energy(&low) > 0.001, "PULSE GM kick produced silence");
+    assert!(
+        energy(&high) > 0.001,
+        "automated PULSE kick produced silence"
+    );
+    let difference = low
+        .iter()
+        .zip(&high)
+        .map(|(left, right)| (left - right).abs())
+        .sum::<f64>();
+    assert!(
+        difference > 1.0,
+        "PULSE frequency automation had no DSP effect"
+    );
+    assert!(!state.is_empty());
+    spec.state = Some(state);
+    drop(Instance::new(&spec, 48_000.0).expect("restore PULSE state"));
+}
+
 #[test]
 fn installed_geonkick_loads_timekit_processes_all_buses_and_restores_state() {
     const GEONKICK_ID: &str = "E2CC953290E863F06405E13924E34B24";

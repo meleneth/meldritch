@@ -650,12 +650,22 @@ impl UserData for LuaWebPlane {
             let label = spec
                 .get::<Option<String>>("label")?
                 .unwrap_or_else(|| id.clone());
-            let definitions = [
-                ("attack", 0.001, 5.0, "log", "s"),
-                ("decay", 0.001, 5.0, "log", "s"),
-                ("sustain", 0.0, 1.0, "linear", ""),
-                ("release", 0.001, 10.0, "log", "s"),
-            ];
+            let normalized = spec.get::<Option<bool>>("normalized")?.unwrap_or(false);
+            let definitions = if normalized {
+                [
+                    ("attack", 0.0, 1.0, "linear", "normalized"),
+                    ("decay", 0.0, 1.0, "linear", "normalized"),
+                    ("sustain", 0.0, 1.0, "linear", "normalized"),
+                    ("release", 0.0, 1.0, "linear", "normalized"),
+                ]
+            } else {
+                [
+                    ("attack", 0.001, 5.0, "log", "s"),
+                    ("decay", 0.001, 5.0, "log", "s"),
+                    ("sustain", 0.0, 1.0, "linear", ""),
+                    ("release", 0.001, 10.0, "log", "s"),
+                ]
+            };
             let mut parameters = Vec::new();
             let mut app = this.application.borrow_mut();
             for (name, default_min, default_max, scale, unit) in definitions {
@@ -764,6 +774,9 @@ fn parameter_table(lua: &Lua, spec: &crate::vst3::Spec) -> mlua::Result<Table> {
         item.set("steps", parameter.step_count)?;
         item.set("automatable", parameter.automatable)?;
         item.set("read_only", parameter.read_only)?;
+        item.set("display", parameter.display.clone())?;
+        item.set("bypass", parameter.bypass)?;
+        item.set("flags", parameter.flags)?;
         result.set(index + 1, item)?;
     }
     Ok(result)
@@ -1470,10 +1483,13 @@ local function decorate_scope(facade, scope, prefix)
       "vst3 requires plugin = stable class ID or unique display name")
     local runtime = meldritch._vst3(values)
     local handle = scope:module(values.id or self:_id("vst3"), "vst3", {}, runtime)
+    handle._midi_channels = values.midi_channels or {1,2,3,4,5,6,7,8}
     handle.out = { left = handle.left, right = handle.right, direction = "stereo_output" }
     handle.parameters = {}
     for _, info in ipairs(runtime:parameters()) do
-      handle.parameters[info.id] = parameter(handle, info.key)
+      if info.automatable and not info.read_only then
+        handle.parameters[info.id] = parameter(handle, info.key)
+      end
     end
     function handle:set_parameter(id, value)
       runtime:set_parameter(id, value)
@@ -1487,7 +1503,7 @@ local function decorate_scope(facade, scope, prefix)
     function handle:descriptor() return runtime:descriptor() end
     function handle:parameter(id)
       if type(id) == "number" then
-        return assert(self.parameters[id], "unknown VST3 parameter ID: " .. tostring(id))
+        return assert(self.parameters[id], "unknown or non-automatable VST3 parameter ID: " .. tostring(id))
       end
       assert(type(id) == "string" and id ~= "", "VST3 parameter requires a numeric ID or exact name")
       local match = nil
@@ -1497,7 +1513,7 @@ local function decorate_scope(facade, scope, prefix)
           match = self.parameters[info.id]
         end
       end
-      return assert(match, "unknown VST3 parameter name: " .. id)
+      return assert(match, "unknown or non-automatable VST3 parameter name: " .. id)
     end
     function handle:connect_track(track, sequence)
       assert(type(track) == "table" and type(track.voices) == "table",
@@ -1516,6 +1532,8 @@ local function decorate_scope(facade, scope, prefix)
       assert(type(kit) == "table" and type(kit.voices) == "table" and #kit.voices <= 8,
         "VST3 drum kit requires at most eight voices")
       for lane, voice in ipairs(kit.voices) do
+        assert(voice.channel == self._midi_channels[lane],
+          "drum voice channel must match the VST3 midi_channels entry for its lane")
         local suffix = lane == 1 and "" or "_" .. lane
         scope:connect(voice.track.pitch, self["pitch" .. suffix])
         scope:connect(voice.track.gate, self["gate" .. suffix])
@@ -1699,9 +1717,12 @@ local function decorate_scope(facade, scope, prefix)
           id = voice.id,
           label = voice.label or voice.id,
           note = voice.note,
+          channel = voice.channel or index,
           duration = voice.duration or 1,
           track = self:track((values.name or "Drums") .. " " .. voice.id),
         }
+        assert(type(item.channel) == "number" and item.channel >= 1 and item.channel <= 16
+          and item.channel % 1 == 0, "drum voice channel must be 1..16")
         item._track_indices = { item.track._track_index }
         kit.voices[index] = item
         kit.by_id[item.id] = item
@@ -2486,6 +2507,20 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
             loaded.activate_all_outputs = spec
                 .get::<Option<bool>>("activate_all_outputs")?
                 .unwrap_or(false);
+            if let Some(channels) = spec.get::<Option<Table>>("midi_channels")? {
+                let channels = channels
+                    .sequence_values::<u8>()
+                    .collect::<mlua::Result<Vec<_>>>()?;
+                if channels.is_empty()
+                    || channels.len() > crate::vst3::NOTE_LANES
+                    || channels.iter().any(|channel| !(1..=16).contains(channel))
+                {
+                    return Err(mlua::Error::external(
+                        "VST3 midi_channels must contain 1..8 channels in the range 1..16",
+                    ));
+                }
+                loaded.midi_channels[..channels.len()].copy_from_slice(&channels);
+            }
             if let Some(state) = spec.get::<Option<Table>>("state")? {
                 loaded.state = Some(
                     state
