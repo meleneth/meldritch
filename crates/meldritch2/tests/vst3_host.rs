@@ -1,4 +1,7 @@
-use std::{path::PathBuf, sync::OnceLock};
+use std::{
+    path::PathBuf,
+    sync::{Mutex, MutexGuard, OnceLock},
+};
 
 use meldritch2::{
     compiler::{OfflineRenderer, compile_at_rate},
@@ -49,6 +52,11 @@ fn energy(samples: &[f64]) -> f64 {
     samples.iter().map(|sample| sample * sample).sum()
 }
 
+fn installed_plugin_lock() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn parameter_id(spec: &vst3::Spec, name: &str) -> u32 {
     spec.parameters
         .iter()
@@ -74,6 +82,7 @@ fn render_effect(spec: &vst3::Spec, input: &[f64]) -> Vec<f64> {
 
 #[test]
 fn installed_lsp_bundle_discovers_and_processes_stereo_compressor_and_limiter() {
+    let _lock = installed_plugin_lock();
     const COMPRESSOR_ID: &str = "647370206B31732020202020756E7363";
     const LIMITER_ID: &str = "64737020623173202020202072667563";
     let root = PathBuf::from("/usr/lib/vst3");
@@ -200,6 +209,7 @@ return instrument
 
 #[test]
 fn installed_pulse_exposes_automation_routes_gm_drums_and_restores_state() {
+    let _lock = installed_plugin_lock();
     const PULSE_ID: &str = "ABCDEF019182FAEB506C7365506C6473";
     if std::env::var_os("MELDRITCH_TEST_PULSE").is_none() {
         eprintln!("set MELDRITCH_TEST_PULSE=1 to run the installed PULSE test");
@@ -311,6 +321,7 @@ fn installed_pulse_exposes_automation_routes_gm_drums_and_restores_state() {
 
 #[test]
 fn installed_geonkick_loads_timekit_processes_all_buses_and_restores_state() {
+    let _lock = installed_plugin_lock();
     const GEONKICK_ID: &str = "E2CC953290E863F06405E13924E34B24";
     if std::env::var_os("MELDRITCH_TEST_GEONKICK").is_none() {
         eprintln!("set MELDRITCH_TEST_GEONKICK=1 to run the installed Geonkick test");
@@ -356,6 +367,7 @@ fn installed_geonkick_loads_timekit_processes_all_buses_and_restores_state() {
 
 #[test]
 fn installed_serum_supports_real_notes_parameters_audio_and_teardown() {
+    let _lock = installed_plugin_lock();
     const SERUM_ID: &str = "56534558667350736572756D20320000";
     let Some(home) = std::env::var_os("HOME") else {
         return;
@@ -422,6 +434,81 @@ fn installed_serum_supports_real_notes_parameters_audio_and_teardown() {
         "Serum produced silence for a two-note chord"
     );
     drop(serum);
+}
+
+#[test]
+fn pressure_system_hosts_isolated_instruments_and_lsp_master_chain() {
+    let _lock = installed_plugin_lock();
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
+    let home = PathBuf::from(home);
+    if !home.join(".vst3/Serum2.vst3").is_dir()
+        || !home.join(".vst3/PULSE Drum Synth.vst3").is_dir()
+        || !PathBuf::from("/usr/lib/vst3/lsp-plugins.vst3").is_dir()
+    {
+        eprintln!("Pressure System plugins are unavailable; skipping conditional integration test");
+        return;
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script = std::fs::read_to_string(root.join("examples/80-pressure-system-live.lua"))
+        .expect("read Pressure System composition");
+    let graph = lua::read_with_root(&script, &root).expect("load Pressure System composition");
+    let machine = compile_at_rate(&graph, 48_000.0).expect("compile Pressure System composition");
+    let order = machine.order();
+    for module in [
+        "instrument/serum_bass",
+        "instrument/serum_lead",
+        "instrument/serum_drone",
+        "instrument/pulse_drums",
+        "instrument/master_compressor",
+        "instrument/master_limiter",
+    ] {
+        assert!(
+            order.iter().any(|candidate| candidate == module),
+            "missing {module}"
+        );
+    }
+    assert!(
+        machine
+            .vst3_latency_samples("instrument/master_compressor")
+            .is_ok()
+    );
+    assert!(
+        machine
+            .vst3_latency_samples("instrument/master_limiter")
+            .is_ok()
+    );
+    for control in [
+        "bass_cutoff",
+        "lead_a_position",
+        "drone_release",
+        "pulse_kick_freq",
+        "compressor_threshold",
+        "limiter_threshold",
+        "PRESSURE",
+    ] {
+        assert!(
+            machine.control_handle(control).is_some(),
+            "missing {control}"
+        );
+    }
+
+    let mut renderer = OfflineRenderer::new(machine, 1024, 2).expect("Pressure renderer");
+    let mut left = vec![0.0; 48_000 * 2];
+    let mut right = vec![0.0; 48_000 * 2];
+    for (left, right) in left.chunks_mut(1024).zip(right.chunks_mut(1024)) {
+        renderer.process_stereo(left, right);
+    }
+    assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
+    assert!(
+        energy(&left) > 0.001,
+        "Pressure System left channel is silent"
+    );
+    assert!(
+        energy(&right) > 0.001,
+        "Pressure System right channel is silent"
+    );
 }
 
 #[test]

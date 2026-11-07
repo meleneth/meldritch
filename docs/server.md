@@ -1,5 +1,9 @@
 # Lua-programmable HTTP and WebSocket server
 
+For the full three-Serum, PULSE, and LSP multi-performer composition, see
+[Pressure System Live](pressure-system-live.md). It uses this same projected
+control-plane protocol; the browser has no composition-specific components.
+
 Meldritch 2 embeds an asynchronous application server for live performance.
 Rust owns HTTP parsing, WebSocket framing, sockets, limits, connection liveness,
 JSON transport, and shutdown. The composition's retained Lua state owns route

@@ -1,5 +1,8 @@
 # Native Linux VST3 hosting
 
+The complete instrument-and-effects reference composition is documented in
+[Pressure System Live](pressure-system-live.md).
+
 Meldritch 2 can load native Linux VST3 instruments as ordinary stereo-producing
 graph modules. Notes, velocity, tempo, and normalized parameter values enter the
 same compiled graph used by built-in oscillators, Plaits, samples, effects,

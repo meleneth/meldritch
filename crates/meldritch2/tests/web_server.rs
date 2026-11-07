@@ -1069,3 +1069,41 @@ fn drop_demo_is_browser_discovered_and_changes_the_real_audio_graph() {
         "DROP must alter Meldritch DSP rather than only browser state"
     );
 }
+
+#[test]
+fn pressure_system_roles_resolve_to_public_controls_and_server_starts() {
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
+    let home = std::path::PathBuf::from(home);
+    if !home.join(".vst3/Serum2.vst3").is_dir()
+        || !home.join(".vst3/PULSE Drum Synth.vst3").is_dir()
+        || !std::path::Path::new("/usr/lib/vst3/lsp-plugins.vst3").is_dir()
+    {
+        eprintln!("Pressure System plugins unavailable; skipping conditional server test");
+        return;
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(root.join("examples/80-pressure-system-live.lua"))
+        .expect("read Pressure System")
+        .replace(
+            "host=os.getenv(\"PRESSURE_HOST\") or \"127.0.0.1\",port=tonumber(os.getenv(\"PRESSURE_PORT\") or \"8080\")",
+            "host=\"127.0.0.1\",port=0",
+        );
+    let mut program = lua::read_program_with_root(&source, root).expect("load Pressure System");
+    let machine = compile(program.graph()).expect("compile Pressure System");
+    let controls = machine
+        .control_ids()
+        .map(|id| {
+            let handle = machine.control_handle(id).unwrap();
+            let value = handle.effective_value();
+            (handle, value)
+        })
+        .collect();
+    let address = program
+        .events_mut()
+        .start_server(controls)
+        .expect("start Pressure System server")
+        .expect("Pressure System listener");
+    assert_eq!(address.ip().to_string(), "127.0.0.1");
+}
