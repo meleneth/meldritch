@@ -624,6 +624,179 @@ fn lua_planes_project_by_role_and_edit_the_real_sequencer() {
 }
 
 #[test]
+fn note_planes_authorize_edits_project_envelopes_and_schedule_patterns() {
+    let source = include_str!("../examples/72-note-performance.lua").replace("port=8080", "port=0");
+    let mut program =
+        lua::read_program_with_root(&source, std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+            .unwrap();
+    let machine = compile(program.graph()).unwrap();
+    let controls = machine
+        .control_ids()
+        .map(|id| {
+            let handle = machine.control_handle(id).unwrap();
+            let value = handle.effective_value();
+            (handle, value)
+        })
+        .collect();
+    let address = program
+        .events_mut()
+        .start_server(controls)
+        .unwrap()
+        .unwrap();
+
+    let client = thread::spawn(move || {
+        tokio::runtime::Runtime::new().unwrap().block_on(async move {
+            let (mut drummer, _) = connect_async(format!("ws://{address}/performance"))
+                .await
+                .unwrap();
+            let guest: Value = serde_json::from_str(
+                drummer.next().await.unwrap().unwrap().to_text().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(guest["state"]["planes"], json!([]));
+            assert_eq!(guest["state"]["controls"], json!({}));
+            drummer
+                .send(Message::Text(
+                    json!({"type":"authenticate","token":"drummer-demo-token"})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            drummer.next().await.unwrap().unwrap();
+            let snapshot: Value = serde_json::from_str(
+                drummer.next().await.unwrap().unwrap().to_text().unwrap(),
+            )
+            .unwrap();
+            let kinds = snapshot["state"]["planes"][0]["controls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|control| control["kind"].as_str().unwrap())
+                .collect::<Vec<_>>();
+            assert!(kinds.contains(&"piano_roll"));
+            assert!(kinds.contains(&"pattern_selector"));
+            assert_eq!(snapshot["state"]["planes"][0]["read_only"], false);
+
+            drummer
+                .send(Message::Text(
+                    json!({"type":"note.create","plane":"rhythm","control":"bass_notes","pattern":0,"step":15,"pitch":48,"velocity":77,"duration":1})
+                        .to_string().into(),
+                ))
+                .await
+                .unwrap();
+            let edited: Value = serde_json::from_str(
+                drummer.next().await.unwrap().unwrap().to_text().unwrap(),
+            )
+            .unwrap();
+            assert!(edited["state"]["values"]["rhythm/bass_notes"]["notes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|note| note["step"] == 15 && note["velocity"] == 77));
+
+            drummer
+                .send(Message::Text(
+                    json!({"type":"pattern.select","plane":"rhythm","control":"bass_patterns","pattern":1,"boundary":"bar"})
+                        .to_string().into(),
+                ))
+                .await
+                .unwrap();
+            let pending: Value = serde_json::from_str(
+                drummer.next().await.unwrap().unwrap().to_text().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(pending["state"]["values"]["rhythm/bass_patterns"]["pending"], 1);
+            assert_eq!(pending["state"]["values"]["rhythm/bass_patterns"]["boundary"], "bar");
+
+            let (mut observer, _) = connect_async(format!("ws://{address}/performance"))
+                .await
+                .unwrap();
+            observer.next().await.unwrap().unwrap();
+            observer
+                .send(Message::Text(
+                    json!({"type":"authenticate","token":"observer-demo-token"})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            observer.next().await.unwrap().unwrap();
+            let observer_snapshot: Value = serde_json::from_str(
+                observer.next().await.unwrap().unwrap().to_text().unwrap(),
+            )
+            .unwrap();
+            assert!(observer_snapshot["state"]["planes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|plane| plane["read_only"] == true));
+            observer
+                .send(Message::Text(
+                    json!({"type":"note.delete","plane":"rhythm","control":"bass_notes","pattern":0,"id":1})
+                        .to_string().into(),
+                ))
+                .await
+                .unwrap();
+            let rejected: Value = serde_json::from_str(
+                observer.next().await.unwrap().unwrap().to_text().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(rejected["type"], "error");
+
+            let (mut synth, _) = connect_async(format!("ws://{address}/performance"))
+                .await
+                .unwrap();
+            synth.next().await.unwrap().unwrap();
+            synth
+                .send(Message::Text(
+                    json!({"type":"authenticate","token":"synth-demo-token"})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            synth.next().await.unwrap().unwrap();
+            let synth_snapshot: Value = serde_json::from_str(
+                synth.next().await.unwrap().unwrap().to_text().unwrap(),
+            )
+            .unwrap();
+            assert!(synth_snapshot["state"]["planes"][0]["controls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|control| control["kind"] == "adsr"));
+            synth
+                .send(Message::Text(
+                    json!({"type":"adsr.set","plane":"synthesis","control":"amp_envelope","parameter":"attack","value":0.08})
+                        .to_string().into(),
+                ))
+                .await
+                .unwrap();
+            synth.next().await.unwrap().unwrap();
+        })
+    });
+    poll_thread(&mut program, client);
+
+    let sequencer = &machine.sequencer_controls()[0];
+    assert!(
+        sequencer
+            .note_events(0, 1)
+            .iter()
+            .any(|note| note.step == 15 && note.velocity == 77)
+    );
+    assert_eq!(sequencer.queued_pattern(), Some(1));
+    assert_eq!(sequencer.queued_pattern_quantization(), 16);
+    assert_eq!(
+        machine
+            .control_handle("amp_attack")
+            .unwrap()
+            .override_value(),
+        Some(0.08)
+    );
+}
+
+#[test]
 fn read_only_projection_is_enforced_and_live_role_reassignment_is_revisioned() {
     let (mut program, machine, address) = start();
     let client = thread::spawn(move || {

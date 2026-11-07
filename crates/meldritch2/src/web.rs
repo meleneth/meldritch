@@ -32,7 +32,7 @@ use serde_json::{Value, json};
 use tokio::sync::{broadcast, oneshot};
 
 use crate::compiler::ControlHandle;
-use crate::sequencer::SequencerControl;
+use crate::sequencer::{NoteEvent, SequencerControl};
 
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
 pub const DEFAULT_BODY_LIMIT: usize = 64 * 1024;
@@ -144,14 +144,87 @@ pub enum PlaneControl {
         callback: Function,
         serial: Rc<Cell<u64>>,
     },
+    PianoRoll {
+        id: String,
+        label: String,
+        sequencer: Arc<SequencerControl>,
+        tracks: Vec<usize>,
+        steps: usize,
+        pitch_min: u8,
+        pitch_max: u8,
+    },
+    Adsr {
+        id: String,
+        label: String,
+        parameters: Vec<AdsrParameter>,
+    },
+    Patterns {
+        id: String,
+        label: String,
+        sequencer: Arc<SequencerControl>,
+        default_boundary: String,
+    },
+}
+
+#[derive(Clone)]
+pub struct AdsrParameter {
+    pub name: &'static str,
+    pub control: String,
+    pub target: String,
+    pub min: f64,
+    pub max: f64,
+    pub scale: String,
+    pub unit: &'static str,
 }
 
 impl PlaneControl {
     pub fn id(&self) -> &str {
         match self {
-            Self::Range { id, .. } | Self::Steps { id, .. } | Self::Trigger { id, .. } => id,
+            Self::Range { id, .. }
+            | Self::Steps { id, .. }
+            | Self::Trigger { id, .. }
+            | Self::PianoRoll { id, .. }
+            | Self::Adsr { id, .. }
+            | Self::Patterns { id, .. } => id,
         }
     }
+}
+
+fn parse_note_command(
+    message: &Value,
+    id: u32,
+    pitch_min: u8,
+    pitch_max: u8,
+) -> Result<NoteEvent, String> {
+    let byte = |name: &str| {
+        message
+            .get(name)
+            .and_then(Value::as_u64)
+            .and_then(|value| u8::try_from(value).ok())
+            .ok_or_else(|| format!("note command requires byte field '{name}'"))
+    };
+    let pitch = byte("pitch")?;
+    if !(pitch_min..=pitch_max).contains(&pitch) {
+        return Err(format!(
+            "note pitch must be in the control's {pitch_min}..={pitch_max} range"
+        ));
+    }
+    let velocity = byte("velocity")?;
+    let duration = byte("duration")?;
+    if velocity == 0 || duration == 0 {
+        return Err("note velocity and duration must be positive".into());
+    }
+    Ok(NoteEvent {
+        id,
+        step: byte("step")?,
+        pitch,
+        velocity,
+        duration,
+        legato: message
+            .get("legato")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
 }
 
 #[derive(Clone)]
@@ -373,6 +446,12 @@ impl Application {
                         } => json!({"id":id,"label":label,"kind":kind,"min":min,"max":max,"scale":scale,"unit":unit}),
                         PlaneControl::Steps { id,label,steps,.. } => json!({"id":id,"label":label,"kind":"step_sequencer","step_count":steps}),
                         PlaneControl::Trigger { id,label,.. } => json!({"id":id,"label":label,"kind":"trigger"}),
+                        PlaneControl::PianoRoll { id,label,steps,pitch_min,pitch_max,tracks,.. } => json!({"id":id,"label":label,"kind":"piano_roll","step_count":steps,"pitch_min":pitch_min,"pitch_max":pitch_max,"voices":tracks.len()}),
+                        PlaneControl::Adsr { id,label,parameters } => {
+                            let parameters=parameters.iter().map(|parameter| json!({"name":parameter.name,"control":parameter.control,"min":parameter.min,"max":parameter.max,"scale":parameter.scale,"unit":parameter.unit})).collect::<Vec<_>>();
+                            json!({"id":id,"label":label,"kind":"adsr","parameters":parameters})
+                        }
+                        PlaneControl::Patterns { id,label,sequencer,default_boundary } => json!({"id":id,"label":label,"kind":"pattern_selector","patterns":sequencer.pattern_names(),"boundaries":["immediate","beat","bar","cycle"],"default_boundary":default_boundary}),
                     })
                     .collect::<Vec<_>>();
                 json!({"id":plane.id,"label":plane.label,"layout":plane.layout,"roles":plane.roles,"read_only_roles":plane.read_only_roles,"controls":controls})
@@ -465,11 +544,71 @@ impl Application {
                     PlaneControl::Trigger { id, serial, .. } => {
                         (id, json!({"serial":serial.get()}))
                     }
+                    PlaneControl::PianoRoll {
+                        id,
+                        sequencer,
+                        tracks,
+                        ..
+                    } => {
+                        let pattern = sequencer.active_pattern();
+                        let notes = sequencer
+                            .note_events(pattern, tracks[0])
+                            .into_iter()
+                            .map(|note| json!({"id":note.id,"step":note.step,"pitch":note.pitch,"velocity":note.velocity,"duration":note.duration,"legato":note.legato}))
+                            .collect::<Vec<_>>();
+                        (
+                            id,
+                            json!({"pattern":pattern,"notes":notes,"position":sequencer.current_step()}),
+                        )
+                    }
+                    PlaneControl::Adsr { id, parameters, .. } => {
+                        let values = parameters
+                            .iter()
+                            .map(|parameter| {
+                                let value = runtime
+                                    .handles
+                                    .get(&parameter.target)
+                                    .map_or(parameter.min, ControlHandle::effective_value);
+                                (parameter.name.to_owned(), json!(value))
+                            })
+                            .collect::<serde_json::Map<_, _>>();
+                        (id, Value::Object(values))
+                    }
+                    PlaneControl::Patterns { id, sequencer, .. } => {
+                        let names = sequencer.pattern_names();
+                        let active = sequencer.active_pattern();
+                        let pending = sequencer.queued_pattern();
+                        let quantization = sequencer.queued_pattern_quantization();
+                        let boundary = if quantization == 0 {
+                            "cycle"
+                        } else if quantization == 1 {
+                            "immediate"
+                        } else if quantization == sequencer.steps_per_beat as usize {
+                            "beat"
+                        } else {
+                            "bar"
+                        };
+                        (
+                            id,
+                            json!({"active":active,"active_name":names.get(active),"pending":pending,"pending_name":pending.and_then(|index|names.get(index)),"boundary":boundary}),
+                        )
+                    }
                 };
                 values.insert(format!("{}/{}", plane.id, id), value);
             }
         }
-        let mut state = json!({ "name": self.name, "controls": controls, "values": values });
+        let role_controls = self
+            .roles
+            .borrow()
+            .iter()
+            .map(|(role, definition)| {
+                let controls = definition.controls.as_ref().map(|controls| {
+                    Value::Array(controls.iter().cloned().map(Value::String).collect())
+                });
+                (role.clone(), controls.unwrap_or(Value::Null))
+            })
+            .collect::<serde_json::Map<_, _>>();
+        let mut state = json!({ "name": self.name, "controls": controls, "values": values, "_role_controls": role_controls });
         if include_schema {
             state["planes"] = Value::Array(definitions);
         }
@@ -477,7 +616,7 @@ impl Application {
             "type": if include_schema { "state.snapshot" } else { "state.updated" },
             "epoch": epoch,
             "revision": revision,
-            "schema_version": 1,
+            "schema_version": 2,
             "schema_revision": schema_revision,
             "state": state
         })
@@ -512,7 +651,10 @@ impl Application {
             .find(|control| match control {
                 PlaneControl::Range { id, .. }
                 | PlaneControl::Steps { id, .. }
-                | PlaneControl::Trigger { id, .. } => id == control_id,
+                | PlaneControl::Trigger { id, .. }
+                | PlaneControl::PianoRoll { id, .. }
+                | PlaneControl::Adsr { id, .. }
+                | PlaneControl::Patterns { id, .. } => id == control_id,
             })
             .cloned()
             .ok_or_else(|| DispatchError::not_found("unknown plane control"))?;
@@ -547,6 +689,108 @@ impl Application {
                 callback.call::<()>(()).map_err(lua_error)?;
                 serial.set(serial.get().wrapping_add(1));
                 Ok(())
+            }
+            (
+                Some(kind @ ("note.create" | "note.update" | "note.delete")),
+                PlaneControl::PianoRoll {
+                    sequencer,
+                    tracks,
+                    steps,
+                    pitch_min,
+                    pitch_max,
+                    ..
+                },
+            ) => {
+                let pattern = message
+                    .get("pattern")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| usize::try_from(value).ok())
+                    .unwrap_or_else(|| sequencer.active_pattern());
+                if pattern >= sequencer.pattern_names().len() {
+                    return Err(DispatchError::bad_request("unknown piano-roll pattern"));
+                }
+                let id = message
+                    .get("id")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok());
+                sequencer
+                    .edit_note_events(pattern, &tracks, steps, |notes| match kind {
+                        "note.delete" => {
+                            let id = id.ok_or_else(|| "note.delete requires an ID".to_owned())?;
+                            let before = notes.len();
+                            notes.retain(|note| note.id != id);
+                            (notes.len() != before)
+                                .then_some(())
+                                .ok_or_else(|| "unknown note ID".to_owned())
+                        }
+                        "note.create" => {
+                            let next = notes
+                                .iter()
+                                .map(|note| note.id)
+                                .max()
+                                .unwrap_or(0)
+                                .checked_add(1)
+                                .ok_or_else(|| "note ID space exhausted".to_owned())?;
+                            notes.push(parse_note_command(message, next, pitch_min, pitch_max)?);
+                            Ok(())
+                        }
+                        "note.update" => {
+                            let id = id.ok_or_else(|| "note.update requires an ID".to_owned())?;
+                            let note = notes
+                                .iter_mut()
+                                .find(|note| note.id == id)
+                                .ok_or_else(|| "unknown note ID".to_owned())?;
+                            *note = parse_note_command(message, id, pitch_min, pitch_max)?;
+                            Ok(())
+                        }
+                        _ => unreachable!(),
+                    })
+                    .map_err(DispatchError::bad_request)
+            }
+            (
+                Some("pattern.select"),
+                PlaneControl::Patterns {
+                    sequencer,
+                    default_boundary,
+                    ..
+                },
+            ) => {
+                let pattern = message
+                    .get("pattern")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| usize::try_from(value).ok())
+                    .ok_or_else(|| {
+                        DispatchError::bad_request("pattern.select requires a pattern index")
+                    })?;
+                let boundary = message
+                    .get("boundary")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&default_boundary);
+                let quantization = match boundary {
+                    "immediate" => 1,
+                    "beat" => sequencer.steps_per_beat as usize,
+                    "bar" => sequencer.steps_per_beat as usize * 4,
+                    "cycle" => 0,
+                    _ => return Err(DispatchError::bad_request("unknown pattern boundary")),
+                };
+                sequencer
+                    .queue_pattern_quantized(pattern, quantization)
+                    .map_err(DispatchError::bad_request)
+            }
+            (Some("adsr.set"), PlaneControl::Adsr { parameters, .. }) => {
+                let name = message
+                    .get("parameter")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| DispatchError::bad_request("adsr.set requires a parameter"))?;
+                let parameter = parameters
+                    .iter()
+                    .find(|parameter| parameter.name == name)
+                    .ok_or_else(|| DispatchError::bad_request("unknown ADSR parameter"))?;
+                self.set_control(
+                    Some("__meldritch_trusted"),
+                    &parameter.control,
+                    message.get("value").cloned().unwrap_or(Value::Null),
+                )
             }
             _ => Err(DispatchError::bad_request(
                 "command does not match plane control type",
@@ -607,7 +851,32 @@ impl Application {
                     PlaneControl::Trigger { id, serial, .. } => {
                         (format!("{}/{}", plane.id, id), serial.get())
                     }
-                    PlaneControl::Range { .. } => continue,
+                    PlaneControl::PianoRoll {
+                        id,
+                        sequencer,
+                        tracks,
+                        ..
+                    } => {
+                        let pattern = sequencer.active_pattern();
+                        let mut value = (pattern as u64) << 56 | sequencer.current_step() as u64;
+                        for note in sequencer.note_events(pattern, tracks[0]) {
+                            value = value
+                                .wrapping_mul(1_099_511_628_211)
+                                .wrapping_add(u64::from(note.id))
+                                ^ (u64::from(note.step) << 8)
+                                ^ (u64::from(note.pitch) << 16)
+                                ^ (u64::from(note.velocity) << 24)
+                                ^ (u64::from(note.duration) << 32);
+                        }
+                        (format!("{}/{}", plane.id, id), value)
+                    }
+                    PlaneControl::Patterns { id, sequencer, .. } => {
+                        let value = sequencer.active_pattern() as u64
+                            | (sequencer.queued_pattern().unwrap_or(255) as u64) << 16
+                            | (sequencer.queued_pattern_quantization() as u64) << 32;
+                        (format!("{}/{}", plane.id, id), value)
+                    }
+                    PlaneControl::Range { .. } | PlaneControl::Adsr { .. } => continue,
                 };
                 values.push(value);
             }
@@ -857,7 +1126,15 @@ impl ControlExecutor {
                     }
                 } else if matches!(
                     message.get("type").and_then(Value::as_str),
-                    Some("step.toggle" | "trigger.fire")
+                    Some(
+                        "step.toggle"
+                            | "trigger.fire"
+                            | "note.create"
+                            | "note.update"
+                            | "note.delete"
+                            | "pattern.select"
+                            | "adsr.set"
+                    )
                 ) {
                     match self
                         .application
@@ -1476,6 +1753,21 @@ async fn websocket_loop(socket: WebSocket, shared: Shared, remote: SocketAddr) {
 
 fn project_snapshot(snapshot: &Value, role: Option<&str>, schema: &Value) -> Value {
     let mut projected = snapshot.clone();
+    let global_controls = role
+        .and_then(|role| {
+            schema
+                .pointer("/state/_role_controls")
+                .and_then(|roles| roles.get(role))
+        })
+        .map(|controls| {
+            controls.as_array().map(|controls| {
+                controls
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect::<BTreeSet<_>>()
+            })
+        });
     let allowed = schema
         .pointer("/state/planes")
         .and_then(Value::as_array)
@@ -1530,6 +1822,19 @@ fn project_snapshot(snapshot: &Value, role: Option<&str>, schema: &Value) -> Val
             key.split_once('/')
                 .is_some_and(|(plane, _)| allowed.contains(plane))
         });
+    }
+    if let Some(controls) = projected
+        .pointer_mut("/state/controls")
+        .and_then(Value::as_object_mut)
+    {
+        match global_controls {
+            Some(None) => {}
+            Some(Some(allowed)) => controls.retain(|name, _| allowed.contains(name)),
+            None => controls.clear(),
+        }
+    }
+    if let Some(state) = projected.get_mut("state").and_then(Value::as_object_mut) {
+        state.remove("_role_controls");
     }
     projected
 }

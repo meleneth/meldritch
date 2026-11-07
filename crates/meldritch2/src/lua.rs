@@ -23,7 +23,7 @@ use crate::model::{
     SubpatchInstance, SurfaceAction, SurfaceButton, SurfaceButtonMode, Widget,
 };
 use crate::sample::{PreparedSample, SampleBank};
-use crate::sequencer::SequencerControl;
+use crate::sequencer::{NoteEvent, SequencerControl};
 
 #[derive(Clone, Debug)]
 struct LuaSampleBank(SampleBank);
@@ -470,6 +470,152 @@ impl UserData for LuaWebPlane {
             });
             Ok(())
         });
+        methods.add_method("piano_roll", |_, this, spec: Table| {
+            let id: String = spec.get("id")?;
+            let track: Table = spec.get("track")?;
+            let sequence: Table = track.get("_sequence")?;
+            let native: AnyUserData = sequence.get("_native")?;
+            let native = native.borrow::<LuaSequencer>()?;
+            let tracks = track
+                .get::<Table>("_track_indices")?
+                .sequence_values::<usize>()
+                .collect::<mlua::Result<Vec<_>>>()?;
+            let steps = spec.get::<Option<usize>>("steps")?.unwrap_or(16);
+            let pitch_min = spec.get::<Option<u8>>("pitch_min")?.unwrap_or(36);
+            let pitch_max = spec.get::<Option<u8>>("pitch_max")?.unwrap_or(60);
+            if id.is_empty()
+                || steps != 16
+                || tracks.is_empty()
+                || tracks.len() > crate::sequencer::MAX_NOTE_VOICES
+                || pitch_min >= pitch_max
+                || pitch_max > 127
+            {
+                return Err(mlua::Error::external(
+                    "piano roll requires an ID, 16 steps, 1..4 voices, and an increasing MIDI pitch range",
+                ));
+            }
+            let label = spec
+                .get::<Option<String>>("label")?
+                .unwrap_or_else(|| id.clone());
+            let planes = Rc::clone(&this.application.borrow().planes);
+            let mut planes = planes.borrow_mut();
+            let plane = planes.get_mut(&this.id).unwrap();
+            if plane.controls.iter().any(|control| control.id() == id) {
+                return Err(mlua::Error::external("duplicate plane control id"));
+            }
+            plane.controls.push(crate::web::PlaneControl::PianoRoll {
+                id,
+                label,
+                sequencer: Arc::clone(&native.control),
+                tracks,
+                steps,
+                pitch_min,
+                pitch_max,
+            });
+            Ok(())
+        });
+        methods.add_method("pattern_selector", |_, this, spec: Table| {
+            let id: String = spec.get("id")?;
+            let sequence: Table = spec.get("sequencer")?;
+            let native: AnyUserData = sequence.get("_native")?;
+            let native = native.borrow::<LuaSequencer>()?;
+            let boundary = spec
+                .get::<Option<String>>("boundary")?
+                .unwrap_or_else(|| "cycle".into());
+            if id.is_empty() || !matches!(boundary.as_str(), "immediate" | "beat" | "bar" | "cycle")
+            {
+                return Err(mlua::Error::external(
+                    "pattern selector requires an ID and immediate/beat/bar/cycle boundary",
+                ));
+            }
+            let label = spec
+                .get::<Option<String>>("label")?
+                .unwrap_or_else(|| id.clone());
+            let planes = Rc::clone(&this.application.borrow().planes);
+            let mut planes = planes.borrow_mut();
+            let plane = planes.get_mut(&this.id).unwrap();
+            if plane.controls.iter().any(|control| control.id() == id) {
+                return Err(mlua::Error::external("duplicate plane control id"));
+            }
+            plane.controls.push(crate::web::PlaneControl::Patterns {
+                id,
+                label,
+                sequencer: Arc::clone(&native.control),
+                default_boundary: boundary,
+            });
+            Ok(())
+        });
+        methods.add_method("adsr", |_, this, spec: Table| {
+            let id: String = spec.get("id")?;
+            if id.is_empty() {
+                return Err(mlua::Error::external("ADSR control id must not be empty"));
+            }
+            let label = spec
+                .get::<Option<String>>("label")?
+                .unwrap_or_else(|| id.clone());
+            let definitions = [
+                ("attack", 0.001, 5.0, "log", "s"),
+                ("decay", 0.001, 5.0, "log", "s"),
+                ("sustain", 0.0, 1.0, "linear", ""),
+                ("release", 0.001, 10.0, "log", "s"),
+            ];
+            let mut parameters = Vec::new();
+            let mut app = this.application.borrow_mut();
+            for (name, default_min, default_max, scale, unit) in definitions {
+                let target: String = spec.get(name)?;
+                let control = format!("{id}.{name}");
+                let min = spec
+                    .get::<Option<f64>>(format!("{name}_min"))?
+                    .unwrap_or(default_min);
+                let max = spec
+                    .get::<Option<f64>>(format!("{name}_max"))?
+                    .unwrap_or(default_max);
+                if !min.is_finite()
+                    || !max.is_finite()
+                    || min >= max
+                    || (scale == "log" && min <= 0.0)
+                    || app.controls.contains_key(&control)
+                {
+                    return Err(mlua::Error::external("invalid or duplicate ADSR parameter"));
+                }
+                app.controls.insert(
+                    control.clone(),
+                    crate::web::PerformanceControl {
+                        name: control.clone(),
+                        label: format!("{label} {name}"),
+                        group: Some(this.id.clone()),
+                        kind: crate::web::ControlKind::Continuous,
+                        target: target.clone(),
+                        min,
+                        max,
+                        choices: Vec::new(),
+                        changed: None,
+                    },
+                );
+                parameters.push(crate::web::AdsrParameter {
+                    name,
+                    control,
+                    target,
+                    min,
+                    max,
+                    scale: scale.into(),
+                    unit,
+                });
+            }
+            let planes = Rc::clone(&app.planes);
+            drop(app);
+            let mut planes = planes.borrow_mut();
+            let plane = planes.get_mut(&this.id).unwrap();
+            if plane.controls.iter().any(|control| control.id() == id) {
+                return Err(mlua::Error::external("duplicate plane control id"));
+            }
+            plane.controls.push(crate::web::PlaneControl::Adsr {
+                id,
+                label,
+                parameters,
+            });
+            Ok(())
+        });
         methods.add_method("trigger", |_, this, spec: Table| {
             let id: String = spec.get("id")?;
             if id.is_empty() {
@@ -534,6 +680,49 @@ impl UserData for LuaSampleBank {
         });
     }
 }
+
+fn parse_midi_pitch(value: Value) -> mlua::Result<u8> {
+    match value {
+        Value::Integer(value) if (0..=127).contains(&value) => Ok(value as u8),
+        Value::Number(value) if value.fract() == 0.0 && (0.0..=127.0).contains(&value) => {
+            Ok(value as u8)
+        }
+        Value::String(value) => {
+            let value = value.to_str()?.to_ascii_uppercase();
+            let split = value
+                .find(|character: char| character == '-' || character.is_ascii_digit())
+                .ok_or_else(|| mlua::Error::external("note name requires an octave, such as C3"))?;
+            let (name, octave) = value.split_at(split);
+            let semitone = match name {
+                "C" => 0,
+                "C#" | "DB" => 1,
+                "D" => 2,
+                "D#" | "EB" => 3,
+                "E" => 4,
+                "F" => 5,
+                "F#" | "GB" => 6,
+                "G" => 7,
+                "G#" | "AB" => 8,
+                "A" => 9,
+                "A#" | "BB" => 10,
+                "B" => 11,
+                _ => return Err(mlua::Error::external("unknown note name")),
+            };
+            let octave: i16 = octave
+                .parse()
+                .map_err(|_| mlua::Error::external("note name has an invalid octave"))?;
+            let midi = (octave + 1) * 12 + semitone;
+            u8::try_from(midi)
+                .ok()
+                .filter(|midi| *midi <= 127)
+                .ok_or_else(|| mlua::Error::external("note name is outside MIDI 0..127"))
+        }
+        _ => Err(mlua::Error::external(
+            "pitch must be MIDI 0..127 or a note name such as C3",
+        )),
+    }
+}
+
 impl UserData for LuaSequencer {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("track", |lua, this, name: String| {
@@ -587,11 +776,58 @@ impl UserData for LuaSequencer {
             let velocities=velocities.sequence_values::<f32>().collect::<mlua::Result<Vec<_>>>()?;
             this.control.set_pattern_notes(pattern,track,&pitches,&gates,&velocities).map_err(mlua::Error::external)
         });
+        methods.add_method(
+            "set_note_events",
+            |_, this, (pattern, tracks, events, length): (usize, Table, Table, usize)| {
+                let tracks = tracks
+                    .sequence_values::<usize>()
+                    .collect::<mlua::Result<Vec<_>>>()?;
+                let mut parsed = Vec::new();
+                for (index, event) in events.sequence_values::<Table>().enumerate() {
+                    let event = event?;
+                    let step: i64 = event.get("step")?;
+                    let duration: i64 = event.get::<Option<i64>>("duration")?.unwrap_or(1);
+                    let velocity: i64 = event.get::<Option<i64>>("velocity")?.unwrap_or(100);
+                    let id = event
+                        .get::<Option<u32>>("id")?
+                        .unwrap_or((index + 1) as u32);
+                    if step < 1
+                        || step > length as i64
+                        || duration < 1
+                        || duration > u8::MAX as i64
+                        || !(1..=127).contains(&velocity)
+                    {
+                        return Err(mlua::Error::external(
+                            "note step, duration, and velocity must be positive integers within the pattern and MIDI range",
+                        ));
+                    }
+                    parsed.push(NoteEvent {
+                        id,
+                        step: (step - 1) as u8,
+                        pitch: parse_midi_pitch(event.get("pitch")?)?,
+                        velocity: velocity as u8,
+                        duration: duration as u8,
+                        legato: event.get::<Option<bool>>("legato")?.unwrap_or(false),
+                    });
+                }
+                this.control
+                    .set_note_events(pattern, &tracks, length, &parsed)
+                    .map_err(mlua::Error::external)
+            },
+        );
         methods.add_method("queue_pattern", |_, this, pattern: usize| {
             this.control
                 .queue_pattern(pattern)
                 .map_err(mlua::Error::external)
         });
+        methods.add_method(
+            "queue_pattern_quantized",
+            |_, this, (pattern, quantization): (usize, usize)| {
+                this.control
+                    .queue_pattern_quantized(pattern, quantization)
+                    .map_err(mlua::Error::external)
+            },
+        );
         methods.add_method(
             "queue_scene",
             |_, this, (pattern, quantization): (usize, usize)| {
@@ -1256,6 +1492,20 @@ local function decorate_scope(facade, scope, prefix)
       function handle:clip(clip_name,spec) return sequence:_clip(name,clip_name,spec or {}) end
       return handle
     end
+    function sequence:note_track(name, options)
+      options = options or {}
+      local voices = options.voices or 4
+      assert(type(name) == "string" and name ~= "", "note track name must be nonempty")
+      assert(type(voices) == "number" and voices >= 1 and voices <= 4 and voices % 1 == 0,
+        "note track voices must be an integer in 1..4")
+      local logical = { name = name, voices = {}, _sequence = self, _track_indices = {} }
+      for voice = 1, voices do
+        local handle = self:track(name .. " Voice " .. voice)
+        logical.voices[voice] = handle
+        logical._track_indices[voice] = handle._track_index
+      end
+      return logical
+    end
     function sequence:steps(name, values)
       local track = assert(self._tracks[name], "unknown sequencer track: " .. tostring(name))
       self._native:set_steps(track, values)
@@ -1270,6 +1520,22 @@ local function decorate_scope(facade, scope, prefix)
         sequence._native:set_pattern_steps(self.index,track,values)
       end
       function pattern:notes(track_name, events, length)
+        if type(track_name) == "table" and track_name._track_indices then
+          length = length or sequence._steps
+          local normalized = {}
+          for index, event in ipairs(events) do
+            normalized[index] = {
+              id = event.id or index,
+              step = event.step,
+              pitch = event.pitch or event.note,
+              velocity = event.velocity,
+              duration = event.duration or event.gate,
+              legato = event.legato,
+            }
+          end
+          sequence._native:set_note_events(self.index, track_name._track_indices, normalized, length)
+          return
+        end
         local track=assert(sequence._tracks[track_name],"unknown sequencer track: "..tostring(track_name))
         local pitches, gates, velocities = {}, {}, {}
         length = length or sequence._steps
@@ -1384,8 +1650,11 @@ local function decorate_scope(facade, scope, prefix)
       end
       return timeline
     end
-    function sequence:switch_pattern(name)
-      self._native:queue_pattern(assert(self._patterns[name],"unknown pattern: "..tostring(name)))
+    function sequence:switch_pattern(name,boundary)
+      boundary=boundary or "cycle"
+      local quantization=assert(({immediate=1,beat=self._steps_per_beat,bar=self._steps_per_beat*4,cycle=0})[boundary],
+        "pattern boundary must be immediate, beat, bar, or cycle")
+      self._native:queue_pattern_quantized(assert(self._patterns[name],"unknown pattern: "..tostring(name)),quantization)
     end
     function sequence:copy_pattern(from,to)
       self._native:copy_pattern(assert(self._patterns[from],"unknown pattern"),assert(self._patterns[to],"unknown pattern"))
@@ -1397,6 +1666,11 @@ local function decorate_scope(facade, scope, prefix)
       local pattern={name=to,index=index}
       function pattern:steps(track_name,values) local track=assert(sequence._tracks[track_name],"unknown track");sequence._native:set_pattern_steps(index,track,values) end
       function pattern:notes(track_name,events,length)
+        if type(track_name)=="table" and track_name._track_indices then
+          length=length or sequence._steps;local normalized={}
+          for event_index,event in ipairs(events) do normalized[event_index]={id=event.id or event_index,step=event.step,pitch=event.pitch or event.note,velocity=event.velocity,duration=event.duration or event.gate,legato=event.legato} end
+          sequence._native:set_note_events(index,track_name._track_indices,normalized,length);return
+        end
         length=length or sequence._steps;local pitches,gates,velocities={},{},{}
         for step=1,length do pitches[step]=440;gates[step]=.5;velocities[step]=0 end
         for _,event in ipairs(events) do local pitch=event.frequency or 440*2^((assert(event.note)-69)/12);pitches[event.step]=pitch;gates[event.step]=event.gate or .5;velocities[event.step]=event.velocity or 1 end
@@ -2950,10 +3224,25 @@ fn endpoint(table: Table) -> Result<Endpoint, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{read, read_with_root};
+    use super::{parse_midi_pitch, read, read_with_root};
     use crate::compiler::{RenderDiagnostics, compile_at_rate};
     use crate::model::{MidiButtonEdge, MidiButtonMessage};
     use std::{fs, io::Cursor};
+
+    #[test]
+    fn note_names_and_numeric_midi_pitches_are_validated_at_the_lua_boundary() {
+        let lua = mlua::Lua::new();
+        for (name, pitch) in [("C4", 60), ("F#3", 54), ("Bb2", 46), ("C-1", 0)] {
+            assert_eq!(
+                parse_midi_pitch(mlua::Value::String(lua.create_string(name).unwrap())).unwrap(),
+                pitch
+            );
+        }
+        assert_eq!(parse_midi_pitch(mlua::Value::Integer(127)).unwrap(), 127);
+        assert!(parse_midi_pitch(mlua::Value::Integer(128)).is_err());
+        assert!(parse_midi_pitch(mlua::Value::Number(60.5)).is_err());
+        assert!(parse_midi_pitch(mlua::Value::String(lua.create_string("H4").unwrap())).is_err());
+    }
 
     #[test]
     fn reads_expected_device_names_from_graph() {

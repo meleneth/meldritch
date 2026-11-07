@@ -1,5 +1,6 @@
 //! Shared authored pattern state and audio-domain sequencer transport.
 
+use std::collections::BTreeMap;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU8, Ordering},
@@ -13,6 +14,18 @@ pub const MAX_STEPS: usize = 128;
 /// Index 255 remains the lock-free "none" sentinel.
 pub const MAX_PATTERNS: usize = 255;
 const NONE: u8 = u8::MAX;
+pub const MAX_NOTE_EVENTS: usize = 256;
+pub const MAX_NOTE_VOICES: usize = 4;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct NoteEvent {
+    pub id: u32,
+    pub step: u8,
+    pub pitch: u8,
+    pub velocity: u8,
+    pub duration: u8,
+    pub legato: bool,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Pattern {
@@ -25,6 +38,9 @@ pub struct Pattern {
     /// Authored loop length for each track. The executor wraps every track
     /// independently; this is musical state, not a viewport size.
     pub lengths: [u8; MAX_TRACKS],
+    /// Tracks compiled from bounded logical note lanes. Scene changes insert
+    /// one low sample before their first note so envelopes retrigger cleanly.
+    pub note_tracks: [bool; MAX_TRACKS],
 }
 
 impl Default for Pattern {
@@ -35,6 +51,7 @@ impl Default for Pattern {
             gates: [[0.5; MAX_STEPS]; MAX_TRACKS],
             offsets: [[0.0; MAX_STEPS]; MAX_TRACKS],
             lengths: [16; MAX_TRACKS],
+            note_tracks: [false; MAX_TRACKS],
         }
     }
 }
@@ -44,6 +61,7 @@ struct PublishedPattern {
     names: Vec<String>,
     authored: Vec<Pattern>,
     memberships: Vec<[u8; MAX_TRACKS]>,
+    note_events: BTreeMap<(usize, usize), Vec<NoteEvent>>,
     pending_revision: bool,
 }
 
@@ -149,6 +167,7 @@ impl SequencerControl {
                 names: vec!["Default".into()],
                 authored: vec![initial],
                 memberships: vec![[0; MAX_TRACKS]],
+                note_events: BTreeMap::new(),
                 pending_revision: true,
             }),
             command: AtomicU8::new(1),
@@ -474,6 +493,127 @@ impl SequencerControl {
         state.pending_revision = true;
         Ok(())
     }
+
+    pub fn set_note_events(
+        &self,
+        pattern: usize,
+        tracks: &[usize],
+        length: usize,
+        events: &[NoteEvent],
+    ) -> Result<(), String> {
+        if tracks.is_empty() || tracks.len() > MAX_NOTE_VOICES {
+            return Err(format!(
+                "piano roll requires 1..={MAX_NOTE_VOICES} sequencer voices"
+            ));
+        }
+        if !(1..=MAX_STEPS).contains(&length) || events.len() > MAX_NOTE_EVENTS {
+            return Err(format!(
+                "piano roll requires 1..={MAX_STEPS} steps and at most {MAX_NOTE_EVENTS} notes"
+            ));
+        }
+        let track_count = self.track_count();
+        if tracks.iter().any(|track| *track >= track_count) {
+            return Err("piano roll references an unknown sequencer voice".into());
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        if events.iter().any(|event| {
+            event.id == 0
+                || !ids.insert(event.id)
+                || usize::from(event.step) >= length
+                || event.velocity == 0
+                || event.duration == 0
+                || usize::from(event.step) + usize::from(event.duration) > length
+        }) {
+            return Err("notes require unique positive IDs, MIDI pitch 0..127, velocity 1..127, and a positive duration contained by the pattern".into());
+        }
+
+        let mut ordered = events.to_vec();
+        ordered.sort_by_key(|event| (event.step, event.id));
+        let mut available = vec![0usize; tracks.len()];
+        let mut active = vec![None::<(usize, usize)>; tracks.len()];
+        let mut assignments = Vec::<(usize, NoteEvent, usize)>::with_capacity(ordered.len());
+        for event in &ordered {
+            let start = usize::from(event.step);
+            let voice =
+                if let Some(voice) = available.iter().position(|available| *available <= start) {
+                    voice
+                } else {
+                    let Some((voice, (_, previous))) = active
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(voice, active)| active.map(|active| (voice, active)))
+                        .min_by_key(|(voice, (started, _))| (*started, *voice))
+                    else {
+                        return Err("piano roll voice allocator has no active voice".into());
+                    };
+                    let previous_start = usize::from(assignments[previous].1.step);
+                    if previous_start == start {
+                        return Err(format!(
+                            "piano roll chord at step {} exceeds its {} simultaneous voices",
+                            start + 1,
+                            tracks.len()
+                        ));
+                    }
+                    assignments[previous].2 = start - previous_start;
+                    voice
+                };
+            available[voice] = start + usize::from(event.duration);
+            let assignment = assignments.len();
+            active[voice] = Some((start, assignment));
+            assignments.push((voice, *event, usize::from(event.duration)));
+        }
+
+        let mut state = self
+            .pattern
+            .lock()
+            .map_err(|_| "sequencer pattern state poisoned")?;
+        if pattern >= state.authored.len() {
+            return Err("unknown pattern".into());
+        }
+        let target = &mut state.authored[pattern];
+        for &track in tracks {
+            target.velocities[track].fill(0.0);
+            target.pitches_hz[track].fill(440.0);
+            target.gates[track].fill(0.5);
+            target.offsets[track].fill(0.0);
+            target.lengths[track] = length as u8;
+            target.note_tracks[track] = true;
+        }
+        for (voice, event, sounding_duration) in assignments {
+            let track = tracks[voice];
+            let step = usize::from(event.step);
+            target.pitches_hz[track][step] =
+                (440.0 * 2.0_f64.powf((f64::from(event.pitch) - 69.0) / 12.0)) as f32;
+            target.velocities[track][step] = f32::from(event.velocity) / 127.0;
+            target.gates[track][step] = sounding_duration as f32;
+        }
+        state.note_events.insert((pattern, tracks[0]), ordered);
+        state.pending_revision = true;
+        Ok(())
+    }
+
+    pub fn note_events(&self, pattern: usize, first_track: usize) -> Vec<NoteEvent> {
+        self.pattern
+            .lock()
+            .ok()
+            .and_then(|state| state.note_events.get(&(pattern, first_track)).cloned())
+            .unwrap_or_default()
+    }
+
+    pub fn edit_note_events<F>(
+        &self,
+        pattern: usize,
+        tracks: &[usize],
+        length: usize,
+        edit: F,
+    ) -> Result<(), String>
+    where
+        F: FnOnce(&mut Vec<NoteEvent>) -> Result<(), String>,
+    {
+        let mut events = self.note_events(pattern, tracks[0]);
+        edit(&mut events)?;
+        self.set_note_events(pattern, tracks, length, &events)
+    }
     pub fn toggle(&self, track: usize, step: usize) -> Result<(), String> {
         if track >= self.track_names().len() || step >= MAX_STEPS {
             return Err("sequencer cell is out of range".into());
@@ -545,6 +685,16 @@ impl SequencerControl {
         let source = *state.authored.get(from).ok_or("unknown source pattern")?;
         let target = state.authored.get_mut(to).ok_or("unknown target pattern")?;
         *target = source;
+        let copied = state
+            .note_events
+            .iter()
+            .filter(|((pattern, _), _)| *pattern == from)
+            .map(|((_, track), events)| (*track, events.clone()))
+            .collect::<Vec<_>>();
+        state.note_events.retain(|(pattern, _), _| *pattern != to);
+        for (track, events) in copied {
+            state.note_events.insert((to, track), events);
+        }
         state.pending_revision = true;
         Ok(())
     }
@@ -563,6 +713,12 @@ impl SequencerControl {
         target.gates[track] = source.gates[track];
         target.offsets[track] = source.offsets[track];
         target.lengths[track] = source.lengths[track];
+        target.note_tracks[track] = source.note_tracks[track];
+        let copied = state.note_events.get(&(from, track)).cloned();
+        state.note_events.remove(&(to, track));
+        if let Some(events) = copied {
+            state.note_events.insert((to, track), events);
+        }
         state.pending_revision = true;
         Ok(())
     }
@@ -714,12 +870,25 @@ impl SequencerControl {
         (value != NONE).then_some(usize::from(value))
     }
     pub fn queue_pattern(&self, index: usize) -> Result<(), String> {
+        self.queue_pattern_quantized(index, 0)
+    }
+    pub fn queue_pattern_quantized(&self, index: usize, quantization: usize) -> Result<(), String> {
         if index >= self.pattern_names().len() {
             return Err("unknown pattern".into());
         }
+        if quantization > MAX_STEPS {
+            return Err(format!(
+                "pattern quantization must be 0..={MAX_STEPS} steps"
+            ));
+        }
+        self.scene_quantization
+            .store(quantization as u8, Ordering::Release);
         self.queued_pattern.store(index as u8, Ordering::Release);
         self.set_status(format!("Queued {}", self.pattern_names()[index]));
         Ok(())
+    }
+    pub fn queued_pattern_quantization(&self) -> usize {
+        usize::from(self.scene_quantization.load(Ordering::Acquire))
     }
     pub fn set_arrangement(&self, sections: &[(usize, u32)]) -> Result<(), String> {
         if sections.is_empty()
@@ -1313,6 +1482,7 @@ impl SequencerControl {
         state.memberships = (0..state.authored.len())
             .map(|index| [index as u8; MAX_TRACKS])
             .collect();
+        state.note_events.clear();
         state.pending_revision = true;
         self.active_pattern.store(active as u8, Ordering::Release);
         self.viewed_pattern.store(viewed as u8, Ordering::Release);
@@ -1508,12 +1678,14 @@ impl SequencerRuntime {
             2 => {
                 self.control.playing.store(false, Ordering::Release);
                 self.clear_scheduled();
+                self.gates.fill(0.0);
             }
             3 => {
                 self.step = 0;
                 self.clip_launch_steps.fill(0);
                 self.frames_until_step = 0.0;
                 self.clear_scheduled();
+                self.gates.fill(0.0);
                 self.control.position_steps.store(0, Ordering::Release);
                 self.control.timeline_section.store(0, Ordering::Release);
                 self.control
@@ -1612,6 +1784,7 @@ impl SequencerRuntime {
                 self.clear_scheduled();
             }
             if scene_changed {
+                self.gates.fill(0.0);
                 self.active_pattern = active_pattern;
                 self.step = 0;
                 self.clip_launch_steps.fill(0);
@@ -1688,7 +1861,8 @@ impl SequencerRuntime {
                 self.control.clip_positions[track].store(track_step as u8, Ordering::Release);
                 let offset = self.pattern.offsets[track][track_step] as f64;
                 if offset >= 0.0 || pattern_reloaded || clip_launched[track] {
-                    let displaced = (offset.max(0.0) * step_frames).round() as u64;
+                    let displaced = (offset.max(0.0) * step_frames).round() as u64
+                        + u64::from(scene_changed && self.pattern.note_tracks[track]);
                     self.schedule_step(
                         track,
                         track_step,
@@ -1922,6 +2096,164 @@ mod tests {
         assert_eq!(observed[0], (0, 0.7_f32 as f64, 110.0, 1.0, 0.7_f32 as f64));
         assert_eq!(observed[1].1, 0.0);
         assert_eq!(runtime.gate(0), 0.0);
+    }
+
+    #[test]
+    fn note_events_validate_boundaries_and_compile_chords_to_voice_tracks() {
+        let control = SequencerControl::new("notes".into(), 120.0, 16, 4).unwrap();
+        for name in ["Voice 1", "Voice 2"] {
+            control.add_track(name.into()).unwrap();
+        }
+        let notes = [
+            NoteEvent {
+                id: 1,
+                step: 0,
+                pitch: 48,
+                velocity: 127,
+                duration: 4,
+                legato: false,
+            },
+            NoteEvent {
+                id: 2,
+                step: 0,
+                pitch: 55,
+                velocity: 64,
+                duration: 2,
+                legato: false,
+            },
+        ];
+        control.set_note_events(0, &[0, 1], 16, &notes).unwrap();
+        assert_eq!(control.note_events(0, 0), notes);
+        let pattern = control.pattern_at(0).unwrap();
+        assert_eq!(pattern.velocities[0][0], 1.0);
+        assert_eq!(pattern.velocities[1][0], 64.0 / 127.0);
+        assert_eq!(pattern.gates[0][0], 4.0);
+        assert!((pattern.pitches_hz[0][0] - 130.812_79).abs() < 0.001);
+
+        let mut invalid = notes[0];
+        invalid.id = 0;
+        assert!(control.set_note_events(0, &[0, 1], 16, &[invalid]).is_err());
+        invalid.id = 3;
+        invalid.velocity = 0;
+        assert!(control.set_note_events(0, &[0, 1], 16, &[invalid]).is_err());
+        invalid.velocity = 100;
+        invalid.step = 15;
+        invalid.duration = 2;
+        assert!(control.set_note_events(0, &[0, 1], 16, &[invalid]).is_err());
+    }
+
+    #[test]
+    fn repeated_pitches_overlap_and_voice_stealing_is_oldest_first() {
+        let control = SequencerControl::new("voices".into(), 120.0, 8, 4).unwrap();
+        control.add_track("A".into()).unwrap();
+        control.add_track("B".into()).unwrap();
+        let notes = [
+            NoteEvent {
+                id: 1,
+                step: 0,
+                pitch: 60,
+                velocity: 100,
+                duration: 6,
+                legato: false,
+            },
+            NoteEvent {
+                id: 2,
+                step: 1,
+                pitch: 60,
+                velocity: 90,
+                duration: 6,
+                legato: false,
+            },
+            NoteEvent {
+                id: 3,
+                step: 2,
+                pitch: 67,
+                velocity: 80,
+                duration: 2,
+                legato: false,
+            },
+        ];
+        control.set_note_events(0, &[0, 1], 8, &notes).unwrap();
+        let pattern = control.pattern_at(0).unwrap();
+        assert_eq!(
+            pattern.gates[0][0], 2.0,
+            "oldest voice is truncated at steal"
+        );
+        assert_eq!(pattern.gates[1][1], 6.0);
+        assert!(pattern.velocities[0][2] > 0.0);
+
+        let oversized_chord = [
+            NoteEvent {
+                id: 4,
+                step: 0,
+                pitch: 48,
+                velocity: 100,
+                duration: 1,
+                legato: false,
+            },
+            NoteEvent {
+                id: 5,
+                step: 0,
+                pitch: 52,
+                velocity: 100,
+                duration: 1,
+                legato: false,
+            },
+            NoteEvent {
+                id: 6,
+                step: 0,
+                pitch: 55,
+                velocity: 100,
+                duration: 1,
+                legato: false,
+            },
+        ];
+        assert!(
+            control
+                .set_note_events(0, &[0, 1], 8, &oversized_chord)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn note_duration_stop_and_quantized_pattern_switch_clear_gates() {
+        let control = SequencerControl::new("lifecycle".into(), 60.0, 4, 4).unwrap();
+        control.add_track("Voice".into()).unwrap();
+        control.define_pattern("First".into()).unwrap();
+        let next = control.define_pattern("Next".into()).unwrap();
+        for (pattern, pitch) in [(0, 60), (next, 72)] {
+            control
+                .set_note_events(
+                    pattern,
+                    &[0],
+                    4,
+                    &[NoteEvent {
+                        id: 1,
+                        step: 0,
+                        pitch,
+                        velocity: 100,
+                        duration: 3,
+                        legato: false,
+                    }],
+                )
+                .unwrap();
+        }
+        let mut runtime = SequencerRuntime::new(Arc::clone(&control));
+        runtime.begin_frame(4.0);
+        assert_eq!(runtime.gate(0), 1.0);
+        control.queue_pattern_quantized(next, 1).unwrap();
+        runtime.begin_frame(4.0);
+        assert_eq!(control.active_pattern(), next);
+        assert_eq!(runtime.gate(0), 0.0, "switch boundary emits a low gate");
+        runtime.begin_frame(4.0);
+        assert_eq!(runtime.gate(0), 1.0);
+        assert!((runtime.pitch(0) - 523.251).abs() < 0.01);
+        control.stop();
+        runtime.begin_frame(4.0);
+        assert_eq!(runtime.gate(0), 0.0);
+        control.restart();
+        runtime.begin_frame(4.0);
+        assert_eq!(runtime.gate(0), 1.0);
     }
     #[test]
     fn queued_patterns_switch_only_at_boundary_for_sixteen_and_sixty_four_steps() {
