@@ -106,6 +106,9 @@ main {
 .drum-row .drum-label { color:#eee; display:flex; justify-content:space-between; padding:.35rem; }
 .drum-label small { color:#999; }.drum-label.muted { color:#777; background:#191b21; }
 .drum-grid > label { display:flex; gap:1rem; align-items:center; margin-top:.5rem; }
+.drum-hit-editor { display:flex; gap:1rem; align-items:center; margin-top:.5rem; }
+.drum-hit-editor label { display:flex; gap:1rem; align-items:center; flex:1; }
+.drum-hit-editor button { min-height:2.75rem; padding:.5rem .8rem; }
 .steps {
   grid-column: 1/-1;
   display: grid;

@@ -263,6 +263,8 @@ describe("control registry", () => {
     const range=view.root.querySelector("input[type=range]") as HTMLInputElement;
     range.value="64";range.dispatchEvent(new Event("change",{bubbles:true}));
     expect(velocities).toEqual([["kick",0,64]]);
+    (view.root.querySelector(".drum-hit-editor button") as HTMLButtonElement).click();
+    expect(toggles).toEqual([["kick",1],["kick",0]]);
     view.unmount();
   });
 });
