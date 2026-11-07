@@ -109,6 +109,27 @@ may be embedded as a Lua byte array with `state = { ... }` or applied before
 compilation with `synth:load_state(bytes)`. State is restored before processing
 starts. Treat it as meaningful only with the same class ID and plugin version.
 
+Stereo audio effects use the same prepared lifecycle and parameter model:
+
+```lua
+local compressor = instrument:vst3_effect {
+  id = "master_compressor",
+  plugin = "647370206B31732020202020756E7363",
+}
+instrument:connect(mix.left, compressor.input.left)
+instrument:connect(mix.right, compressor.input.right)
+instrument:connect(compressor.out.left, instrument.output.left)
+instrument:connect(compressor.out.right, instrument.output.right)
+```
+
+`vst3_effect` accepts only classes whose metadata does not identify an
+instrument, and currently requires exactly one stereo main input and stereo
+main output. Effects participate in normalized parameter automation, opaque
+state round-trips, offline mode, failure diagnostics, and latency reporting via
+`Machine::vst3_latency_samples`. The reported latency is observable for render
+tail and routing decisions; automatic compensation across parallel paths is not
+yet implemented.
+
 ## Processing model
 
 VST3 is block-oriented while Meldritch's native modules have scalar DSP
@@ -121,7 +142,8 @@ The adapter currently:
 
 - converts Meldritch `f64` planar graph signals to the VST3 host's `f32`
   processing buffers;
-- negotiates a no-input, stereo-output instrument at the engine sample rate;
+- negotiates either a no-input stereo instrument or a stereo-input/stereo-output
+  effect at the engine sample rate;
 - accepts blocks up to 1024 frames and rejects larger configurations clearly;
 - schedules note-on, note-off, velocity, configured channels 1–16, and host-assigned note
   identity at exact offsets in the upcoming block;
@@ -173,6 +195,12 @@ audible output, note-off, parameter enumeration and changes, state round-trip,
 repeated destruction, invalid identity errors, unsupported block diagnostics,
 Lua construction, offline rendering, and routing through Meldritch's existing
 drive effect.
+
+When Debian's `lsp-plugins-vst3` package is installed, the same suite also
+discovers every class in LSP's multi-class bundle and processes real stereo
+audio through LSP Compressor Stereo and LSP Limiter Stereo. This conditional
+test covers effect buses, graph lowering, automation metadata, state, latency,
+offline processing, and teardown without making LSP a CI prerequisite.
 
 ## Serum 2
 
@@ -315,8 +343,9 @@ MELDRITCH_TEST_PULSE=1 cargo test -p meldritch2 --test vst3_host installed_pulse
 
 - Native Linux `.vst3` bundles only. Wine and yabridge are not configured or
   detected.
-- Instruments only: no audio input bus is exposed yet. Effects are the next
-  natural extension of the same adapter.
+- Instruments and single-main-bus stereo effects are supported. Mono effects,
+  auxiliary inputs, external sidechains, multi-output effect routing, and
+  automatic latency compensation are not yet supported.
 - Main stereo output is supported. A plugin that cannot negotiate the requested
   configuration fails graph preparation; incompatible buffers are never
   silently processed.

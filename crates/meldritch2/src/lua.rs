@@ -1544,6 +1544,46 @@ local function decorate_scope(facade, scope, prefix)
     end
     return handle
   end
+  function facade:vst3_effect(values)
+    assert(type(values) == "table" and type(values.plugin) == "string",
+      "vst3_effect requires plugin = stable class ID or unique display name")
+    local runtime = meldritch._vst3(values)
+    assert(not runtime:descriptor().instrument, "vst3_effect requires an audio-effect class")
+    local handle = scope:module(values.id or self:_id("vst3_effect"), "vst3_effect", {}, runtime)
+    handle.input = { left=handle.input_left, right=handle.input_right, direction="stereo_input" }
+    handle.out = { left=handle.left, right=handle.right, direction="stereo_output" }
+    handle.parameters = {}
+    for _, info in ipairs(runtime:parameters()) do
+      if info.automatable and not info.read_only then
+        handle.parameters[info.id] = parameter(handle, info.key)
+      end
+    end
+    function handle:set_parameter(id, value)
+      runtime:set_parameter(id, value)
+      return self
+    end
+    function handle:load_state(bytes)
+      runtime:load_state(bytes)
+      return self
+    end
+    function handle:parameter_info() return runtime:parameters() end
+    function handle:descriptor() return runtime:descriptor() end
+    function handle:parameter(id)
+      if type(id) == "number" then
+        return assert(self.parameters[id], "unknown or non-automatable VST3 parameter ID: " .. tostring(id))
+      end
+      assert(type(id) == "string" and id ~= "", "VST3 parameter requires a numeric ID or exact name")
+      local match = nil
+      for _, info in ipairs(runtime:parameters()) do
+        if info.name == id then
+          assert(match == nil, "ambiguous VST3 parameter name: " .. id)
+          match = self.parameters[info.id]
+        end
+      end
+      return assert(match, "unknown or non-automatable VST3 parameter name: " .. id)
+    end
+    return handle
+  end
   function facade:adsr(values)
     local handle = scope:module(self:_id("adsr"), "adsr", copy_values(values,
       { "attack", "decay", "sustain", "release" }))

@@ -35,3 +35,4 @@ pub mod switch;
 pub mod triangle;
 pub mod vca;
 pub mod vst3;
+pub mod vst3_effect;

@@ -57,6 +57,147 @@ fn parameter_id(spec: &vst3::Spec, name: &str) -> u32 {
         .id
 }
 
+fn render_effect(spec: &vst3::Spec, input: &[f64]) -> Vec<f64> {
+    let values = spec
+        .parameters
+        .iter()
+        .map(|parameter| spec.initial_value(parameter))
+        .collect::<Vec<_>>();
+    let mut plugin = Instance::new(spec, 48_000.0).expect("instantiate VST3 effect");
+    let mut output = vec![0.0; input.len() * 2];
+    let right = input.to_vec();
+    plugin.process_effect(input, &right, &values, &mut output);
+    assert!(!plugin.failed());
+    assert!(output.iter().all(|sample| sample.is_finite()));
+    output
+}
+
+#[test]
+fn installed_lsp_bundle_discovers_and_processes_stereo_compressor_and_limiter() {
+    const COMPRESSOR_ID: &str = "647370206B31732020202020756E7363";
+    const LIMITER_ID: &str = "64737020623173202020202072667563";
+    let root = PathBuf::from("/usr/lib/vst3");
+    if !root.join("lsp-plugins.vst3").is_dir() {
+        eprintln!("LSP VST3 plugins are not installed; skipping conditional integration test");
+        return;
+    }
+
+    let discovered = vst3::discover(std::slice::from_ref(&root)).expect("discover LSP bundle");
+    let compressor = discovered
+        .iter()
+        .find(|plugin| plugin.class_id == COMPRESSOR_ID)
+        .expect("discover Compressor Stereo");
+    let limiter = discovered
+        .iter()
+        .find(|plugin| plugin.class_id == LIMITER_ID)
+        .expect("discover Limiter Stereo");
+    assert_eq!(compressor.name, "Compressor Stereo");
+    assert_eq!(limiter.name, "Limiter Stereo");
+    assert!(!compressor.instrument);
+    assert!(!limiter.instrument);
+
+    let mut compressor =
+        vst3::load(COMPRESSOR_ID, std::slice::from_ref(&root)).expect("inspect Compressor Stereo");
+    assert_eq!(compressor.audio_inputs, 2);
+    for name in [
+        "Bypass",
+        "Attack threshold",
+        "Attack time",
+        "Release time",
+        "Ratio",
+        "Knee",
+        "Makeup gain",
+    ] {
+        assert!(
+            compressor
+                .parameters
+                .iter()
+                .any(|parameter| parameter.name == name),
+            "missing compressor parameter {name}"
+        );
+    }
+    compressor
+        .initial_values
+        .insert(parameter_id(&compressor, "Attack threshold"), 0.45);
+    compressor
+        .initial_values
+        .insert(parameter_id(&compressor, "Ratio"), 0.85);
+    compressor
+        .initial_values
+        .insert(parameter_id(&compressor, "Attack time"), 0.2);
+    compressor
+        .initial_values
+        .insert(parameter_id(&compressor, "Release time"), 0.45);
+    let input = (0..1024)
+        .map(|frame| ((frame as f64 * std::f64::consts::TAU * 220.0) / 48_000.0).sin() * 0.8)
+        .collect::<Vec<_>>();
+    let compressed = render_effect(&compressor, &input);
+    assert!(energy(&compressed) > 0.001);
+    let dry_energy = energy(&input) * 2.0;
+    assert!(
+        (energy(&compressed) - dry_energy).abs() > 0.01,
+        "compressor did not measurably alter the signal"
+    );
+
+    let limiter =
+        vst3::load(LIMITER_ID, std::slice::from_ref(&root)).expect("inspect Limiter Stereo");
+    assert_eq!(limiter.audio_inputs, 2);
+    for name in ["Bypass", "Threshold", "Lookahead", "Release time"] {
+        assert!(
+            limiter
+                .parameters
+                .iter()
+                .any(|parameter| parameter.name == name),
+            "missing limiter parameter {name}"
+        );
+    }
+    let limited = render_effect(&limiter, &input);
+    assert!(energy(&limited) > 0.001);
+
+    let stateful = Instance::new(&compressor, 48_000.0).expect("instantiate compressor");
+    let state = stateful.save_state().expect("save compressor state");
+    assert!(!state.is_empty());
+    assert!(stateful.latency_samples() < 48_000);
+    drop(stateful);
+    compressor.state = Some(state);
+    drop(Instance::new(&compressor, 48_000.0).expect("restore compressor state"));
+
+    let script = format!(
+        r#"
+local instrument = meldritch.instrument("LSP effect graph")
+local tone = instrument:oscillator {{ waveform="sine", frequency=110 }}
+local effect = instrument:vst3_effect {{
+  id="master_compressor", plugin="{COMPRESSOR_ID}", paths={{"{}"}}
+}}
+effect:set_parameter({}, 0.45)
+effect:set_parameter({}, 0.85)
+instrument:connect(tone.out, effect.input.left)
+instrument:connect(tone.out, effect.input.right)
+instrument:connect(effect.out.left, instrument.output.left)
+instrument:connect(effect.out.right, instrument.output.right)
+return instrument
+"#,
+        root.display(),
+        parameter_id(&compressor, "Attack threshold"),
+        parameter_id(&compressor, "Ratio"),
+    );
+    let graph = lua::read_with_root(&script, &root).expect("load LSP effect graph");
+    let machine = compile_at_rate(&graph, 48_000.0).expect("compile LSP effect graph");
+    assert!(
+        machine
+            .vst3_latency_samples("instrument/master_compressor")
+            .is_ok()
+    );
+    let mut renderer = OfflineRenderer::new(machine, 1024, 2).expect("effect renderer");
+    let mut left = vec![0.0; 4096];
+    let mut right = vec![0.0; 4096];
+    for (left, right) in left.chunks_mut(1024).zip(right.chunks_mut(1024)) {
+        renderer.process_stereo(left, right);
+    }
+    assert!(energy(&left) > 0.001);
+    assert!(energy(&right) > 0.001);
+}
+
 #[test]
 fn installed_pulse_exposes_automation_routes_gm_drums_and_restores_state() {
     const PULSE_ID: &str = "ABCDEF019182FAEB506C7365506C6473";

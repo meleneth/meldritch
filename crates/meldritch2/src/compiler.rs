@@ -41,6 +41,7 @@ enum OpProcessor {
     },
     SequencerTempo(Arc<SequencerControl>),
     Vst3(Box<crate::vst3::Instance>),
+    Vst3Effect(Box<crate::vst3::Instance>),
 }
 
 const MAX_DELAY_SECONDS: f64 = 4.0;
@@ -1178,6 +1179,9 @@ impl Machine {
                     params,
                     outputs,
                 ),
+                OpProcessor::Vst3Effect(plugin) => {
+                    plugin.process_effect(&inputs[0..1], &inputs[1..2], params, outputs)
+                }
                 OpProcessor::SequencerTrack { sequencer, track } => {
                     let runtime = &self.sequencers[*sequencer];
                     outputs[0] = runtime.trigger(*track);
@@ -1252,6 +1256,9 @@ impl Machine {
                     params,
                     outputs,
                 ),
+                OpProcessor::Vst3Effect(plugin) => {
+                    plugin.process_effect(&inputs[0..1], &inputs[1..2], params, outputs)
+                }
                 OpProcessor::SequencerTrack { sequencer, track } => {
                     let runtime = &self.sequencers[*sequencer];
                     outputs[0] = runtime.trigger(*track);
@@ -1457,8 +1464,11 @@ impl Machine {
 
     pub fn set_offline_processing(&mut self) {
         for op in &mut self.ops {
-            if let OpProcessor::Vst3(plugin) = &mut op.processor {
-                plugin.set_offline();
+            match &mut op.processor {
+                OpProcessor::Vst3(plugin) | OpProcessor::Vst3Effect(plugin) => {
+                    plugin.set_offline();
+                }
+                _ => {}
             }
         }
     }
@@ -1470,7 +1480,21 @@ impl Machine {
             .position(|id| id == module)
             .ok_or_else(|| format!("unknown module '{module}'"))?;
         match &self.ops[index].processor {
-            OpProcessor::Vst3(plugin) => plugin.save_state(),
+            OpProcessor::Vst3(plugin) | OpProcessor::Vst3Effect(plugin) => plugin.save_state(),
+            _ => Err(format!("module '{module}' is not a VST3 plugin")),
+        }
+    }
+
+    pub fn vst3_latency_samples(&self, module: &str) -> Result<u32, String> {
+        let index = self
+            .op_ids
+            .iter()
+            .position(|id| id == module)
+            .ok_or_else(|| format!("unknown module '{module}'"))?;
+        match &self.ops[index].processor {
+            OpProcessor::Vst3(plugin) | OpProcessor::Vst3Effect(plugin) => {
+                Ok(plugin.latency_samples())
+            }
             _ => Err(format!("module '{module}' is not a VST3 plugin")),
         }
     }
@@ -1480,7 +1504,9 @@ impl Machine {
             .iter()
             .zip(&self.op_ids)
             .filter_map(|(op, id)| match &op.processor {
-                OpProcessor::Vst3(plugin) if plugin.failed() => Some(id.as_str()),
+                OpProcessor::Vst3(plugin) | OpProcessor::Vst3Effect(plugin) if plugin.failed() => {
+                    Some(id.as_str())
+                }
                 _ => None,
             })
     }
@@ -1490,7 +1516,11 @@ impl Machine {
             .iter()
             .zip(&self.op_ids)
             .filter_map(|(op, id)| match &op.processor {
-                OpProcessor::Vst3(plugin) if plugin.offline_fallback() => Some(id.as_str()),
+                OpProcessor::Vst3(plugin) | OpProcessor::Vst3Effect(plugin)
+                    if plugin.offline_fallback() =>
+                {
+                    Some(id.as_str())
+                }
                 _ => None,
             })
     }
@@ -1589,10 +1619,12 @@ impl OfflineRenderer {
             return Err("offline renderer requires positive block size and worker count".into());
         }
         if block_size > crate::vst3::MAX_BLOCK_SIZE
-            && machine
-                .ops
-                .iter()
-                .any(|op| matches!(op.processor, OpProcessor::Vst3(_)))
+            && machine.ops.iter().any(|op| {
+                matches!(
+                    op.processor,
+                    OpProcessor::Vst3(_) | OpProcessor::Vst3Effect(_)
+                )
+            })
         {
             return Err(format!(
                 "VST3 processing supports block sizes up to {} frames, got {block_size}",
@@ -1828,6 +1860,24 @@ fn process_offline_op(
         );
         return;
     }
+    if let OpProcessor::Vst3Effect(plugin) = &mut op.processor {
+        for (input_index, input) in op.inputs.iter().enumerate() {
+            for frame in 0..frames {
+                inputs[input_index * frames + frame] = input
+                    .sources
+                    .iter()
+                    .fold(0.0, |sum, source| sum + slots[*source][frame]);
+            }
+        }
+        let (left, right) = inputs.split_at_mut(frames);
+        plugin.process_effect(
+            left,
+            &right[..frames],
+            params,
+            &mut outputs[..frames * output_count],
+        );
+        return;
+    }
     let inputs = &mut inputs[..op.inputs.len()];
     for frame in 0..frames {
         for (target, input) in inputs.iter_mut().zip(&op.inputs) {
@@ -1854,7 +1904,9 @@ fn process_offline_op(
                 delay.process(inputs, params, sample_rate, frame_outputs)
             }
             OpProcessor::Plaits(plaits) => plaits.process(inputs, params, frame_outputs),
-            OpProcessor::Vst3(_) => unreachable!("VST3 block path returned above"),
+            OpProcessor::Vst3(_) | OpProcessor::Vst3Effect(_) => {
+                unreachable!("VST3 block path returned above")
+            }
             OpProcessor::SequencerTrack { .. } | OpProcessor::SequencerTempo(_) => unreachable!(),
         }
     }
@@ -2678,6 +2730,12 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 ModuleRuntime::Vst3(spec) if module.kind == "vst3" => {
                     OpProcessor::Vst3(Box::new(crate::vst3::Instance::new(spec, sample_rate)?))
                 }
+                ModuleRuntime::Vst3(spec) if module.kind == "vst3_effect" => {
+                    OpProcessor::Vst3Effect(Box::new(crate::vst3::Instance::new(
+                        spec,
+                        sample_rate,
+                    )?))
+                }
                 _ => {
                     return Err(format!(
                         "module '{}' has incompatible runtime data",
@@ -2708,9 +2766,12 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         .cloned()
         .map(SequencerRuntime::new)
         .collect();
-    let has_vst3 = ops
-        .iter()
-        .any(|op| matches!(op.processor, OpProcessor::Vst3(_)));
+    let has_vst3 = ops.iter().any(|op| {
+        matches!(
+            op.processor,
+            OpProcessor::Vst3(_) | OpProcessor::Vst3Effect(_)
+        )
+    });
     let mut machine = Machine {
         revision: Arc::new(()),
         ops,

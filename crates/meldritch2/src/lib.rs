@@ -119,7 +119,12 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 37);
+        assert_eq!(contract::all().len(), 38);
+        let vst3_effect = contract::find("vst3_effect").unwrap();
+        assert_eq!(vst3_effect.inputs[0].name, "input_left");
+        assert_eq!(vst3_effect.inputs[1].name, "input_right");
+        assert_eq!(vst3_effect.outputs[0].name, "left");
+        assert_eq!(vst3_effect.outputs[1].name, "right");
         let gain = contract::find("gain").unwrap();
         assert_eq!(gain.role, Role::Processor);
         assert_eq!(gain.inputs[0].name, "input");

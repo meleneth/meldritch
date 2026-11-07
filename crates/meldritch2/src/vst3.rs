@@ -94,6 +94,8 @@ pub struct Spec {
     pub activate_all_outputs: bool,
     /// Human-readable MIDI channel (1..=16) assigned to each logical note lane.
     pub midi_channels: [u8; NOTE_LANES],
+    /// Number of channels on the main input bus. Zero identifies an instrument.
+    pub audio_inputs: usize,
 }
 
 impl Spec {
@@ -135,21 +137,117 @@ fn host_builder(paths: &[PathBuf]) -> vst3_host::Vst3HostBuilder {
     builder.with_process_isolation(false)
 }
 
+fn module_descriptors(path: &Path) -> Option<Vec<Descriptor>> {
+    const MAX_MODULE_INFO_BYTES: u64 = 4 * 1024 * 1024;
+    let file = path.join("Contents/Resources/moduleinfo.json");
+    if std::fs::metadata(&file).ok()?.len() > MAX_MODULE_INFO_BYTES {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(file).ok()?).ok()?;
+    let factory_vendor = value
+        .get("Factory Info")
+        .and_then(|factory| factory.get("Vendor"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let classes = value.get("Classes")?.as_array()?;
+    let mut descriptors = Vec::new();
+    for class in classes {
+        let class_category = class
+            .get("Category")
+            .or_else(|| class.get("Catetory"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if class_category != "Audio Module Class" {
+            continue;
+        }
+        let sub_categories = class
+            .get("Sub Categories")
+            .and_then(serde_json::Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let class_id = class.get("CID")?.as_str()?.to_owned();
+        let name = class.get("Name")?.as_str()?.to_owned();
+        let vendor = class
+            .get("Vendor")
+            .and_then(serde_json::Value::as_str)
+            .filter(|vendor| !vendor.is_empty())
+            .unwrap_or(factory_vendor)
+            .to_owned();
+        let version = class
+            .get("Version")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        descriptors.push(Descriptor {
+            path: path.to_owned(),
+            class_id,
+            name,
+            vendor,
+            category: sub_categories.join("|"),
+            version,
+            instrument: sub_categories
+                .iter()
+                .any(|part| part.eq_ignore_ascii_case("instrument")),
+        });
+    }
+    (!descriptors.is_empty()).then_some(descriptors)
+}
+
 pub fn discover(paths: &[PathBuf]) -> Result<Vec<Descriptor>, String> {
     let selected = if paths.is_empty() {
         configured_paths()
     } else {
         paths.to_vec()
     };
-    let mut host = host_builder(&selected)
+    let host = host_builder(&selected)
         .build()
         .map_err(|error| error.to_string())?;
-    let mut plugins = host
-        .discover_plugins()
-        .map_err(|error| format!("VST3 discovery failed: {error}"))?
-        .into_iter()
-        .map(Descriptor::from)
-        .collect::<Vec<_>>();
+    let mut plugins = Vec::new();
+    for path in host.scan_plugin_paths() {
+        if let Some(mut descriptors) = module_descriptors(&path) {
+            plugins.append(&mut descriptors);
+            continue;
+        }
+        match vst3_host::discovery::read_module_info(&path) {
+            Ok(Some(module)) => {
+                for class in module
+                    .classes
+                    .iter()
+                    .filter(|class| class.category == "Audio Module Class")
+                {
+                    let category = class.sub_categories.join("|");
+                    let instrument = class
+                        .sub_categories
+                        .iter()
+                        .any(|part| part.eq_ignore_ascii_case("instrument"));
+                    plugins.push(Descriptor {
+                        path: path.clone(),
+                        class_id: class.class_id.clone(),
+                        name: class.name.clone(),
+                        vendor: if class.vendor.is_empty() {
+                            module.factory.vendor.clone()
+                        } else {
+                            class.vendor.clone()
+                        },
+                        category,
+                        version: class.version.clone(),
+                        instrument,
+                    });
+                }
+            }
+            Ok(None) => {
+                if let Ok(plugin) = vst3_host::discovery::get_plugin_info(&path) {
+                    plugins.push(Descriptor::from(plugin));
+                }
+            }
+            Err(_) => {}
+        }
+    }
     plugins.sort_by(|left, right| {
         left.name
             .cmp(&right.name)
@@ -184,10 +282,11 @@ pub fn resolve(selector: &str, paths: &[PathBuf]) -> Result<Descriptor, String> 
 }
 
 pub fn inspect(descriptor: Descriptor) -> Result<Spec, String> {
+    let audio_inputs = if descriptor.instrument { 0 } else { 2 };
     let mut host = Vst3Host::builder()
         .sample_rate(48_000.0)
         .block_size(MAX_BLOCK_SIZE)
-        .input_channels(0)
+        .input_channels(audio_inputs)
         .output_channels(2)
         .with_process_isolation(false)
         .build()
@@ -200,6 +299,22 @@ pub fn inspect(descriptor: Descriptor) -> Result<Spec, String> {
                 descriptor.name
             )
         })?;
+    let layout = plugin.audio_bus_layout().map_err(|error| {
+        format!(
+            "failed to inspect '{}' audio buses: {error}",
+            descriptor.name
+        )
+    })?;
+    if audio_inputs == 2 {
+        let input_channels = layout.inputs.first().map(|bus| bus.channel_count);
+        let output_channels = layout.outputs.first().map(|bus| bus.channel_count);
+        if input_channels != Some(2) || output_channels != Some(2) {
+            return Err(format!(
+                "VST3 effect '{}' requires unsupported main buses: input={input_channels:?}, output={output_channels:?}; stereo 2-in/2-out is required",
+                descriptor.name
+            ));
+        }
+    }
     let host_parameters = plugin
         .get_parameters()
         .map_err(|error| format!("failed to enumerate '{}': {error}", descriptor.name))?;
@@ -217,6 +332,7 @@ pub fn inspect(descriptor: Descriptor) -> Result<Spec, String> {
         state: None,
         activate_all_outputs: false,
         midi_channels: [1, 2, 3, 4, 5, 6, 7, 8],
+        audio_inputs,
     })
 }
 
@@ -259,7 +375,7 @@ impl Instance {
         let mut host = Vst3Host::builder()
             .sample_rate(sample_rate)
             .block_size(MAX_BLOCK_SIZE)
-            .input_channels(0)
+            .input_channels(spec.audio_inputs)
             .output_channels(2)
             .with_process_isolation(false)
             .build()
@@ -329,7 +445,12 @@ impl Instance {
                     .map_err(|error| format!("failed to allocate VST3 bus buffers: {error}"))?,
             )
         } else {
-            ProcessingBuffers::Flat(AudioBuffers::new(0, 2, MAX_BLOCK_SIZE, sample_rate))
+            ProcessingBuffers::Flat(AudioBuffers::new(
+                spec.audio_inputs,
+                2,
+                MAX_BLOCK_SIZE,
+                sample_rate,
+            ))
         };
         plugin.start_processing().map_err(|error| {
             format!(
@@ -392,6 +513,39 @@ impl Instance {
         self.plugin.save_state().map_err(|error| error.to_string())
     }
 
+    pub fn latency_samples(&self) -> u32 {
+        self.plugin.latency_samples()
+    }
+
+    fn apply_parameters(&mut self, parameter_values: &[f64]) -> Result<(), ()> {
+        for (active_index, (&(parameter_index, id), previous)) in self
+            .parameters
+            .iter()
+            .zip(&mut self.previous_parameters)
+            .enumerate()
+        {
+            let value = parameter_values[parameter_index];
+            if self
+                .restored_baseline
+                .as_ref()
+                .is_some_and(|baseline| value.to_bits() == baseline[active_index].to_bits())
+            {
+                continue;
+            }
+            if value.to_bits() != previous.to_bits() {
+                if self.plugin.set_parameter_at(id, value, 0).is_err() {
+                    self.failed = true;
+                    return Err(());
+                }
+                *previous = value;
+            }
+            if let Some(baseline) = &mut self.restored_baseline {
+                baseline[active_index] = f64::NAN;
+            }
+        }
+        Ok(())
+    }
+
     pub fn process(
         &mut self,
         note_inputs: [&[f64]; 5],
@@ -421,31 +575,9 @@ impl Instance {
             self.previous_tempo = tempo;
         }
 
-        for (active_index, (&(parameter_index, id), previous)) in self
-            .parameters
-            .iter()
-            .zip(&mut self.previous_parameters)
-            .enumerate()
-        {
-            let value = parameter_values[parameter_index];
-            if self
-                .restored_baseline
-                .as_ref()
-                .is_some_and(|baseline| value.to_bits() == baseline[active_index].to_bits())
-            {
-                continue;
-            }
-            if value.to_bits() != previous.to_bits() {
-                if self.plugin.set_parameter_at(id, value, 0).is_err() {
-                    self.failed = true;
-                    output.fill(0.0);
-                    return;
-                }
-                *previous = value;
-            }
-            if let Some(baseline) = &mut self.restored_baseline {
-                baseline[active_index] = f64::NAN;
-            }
+        if self.apply_parameters(parameter_values).is_err() {
+            output.fill(0.0);
+            return;
         }
 
         for frame in 0..frames {
@@ -562,6 +694,94 @@ impl Instance {
             }
         }
     }
+
+    pub fn process_effect(
+        &mut self,
+        left_input: &[f64],
+        right_input: &[f64],
+        parameter_values: &[f64],
+        output: &mut [f64],
+    ) {
+        let frames = left_input.len();
+        debug_assert_eq!(right_input.len(), frames);
+        debug_assert_eq!(output.len(), frames * 2);
+        if self.failed || frames == 0 || frames > MAX_BLOCK_SIZE {
+            output.fill(0.0);
+            self.failed |= frames > MAX_BLOCK_SIZE;
+            return;
+        }
+        if self.apply_parameters(parameter_values).is_err() {
+            output.fill(0.0);
+            return;
+        }
+
+        match &mut self.buffers {
+            ProcessingBuffers::Flat(buffers) => {
+                buffers.block_size = frames;
+                if buffers.inputs.len() != 2 {
+                    self.failed = true;
+                    output.fill(0.0);
+                    return;
+                }
+                for frame in 0..frames {
+                    buffers.inputs[0][frame] = left_input[frame] as f32;
+                    buffers.inputs[1][frame] = right_input[frame] as f32;
+                }
+                for channel in &mut buffers.outputs {
+                    channel[..frames].fill(0.0);
+                }
+                if self.plugin.process_audio(buffers).is_err() {
+                    self.failed = true;
+                    output.fill(0.0);
+                    return;
+                }
+                let left = buffers.outputs.first();
+                let right = buffers.outputs.get(1).or(left);
+                for frame in 0..frames {
+                    output[frame * 2] = left.map_or(0.0, |channel| f64::from(channel[frame]));
+                    output[frame * 2 + 1] = right.map_or(0.0, |channel| f64::from(channel[frame]));
+                }
+            }
+            ProcessingBuffers::Buses(buffers) => {
+                buffers.block_size = frames;
+                buffers.clear();
+                let Some(input) = buffers.inputs.iter_mut().find(|bus| bus.active) else {
+                    self.failed = true;
+                    output.fill(0.0);
+                    return;
+                };
+                if input.channels.len() != 2 {
+                    self.failed = true;
+                    output.fill(0.0);
+                    return;
+                }
+                for frame in 0..frames {
+                    input.channels[0][frame] = left_input[frame] as f32;
+                    input.channels[1][frame] = right_input[frame] as f32;
+                }
+                if self.plugin.process_bus_audio(buffers).is_err() {
+                    self.failed = true;
+                    output.fill(0.0);
+                    return;
+                }
+                for frame in 0..frames {
+                    let mut left = 0.0;
+                    let mut right = 0.0;
+                    for bus in &buffers.outputs {
+                        let first = bus.channels.first();
+                        left += first.map_or(0.0, |channel| f64::from(channel[frame]));
+                        right += bus
+                            .channels
+                            .get(1)
+                            .or(first)
+                            .map_or(0.0, |channel| f64::from(channel[frame]));
+                    }
+                    output[frame * 2] = left;
+                    output[frame * 2 + 1] = right;
+                }
+            }
+        }
+    }
 }
 
 impl Drop for Instance {
@@ -630,6 +850,7 @@ mod tests {
             state: None,
             activate_all_outputs: false,
             midi_channels: [1, 2, 3, 4, 5, 6, 7, 8],
+            audio_inputs: 0,
         };
         assert_eq!(Spec::parameter_name(42), "parameter_42");
         assert_eq!(spec.parameter_id("parameter_42"), Some(42));
