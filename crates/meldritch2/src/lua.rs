@@ -514,6 +514,48 @@ impl UserData for LuaWebPlane {
             });
             Ok(())
         });
+        methods.add_method("drum_grid", |_, this, spec: Table| {
+            let id: String = spec.get("id")?;
+            let kit: Table = spec.get("kit")?;
+            let sequence: Table = kit.get("_sequence")?;
+            let native: AnyUserData = sequence.get("_native")?;
+            let native = native.borrow::<LuaSequencer>()?;
+            let voices: Table = kit.get("voices")?;
+            let mut lanes = Vec::new();
+            for voice in voices.sequence_values::<Table>() {
+                let voice = voice?;
+                let track: Table = voice.get("track")?;
+                lanes.push(crate::web::DrumLane {
+                    id: voice.get("id")?,
+                    label: voice.get("label")?,
+                    track: track.get("_track_index")?,
+                    note: voice.get("note")?,
+                });
+            }
+            let steps = spec.get::<Option<usize>>("steps")?.unwrap_or(16);
+            if id.is_empty() || steps != 16 || lanes.is_empty() || lanes.len() > 8 {
+                return Err(mlua::Error::external(
+                    "drum grid requires an ID, 16 steps, and 1..8 kit voices",
+                ));
+            }
+            let label = spec
+                .get::<Option<String>>("label")?
+                .unwrap_or_else(|| id.clone());
+            let planes = Rc::clone(&this.application.borrow().planes);
+            let mut planes = planes.borrow_mut();
+            let plane = planes.get_mut(&this.id).unwrap();
+            if plane.controls.iter().any(|control| control.id() == id) {
+                return Err(mlua::Error::external("duplicate plane control id"));
+            }
+            plane.controls.push(crate::web::PlaneControl::DrumGrid {
+                id,
+                label,
+                sequencer: Arc::clone(&native.control),
+                lanes,
+                steps,
+            });
+            Ok(())
+        });
         methods.add_method("pattern_selector", |_, this, spec: Table| {
             let id: String = spec.get("id")?;
             let sequence: Table = spec.get("sequencer")?;
@@ -1468,6 +1510,18 @@ local function decorate_scope(facade, scope, prefix)
       scope:connect(sequence.tempo, self.tempo)
       return self
     end
+    function handle:connect_drum_kit(kit)
+      assert(type(kit) == "table" and type(kit.voices) == "table" and #kit.voices <= 8,
+        "VST3 drum kit requires at most eight voices")
+      for lane, voice in ipairs(kit.voices) do
+        local suffix = lane == 1 and "" or "_" .. lane
+        scope:connect(voice.track.pitch, self["pitch" .. suffix])
+        scope:connect(voice.track.gate, self["gate" .. suffix])
+        scope:connect(voice.track.velocity, self["velocity" .. suffix])
+      end
+      scope:connect(kit._sequence.tempo, self.tempo)
+      return self
+    end
     return handle
   end
   function facade:adsr(values)
@@ -1629,6 +1683,29 @@ local function decorate_scope(facade, scope, prefix)
       end
       return logical
     end
+    function sequence:drum_kit(values)
+      assert(type(values) == "table" and type(values.voices) == "table",
+        "drum kit requires an ordered voices array")
+      local kit = { name = values.name or "Drums", voices = {}, by_id = {}, _sequence = self }
+      assert(#values.voices >= 1 and #values.voices <= 8, "drum kit requires 1..8 voices")
+      for index, voice in ipairs(values.voices) do
+        assert(type(voice.id) == "string" and voice.id ~= "" and not kit.by_id[voice.id],
+          "drum voice IDs must be unique nonempty strings")
+        assert(type(voice.note) == "number" and voice.note >= 0 and voice.note <= 127 and voice.note % 1 == 0,
+          "drum voice note must be a MIDI pitch in 0..127")
+        local item = {
+          id = voice.id,
+          label = voice.label or voice.id,
+          note = voice.note,
+          duration = voice.duration or 1,
+          track = self:track((values.name or "Drums") .. " " .. voice.id),
+        }
+        item._track_indices = { item.track._track_index }
+        kit.voices[index] = item
+        kit.by_id[item.id] = item
+      end
+      return kit
+    end
     function sequence:steps(name, values)
       local track = assert(self._tracks[name], "unknown sequencer track: " .. tostring(name))
       self._native:set_steps(track, values)
@@ -1672,6 +1749,27 @@ local function decorate_scope(facade, scope, prefix)
         end
         sequence._native:set_pattern_notes(self.index,track,pitches,gates,velocities)
         sequence._native:set_pattern_offsets(self.index,track,event_offsets(events,length,nil))
+      end
+      function pattern:drums(kit, lanes, length)
+        assert(type(kit) == "table" and type(kit.voices) == "table" and type(lanes) == "table",
+          "drum pattern requires a drum kit and lane table")
+        length = length or sequence._steps
+        for _, voice in ipairs(kit.voices) do
+          local normalized = {}
+          for index, hit in ipairs(lanes[voice.id] or {}) do
+            local velocity = hit.velocity or 100
+            if velocity <= 1 then velocity = math.floor(velocity * 127 + 0.5) end
+            normalized[index] = {
+              id = hit.id or (index + (_ - 1) * 1000),
+              step = hit.step,
+              pitch = voice.note,
+              velocity = velocity,
+              duration = hit.duration or voice.duration,
+            }
+          end
+          self:notes(voice, normalized, length)
+        end
+        return self
       end
       function pattern:length(track_name, length)
         local track=assert(sequence._tracks[track_name],"unknown sequencer track: "..tostring(track_name))
@@ -2383,12 +2481,37 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
             let selector: String = spec.get("plugin")?;
             let paths = lua_vst3_paths(&spec, &vst3_root)?;
             let mut loaded = crate::vst3::load(&selector, &paths).map_err(mlua::Error::external)?;
+            loaded.activate_all_outputs = spec
+                .get::<Option<bool>>("activate_all_outputs")?
+                .unwrap_or(false);
             if let Some(state) = spec.get::<Option<Table>>("state")? {
                 loaded.state = Some(
                     state
                         .sequence_values::<u8>()
                         .collect::<mlua::Result<Vec<_>>>()?,
                 );
+            }
+            if let Some(state_file) = spec.get::<Option<String>>("state_file")? {
+                if loaded.state.is_some() {
+                    return Err(mlua::Error::external(
+                        "VST3 configuration cannot provide both state and state_file",
+                    ));
+                }
+                let path = PathBuf::from(state_file);
+                let path = if path.is_absolute() {
+                    path
+                } else {
+                    vst3_root.join(path)
+                };
+                let metadata = std::fs::metadata(&path).map_err(mlua::Error::external)?;
+                const MAX_VST3_STATE_BYTES: u64 = 16 * 1024 * 1024;
+                if metadata.len() > MAX_VST3_STATE_BYTES {
+                    return Err(mlua::Error::external(format!(
+                        "VST3 state file exceeds the {} MiB limit",
+                        MAX_VST3_STATE_BYTES / 1024 / 1024
+                    )));
+                }
+                loaded.state = Some(std::fs::read(path).map_err(mlua::Error::external)?);
             }
             lua.create_userdata(LuaVst3(Arc::new(loaded)))
         })

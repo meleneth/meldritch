@@ -40,7 +40,7 @@ enum OpProcessor {
         track: usize,
     },
     SequencerTempo(Arc<SequencerControl>),
-    Vst3(crate::vst3::Instance),
+    Vst3(Box<crate::vst3::Instance>),
 }
 
 const MAX_DELAY_SECONDS: f64 = 4.0;
@@ -1173,7 +1173,7 @@ impl Machine {
                         &inputs[1..2],
                         &inputs[2..3],
                         &inputs[3..4],
-                        &inputs[4..13],
+                        &inputs[4..4 + crate::vst3::EXTRA_NOTE_INPUTS],
                     ],
                     params,
                     outputs,
@@ -1247,7 +1247,7 @@ impl Machine {
                         &inputs[1..2],
                         &inputs[2..3],
                         &inputs[3..4],
-                        &inputs[4..13],
+                        &inputs[4..4 + crate::vst3::EXTRA_NOTE_INPUTS],
                     ],
                     params,
                     outputs,
@@ -1821,7 +1821,7 @@ fn process_offline_op(
                 gate,
                 velocity,
                 tempo,
-                &extra_note_inputs[..frames * 9],
+                &extra_note_inputs[..frames * crate::vst3::EXTRA_NOTE_INPUTS],
             ],
             params,
             &mut outputs[..frames * output_count],
@@ -2676,7 +2676,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                     OpProcessor::SequencerTempo(Arc::clone(sequencer))
                 }
                 ModuleRuntime::Vst3(spec) if module.kind == "vst3" => {
-                    OpProcessor::Vst3(crate::vst3::Instance::new(spec, sample_rate)?)
+                    OpProcessor::Vst3(Box::new(crate::vst3::Instance::new(spec, sample_rate)?))
                 }
                 _ => {
                     return Err(format!(

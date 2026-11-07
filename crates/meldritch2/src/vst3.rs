@@ -12,11 +12,13 @@ use std::{
 
 use vst3_host::{
     Plugin, PluginInfo, ProcessMode, Vst3Host,
-    audio::AudioBuffers,
+    audio::{AudioBuffers, BusAudioBuffers, BusDirection, MediaType},
     midi::{MidiChannel, MidiEvent},
 };
 
 pub const MAX_BLOCK_SIZE: usize = 1024;
+pub const NOTE_LANES: usize = 8;
+pub const EXTRA_NOTE_INPUTS: usize = (NOTE_LANES - 1) * 3;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Descriptor {
@@ -80,6 +82,9 @@ pub struct Spec {
     pub parameters: Vec<Parameter>,
     pub initial_values: BTreeMap<u32, f64>,
     pub state: Option<Vec<u8>>,
+    /// Activate and retain every output bus. Multi-output instruments such as
+    /// Geonkick require every advertised bus to be present during processing.
+    pub activate_all_outputs: bool,
 }
 
 impl Spec {
@@ -197,6 +202,7 @@ pub fn inspect(descriptor: Descriptor) -> Result<Spec, String> {
         parameters,
         initial_values: BTreeMap::new(),
         state: None,
+        activate_all_outputs: false,
     })
 }
 
@@ -206,14 +212,19 @@ pub fn load(selector: &str, paths: &[PathBuf]) -> Result<Spec, String> {
 
 pub struct Instance {
     plugin: Plugin,
-    buffers: AudioBuffers,
+    buffers: ProcessingBuffers,
     parameters: Vec<u32>,
     previous_parameters: Vec<f64>,
     restored_baseline: Option<Vec<f64>>,
-    active_notes: [Option<u8>; 4],
+    active_notes: [Option<u8>; NOTE_LANES],
     failed: bool,
     offline_fallback: bool,
     previous_tempo: f64,
+}
+
+enum ProcessingBuffers {
+    Flat(AudioBuffers),
+    Buses(BusAudioBuffers),
 }
 
 impl std::fmt::Debug for Instance {
@@ -280,6 +291,27 @@ impl Instance {
                 })?;
             }
         }
+        let buffers = if spec.activate_all_outputs {
+            let output_count = plugin
+                .audio_bus_layout()
+                .map_err(|error| format!("failed to inspect VST3 audio buses: {error}"))?
+                .outputs
+                .len();
+            for bus in 0..output_count {
+                plugin
+                    .set_bus_active(MediaType::Audio, BusDirection::Output, bus as i32, true)
+                    .map_err(|error| {
+                        format!("failed to activate VST3 output bus {bus}: {error}")
+                    })?;
+            }
+            ProcessingBuffers::Buses(
+                plugin
+                    .create_bus_audio_buffers(MAX_BLOCK_SIZE)
+                    .map_err(|error| format!("failed to allocate VST3 bus buffers: {error}"))?,
+            )
+        } else {
+            ProcessingBuffers::Flat(AudioBuffers::new(0, 2, MAX_BLOCK_SIZE, sample_rate))
+        };
         plugin.start_processing().map_err(|error| {
             format!(
                 "failed to start VST3 plugin '{}': {error}",
@@ -288,11 +320,11 @@ impl Instance {
         })?;
         Ok(Self {
             plugin,
-            buffers: AudioBuffers::new(0, 2, MAX_BLOCK_SIZE, sample_rate),
+            buffers,
             parameters,
             previous_parameters,
             restored_baseline,
-            active_notes: [None; 4],
+            active_notes: [None; NOTE_LANES],
             failed: false,
             offline_fallback: false,
             previous_tempo: 120.0,
@@ -340,7 +372,7 @@ impl Instance {
         debug_assert_eq!(velocity.len(), frames);
         debug_assert_eq!(tempo.len(), frames);
         debug_assert_eq!(output.len(), frames * 2);
-        debug_assert_eq!(extra_note_inputs.len(), frames * 9);
+        debug_assert_eq!(extra_note_inputs.len(), frames * EXTRA_NOTE_INPUTS);
         if self.failed || frames == 0 || frames > MAX_BLOCK_SIZE {
             output.fill(0.0);
             self.failed |= frames > MAX_BLOCK_SIZE;
@@ -389,6 +421,10 @@ impl Instance {
             MidiChannel::Ch2,
             MidiChannel::Ch3,
             MidiChannel::Ch4,
+            MidiChannel::Ch5,
+            MidiChannel::Ch6,
+            MidiChannel::Ch7,
+            MidiChannel::Ch8,
         ];
         for frame in 0..frames {
             for (lane, channel) in channels.iter().copied().enumerate() {
@@ -460,20 +496,48 @@ impl Instance {
             return;
         }
 
-        self.buffers.block_size = frames;
-        for channel in &mut self.buffers.outputs {
-            channel[..frames].fill(0.0);
-        }
-        if self.plugin.process_audio(&mut self.buffers).is_err() {
-            self.failed = true;
-            output.fill(0.0);
-            return;
-        }
-        let left = self.buffers.outputs.first();
-        let right = self.buffers.outputs.get(1).or(left);
-        for frame in 0..frames {
-            output[frame * 2] = left.map_or(0.0, |channel| f64::from(channel[frame]));
-            output[frame * 2 + 1] = right.map_or(0.0, |channel| f64::from(channel[frame]));
+        match &mut self.buffers {
+            ProcessingBuffers::Flat(buffers) => {
+                buffers.block_size = frames;
+                for channel in &mut buffers.outputs {
+                    channel[..frames].fill(0.0);
+                }
+                if self.plugin.process_audio(buffers).is_err() {
+                    self.failed = true;
+                    output.fill(0.0);
+                    return;
+                }
+                let left = buffers.outputs.first();
+                let right = buffers.outputs.get(1).or(left);
+                for frame in 0..frames {
+                    output[frame * 2] = left.map_or(0.0, |channel| f64::from(channel[frame]));
+                    output[frame * 2 + 1] = right.map_or(0.0, |channel| f64::from(channel[frame]));
+                }
+            }
+            ProcessingBuffers::Buses(buffers) => {
+                buffers.block_size = frames;
+                buffers.clear();
+                if self.plugin.process_bus_audio(buffers).is_err() {
+                    self.failed = true;
+                    output.fill(0.0);
+                    return;
+                }
+                for frame in 0..frames {
+                    let mut left = 0.0;
+                    let mut right = 0.0;
+                    for bus in &buffers.outputs {
+                        let first = bus.channels.first();
+                        left += first.map_or(0.0, |channel| f64::from(channel[frame]));
+                        right += bus
+                            .channels
+                            .get(1)
+                            .or(first)
+                            .map_or(0.0, |channel| f64::from(channel[frame]));
+                    }
+                    output[frame * 2] = left;
+                    output[frame * 2 + 1] = right;
+                }
+            }
         }
     }
 }
@@ -539,6 +603,7 @@ mod tests {
             }],
             initial_values: BTreeMap::new(),
             state: None,
+            activate_all_outputs: false,
         };
         assert_eq!(Spec::parameter_name(42), "parameter_42");
         assert_eq!(spec.parameter_id("parameter_42"), Some(42));

@@ -930,6 +930,80 @@ fn read_only_projection_is_enforced_and_live_role_reassignment_is_revisioned() {
 }
 
 #[test]
+fn drum_grid_edits_velocity_and_mute_are_authoritative() {
+    let source = r#"
+local instrument=meldritch.instrument("Drum grid test")
+local sequence=instrument:sequencer {bpm=120,steps=16,steps_per_beat=4}
+local kit=sequence:drum_kit {name="Kit",voices={{id="kick",label="Kick",note=36},{id="snare",label="Snare",note=38}}}
+local pattern=sequence:pattern("Main")
+pattern:drums(kit,{kick={{id=1,step=1,velocity=100}},snare={{id=1,step=5,velocity=110}}},16)
+local tone=instrument:oscillator {waveform="sine",frequency=60}
+instrument:connect(tone.out,instrument.output.left);instrument:connect(tone.out,instrument.output.right)
+local server=meldritch.server {host="127.0.0.1",port=0}
+server:websocket("/performance",{})
+local performance=server:performance {name="Drums"}
+performance:role("drummer",{controls={}});performance:role("observer",{controls={}})
+server:credential("drummer-token","drummer");server:credential("observer-token","observer")
+local plane=performance:plane {id="drums",label="Drums",roles={"drummer"},read_only_roles={"observer"}}
+plane:drum_grid {id="grid",label="Grid",kit=kit,steps=16}
+return instrument
+"#;
+    let mut program =
+        lua::read_program_with_root(source, std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+            .unwrap();
+    let machine = compile(program.graph()).unwrap();
+    let controls = machine
+        .control_ids()
+        .map(|id| {
+            let handle = machine.control_handle(id).unwrap();
+            let value = handle.effective_value();
+            (handle, value)
+        })
+        .collect();
+    let address = program
+        .events_mut()
+        .start_server(controls)
+        .unwrap()
+        .unwrap();
+    let client = thread::spawn(move || {
+        tokio::runtime::Runtime::new().unwrap().block_on(async move {
+        let (mut socket,_) = connect_async(format!("ws://{address}/performance")).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+        socket.send(Message::Text(json!({"type":"authenticate","token":"drummer-token"}).to_string().into())).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+        let snapshot: Value=serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+        assert_eq!(snapshot["state"]["planes"][0]["controls"][0]["kind"],"drum_grid");
+        socket.send(Message::Text(json!({"type":"drum.hit.toggle","plane":"drums","control":"grid","row":"kick","pattern":0,"step":2}).to_string().into())).await.unwrap();
+        let added: Value=serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+        assert!(added["state"]["values"]["drums/grid"]["rows"][0]["hits"].as_array().unwrap().iter().any(|hit|hit["step"]==2));
+        socket.send(Message::Text(json!({"type":"drum.hit.velocity","plane":"drums","control":"grid","row":"kick","pattern":0,"step":2,"velocity":64}).to_string().into())).await.unwrap();
+        let velocity: Value=serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+        assert!(velocity["state"]["values"]["drums/grid"]["rows"][0]["hits"].as_array().unwrap().iter().any(|hit|hit["step"]==2&&hit["velocity"]==64));
+        socket.send(Message::Text(json!({"type":"drum.mute","plane":"drums","control":"grid","row":"kick","muted":true}).to_string().into())).await.unwrap();
+        let muted: Value=serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+        assert_eq!(muted["state"]["values"]["drums/grid"]["rows"][0]["muted"],true);
+        let (mut observer,_) = connect_async(format!("ws://{address}/performance")).await.unwrap();
+        observer.next().await.unwrap().unwrap();
+        observer.send(Message::Text(json!({"type":"authenticate","token":"observer-token"}).to_string().into())).await.unwrap();
+        observer.next().await.unwrap().unwrap();observer.next().await.unwrap().unwrap();
+        observer.send(Message::Text(json!({"type":"drum.mute","plane":"drums","control":"grid","row":"snare","muted":true}).to_string().into())).await.unwrap();
+        let rejected: Value=serde_json::from_str(observer.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+        assert_eq!(rejected["type"],"error");
+    })
+    });
+    poll_thread(&mut program, client);
+    let sequencer = &machine.sequencer_controls()[0];
+    assert!(
+        sequencer
+            .note_events(0, 0)
+            .iter()
+            .any(|hit| hit.step == 2 && hit.velocity == 64)
+    );
+    assert!(sequencer.muted(0));
+    assert!(!sequencer.muted(1));
+}
+
+#[test]
 fn drop_demo_is_browser_discovered_and_changes_the_real_audio_graph() {
     let source =
         include_str!("../examples/70-network-performance.lua").replace("port = 8080", "port = 0");

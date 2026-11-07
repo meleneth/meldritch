@@ -50,6 +50,51 @@ fn energy(samples: &[f64]) -> f64 {
 }
 
 #[test]
+fn installed_geonkick_loads_timekit_processes_all_buses_and_restores_state() {
+    const GEONKICK_ID: &str = "E2CC953290E863F06405E13924E34B24";
+    if std::env::var_os("MELDRITCH_TEST_GEONKICK").is_none() {
+        eprintln!("set MELDRITCH_TEST_GEONKICK=1 to run the installed Geonkick test");
+        return;
+    }
+    let home = PathBuf::from(std::env::var_os("HOME").expect("HOME"));
+    let plugins = home.join(".local/lib/vst3");
+    let kit = home.join(".local/share/geonkick/presets/TimeKit/TimeKit.gkit");
+    let mut spec = vst3::load(GEONKICK_ID, &[plugins]).expect("inspect installed Geonkick");
+    assert_eq!(spec.descriptor.name, "Geonkick");
+    assert_eq!(spec.descriptor.vendor, "Iurie Nistor");
+    assert_eq!(spec.descriptor.version, "3.9.0");
+    assert_eq!(spec.descriptor.category, "Instrument|Synth");
+    assert!(spec.descriptor.instrument);
+    assert!(
+        spec.parameters.is_empty(),
+        "Geonkick 3.9 exposes kit state, not VST parameters"
+    );
+    spec.state = Some(std::fs::read(kit).expect("read TimeKit state"));
+    spec.activate_all_outputs = true;
+    let frames = 1024;
+    let pitch = vec![32.703_196; frames]; // MIDI 24, TimeKit kick
+    let gate = vec![1.0; frames];
+    let velocity = vec![1.0; frames];
+    let tempo = vec![124.0; frames];
+    let extra = vec![0.0; frames * vst3::EXTRA_NOTE_INPUTS];
+    let mut output = vec![0.0; frames * 2];
+    let mut plugin = Instance::new(&spec, 48_000.0).expect("instantiate Geonkick");
+    let mut total = 0.0;
+    for _ in 0..8 {
+        plugin.process([&pitch, &gate, &velocity, &tempo, &extra], &[], &mut output);
+        assert!(output.iter().all(|sample| sample.is_finite()));
+        total += energy(&output);
+    }
+    assert!(total > 0.001, "TimeKit kick produced silence");
+    let state = plugin.save_state().expect("save Geonkick state");
+    assert!(!state.is_empty());
+    drop(plugin);
+    let mut restored = spec.clone();
+    restored.state = Some(state);
+    drop(Instance::new(&restored, 48_000.0).expect("restore Geonkick state"));
+}
+
+#[test]
 fn installed_serum_supports_real_notes_parameters_audio_and_teardown() {
     const SERUM_ID: &str = "56534558667350736572756D20320000";
     let Some(home) = std::env::var_os("HOME") else {
@@ -95,7 +140,7 @@ fn installed_serum_supports_real_notes_parameters_audio_and_teardown() {
     let gate = vec![1.0; frames];
     let velocity = vec![0.85; frames];
     let tempo = vec![116.0; frames];
-    let mut extra = vec![0.0; frames * 9];
+    let mut extra = vec![0.0; frames * vst3::EXTRA_NOTE_INPUTS];
     extra[..frames].fill(329.627_557);
     extra[frames..frames * 2].fill(1.0);
     extra[frames * 2..frames * 3].fill(0.72);
@@ -144,7 +189,7 @@ fn native_plugin_vertical_slice_covers_discovery_lifecycle_events_parameters_and
     gate[17..80].fill(1.0);
     let velocity = vec![0.8; frames];
     let tempo = vec![120.0; frames];
-    let extra_notes = vec![0.0; frames * 9];
+    let extra_notes = vec![0.0; frames * vst3::EXTRA_NOTE_INPUTS];
     let mut output = vec![f64::NAN; frames * 2];
     let mut plugin = Instance::new(&spec, 48_000.0).expect("create fixture instance");
     plugin.process(

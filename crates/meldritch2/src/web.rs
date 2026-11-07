@@ -153,6 +153,13 @@ pub enum PlaneControl {
         pitch_min: u8,
         pitch_max: u8,
     },
+    DrumGrid {
+        id: String,
+        label: String,
+        sequencer: Arc<SequencerControl>,
+        lanes: Vec<DrumLane>,
+        steps: usize,
+    },
     Adsr {
         id: String,
         label: String,
@@ -173,6 +180,14 @@ pub enum PlaneControl {
 }
 
 #[derive(Clone)]
+pub struct DrumLane {
+    pub id: String,
+    pub label: String,
+    pub track: usize,
+    pub note: u8,
+}
+
+#[derive(Clone)]
 pub struct AdsrParameter {
     pub name: &'static str,
     pub control: String,
@@ -190,6 +205,7 @@ impl PlaneControl {
             | Self::Steps { id, .. }
             | Self::Trigger { id, .. }
             | Self::PianoRoll { id, .. }
+            | Self::DrumGrid { id, .. }
             | Self::Adsr { id, .. }
             | Self::Patterns { id, .. }
             | Self::Presets { id, .. } => id,
@@ -454,6 +470,10 @@ impl Application {
                         PlaneControl::Steps { id,label,steps,.. } => json!({"id":id,"label":label,"kind":"step_sequencer","step_count":steps}),
                         PlaneControl::Trigger { id,label,.. } => json!({"id":id,"label":label,"kind":"trigger"}),
                         PlaneControl::PianoRoll { id,label,steps,pitch_min,pitch_max,tracks,.. } => json!({"id":id,"label":label,"kind":"piano_roll","step_count":steps,"pitch_min":pitch_min,"pitch_max":pitch_max,"voices":tracks.len()}),
+                        PlaneControl::DrumGrid { id,label,steps,lanes,.. } => {
+                            let rows=lanes.iter().map(|lane| json!({"id":lane.id,"label":lane.label,"note":lane.note})).collect::<Vec<_>>();
+                            json!({"id":id,"label":label,"kind":"drum_grid","step_count":steps,"rows":rows})
+                        }
                         PlaneControl::Adsr { id,label,parameters } => {
                             let parameters=parameters.iter().map(|parameter| json!({"name":parameter.name,"control":parameter.control,"min":parameter.min,"max":parameter.max,"scale":parameter.scale,"unit":parameter.unit})).collect::<Vec<_>>();
                             json!({"id":id,"label":label,"kind":"adsr","parameters":parameters})
@@ -569,6 +589,24 @@ impl Application {
                             json!({"pattern":pattern,"notes":notes,"position":sequencer.current_step()}),
                         )
                     }
+                    PlaneControl::DrumGrid {
+                        id,
+                        sequencer,
+                        lanes,
+                        ..
+                    } => {
+                        let pattern = sequencer.active_pattern();
+                        let rows = lanes.iter().map(|lane| {
+                            let hits = sequencer.note_events(pattern, lane.track).into_iter()
+                                .map(|hit| json!({"id":hit.id,"step":hit.step,"velocity":hit.velocity,"duration":hit.duration}))
+                                .collect::<Vec<_>>();
+                            json!({"id":lane.id,"muted":sequencer.muted(lane.track),"hits":hits})
+                        }).collect::<Vec<_>>();
+                        (
+                            id,
+                            json!({"pattern":pattern,"rows":rows,"position":sequencer.current_step()}),
+                        )
+                    }
                     PlaneControl::Adsr { id, parameters, .. } => {
                         let values = parameters
                             .iter()
@@ -676,6 +714,7 @@ impl Application {
                 | PlaneControl::Steps { id, .. }
                 | PlaneControl::Trigger { id, .. }
                 | PlaneControl::PianoRoll { id, .. }
+                | PlaneControl::DrumGrid { id, .. }
                 | PlaneControl::Adsr { id, .. }
                 | PlaneControl::Patterns { id, .. }
                 | PlaneControl::Presets { id, .. } => id == control_id,
@@ -768,6 +807,80 @@ impl Application {
                             Ok(())
                         }
                         _ => unreachable!(),
+                    })
+                    .map_err(DispatchError::bad_request)
+            }
+            (
+                Some(kind @ ("drum.hit.toggle" | "drum.hit.velocity" | "drum.mute")),
+                PlaneControl::DrumGrid {
+                    sequencer,
+                    lanes,
+                    steps,
+                    ..
+                },
+            ) => {
+                let row = message
+                    .get("row")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| DispatchError::bad_request("drum command requires row"))?;
+                let lane = lanes
+                    .iter()
+                    .find(|lane| lane.id == row)
+                    .ok_or_else(|| DispatchError::bad_request("unknown drum row"))?;
+                if kind == "drum.mute" {
+                    let muted = message
+                        .get("muted")
+                        .and_then(Value::as_bool)
+                        .ok_or_else(|| DispatchError::bad_request("drum mute requires muted"))?;
+                    return sequencer
+                        .set_muted(lane.track, muted)
+                        .map_err(DispatchError::bad_request);
+                }
+                let step = message
+                    .get("step")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u8::try_from(value).ok())
+                    .filter(|step| usize::from(*step) < steps)
+                    .ok_or_else(|| DispatchError::bad_request("invalid drum step"))?;
+                let pattern = message
+                    .get("pattern")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| usize::try_from(value).ok())
+                    .unwrap_or_else(|| sequencer.active_pattern());
+                sequencer
+                    .edit_note_events(pattern, &[lane.track], steps, |events| {
+                        if kind == "drum.hit.toggle" {
+                            if let Some(index) = events.iter().position(|hit| hit.step == step) {
+                                events.remove(index);
+                            } else {
+                                let id = events
+                                    .iter()
+                                    .map(|hit| hit.id)
+                                    .max()
+                                    .unwrap_or(0)
+                                    .saturating_add(1);
+                                events.push(NoteEvent {
+                                    id,
+                                    step,
+                                    pitch: lane.note,
+                                    velocity: 100,
+                                    duration: 1,
+                                    legato: false,
+                                });
+                            }
+                        } else {
+                            let velocity = message
+                                .get("velocity")
+                                .and_then(Value::as_u64)
+                                .and_then(|value| u8::try_from(value).ok())
+                                .filter(|value| *value > 0 && *value <= 127)
+                                .ok_or_else(|| "drum velocity must be in 1..127".to_string())?;
+                            let hit = events.iter_mut().find(|hit| hit.step == step).ok_or_else(
+                                || "cannot set velocity for an empty drum step".to_string(),
+                            )?;
+                            hit.velocity = velocity;
+                        }
+                        Ok(())
                     })
                     .map_err(DispatchError::bad_request)
             }
@@ -889,6 +1002,28 @@ impl Application {
                         for step in 0..(*steps).min(56) {
                             if authored.velocities[*track][step] > 0.0 {
                                 value |= 1_u64 << (step + 8);
+                            }
+                        }
+                        (format!("{}/{}", plane.id, id), value)
+                    }
+                    PlaneControl::DrumGrid {
+                        id,
+                        sequencer,
+                        lanes,
+                        ..
+                    } => {
+                        let pattern = sequencer.active_pattern();
+                        let mut value = (pattern as u64) << 56 | sequencer.current_step() as u64;
+                        for lane in lanes {
+                            value = value.wrapping_mul(1_099_511_628_211)
+                                ^ (lane.track as u64) << 40
+                                ^ (sequencer.muted(lane.track) as u64) << 55;
+                            for hit in sequencer.note_events(pattern, lane.track) {
+                                value = value
+                                    .wrapping_mul(1_099_511_628_211)
+                                    .wrapping_add(u64::from(hit.id))
+                                    ^ (u64::from(hit.step) << 8)
+                                    ^ (u64::from(hit.velocity) << 24);
                             }
                         }
                         (format!("{}/{}", plane.id, id), value)
@@ -1182,6 +1317,9 @@ impl ControlExecutor {
                             | "pattern.select"
                             | "adsr.set"
                             | "preset.select"
+                            | "drum.hit.toggle"
+                            | "drum.hit.velocity"
+                            | "drum.mute"
                     )
                 ) {
                     match self

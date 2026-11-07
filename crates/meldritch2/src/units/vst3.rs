@@ -88,6 +88,78 @@ pub const CONTRACT: Contract = Contract {
             fan_in: FanIn::One,
             unconnected: Some(1.0),
         },
+        InputPort {
+            name: "pitch_5",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(440.0),
+        },
+        InputPort {
+            name: "gate_5",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(0.0),
+        },
+        InputPort {
+            name: "velocity_5",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(1.0),
+        },
+        InputPort {
+            name: "pitch_6",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(440.0),
+        },
+        InputPort {
+            name: "gate_6",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(0.0),
+        },
+        InputPort {
+            name: "velocity_6",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(1.0),
+        },
+        InputPort {
+            name: "pitch_7",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(440.0),
+        },
+        InputPort {
+            name: "gate_7",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(0.0),
+        },
+        InputPort {
+            name: "velocity_7",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(1.0),
+        },
+        InputPort {
+            name: "pitch_8",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(440.0),
+        },
+        InputPort {
+            name: "gate_8",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(0.0),
+        },
+        InputPort {
+            name: "velocity_8",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(1.0),
+        },
     ],
     outputs: &[
         OutputPort {

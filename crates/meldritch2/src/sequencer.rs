@@ -1064,6 +1064,11 @@ impl SequencerControl {
         cell.store(!cell.load(Ordering::Acquire), Ordering::Release);
         Ok(())
     }
+    pub fn set_muted(&self, track: usize, muted: bool) -> Result<(), String> {
+        let cell = self.muted.get(track).ok_or("track is out of range")?;
+        cell.store(muted, Ordering::Release);
+        Ok(())
+    }
     pub fn toggle_solo(&self, track: usize) -> Result<(), String> {
         let cell = self.soloed.get(track).ok_or("track is out of range")?;
         cell.store(!cell.load(Ordering::Acquire), Ordering::Release);
