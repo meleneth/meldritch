@@ -89,6 +89,11 @@ main {
   display: grid;
   place-items: center;
 }
+.plane article:has(.piano-roll),
+.plane article:has(.adsr),
+.plane article:has(.patterns) {
+  grid-column: 1/-1;
+}
 .steps {
   grid-column: 1/-1;
   display: grid;
@@ -150,6 +155,103 @@ main {
 .trigger.pressed {
   transform: translateY(0.3rem);
   box-shadow: 0 0.1rem #681818;
+}
+.piano-roll,
+.adsr,
+.patterns {
+  width: 100%;
+  display: grid;
+  gap: 0.7rem;
+}
+.piano-roll > header {
+  display: flex;
+  justify-content: space-between;
+}
+.piano-grid {
+  display: grid;
+  grid-template-columns: 3rem repeat(var(--steps), minmax(1.35rem, 1fr));
+  max-height: 28rem;
+  overflow: auto;
+  align-items: center;
+}
+.pitch-label {
+  font-size: 0.7rem;
+  color: #aaa;
+}
+.piano-grid button {
+  position: relative;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: 1px solid #353945;
+  background: #252832;
+}
+.piano-grid button:nth-of-type(4n + 1) {
+  border-left-color: #777;
+}
+.piano-grid button.play {
+  background: #3b3a27;
+}
+.piano-grid button.note span {
+  display: block;
+  position: absolute;
+  z-index: 1;
+  inset: 0 auto 0 0;
+  background: #ee6b3b;
+  border-radius: 0.2rem;
+  pointer-events: none;
+}
+.piano-grid button.selected span {
+  outline: 2px solid #f6d365;
+}
+.piano-roll fieldset {
+  border: 1px solid #454957;
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+.piano-roll fieldset label {
+  display: grid;
+  gap: 0.25rem;
+}
+.piano-roll input,
+.piano-roll fieldset button,
+.patterns button,
+.patterns select {
+  min-height: 2.5rem;
+  background: #292d36;
+  border: 1px solid #555;
+  border-radius: 0.35rem;
+  color: inherit;
+}
+.adsr svg {
+  max-width: 22rem;
+}
+.adsr polyline {
+  fill: none;
+  stroke: #f6d365;
+  stroke-width: 4;
+}
+.adsr label {
+  display: grid;
+  grid-template-columns: 5rem 1fr 7rem;
+  gap: 0.6rem;
+  align-items: center;
+  text-transform: capitalize;
+}
+.patterns > div {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.patterns button {
+  padding: 0.5rem 1rem;
+}
+.patterns button.active {
+  background: #347f52;
+}
+.patterns button.pending {
+  outline: 2px dashed #f6d365;
 }
 .empty {
   text-align: center;

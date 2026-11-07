@@ -76,4 +76,78 @@ describe("performance store", () => {
     expect(store.revision).toBe(0);
     expect(store.planes[0].controls[0]).toMatchObject({ value: 440 });
   });
+
+  it("reconciles piano-roll, ADSR, and pending-pattern authoritative values", () => {
+    const store = usePerformanceStore();
+    const message = snapshot(1);
+    message.state.planes![0].controls = [
+      {
+        id: "notes",
+        label: "Notes",
+        kind: "piano_roll",
+        step_count: 16,
+        pitch_min: 48,
+        pitch_max: 72,
+        voices: 4,
+        pattern: 0,
+        notes: [],
+        position: null,
+      },
+      {
+        id: "env",
+        label: "Envelope",
+        kind: "adsr",
+        parameters: [],
+        values: {},
+      },
+      {
+        id: "patterns",
+        label: "Patterns",
+        kind: "pattern_selector",
+        patterns: ["A", "B"],
+        boundaries: ["bar"],
+        default_boundary: "bar",
+        active: 0,
+        pending: null,
+        boundary: "bar",
+      },
+    ];
+    message.state.values = {
+      "synth/notes": {
+        pattern: 1,
+        notes: [
+          {
+            id: 7,
+            step: 2,
+            pitch: 60,
+            velocity: 90,
+            duration: 3,
+            legato: false,
+          },
+        ],
+        position: 4,
+      },
+      "synth/env": { attack: 0.02, sustain: 0.7 },
+      "synth/patterns": {
+        active: 0,
+        active_name: "A",
+        pending: 1,
+        pending_name: "B",
+        boundary: "bar",
+      },
+    };
+    store.applySnapshot(message);
+    expect(store.planes[0].controls[0]).toMatchObject({
+      pattern: 1,
+      position: 4,
+      notes: [{ id: 7 }],
+    });
+    expect(store.planes[0].controls[1]).toMatchObject({
+      values: { attack: 0.02, sustain: 0.7 },
+    });
+    expect(store.planes[0].controls[2]).toMatchObject({
+      active: 0,
+      pending: 1,
+    });
+  });
 });

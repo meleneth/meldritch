@@ -26,6 +26,17 @@ export const usePerformanceStore = defineStore("performance", () => {
           const state = value as { steps: boolean[]; position: number | null };
           return { ...control, steps: state.steps, position: state.position };
         }
+        if (control.kind === "piano_roll") {
+          const state = value as Pick<
+            typeof control,
+            "pattern" | "notes" | "position"
+          >;
+          return { ...control, ...state };
+        }
+        if (control.kind === "adsr")
+          return { ...control, values: value as Record<string, number> };
+        if (control.kind === "pattern_selector")
+          return { ...control, ...(value as Partial<typeof control>) };
         return { ...control, serial: (value as { serial: number }).serial };
       }),
     }));

@@ -2,6 +2,11 @@
 import { ref, onMounted } from "vue";
 import { usePerformanceStore } from "./stores/performance";
 import PerformancePlane from "./components/PerformancePlane.vue";
+import type {
+  AdsrParameter,
+  NoteEvent,
+  PatternControl,
+} from "./types/protocol";
 const store = usePerformanceStore(),
   credential = ref("");
 onMounted(() => store.connect());
@@ -11,6 +16,36 @@ const toggle = (plane: string, id: string, step: number) =>
   store.send({ type: "step.toggle", plane, control: id, step });
 const fire = (plane: string, id: string) =>
   store.send({ type: "trigger.fire", plane, control: id });
+const createNote = (
+  plane: string,
+  control: string,
+  pattern: number,
+  note: Omit<NoteEvent, "id">,
+) => store.send({ type: "note.create", plane, control, pattern, ...note });
+const updateNote = (
+  plane: string,
+  control: string,
+  pattern: number,
+  note: NoteEvent,
+) => store.send({ type: "note.update", plane, control, pattern, ...note });
+const deleteNote = (
+  plane: string,
+  control: string,
+  pattern: number,
+  id: number,
+) => store.send({ type: "note.delete", plane, control, pattern, id });
+const selectPattern = (
+  plane: string,
+  control: string,
+  pattern: number,
+  boundary: PatternControl["boundary"],
+) => store.send({ type: "pattern.select", plane, control, pattern, boundary });
+const setAdsr = (
+  plane: string,
+  control: string,
+  parameter: AdsrParameter["name"],
+  value: number,
+) => store.send({ type: "adsr.set", plane, control, parameter, value });
 </script>
 <template>
   <header class="top">
@@ -36,6 +71,20 @@ const fire = (plane: string, id: string) =>
       @set="(id, value) => set(plane.id, id, value)"
       @toggle="(id, step) => toggle(plane.id, id, step)"
       @fire="(id) => fire(plane.id, id)"
+      @note-create="
+        (id, pattern, note) => createNote(plane.id, id, pattern, note)
+      "
+      @note-update="
+        (id, pattern, note) => updateNote(plane.id, id, pattern, note)
+      "
+      @note-delete="
+        (id, pattern, noteId) => deleteNote(plane.id, id, pattern, noteId)
+      "
+      @pattern="
+        (id, pattern, boundary) =>
+          selectPattern(plane.id, id, pattern, boundary)
+      "
+      @adsr="(id, parameter, value) => setAdsr(plane.id, id, parameter, value)"
     />
     <p v-if="!store.visiblePlanes.length" class="empty">
       Waiting for an authorized control plane…
