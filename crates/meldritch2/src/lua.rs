@@ -517,6 +517,7 @@ impl UserData for LuaWebPlane {
         methods.add_method("drum_grid", |_, this, spec: Table| {
             let id: String = spec.get("id")?;
             let kit: Table = spec.get("kit")?;
+            let kit_name: String = kit.get("name")?;
             let sequence: Table = kit.get("_sequence")?;
             let native: AnyUserData = sequence.get("_native")?;
             let native = native.borrow::<LuaSequencer>()?;
@@ -550,6 +551,7 @@ impl UserData for LuaWebPlane {
             plane.controls.push(crate::web::PlaneControl::DrumGrid {
                 id,
                 label,
+                kit_name,
                 sequencer: Arc::clone(&native.control),
                 lanes,
                 steps,

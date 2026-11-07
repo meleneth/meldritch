@@ -156,6 +156,7 @@ pub enum PlaneControl {
     DrumGrid {
         id: String,
         label: String,
+        kit_name: String,
         sequencer: Arc<SequencerControl>,
         lanes: Vec<DrumLane>,
         steps: usize,
@@ -470,9 +471,9 @@ impl Application {
                         PlaneControl::Steps { id,label,steps,.. } => json!({"id":id,"label":label,"kind":"step_sequencer","step_count":steps}),
                         PlaneControl::Trigger { id,label,.. } => json!({"id":id,"label":label,"kind":"trigger"}),
                         PlaneControl::PianoRoll { id,label,steps,pitch_min,pitch_max,tracks,.. } => json!({"id":id,"label":label,"kind":"piano_roll","step_count":steps,"pitch_min":pitch_min,"pitch_max":pitch_max,"voices":tracks.len()}),
-                        PlaneControl::DrumGrid { id,label,steps,lanes,.. } => {
+                        PlaneControl::DrumGrid { id,label,kit_name,steps,lanes,.. } => {
                             let rows=lanes.iter().map(|lane| json!({"id":lane.id,"label":lane.label,"note":lane.note})).collect::<Vec<_>>();
-                            json!({"id":id,"label":label,"kind":"drum_grid","step_count":steps,"rows":rows})
+                            json!({"id":id,"label":label,"kind":"drum_grid","kit":kit_name,"step_count":steps,"rows":rows})
                         }
                         PlaneControl::Adsr { id,label,parameters } => {
                             let parameters=parameters.iter().map(|parameter| json!({"name":parameter.name,"control":parameter.control,"min":parameter.min,"max":parameter.max,"scale":parameter.scale,"unit":parameter.unit})).collect::<Vec<_>>();
@@ -591,6 +592,7 @@ impl Application {
                     }
                     PlaneControl::DrumGrid {
                         id,
+                        kit_name,
                         sequencer,
                         lanes,
                         ..
@@ -604,7 +606,7 @@ impl Application {
                         }).collect::<Vec<_>>();
                         (
                             id,
-                            json!({"pattern":pattern,"rows":rows,"position":sequencer.current_step()}),
+                            json!({"current_kit":kit_name,"pattern":pattern,"rows":rows,"position":sequencer.current_step()}),
                         )
                     }
                     PlaneControl::Adsr { id, parameters, .. } => {

@@ -19,6 +19,7 @@ function velocity(value: string) {
 </script>
 <template>
   <div class="drum-grid" :aria-label="control.label">
+    <header><strong>{{ control.current_kit || control.kit }}</strong><small> · active kit</small></header>
     <div class="drum-header"><span></span><span v-for="step in control.step_count" :key="step">{{ String(step).padStart(2, "0") }}</span></div>
     <div v-for="row in control.rows" :key="row.id" class="drum-row">
       <button class="drum-label" :class="{ muted: rowState(row.id)?.muted }" :disabled="control.read_only" @click="$emit('mute', row.id, !rowState(row.id)?.muted)">{{ row.label }}<small>{{ rowState(row.id)?.muted ? "MUTED" : "MUTE" }}</small></button>

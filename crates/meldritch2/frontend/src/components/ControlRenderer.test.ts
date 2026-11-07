@@ -245,7 +245,7 @@ describe("control registry", () => {
   it("renders drum lanes and emits hit, velocity, and mute edits", async () => {
     const toggles: unknown[] = [], velocities: unknown[] = [], mutes: unknown[] = [];
     const view = render(DrumGrid, { control: {
-      id:"grid",label:"Drums",kind:"drum_grid",step_count:16,pattern:0,position:3,
+      id:"grid",label:"Drums",kind:"drum_grid",kit:"TimeKit",current_kit:"TimeKit",step_count:16,pattern:0,position:3,
       rows:[{id:"kick",label:"Kick",note:36}],
       state_rows:[{id:"kick",muted:false,hits:[{id:1,step:0,velocity:100,duration:1}]}],
     }}, {

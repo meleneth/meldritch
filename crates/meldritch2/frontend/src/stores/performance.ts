@@ -34,8 +34,8 @@ export const usePerformanceStore = defineStore("performance", () => {
           return { ...control, ...state };
         }
         if (control.kind === "drum_grid") {
-          const state = value as { pattern: number; rows: typeof control.state_rows; position: number | null };
-          return { ...control, pattern: state.pattern, state_rows: state.rows, position: state.position };
+          const state = value as { current_kit: string; pattern: number; rows: typeof control.state_rows; position: number | null };
+          return { ...control, current_kit: state.current_kit, pattern: state.pattern, state_rows: state.rows, position: state.position };
         }
         if (control.kind === "adsr")
           return { ...control, values: value as Record<string, number> };

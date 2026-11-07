@@ -28,6 +28,8 @@ export interface DrumRowDefinition { id: string; label: string; note: number }
 export interface DrumRowState { id: string; muted: boolean; hits: DrumHit[] }
 export interface DrumGridControl extends BaseControl {
   kind: "drum_grid";
+  kit: string;
+  current_kit: string;
   step_count: number;
   rows: DrumRowDefinition[];
   pattern: number;
