@@ -350,6 +350,43 @@ change rather than filesystem or plugin initialization work.
 Rust revalidates every field and role independently of the Vue interface.
 Unauthorized clients neither receive hidden plane state nor mutate it.
 
+### Drum grid
+
+`sequence:drum_kit` groups up to eight ordinary sequencer tracks and binds
+their explicit MIDI pitches to one VST3 instance. It does not introduce a
+second clock or scheduler:
+
+```lua
+local kit = sequence:drum_kit {
+  name="TimeKit",
+  voices={
+    {id="kick",label="Kick",note=24},
+    {id="snare",label="Snare",note=26},
+    {id="closed_hat",label="Closed Hat",note=30},
+  },
+}
+pattern:drums(kit, {
+  kick={{step=1,velocity=127},{step=5,velocity=110}},
+  snare={{step=5,velocity=118},{step=13,velocity=124}},
+},16)
+plugin:connect_drum_kit(kit)
+plane:drum_grid {id="drums",label="Drums",kit=kit,steps=16}
+```
+
+The Vue drum grid projects authoritative hits, MIDI velocity, lane mute,
+active pattern, and the coarse engine playhead. Clicking an empty cell adds a
+hit; selecting one exposes velocity; double-click removes it. Mute suppresses
+future note-ons for only that lane and lowers its gate at the next engine
+frame. Rust authorizes and serializes every edit through the existing pattern
+mutation boundary. The browser never schedules notes.
+
+Run `examples/74-geonkick-performance.lua` with `meldritch2 perform`, open
+`http://127.0.0.1:8080`, and use `drummer-demo-token`, `serum-demo-token`,
+`leader-demo-token`, or `observer-demo-token`. `GEONKICK_VST3` and
+`GEONKICK_KIT` override the user-local installation paths. Drummer and Serum
+roles receive independent planes; leader receives both plus arrangement;
+observer receives read-only projections.
+
 ## Vue and Pinia workflow
 
 The frontend source is isolated in `crates/meldritch2/frontend`. For local UI

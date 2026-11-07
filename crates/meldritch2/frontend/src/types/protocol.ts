@@ -23,6 +23,17 @@ export interface TriggerControl extends BaseControl {
   kind: "trigger";
   serial: number;
 }
+export interface DrumHit { id: number; step: number; velocity: number; duration: number }
+export interface DrumRowDefinition { id: string; label: string; note: number }
+export interface DrumRowState { id: string; muted: boolean; hits: DrumHit[] }
+export interface DrumGridControl extends BaseControl {
+  kind: "drum_grid";
+  step_count: number;
+  rows: DrumRowDefinition[];
+  pattern: number;
+  state_rows: DrumRowState[];
+  position: number | null;
+}
 export interface NoteEvent {
   id: number;
   step: number;
@@ -77,6 +88,7 @@ export type ControlDefinition =
   | RangeControl
   | StepControl
   | TriggerControl
+  | DrumGridControl
   | PianoRollControl
   | AdsrControl
   | PatternControl
@@ -106,6 +118,9 @@ export type Command =
   | { type: "control.set"; name: string; value: number | boolean | string }
   | { type: "step.toggle"; plane: string; control: string; step: number }
   | { type: "trigger.fire"; plane: string; control: string }
+  | { type: "drum.hit.toggle"; plane: string; control: string; pattern: number; row: string; step: number }
+  | { type: "drum.hit.velocity"; plane: string; control: string; pattern: number; row: string; step: number; velocity: number }
+  | { type: "drum.mute"; plane: string; control: string; row: string; muted: boolean }
   | ({
       type: "note.create" | "note.update";
       plane: string;

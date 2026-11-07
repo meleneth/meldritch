@@ -6,6 +6,7 @@ import PianoRoll from "./controls/PianoRoll.vue";
 import AdsrControl from "./controls/AdsrControl.vue";
 import PatternSelector from "./controls/PatternSelector.vue";
 import PresetSelector from "./controls/PresetSelector.vue";
+import DrumGrid from "./controls/DrumGrid.vue";
 
 function render(
   component: Component,
@@ -238,6 +239,30 @@ describe("control registry", () => {
     expect(view.root.querySelector("fieldset")?.hasAttribute("disabled")).toBe(true);
     (view.root.querySelectorAll("button")[0] as HTMLButtonElement).click();
     expect(selections).toEqual([]);
+    view.unmount();
+  });
+
+  it("renders drum lanes and emits hit, velocity, and mute edits", async () => {
+    const toggles: unknown[] = [], velocities: unknown[] = [], mutes: unknown[] = [];
+    const view = render(DrumGrid, { control: {
+      id:"grid",label:"Drums",kind:"drum_grid",step_count:16,pattern:0,position:3,
+      rows:[{id:"kick",label:"Kick",note:36}],
+      state_rows:[{id:"kick",muted:false,hits:[{id:1,step:0,velocity:100,duration:1}]}],
+    }}, {
+      onToggle:(...args:unknown[])=>toggles.push(args),
+      onVelocity:(...args:unknown[])=>velocities.push(args),
+      onMute:(...args:unknown[])=>mutes.push(args),
+    });
+    const buttons=view.root.querySelectorAll(".drum-row button");
+    (buttons[2] as HTMLButtonElement).click();
+    expect(toggles).toEqual([["kick",1]]);
+    (buttons[0] as HTMLButtonElement).click();
+    expect(mutes).toEqual([["kick",true]]);
+    (buttons[1] as HTMLButtonElement).click();
+    await nextTick();
+    const range=view.root.querySelector("input[type=range]") as HTMLInputElement;
+    range.value="64";range.dispatchEvent(new Event("change",{bubbles:true}));
+    expect(velocities).toEqual([["kick",0,64]]);
     view.unmount();
   });
 });

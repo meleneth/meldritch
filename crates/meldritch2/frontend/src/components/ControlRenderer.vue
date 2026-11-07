@@ -5,6 +5,7 @@ import type {
   NoteEvent,
   PatternControl,
   PresetControl,
+  DrumGridControl,
 } from "../types/protocol";
 import Adsr from "./controls/AdsrControl.vue";
 import Fader from "./controls/FaderControl.vue";
@@ -14,6 +15,7 @@ import PianoRoll from "./controls/PianoRoll.vue";
 import Presets from "./controls/PresetSelector.vue";
 import Steps from "./controls/StepSequencer.vue";
 import Trigger from "./controls/TriggerControl.vue";
+import DrumGrid from "./controls/DrumGrid.vue";
 defineProps<{ control: ControlDefinition }>();
 defineEmits<{
   set: [string, number];
@@ -25,6 +27,9 @@ defineEmits<{
   noteDelete: [number];
   pattern: [number, PatternControl["boundary"]];
   preset: [number];
+  drumToggle: [string, number];
+  drumVelocity: [string, number, number];
+  drumMute: [string, boolean];
 }>();
 </script>
 <template>
@@ -51,6 +56,13 @@ defineEmits<{
     @create="$emit('noteCreate', $event)"
     @update="$emit('noteUpdate', $event)"
     @delete="$emit('noteDelete', $event)"
+  />
+  <DrumGrid
+    v-else-if="control.kind === 'drum_grid'"
+    :control="control as DrumGridControl"
+    @toggle="(row, step) => $emit('drumToggle', row, step)"
+    @velocity="(row, step, velocity) => $emit('drumVelocity', row, step, velocity)"
+    @mute="(row, muted) => $emit('drumMute', row, muted)"
   />
   <Adsr
     v-else-if="control.kind === 'adsr'"

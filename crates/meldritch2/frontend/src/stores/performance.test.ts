@@ -150,4 +150,15 @@ describe("performance store", () => {
       pending: 1,
     });
   });
+
+  it("reconciles authoritative drum hits, velocity, mute, and playhead", () => {
+    const store=usePerformanceStore();const message=snapshot(1);
+    message.state.planes![0].controls=[{
+      id:"grid",label:"Drums",kind:"drum_grid",step_count:16,
+      rows:[{id:"kick",label:"Kick",note:36}],pattern:0,state_rows:[],position:null,
+    }];
+    message.state.values={"synth/grid":{pattern:1,position:7,rows:[{id:"kick",muted:true,hits:[{id:2,step:4,velocity:64,duration:1}]}]}};
+    store.applySnapshot(message);
+    expect(store.planes[0].controls[0]).toMatchObject({pattern:1,position:7,state_rows:[{id:"kick",muted:true,hits:[{velocity:64}]}]});
+  });
 });

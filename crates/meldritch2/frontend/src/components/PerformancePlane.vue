@@ -17,6 +17,9 @@ defineEmits<{
   pattern: [string, number, PatternControl["boundary"]];
   adsr: [string, AdsrParameter["name"], number];
   preset: [string, number];
+  drumToggle: [string, string, number, number];
+  drumVelocity: [string, string, number, number, number];
+  drumMute: [string, string, boolean];
 }>();
 </script>
 <template>
@@ -67,6 +70,9 @@ defineEmits<{
             (parameter, value) => $emit('adsr', control.id, parameter, value)
           "
           @preset="$emit('preset', control.id, $event)"
+          @drum-toggle="(row, step) => $emit('drumToggle', control.id, row, control.kind === 'drum_grid' ? control.pattern : 0, step)"
+          @drum-velocity="(row, step, velocity) => $emit('drumVelocity', control.id, row, control.kind === 'drum_grid' ? control.pattern : 0, step, velocity)"
+          @drum-mute="(row, muted) => $emit('drumMute', control.id, row, muted)"
         />
       </article>
     </div>

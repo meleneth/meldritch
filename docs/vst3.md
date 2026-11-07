@@ -204,6 +204,47 @@ event-loop facilities. Native DSP, notes, parameters, state, real-time playback,
 and offline rendering have been validated despite that warning. Editor
 embedding is intentionally out of scope.
 
+## Geonkick 3.9 drum kits
+
+Meldritch has been validated against native Geonkick 3.9.0 (class ID
+`E2CC953290E863F06405E13924E34B24`, category `Instrument|Synth`). The upstream
+VST3 is a 16-instrument kit and advertises 17 stereo output buses (16 kit
+channels plus audition). Geonkick requires all buses to remain present. Set
+`activate_all_outputs = true`; Meldritch processes every bus without allocating
+in the callback and sums them into the module's existing stereo contract. The
+individual buses are not yet separately routable in the graph.
+
+Build the [official Geonkick source](https://github.com/quamplex/geonkick) with
+its documented dependencies and the Steinberg VST3 SDK, then install to a user
+prefix:
+
+```sh
+cmake -S geonkick -B build -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$HOME/.local" \
+  -DCMAKE_INSTALL_FULL_DATADIR="$HOME/.local/share" \
+  -DVST3_SDK_PATH=/path/to/vst3sdk \
+  -DGKICK_STANDALONE=OFF -DGKICK_PLUGIN_LV2=OFF
+cmake --build build --parallel
+cmake --install build
+```
+
+The normal locations are `$HOME/.local/lib/vst3/Geonkick.vst3` and
+`$HOME/.local/share/geonkick/presets`. Pass the first directory in `paths` or
+add it to `MELDRITCH_VST3_PATH`.
+
+Geonkick `.gkit` presets are opaque component state. Restore one before
+activation with `state_file`, alongside `activate_all_outputs = true`.
+`state_file` is read on the Lua/control thread during composition loading, is
+limited to 16 MiB, and is never accepted from browser commands. Opaque state
+can still be saved through `Machine::vst3_state`.
+
+Geonkick 3.9 exposes no automatable VST3 parameters, so its synthesis controls
+cannot be honestly mapped to Meldritch knobs yet. Kit design remains in
+Geonkick's editor; Meldritch provides note velocity, lane mute, pattern, and
+kit-state control. The TimeKit mapping used by example 74 is explicit: kick
+24, snare 26, clap 27, alternate snare 28, closed hat 30, hat 32, open hat 34,
+and shaker 58. These are preset mappings, not assumed General MIDI values.
+
 ## Current boundaries
 
 - Native Linux `.vst3` bundles only. Wine and yabridge are not configured or
