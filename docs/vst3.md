@@ -80,6 +80,20 @@ end
 synth:set_parameter(42, 0.5)
 ```
 
+Logical note tracks connect all of their bounded lanes to one plugin instance;
+the plugin, not Meldritch's lane allocator, owns synthesis voices:
+
+```lua
+local lead = sequence:note_track("Lead", { voices = 4 })
+synth:connect_track(lead, sequence)
+local cutoff = synth:parameter(2000003) -- stable numeric ID
+```
+
+`parameter` accepts a numeric ID or an exact, unambiguous plugin-reported
+name. Numeric IDs should be persisted in compositions. Each lane is sent on a
+separate VST3 event channel, so overlapping pitches and deterministic lane
+steals generate paired note-off/note-on events without stuck notes.
+
 Each parameter table contains its numeric `id`, stable graph `key`, display
 `name`, normalized current and default values, unit, step count, automation
 flag, and read-only flag. The graph parameter key is `parameter_<id>`; controls
@@ -105,7 +119,7 @@ The adapter currently:
   processing buffers;
 - negotiates a no-input, stereo-output instrument at the engine sample rate;
 - accepts blocks up to 1024 frames and rejects larger configurations clearly;
-- schedules note-on, note-off, velocity, channel 1, and host-assigned note
+- schedules note-on, note-off, velocity, channels 1–4, and host-assigned note
   identity at exact offsets in the upcoming block;
 - sends a note-off before a changed-pitch note-on and therefore handles notes
   beginning and ending within the same block;
@@ -156,6 +170,40 @@ repeated destruction, invalid identity errors, unsupported block diagnostics,
 Lua construction, offline rendering, and routing through Meldritch's existing
 drive effect.
 
+## Serum 2
+
+Install the native Linux bundle at `$HOME/.vst3/Serum2.vst3`. Its stable class
+ID is `56534558667350736572756D20320000`; the conditional host test runs when
+that bundle is present and otherwise leaves portable CI on the source-built
+fixture. The complete performance example is:
+
+```sh
+cargo run -p meldritch2 -- perform crates/meldritch2/examples/73-serum-performance.lua
+cargo run -p meldritch2 -- render \
+  crates/meldritch2/examples/73-serum-performance.lua \
+  /tmp/meldritch-serum-performance.wav 8
+```
+
+The example uses programmatically enumerated Serum IDs for main level, filter
+cutoff/resonance/drive, oscillator A/B wavetable position, and macros 1/2.
+Values are normalized VST3 automation values and are delivered at the next
+processing block; there is no browser automation clock.
+
+Serum 2.1.5's native `.SerumPreset` files are Xfer-specific containers. Serum
+rejects those bytes through component `setState` and does not expose
+`IProgramListData`, so Meldritch does not pretend they are loadable through a
+standard VST3 preset API. Example 73 instead preloads three independent Serum
+instances from explicit normalized parameter snapshots and switches their
+already-running outputs at a processing boundary. This is safe for live use,
+retains independent state, avoids filesystem work on the audio thread, and is
+deterministically reconstructed on composition reload. Exact factory-preset
+loading remains unavailable until Xfer exposes a supported non-GUI interface.
+
+Serum logs an `IRunLoop` warning because the current host does not provide GUI
+event-loop facilities. Native DSP, notes, parameters, state, real-time playback,
+and offline rendering have been validated despite that warning. Editor
+embedding is intentionally out of scope.
+
 ## Current boundaries
 
 - Native Linux `.vst3` bundles only. Wine and yabridge are not configured or
@@ -166,7 +214,9 @@ drive effect.
   configuration fails graph preparation; incompatible buffers are never
   silently processed.
 - No plugin editor or GUI embedding.
-- No preset browser. State is an opaque project blob.
+- Opaque VST3 state round-trips are supported, but vendor-native preset files
+  require a plugin-supported host interface. The Serum example exposes only
+  its explicitly configured preloaded performance patches.
 - Hosting is in-process. Rust ownership and lifecycle errors are contained by
   the adapter, but a native plugin can still abort, corrupt memory, deadlock, or
   run unbounded work; none of those failures can be recovered safely in the

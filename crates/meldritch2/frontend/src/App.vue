@@ -46,6 +46,8 @@ const setAdsr = (
   parameter: AdsrParameter["name"],
   value: number,
 ) => store.send({ type: "adsr.set", plane, control, parameter, value });
+const selectPreset = (plane: string, control: string, preset: number) =>
+  store.send({ type: "preset.select", plane, control, preset });
 </script>
 <template>
   <header class="top">
@@ -85,6 +87,7 @@ const setAdsr = (
           selectPattern(plane.id, id, pattern, boundary)
       "
       @adsr="(id, parameter, value) => setAdsr(plane.id, id, parameter, value)"
+      @preset="(id, preset) => selectPreset(plane.id, id, preset)"
     />
     <p v-if="!store.visiblePlanes.length" class="empty">
       Waiting for an authorized control plane…

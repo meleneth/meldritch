@@ -16,6 +16,7 @@ defineEmits<{
   noteDelete: [string, number, number];
   pattern: [string, number, PatternControl["boundary"]];
   adsr: [string, AdsrParameter["name"], number];
+  preset: [string, number];
 }>();
 </script>
 <template>
@@ -65,6 +66,7 @@ defineEmits<{
           @adsr="
             (parameter, value) => $emit('adsr', control.id, parameter, value)
           "
+          @preset="$emit('preset', control.id, $event)"
         />
       </article>
     </div>

@@ -5,6 +5,7 @@ import FaderControl from "./controls/FaderControl.vue";
 import PianoRoll from "./controls/PianoRoll.vue";
 import AdsrControl from "./controls/AdsrControl.vue";
 import PatternSelector from "./controls/PatternSelector.vue";
+import PresetSelector from "./controls/PresetSelector.vue";
 
 function render(
   component: Component,
@@ -211,5 +212,32 @@ describe("control registry", () => {
     (patterns.root.querySelectorAll("button")[1] as HTMLButtonElement).click();
     expect(selections).toEqual([[1, "bar"]]);
     patterns.unmount();
+  });
+
+  it("renders authoritative preset state and honors read-only projection", () => {
+    const selections: number[] = [];
+    const view = render(
+      PresetSelector,
+      {
+        control: {
+          id: "serum_preset",
+          label: "Performance Patch",
+          kind: "preset_selector",
+          presets: ["Clean", "Glass", "Driven"],
+          active: 1,
+          active_name: "Glass",
+          pending: 2,
+          failed: null,
+          read_only: true,
+        },
+      },
+      { onSelect: (preset: number) => selections.push(preset) },
+    );
+    expect(view.root.querySelectorAll("button.active")).toHaveLength(1);
+    expect(view.root.querySelectorAll("button.pending")).toHaveLength(1);
+    expect(view.root.querySelector("fieldset")?.hasAttribute("disabled")).toBe(true);
+    (view.root.querySelectorAll("button")[0] as HTMLButtonElement).click();
+    expect(selections).toEqual([]);
+    view.unmount();
   });
 });

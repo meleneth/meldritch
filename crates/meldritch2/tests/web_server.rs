@@ -48,7 +48,10 @@ plane:fader {
   id = "plane_level", label = "Level", target = "level",
   min = 0.0, max = 1.0,
 }
-performance:assign("performer", { "level", "plane_level" })
+plane:preset_selector {
+  id = "patch", label = "Patch", target = "level", presets = { "Clean", "Driven" },
+}
+performance:assign("performer", { "level", "plane_level", "patch" })
 server:post("/promote-plane", function()
   performance:assign("viewer", { "plane_level" })
   performance:assign_plane("main", { roles = { "performer", "viewer" } })
@@ -126,6 +129,62 @@ fn get_json(program: &mut lua::Program, url: String) -> (u16, Value) {
         (status, body)
     });
     poll_thread(program, request)
+}
+
+#[test]
+fn preset_selector_is_typed_authoritative_and_server_validated() {
+    let (mut program, machine, address) = start();
+    let client = thread::spawn(move || {
+        tokio::runtime::Runtime::new().unwrap().block_on(async move {
+            let (mut socket, _) = connect_async(format!("ws://{address}/performance"))
+                .await
+                .unwrap();
+            let snapshot: Value = serde_json::from_str(
+                socket.next().await.unwrap().unwrap().to_text().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(snapshot["schema_version"], 3);
+            let patch = snapshot["state"]["planes"][0]["controls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|control| control["id"] == "patch")
+                .unwrap();
+            assert_eq!(patch["kind"], "preset_selector");
+            assert_eq!(patch["presets"], json!(["Clean", "Driven"]));
+            socket
+                .send(Message::Text(
+                    json!({"type":"preset.select","plane":"main","control":"patch","preset":"Driven"})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            let updated: Value = serde_json::from_str(
+                socket.next().await.unwrap().unwrap().to_text().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(updated["state"]["values"]["main/patch"]["active"], 1);
+            socket
+                .send(Message::Text(
+                    json!({"type":"preset.select","plane":"main","control":"patch","preset":"/tmp/not-allowed"})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            let rejected: Value = serde_json::from_str(
+                socket.next().await.unwrap().unwrap().to_text().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(rejected["type"], "error");
+        })
+    });
+    poll_thread(&mut program, client);
+    assert_eq!(
+        machine.control_handle("level").unwrap().override_value(),
+        Some(1.0)
+    );
 }
 
 #[test]

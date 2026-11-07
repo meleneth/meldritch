@@ -65,13 +65,22 @@ export interface PatternControl extends BaseControl {
   pending_name?: string | null;
   boundary: "immediate" | "beat" | "bar" | "cycle";
 }
+export interface PresetControl extends BaseControl {
+  kind: "preset_selector";
+  presets: string[];
+  active: number;
+  active_name?: string;
+  pending: number | null;
+  failed: string | null;
+}
 export type ControlDefinition =
   | RangeControl
   | StepControl
   | TriggerControl
   | PianoRollControl
   | AdsrControl
-  | PatternControl;
+  | PatternControl
+  | PresetControl;
 export interface Plane {
   id: string;
   label: string;
@@ -123,4 +132,10 @@ export type Command =
       control: string;
       parameter: AdsrParameter["name"];
       value: number;
+    }
+  | {
+      type: "preset.select";
+      plane: string;
+      control: string;
+      preset: number | string;
     };

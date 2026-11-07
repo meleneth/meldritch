@@ -164,6 +164,12 @@ pub enum PlaneControl {
         sequencer: Arc<SequencerControl>,
         default_boundary: String,
     },
+    Presets {
+        id: String,
+        label: String,
+        target: String,
+        names: Vec<String>,
+    },
 }
 
 #[derive(Clone)]
@@ -185,7 +191,8 @@ impl PlaneControl {
             | Self::Trigger { id, .. }
             | Self::PianoRoll { id, .. }
             | Self::Adsr { id, .. }
-            | Self::Patterns { id, .. } => id,
+            | Self::Patterns { id, .. }
+            | Self::Presets { id, .. } => id,
         }
     }
 }
@@ -452,6 +459,7 @@ impl Application {
                             json!({"id":id,"label":label,"kind":"adsr","parameters":parameters})
                         }
                         PlaneControl::Patterns { id,label,sequencer,default_boundary } => json!({"id":id,"label":label,"kind":"pattern_selector","patterns":sequencer.pattern_names(),"boundaries":["immediate","beat","bar","cycle"],"default_boundary":default_boundary}),
+                        PlaneControl::Presets { id,label,names,.. } => json!({"id":id,"label":label,"kind":"preset_selector","presets":names}),
                     })
                     .collect::<Vec<_>>();
                 json!({"id":plane.id,"label":plane.label,"layout":plane.layout,"roles":plane.roles,"read_only_roles":plane.read_only_roles,"controls":controls})
@@ -593,6 +601,21 @@ impl Application {
                             json!({"active":active,"active_name":names.get(active),"pending":pending,"pending_name":pending.and_then(|index|names.get(index)),"boundary":boundary}),
                         )
                     }
+                    PlaneControl::Presets {
+                        id, target, names, ..
+                    } => {
+                        let active = runtime
+                            .handles
+                            .get(target)
+                            .map_or(0.0, ControlHandle::effective_value)
+                            .round()
+                            .clamp(0.0, names.len().saturating_sub(1) as f64)
+                            as usize;
+                        (
+                            id,
+                            json!({"active":active,"active_name":names.get(active),"pending":Value::Null,"failed":Value::Null}),
+                        )
+                    }
                 };
                 values.insert(format!("{}/{}", plane.id, id), value);
             }
@@ -616,7 +639,7 @@ impl Application {
             "type": if include_schema { "state.snapshot" } else { "state.updated" },
             "epoch": epoch,
             "revision": revision,
-            "schema_version": 2,
+            "schema_version": 3,
             "schema_revision": schema_revision,
             "state": state
         })
@@ -654,7 +677,8 @@ impl Application {
                 | PlaneControl::Trigger { id, .. }
                 | PlaneControl::PianoRoll { id, .. }
                 | PlaneControl::Adsr { id, .. }
-                | PlaneControl::Patterns { id, .. } => id == control_id,
+                | PlaneControl::Patterns { id, .. }
+                | PlaneControl::Presets { id, .. } => id == control_id,
             })
             .cloned()
             .ok_or_else(|| DispatchError::not_found("unknown plane control"))?;
@@ -792,6 +816,27 @@ impl Application {
                     message.get("value").cloned().unwrap_or(Value::Null),
                 )
             }
+            (Some("preset.select"), PlaneControl::Presets { id, names, .. }) => {
+                let index = match message.get("preset") {
+                    Some(Value::String(name)) => names
+                        .iter()
+                        .position(|candidate| candidate == name)
+                        .ok_or_else(|| DispatchError::bad_request("unknown configured preset"))?,
+                    Some(value) => value
+                        .as_u64()
+                        .and_then(|value| usize::try_from(value).ok())
+                        .filter(|value| *value < names.len())
+                        .ok_or_else(|| DispatchError::bad_request("invalid preset index"))?,
+                    None => {
+                        return Err(DispatchError::bad_request("preset.select requires preset"));
+                    }
+                };
+                self.set_control(
+                    Some("__meldritch_trusted"),
+                    &id,
+                    Value::String(names[index].clone()),
+                )
+            }
             _ => Err(DispatchError::bad_request(
                 "command does not match plane control type",
             )),
@@ -876,7 +921,9 @@ impl Application {
                             | (sequencer.queued_pattern_quantization() as u64) << 32;
                         (format!("{}/{}", plane.id, id), value)
                     }
-                    PlaneControl::Range { .. } | PlaneControl::Adsr { .. } => continue,
+                    PlaneControl::Range { .. }
+                    | PlaneControl::Adsr { .. }
+                    | PlaneControl::Presets { .. } => continue,
                 };
                 values.push(value);
             }
@@ -1134,6 +1181,7 @@ impl ControlExecutor {
                             | "note.delete"
                             | "pattern.select"
                             | "adsr.set"
+                            | "preset.select"
                     )
                 ) {
                     match self

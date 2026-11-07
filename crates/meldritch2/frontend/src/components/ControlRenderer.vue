@@ -4,12 +4,14 @@ import type {
   ControlDefinition,
   NoteEvent,
   PatternControl,
+  PresetControl,
 } from "../types/protocol";
 import Adsr from "./controls/AdsrControl.vue";
 import Fader from "./controls/FaderControl.vue";
 import Knob from "./controls/KnobControl.vue";
 import Patterns from "./controls/PatternSelector.vue";
 import PianoRoll from "./controls/PianoRoll.vue";
+import Presets from "./controls/PresetSelector.vue";
 import Steps from "./controls/StepSequencer.vue";
 import Trigger from "./controls/TriggerControl.vue";
 defineProps<{ control: ControlDefinition }>();
@@ -22,6 +24,7 @@ defineEmits<{
   noteUpdate: [NoteEvent];
   noteDelete: [number];
   pattern: [number, PatternControl["boundary"]];
+  preset: [number];
 }>();
 </script>
 <template>
@@ -58,5 +61,10 @@ defineEmits<{
     v-else-if="control.kind === 'pattern_selector'"
     :control="control"
     @select="(pattern, boundary) => $emit('pattern', pattern, boundary)"
+  />
+  <Presets
+    v-else-if="control.kind === 'preset_selector'"
+    :control="control as PresetControl"
+    @select="$emit('preset', $event)"
   />
 </template>

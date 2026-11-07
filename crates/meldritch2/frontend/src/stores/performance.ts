@@ -37,6 +37,8 @@ export const usePerformanceStore = defineStore("performance", () => {
           return { ...control, values: value as Record<string, number> };
         if (control.kind === "pattern_selector")
           return { ...control, ...(value as Partial<typeof control>) };
+        if (control.kind === "preset_selector")
+          return { ...control, ...(value as Partial<typeof control>) };
         return { ...control, serial: (value as { serial: number }).serial };
       }),
     }));

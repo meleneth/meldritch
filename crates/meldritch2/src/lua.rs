@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     net::SocketAddr,
     path::{Path, PathBuf},
     rc::Rc,
@@ -542,6 +542,59 @@ impl UserData for LuaWebPlane {
                 label,
                 sequencer: Arc::clone(&native.control),
                 default_boundary: boundary,
+            });
+            Ok(())
+        });
+        methods.add_method("preset_selector", |_, this, spec: Table| {
+            let id: String = spec.get("id")?;
+            let target: String = spec.get("target")?;
+            let names = spec
+                .get::<Table>("presets")?
+                .sequence_values::<String>()
+                .collect::<mlua::Result<Vec<_>>>()?;
+            if id.is_empty()
+                || target.is_empty()
+                || names.len() < 2
+                || names.iter().any(String::is_empty)
+                || names.iter().collect::<BTreeSet<_>>().len() != names.len()
+            {
+                return Err(mlua::Error::external(
+                    "preset selector requires an ID, target, and at least two unique named presets",
+                ));
+            }
+            let label = spec
+                .get::<Option<String>>("label")?
+                .unwrap_or_else(|| id.clone());
+            let mut app = this.application.borrow_mut();
+            if app.controls.contains_key(&id) {
+                return Err(mlua::Error::external("duplicate performance control id"));
+            }
+            app.controls.insert(
+                id.clone(),
+                crate::web::PerformanceControl {
+                    name: id.clone(),
+                    label: label.clone(),
+                    group: Some(this.id.clone()),
+                    kind: crate::web::ControlKind::Choice,
+                    target: target.clone(),
+                    min: 0.0,
+                    max: (names.len() - 1) as f64,
+                    choices: names.clone(),
+                    changed: None,
+                },
+            );
+            let planes = Rc::clone(&app.planes);
+            drop(app);
+            let mut planes = planes.borrow_mut();
+            let plane = planes.get_mut(&this.id).unwrap();
+            if plane.controls.iter().any(|control| control.id() == id) {
+                return Err(mlua::Error::external("duplicate plane control id"));
+            }
+            plane.controls.push(crate::web::PlaneControl::Presets {
+                id,
+                label,
+                target,
+                names,
             });
             Ok(())
         });
@@ -1388,6 +1441,33 @@ local function decorate_scope(facade, scope, prefix)
     end
     function handle:parameter_info() return runtime:parameters() end
     function handle:descriptor() return runtime:descriptor() end
+    function handle:parameter(id)
+      if type(id) == "number" then
+        return assert(self.parameters[id], "unknown VST3 parameter ID: " .. tostring(id))
+      end
+      assert(type(id) == "string" and id ~= "", "VST3 parameter requires a numeric ID or exact name")
+      local match = nil
+      for _, info in ipairs(runtime:parameters()) do
+        if info.name == id then
+          assert(match == nil, "ambiguous VST3 parameter name: " .. id)
+          match = self.parameters[info.id]
+        end
+      end
+      return assert(match, "unknown VST3 parameter name: " .. id)
+    end
+    function handle:connect_track(track, sequence)
+      assert(type(track) == "table" and type(track.voices) == "table",
+        "VST3 connect_track requires a logical note track")
+      sequence = sequence or track._sequence
+      for lane, voice in ipairs(track.voices) do
+        local suffix = lane == 1 and "" or "_" .. lane
+        scope:connect(voice.pitch, self["pitch" .. suffix])
+        scope:connect(voice.gate, self["gate" .. suffix])
+        scope:connect(voice.velocity, self["velocity" .. suffix])
+      end
+      scope:connect(sequence.tempo, self.tempo)
+      return self
+    end
     return handle
   end
   function facade:adsr(values)
@@ -1407,6 +1487,49 @@ local function decorate_scope(facade, scope, prefix)
     local handle = scope:module(self:_id("constant"), "constant", copy_values(values, { "value" }))
     handle.value = parameter(handle, "value")
     return handle
+  end
+  function facade:switch(values)
+    values = values or {}
+    local handle = scope:module(self:_id("switch"), "switch", { threshold = values.threshold or 0.5 })
+    handle.threshold = parameter(handle, "threshold")
+    return handle
+  end
+  function facade:vst3_bank(values)
+    assert(type(values) == "table" and type(values.plugin) == "string"
+      and type(values.presets) == "table" and #values.presets >= 2,
+      "vst3_bank requires plugin and at least two performance presets")
+    local bank = { instances = {}, preset_names = {} }
+    local selector = self:constant { value = values.initial or 0 }
+    bank.preset = selector.value
+    for index, preset in ipairs(values.presets) do
+      assert(type(preset.name) == "string" and preset.name ~= "" and type(preset.parameters) == "table",
+        "each VST3 performance preset requires a name and parameter table")
+      local instance = self:vst3 { plugin = values.plugin, paths = values.paths,
+        id = (values.id or "vst3_bank") .. "_" .. index }
+      for id, value in pairs(preset.parameters) do instance:set_parameter(id, value) end
+      bank.instances[index] = instance
+      bank.preset_names[index] = preset.name
+    end
+    local left, right = bank.instances[1].left, bank.instances[1].right
+    for index = 2, #bank.instances do
+      local left_switch = self:switch { threshold = index - 1.5 }
+      local right_switch = self:switch { threshold = index - 1.5 }
+      scope:connect(left, left_switch.left); scope:connect(bank.instances[index].left, left_switch.right)
+      scope:connect(right, right_switch.left); scope:connect(bank.instances[index].right, right_switch.right)
+      scope:connect(selector.out, left_switch.select); scope:connect(selector.out, right_switch.select)
+      left, right = left_switch.out, right_switch.out
+    end
+    bank.out = { left = left, right = right, direction = "stereo_output" }
+    function bank:connect_track(track, sequence)
+      for _, instance in ipairs(self.instances) do instance:connect_track(track, sequence) end
+      return self
+    end
+    function bank:parameter_targets(id)
+      local first, rest = self.instances[1]:parameter(id), {}
+      for index = 2, #self.instances do rest[#rest + 1] = self.instances[index]:parameter(id) end
+      return first, rest
+    end
+    return bank
   end
   function facade:multiply(values)
     assert(values == nil or next(values) == nil, "multiply has no authored values")
