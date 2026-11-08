@@ -282,6 +282,25 @@ The supplied coordinates target Serum 2.1.5 at its default editor scale; use
 the interactive `meldritch-vst3-state capture` command if a future editor
 layout or custom scaling moves those controls.
 
+To capture the complete installed factory library into a resumable user-local
+bank, run:
+
+```sh
+tools/capture-serum-factory.sh
+```
+
+The default destination is
+`~/.local/share/meldritch2/patches/serum2/factory`. `--plan` prints the stable
+ID, display name, browser search text, and source-relative path without opening
+Serum. Existing state files are skipped, so an interrupted run can be resumed.
+Each preset uses a fresh editor process because Serum 2.1.5 can retain the
+previous search result when the embedded browser is reused programmatically.
+The extractor enumerates filenames only; it loads every preset through Serum's
+native editor, waits one second between UI operations, and captures opaque VST3
+state. For performance use, create small role-specific banks with the `subset`
+command: loading the entire factory bank as one Lua patch bank would construct
+one resident Serum processor per preset and is intentionally not recommended.
+
 Lua loads a validated bank directly:
 
 ```lua
