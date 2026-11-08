@@ -741,6 +741,37 @@ fn native_plugin_vertical_slice_covers_discovery_lifecycle_events_parameters_and
     );
     assert!(energy(&restored_output) > 0.001);
 
+    let mut resident_spec = spec.clone();
+    resident_spec.patch_index = Some(1);
+    let mut resident = Instance::new(&resident_spec, 48_000.0).expect("create resident fixture");
+    let selected = vec![1.0; frames];
+    let deselected = vec![0.0; frames];
+    let mut resident_output = vec![f64::NAN; frames * 2];
+    resident.process_selected(
+        [&pitch, &full_gate, &velocity, &tempo, &extra_notes],
+        &[0.5],
+        &selected,
+        &mut resident_output,
+    );
+    assert!(energy(&resident_output) > 0.001);
+    resident.process_selected(
+        [&pitch, &full_gate, &velocity, &tempo, &extra_notes],
+        &[0.5],
+        &deselected,
+        &mut resident_output,
+    );
+    assert_eq!(energy(&resident_output), 0.0);
+    resident.process_selected(
+        [&pitch, &full_gate, &velocity, &tempo, &extra_notes],
+        &[0.5],
+        &selected,
+        &mut resident_output,
+    );
+    assert!(
+        energy(&resident_output) > 0.001,
+        "resident patch must reconstruct a held note when reselected"
+    );
+
     for _ in 0..8 {
         drop(Instance::new(&spec, 48_000.0).expect("repeat instance creation"));
     }

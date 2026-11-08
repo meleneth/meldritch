@@ -160,6 +160,12 @@ pub const CONTRACT: Contract = Contract {
             fan_in: FanIn::One,
             unconnected: Some(1.0),
         },
+        InputPort {
+            name: "patch_selector",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(0.0),
+        },
     ],
     outputs: &[
         OutputPort {

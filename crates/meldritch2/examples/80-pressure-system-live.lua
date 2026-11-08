@@ -94,9 +94,9 @@ lead_sequence:switch_pattern("Signal")
 drone_sequence:switch_pattern("Reactor")
 drum_sequence:switch_pattern("Iron March")
 
--- Authentic Serum states captured from the native editor. Every patch-resident processor
--- receives the same notes and note-offs; the selector only changes the audible branch, so
--- no opaque plugin state mutation occurs in the real-time callback.
+-- Authentic Serum states captured from the native editor. Only the selected resident runs
+-- steady-state DSP; selection flushes outgoing notes and reconstructs held incoming notes
+-- without opaque plugin state mutation in the real-time callback.
 local bass = instrument:vst3 {id="serum_bass",plugin=SERUM,paths=plugin_paths,
   patch_bank=serum_bank_root.."/bass",initial_patch="bass_reese"}:connect_track(bass_track,bass_sequence)
 local lead = instrument:vst3 {id="serum_lead",plugin=SERUM,paths=plugin_paths,

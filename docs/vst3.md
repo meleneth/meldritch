@@ -279,11 +279,13 @@ local bass = instrument:vst3 {
 `available_patches()` exposes IDs/names and an unavailable initial ID is an
 error. Calling `load_patch(id_or_name)` during Lua graph authoring changes the
 initial selection; during performance the authoritative preset selector is the
-switching API. Banks preload one processor per patch and switch only the audible
-branch at a block boundary. All receive notes and note-offs, so sustained events
-stay paired and rapid requests reduce to the latest selector value. This favors
-correctness over CPU/RAM and does not promise click-free timbral transitions.
-Identity/load failures abort startup rather than falling back to Init.
+switching API. Banks preload one processor per patch, but only the selected
+processor runs steady-state DSP. At a block-boundary switch, the outgoing
+processor receives one final all-notes-off block and the incoming processor
+reconstructs currently held notes from the graph inputs. Rapid requests reduce
+to the latest selector value. This avoids state restoration on the audio thread
+but does not promise click-free timbral transitions. Identity/load failures
+abort startup rather than falling back to Init.
 
 ## Geonkick 3.9 drum kits
 

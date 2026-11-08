@@ -357,9 +357,10 @@ The target is an existing compiled control; clients can select only one of the
 configured names and cannot submit paths. Rust revalidates the plane role and
 index/name before publishing the control. The snapshot reports `active`,
 `active_name`, `pending`, and `failed`. Authentic Serum banks preload every
-captured patch as an isolated processor, so selection is a bounded graph
-parameter change rather than filesystem access or plugin state mutation on the
-audio callback.
+captured patch as an isolated processor while running DSP only for the selected
+one, so selection is a bounded graph parameter change plus a one-block note
+handoff rather than filesystem access or plugin state mutation on the audio
+callback.
 
 Rust revalidates every field and role independently of the Vue interface.
 Unauthorized clients neither receive hidden plane state nor mutate it.

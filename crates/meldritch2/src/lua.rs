@@ -1503,7 +1503,8 @@ local function decorate_scope(facade, scope, prefix)
           or (values.id or "vst3_patch_bank") .. "__" .. patch.id
         local instance = self:vst3 { plugin = values.plugin, paths = values.paths,
           id = instance_id, state_file = patch.file,
-          midi_channels = values.midi_channels }
+          midi_channels = values.midi_channels, patch_index = index - 1 }
+        scope:connect(selector.out, instance.patch_selector)
         bank.instances[index] = instance
         bank.patch_ids[index] = patch.id
         bank.patch_names[index] = patch.name
@@ -2646,6 +2647,7 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
                         .collect::<mlua::Result<Vec<_>>>()?,
                 );
             }
+            loaded.patch_index = spec.get::<Option<u32>>("patch_index")?;
             if let Some(state_file) = spec.get::<Option<String>>("state_file")? {
                 if loaded.state.is_some() {
                     return Err(mlua::Error::external(

@@ -21,6 +21,9 @@ use vst3_host::{
 pub const MAX_BLOCK_SIZE: usize = 1024;
 pub const NOTE_LANES: usize = 8;
 pub const EXTRA_NOTE_INPUTS: usize = (NOTE_LANES - 1) * 3;
+static ZERO_SIGNAL: [f64; MAX_BLOCK_SIZE] = [0.0; MAX_BLOCK_SIZE];
+static ZERO_NOTE_INPUTS: [f64; MAX_BLOCK_SIZE * EXTRA_NOTE_INPUTS] =
+    [0.0; MAX_BLOCK_SIZE * EXTRA_NOTE_INPUTS];
 const STATE_FILE_MAGIC: &[u8; 16] = b"MELDRITCH_VST3\0\0";
 const STATE_FILE_VERSION: u32 = 1;
 const STATE_FILE_HEADER_BYTES: usize = 16 + 4 + 4 + 8;
@@ -388,6 +391,9 @@ pub struct Spec {
     pub midi_channels: [u8; NOTE_LANES],
     /// Number of channels on the main input bus. Zero identifies an instrument.
     pub audio_inputs: usize,
+    /// Resident-bank index selected by the `patch_selector` input. Ordinary
+    /// VST3 modules leave this unset and process every block.
+    pub patch_index: Option<u32>,
 }
 
 impl Spec {
@@ -625,6 +631,7 @@ pub fn inspect(descriptor: Descriptor) -> Result<Spec, String> {
         activate_all_outputs: false,
         midi_channels: [1, 2, 3, 4, 5, 6, 7, 8],
         audio_inputs,
+        patch_index: None,
     })
 }
 
@@ -643,6 +650,8 @@ pub struct Instance {
     failed: bool,
     offline_fallback: bool,
     previous_tempo: f64,
+    patch_index: Option<u32>,
+    was_selected: bool,
 }
 
 enum ProcessingBuffers {
@@ -773,6 +782,8 @@ impl Instance {
             failed: false,
             offline_fallback: false,
             previous_tempo: 120.0,
+            patch_index: spec.patch_index,
+            was_selected: false,
         })
     }
 
@@ -997,6 +1008,45 @@ impl Instance {
         }
     }
 
+    pub fn process_selected(
+        &mut self,
+        note_inputs: [&[f64]; 5],
+        parameter_values: &[f64],
+        patch_selector: &[f64],
+        output: &mut [f64],
+    ) {
+        let selected = self.patch_index.is_none_or(|index| {
+            patch_selector
+                .first()
+                .copied()
+                .filter(|value| value.is_finite())
+                .is_some_and(|value| value.round().clamp(0.0, f64::from(u32::MAX)) as u32 == index)
+        });
+        if selected {
+            self.was_selected = true;
+            self.process(note_inputs, parameter_values, output);
+            return;
+        }
+        if self.was_selected {
+            self.was_selected = false;
+            let frames = note_inputs[0].len();
+            let pitch = note_inputs[0];
+            let tempo = note_inputs[3];
+            self.process(
+                [
+                    pitch,
+                    &ZERO_SIGNAL[..frames],
+                    &ZERO_SIGNAL[..frames],
+                    tempo,
+                    &ZERO_NOTE_INPUTS[..frames * EXTRA_NOTE_INPUTS],
+                ],
+                parameter_values,
+                output,
+            );
+        }
+        output.fill(0.0);
+    }
+
     pub fn process_effect(
         &mut self,
         left_input: &[f64],
@@ -1153,6 +1203,7 @@ mod tests {
             activate_all_outputs: false,
             midi_channels: [1, 2, 3, 4, 5, 6, 7, 8],
             audio_inputs: 0,
+            patch_index: None,
         };
         assert_eq!(Spec::parameter_name(42), "parameter_42");
         assert_eq!(spec.parameter_id("parameter_42"), Some(42));

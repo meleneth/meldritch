@@ -154,9 +154,11 @@ Each performer plane has an authoritative `*_patch` selector. Bass, lead, and
 drone roles may change only their own selector; conductor can change all, and
 observer is read-only. WebSocket state derives `active_name` from the compiled
 selector value, so clients display what is actually audible. Banks preload
-states during graph construction and switch resident output branches; no file
-I/O or state restoration occurs on the audio callback. Wavetable-position
-controls remain live, though their audible range depends on preset routing.
+states during graph construction, but inactive residents do not run DSP. Patch
+changes flush the outgoing notes once, reconstruct held notes in the incoming
+processor, and switch output branches at a block boundary; no file I/O or state
+restoration occurs on the audio callback. Wavetable-position controls remain
+live, though their audible range depends on preset routing.
 
 ## Offline reference render
 
@@ -181,15 +183,17 @@ third-party plugin version and CPU behavior prevent publishing a universal
 sample hash. On the documented Serum 2.1.5 setup, a ten-second opening render
 produced 480,000 24-bit stereo frames at 48 kHz; FFmpeg measured -6.95 dBFS
 overall peak and -21.74 dBFS RMS. Inspect a full local render before using it as
-a live gain reference.
+a live gain reference. With resident-patch DSP suspension enabled, a 30-second
+release render measured 4.32x real time with four workers and 2.56x with one
+worker on the target development host.
 
 ## Current boundaries
 
 - Serum exposes no supported headless native-preset loader; bank creation needs
   X11 editor hosting, while runtime recall is headless.
-- Four resident Serum processors per instrument increase CPU/RAM usage. This is
-  the real-time-safety tradeoff until a control-thread plugin-swap primitive is
-  available.
+- Four resident Serum processors per instrument increase startup time and RAM,
+  but only one per instrument runs steady-state DSP. A switch can briefly cost
+  one outgoing flush plus one incoming block.
 - PULSE has four parts; “open” hat and auxiliary metallic roles are achieved by
   different patterns and synthesis settings, not imaginary extra plugin parts.
 - Master and gain-reduction diagnostics exist in the engine, but a dedicated

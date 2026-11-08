@@ -1168,7 +1168,7 @@ impl Machine {
                     delay.process(inputs, params, self.sample_rate, outputs)
                 }
                 OpProcessor::Plaits(plaits) => plaits.process(inputs, params, outputs),
-                OpProcessor::Vst3(plugin) => plugin.process(
+                OpProcessor::Vst3(plugin) => plugin.process_selected(
                     [
                         &inputs[0..1],
                         &inputs[1..2],
@@ -1177,6 +1177,7 @@ impl Machine {
                         &inputs[4..4 + crate::vst3::EXTRA_NOTE_INPUTS],
                     ],
                     params,
+                    &inputs[4 + crate::vst3::EXTRA_NOTE_INPUTS..],
                     outputs,
                 ),
                 OpProcessor::Vst3Effect(plugin) => {
@@ -1245,7 +1246,7 @@ impl Machine {
                     delay.process(inputs, params, self.sample_rate, outputs)
                 }
                 OpProcessor::Plaits(plaits) => plaits.process(inputs, params, outputs),
-                OpProcessor::Vst3(plugin) => plugin.process(
+                OpProcessor::Vst3(plugin) => plugin.process_selected(
                     [
                         &inputs[0..1],
                         &inputs[1..2],
@@ -1254,6 +1255,7 @@ impl Machine {
                         &inputs[4..4 + crate::vst3::EXTRA_NOTE_INPUTS],
                     ],
                     params,
+                    &inputs[4 + crate::vst3::EXTRA_NOTE_INPUTS..],
                     outputs,
                 ),
                 OpProcessor::Vst3Effect(plugin) => {
@@ -1846,8 +1848,10 @@ fn process_offline_op(
         let (pitch, rest) = inputs.split_at_mut(frames);
         let (gate, rest) = rest.split_at_mut(frames);
         let (velocity, rest) = rest.split_at_mut(frames);
-        let (tempo, extra_note_inputs) = rest.split_at_mut(frames);
-        plugin.process(
+        let (tempo, rest) = rest.split_at_mut(frames);
+        let (extra_note_inputs, patch_selector) =
+            rest.split_at_mut(frames * crate::vst3::EXTRA_NOTE_INPUTS);
+        plugin.process_selected(
             [
                 pitch,
                 gate,
@@ -1856,6 +1860,7 @@ fn process_offline_op(
                 &extra_note_inputs[..frames * crate::vst3::EXTRA_NOTE_INPUTS],
             ],
             params,
+            patch_selector,
             &mut outputs[..frames * output_count],
         );
         return;
