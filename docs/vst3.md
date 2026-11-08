@@ -190,6 +190,13 @@ Exact sample-for-sample reproducibility still depends on the hosted plugin;
 plugins may use random seeds, wall time, internal threading, or different
 offline algorithms.
 
+Live output requests a 1024-frame device period and permits VST3 batches up to
+that size. Serum 2's per-call overhead makes the former forced 256-frame host
+chunks miss real-time deadlines even when its aggregate DSP load is
+sustainable. At 48 kHz a full block trades roughly 21 ms of output latency for
+reliable callback headroom; an audio backend may return a nearby size instead.
+Startup reports the actual buffer size returned by the backend.
+
 ## Reproducible native fixture and demo
 
 The repository contains an MIT/Apache-2.0 Rust VST3 test instrument. It is

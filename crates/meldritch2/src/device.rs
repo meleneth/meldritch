@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use cpal::{
-    FromSample, Sample, SampleFormat,
+    BufferSize, FromSample, Sample, SampleFormat, SupportedBufferSize,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 
@@ -16,7 +16,17 @@ use crate::{
     model::{Action, ControlSurface, Graph, Navigation, Performance, Screen},
 };
 
-const CHUNK_FRAMES: usize = 256;
+// Serum's per-process-call overhead makes 256-frame chunks miss real-time
+// deadlines even when its DSP load is otherwise sustainable. Keep host calls
+// at the VST3 adapter's maximum block and request the same device period.
+const CHUNK_FRAMES: usize = crate::vst3::MAX_BLOCK_SIZE;
+
+fn requested_buffer_frames(supported: &SupportedBufferSize) -> u32 {
+    match supported {
+        SupportedBufferSize::Range { min, max } => (CHUNK_FRAMES as u32).clamp(*min, *max),
+        SupportedBufferSize::Unknown => CHUNK_FRAMES as u32,
+    }
+}
 
 fn stream_error_code(kind: cpal::ErrorKind) -> u8 {
     use cpal::ErrorKind;
@@ -75,15 +85,16 @@ pub fn fill_interleaved<T: Sample + FromSample<f64>>(
     runtime: &mut LiveRuntime,
     output: &mut [T],
     channels: usize,
-    left: &mut [f64; CHUNK_FRAMES],
-    right: &mut [f64; CHUNK_FRAMES],
+    left: &mut [f64],
+    right: &mut [f64],
 ) {
     if channels == 0 || output.is_empty() {
         return;
     }
     runtime.begin_buffer();
-    for chunk in output.chunks_mut(CHUNK_FRAMES * channels) {
+    for chunk in output.chunks_mut(left.len() * channels) {
         let frames = chunk.len().div_ceil(channels);
+        debug_assert!(frames <= left.len() && frames <= right.len());
         runtime.process_stereo_prepared(&mut left[..frames], &mut right[..frames]);
         for (index, frame) in chunk.chunks_mut(channels).enumerate() {
             for (channel, sample) in frame.iter_mut().enumerate() {
@@ -105,7 +116,7 @@ pub fn fill_interleaved_timed<T: Sample + FromSample<f64>>(
     active: &mut bool,
     output: &mut [T],
     channels: usize,
-    scratch: &mut [f64; CHUNK_FRAMES],
+    scratch: &mut [f64],
     errors: &AtomicU64,
 ) {
     if channels == 0 || output.is_empty() {
@@ -116,8 +127,9 @@ pub fn fill_interleaved_timed<T: Sample + FromSample<f64>>(
         // ordinary rendering until the output and MIDI route are reopened.
         *active = false;
     }
-    for chunk in output.chunks_mut(CHUNK_FRAMES * channels) {
+    for chunk in output.chunks_mut(scratch.len() * channels) {
         let frames = chunk.len().div_ceil(channels);
+        debug_assert!(frames <= scratch.len());
         if *active {
             if consumer
                 .render_prepared(runtime.current_mut(), &mut scratch[..frames])
@@ -157,6 +169,7 @@ pub struct DeviceOutput {
     pub device_name: String,
     pub sample_rate: u32,
     pub channels: u16,
+    pub buffer_frames: u32,
 }
 
 pub fn output_device_names() -> Result<Vec<String>, String> {
@@ -245,7 +258,9 @@ impl DeviceOutput {
             .default_output_config()
             .map_err(|error| format!("failed to get output configuration: {error}"))?;
         let format = supported.sample_format();
-        let config: cpal::StreamConfig = supported.into();
+        let requested_frames = requested_buffer_frames(supported.buffer_size());
+        let mut config: cpal::StreamConfig = supported.into();
+        config.buffer_size = BufferSize::Fixed(requested_frames);
         if config.channels == 0 {
             return Err("output device reported zero channels".into());
         }
@@ -303,8 +318,9 @@ impl DeviceOutput {
                 (None, None)
             } else {
                 let (producer, consumer) = live_note_queue(&machine, 0);
-                let router = TimedMidiRouter::new(&machine, producer, config.sample_rate, 256)
-                    .map_err(|error| format!("invalid MIDI note clock: {error:?}"))?;
+                let router =
+                    TimedMidiRouter::new(&machine, producer, config.sample_rate, requested_frames)
+                        .map_err(|error| format!("invalid MIDI note clock: {error:?}"))?;
                 (Some(router), Some(consumer))
             };
         let (runtime, control) = LiveRuntime::new(machine);
@@ -365,6 +381,7 @@ impl DeviceOutput {
             _ => return Err(format!("unsupported output sample format: {format}")),
         };
         let stream = result.map_err(|error| format!("failed to build output stream: {error}"))?;
+        let buffer_frames = stream.buffer_size().unwrap_or(requested_frames);
         Ok(Self {
             stream,
             control,
@@ -386,6 +403,7 @@ impl DeviceOutput {
             device_name,
             sample_rate: config.sample_rate,
             channels: config.channels,
+            buffer_frames,
         })
     }
 
@@ -451,7 +469,7 @@ impl DeviceOutput {
 mod tests {
     use super::{
         CHUNK_FRAMES, fill_interleaved, fill_interleaved_timed, record_stream_error,
-        stream_error_label, unique_name_match,
+        requested_buffer_frames, stream_error_label, unique_name_match,
     };
     use crate::{
         compiler::compile,
@@ -461,6 +479,7 @@ mod tests {
         midi::TimedMidiRouter,
         timed::{TimedNotePlan, TimedNoteState},
     };
+    use cpal::SupportedBufferSize;
     use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
     #[test]
@@ -504,6 +523,26 @@ mod tests {
     }
 
     #[test]
+    fn vst3_device_period_prefers_1024_and_clamps_to_backend_limits() {
+        assert_eq!(requested_buffer_frames(&SupportedBufferSize::Unknown), 1024);
+        assert_eq!(
+            requested_buffer_frames(&SupportedBufferSize::Range { min: 64, max: 4096 }),
+            1024
+        );
+        assert_eq!(
+            requested_buffer_frames(&SupportedBufferSize::Range { min: 64, max: 512 }),
+            512
+        );
+        assert_eq!(
+            requested_buffer_frames(&SupportedBufferSize::Range {
+                min: 2048,
+                max: 4096
+            }),
+            2048
+        );
+    }
+
+    #[test]
     fn mono_values_fill_all_channels_across_chunks() {
         let graph = lua::read(include_str!("../examples/01-basic.lua")).unwrap();
         let (mut runtime, _) = LiveRuntime::new(compile(&graph).unwrap());
@@ -520,12 +559,12 @@ mod tests {
         let (mut runtime, _) = LiveRuntime::new(compile(&graph).unwrap());
         let mut scratch = [0.0; CHUNK_FRAMES];
         let mut right = [0.0; CHUNK_FRAMES];
-        let mut output = vec![0_i16; 260];
+        let mut output = vec![0_i16; CHUNK_FRAMES + 4];
         fill_interleaved(&mut runtime, &mut output, 1, &mut scratch, &mut right);
         assert_eq!(output[0], 0);
         assert!((i32::from(output[1]) - 8192).abs() <= 1);
-        assert_eq!(output[256], 0);
-        assert!((i32::from(output[257]) - 8192).abs() <= 1);
+        assert_eq!(output[CHUNK_FRAMES], 0);
+        assert!((i32::from(output[CHUNK_FRAMES + 1]) - 8192).abs() <= 1);
     }
 
     #[test]

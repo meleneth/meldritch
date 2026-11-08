@@ -194,6 +194,10 @@ worker on the target development host.
 - Four resident Serum processors per instrument increase startup time and RAM,
   but only one per instrument runs steady-state DSP. A switch can briefly cost
   one outgoing flush plus one incoming block.
+- Live output requests 1024-frame VST3/device blocks. At 48 kHz this is roughly
+  21 ms of output latency, though the backend may select a nearby size. The
+  larger block is required because Serum's per-call overhead is not sustainable
+  with the former forced 256-frame chunks.
 - PULSE has four parts; “open” hat and auxiliary metallic roles are achieved by
   different patterns and synthesis settings, not imaginary extra plugin parts.
 - Master and gain-reduction diagnostics exist in the engine, but a dedicated

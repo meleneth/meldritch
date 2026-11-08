@@ -290,8 +290,8 @@ fn main() {
                     process::exit(1);
                 }
                 println!(
-                    "playing on {} at {} Hz ({} channels)",
-                    output.device_name, output.sample_rate, output.channels
+                    "playing on {} at {} Hz ({} channels, {}-frame buffer)",
+                    output.device_name, output.sample_rate, output.channels, output.buffer_frames
                 );
                 thread::sleep(Duration::from_secs_f64(seconds));
                 if output.stream_errors() > 0 {
@@ -400,6 +400,10 @@ fn main() {
         });
         match result {
             Ok((mut output, configured_midi, configured_controls, mut program)) => {
+                eprintln!(
+                    "audio output: {} at {} Hz, {} channels, {}-frame buffer",
+                    output.device_name, output.sample_rate, output.channels, output.buffer_frames
+                );
                 let midi_session = match (midi_index, configured_midi) {
                     (Some(index), _) => {
                         let opened = match output.take_timed_midi_router() {
