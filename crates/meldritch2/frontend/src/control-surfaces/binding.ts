@@ -72,8 +72,8 @@ export function createSurfaceBinding<T>(
     write(value, origin = "surface") {
       if (disposed || options.readOnly) return;
       lastSurfaceValue = value;
-      options.optimistic?.(value);
       options.write(value);
+      options.optimistic?.(value);
       for (const listener of listeners) listener({ value, origin });
     },
     beginGesture(info) {
