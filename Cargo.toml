@@ -71,4 +71,4 @@ tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync",
 toml = "1"
 url = "2"
 ureq = "3"
-vst3-host = { version = "0.11", default-features = false }
+vst3-host = { version = "0.11", path = "crates/meldritch2/vendor/vst3-host", default-features = false }

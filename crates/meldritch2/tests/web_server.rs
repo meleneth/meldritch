@@ -1126,6 +1126,28 @@ fn pressure_system_roles_resolve_to_public_controls_and_server_starts() {
                 let snapshot: Value =
                     serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
                         .unwrap();
+                let bass = snapshot["state"]["planes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|plane| plane["id"] == "bass")
+                    .unwrap();
+                let selector = bass["controls"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|control| control["id"] == "bass_patch")
+                    .unwrap();
+                assert_eq!(selector["kind"], "preset_selector");
+                assert_eq!(
+                    selector["presets"],
+                    json!([
+                        "BA - Master Reese Theatre",
+                        "BA - Gnarly Reese",
+                        "BA - Sub Sustain - Low",
+                        "BA - Harmonic Twist"
+                    ])
+                );
                 let master = snapshot["state"]["planes"]
                     .as_array()
                     .unwrap()

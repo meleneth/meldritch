@@ -107,10 +107,21 @@ parameter key is `parameter_<id>`; controls
 and the existing automation system target that key, so no plugin-specific
 cutoff/envelope vocabulary is invented.
 
-Opaque state previously returned by Meldritch's Rust `Machine::vst3_state`
-may be embedded as a Lua byte array with `state = { ... }` or applied before
-compilation with `synth:load_state(bytes)`. State is restored before processing
-starts. Treat it as meaningful only with the same class ID and plugin version.
+`Machine::vst3_state` captures the component stream through
+`IComponent::getState` and, for a separate controller that supports it, the
+controller stream through `IEditController::getState`. The host keeps the two
+streams distinct in an opaque, versioned snapshot. Restore stops processing,
+deactivates the component, calls component `setState`, synchronizes that stream
+to the controller with `setComponentState`, applies optional controller
+`setState`, then reactivates and resumes. Unsupported controller state is not an
+error; component-state failure is.
+
+Meldritch state files add a `MELDRITCH_VST3` versioned binary envelope around
+that byte-exact snapshot. JSON metadata records class ID, vendor, plugin
+name/version, patch name, optional source, and separate component/controller
+byte counts. The loader rejects identity and size mismatches before calling
+plugin code. Legacy raw component snapshots remain accepted through
+`state_file`, but do not have identity validation.
 
 Stereo audio effects use the same prepared lifecycle and parameter model:
 
@@ -224,23 +235,55 @@ cutoff/resonance/drive, oscillator A/B wavetable position, and macros 1/2.
 Values are normalized VST3 automation values and are delivered at the next
 processing block; there is no browser automation clock.
 
-Serum 2.1.5's native `.SerumPreset` files are Xfer-specific containers. Serum
-rejects those bytes through component `setState` and does not expose
-`IProgramListData`, so Meldritch does not pretend they are loadable through a
-standard VST3 preset API. Example 73 instead preloads three independent Serum
-instances from explicit normalized parameter snapshots and switches their
-already-running outputs at a processing boundary. This is safe for live use,
-retains independent state, avoids filesystem work on the audio thread, and is
-deterministically reconstructed on composition reload. Exact factory-preset
-loading remains unavailable until Xfer exposes a supported non-GUI interface.
+Serum 2.1.5 exposes `IUnitInfo`, but its root list is only 128 generic names
+(`Prog 1` through `Prog 128`). Selecting programs 0, 1, and 127 leaves state
+byte-identical and does not select factory content. `IProgramListData` provides
+no usable factory data, and passing an installed `.SerumPreset` directly to
+component `setState` is rejected. VST3 program selection, Xfer's native preset
+browser, and captured VST3 state restoration are distinct mechanisms.
 
-Serum logs an `IRunLoop` warning because the current host does not provide GUI
-event-loop facilities through the factory host context. The host library does
-provide the editor-frame run loop, but Serum queries the factory context first.
-Native DSP, notes, parameters, state, real-time playback, and offline rendering
-have been validated despite the diagnostic. Editor embedding is intentionally
-out of scope. Example 75 accepts `PULSE_DISABLE_SERUM=1` when a warning-free
-PULSE-only session is preferred.
+Authentic factory loading uses Serum's supported native editor. The vendored
+host exposes one shared Linux `IRunLoop` from the factory host context (where
+Serum queries it before class creation) and from `IPlugFrame`, embeds
+`IPlugView` in X11, and services timers/file descriptors on the control thread.
+The automated Pressure capture requires `xdotool` and `xwininfo` (Debian
+packages `xdotool` and `x11-utils`). It verifies the active Serum parent and
+embedded child before every keyboard sequence and waits one second between UI
+steps. Create the Pressure bank with:
+
+```sh
+tools/capture-pressure-serum.sh /tmp/pressure-serum
+cargo run -p meldritch2 --bin meldritch-vst3-state -- subset \
+  /tmp/pressure-serum ~/.local/share/meldritch2/patches/serum2/pressure-system/bass \
+  bass_reese bass_distorted bass_sub bass_rhythmic
+```
+
+Repeat `subset` for lead and drone IDs listed in
+`examples/pressure-system-serum-capture.json`. The automation targets only the
+active Serum XEmbed window, opens a fresh process per capture, and refuses
+Init/duplicate processor state. State files remain in user data and out of Git.
+The supplied coordinates target Serum 2.1.5 at its default editor scale; use
+the interactive `meldritch-vst3-state capture` command if a future editor
+layout or custom scaling moves those controls.
+
+Lua loads a validated bank directly:
+
+```lua
+local bass = instrument:vst3 {
+  plugin = "56534558667350736572756D20320000",
+  patch_bank = os.getenv("HOME") .. "/.local/share/meldritch2/patches/serum2/pressure-system/bass",
+  initial_patch = "bass_reese",
+}
+```
+
+`available_patches()` exposes IDs/names and an unavailable initial ID is an
+error. Calling `load_patch(id_or_name)` during Lua graph authoring changes the
+initial selection; during performance the authoritative preset selector is the
+switching API. Banks preload one processor per patch and switch only the audible
+branch at a block boundary. All receive notes and note-offs, so sustained events
+stay paired and rapid requests reduce to the latest selector value. This favors
+correctness over CPU/RAM and does not promise click-free timbral transitions.
+Identity/load failures abort startup rather than falling back to Init.
 
 ## Geonkick 3.9 drum kits
 
@@ -273,8 +316,8 @@ add it to `MELDRITCH_VST3_PATH`.
 Geonkick `.gkit` presets are opaque component state. Restore one before
 activation with `state_file`, alongside `activate_all_outputs = true`.
 `state_file` is read on the Lua/control thread during composition loading, is
-limited to 16 MiB, and is never accepted from browser commands. Opaque state
-can still be saved through `Machine::vst3_state`.
+limited to 65 MiB including its envelope, and is never accepted from browser
+commands. Opaque state can still be saved through `Machine::vst3_state`.
 
 Geonkick 3.9 exposes no automatable VST3 parameters, so its synthesis controls
 cannot be honestly mapped to Meldritch knobs yet. Kit design remains in
@@ -331,7 +374,7 @@ release parameters—Meldritch does not add another synthesis envelope.
 
 Opaque state round-trips through the existing VST3 state interface. A trusted
 startup state may be selected with `PULSE_STATE=/path/to/state` and is read on
-the control thread under the 16 MiB state-file limit. Example 75 defaults to a
+the control thread under the 65 MiB state-file limit. Example 75 defaults to a
 self-contained synthesis-only configuration, so it has no sample paths to
 lose. Browser clients never submit filesystem paths.
 
@@ -352,10 +395,12 @@ MELDRITCH_TEST_PULSE=1 cargo test -p meldritch2 --test vst3_host installed_pulse
 - Main stereo output is supported. A plugin that cannot negotiate the requested
   configuration fails graph preparation; incompatible buffers are never
   silently processed.
-- No plugin editor or GUI embedding.
+- X11 editor embedding is available to the dedicated state-capture command;
+  performance and render modes remain headless and do not expose general DAW
+  editor management.
 - Opaque VST3 state round-trips are supported, but vendor-native preset files
-  require a plugin-supported host interface. The Serum example exposes only
-  its explicitly configured preloaded performance patches.
+  require a plugin-supported host interface. Serum's native files are selected
+  in its editor and recalled from identity-checked, user-local captured state.
 - Hosting is in-process. Rust ownership and lifecycle errors are contained by
   the adapter, but a native plugin can still abort, corrupt memory, deadlock, or
   run unbounded work; none of those failures can be recovered safely in the

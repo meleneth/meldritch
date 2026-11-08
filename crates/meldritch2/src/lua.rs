@@ -1485,6 +1485,76 @@ local function decorate_scope(facade, scope, prefix)
   function facade:vst3(values)
     assert(type(values) == "table" and type(values.plugin) == "string",
       "vst3 requires plugin = stable class ID or unique display name")
+    if values.patch_bank ~= nil then
+      local patches = meldritch._vst3_patch_bank(values)
+      assert(#patches >= 2, "VST3 patch bank requires at least two patches")
+      local bank = { instances = {}, patch_ids = {}, patch_names = {}, preset_names = {} }
+      local initial = values.initial_patch or patches[1].id
+      local initial_index = nil
+      for index, patch in ipairs(patches) do
+        if patch.id == initial or patch.name == initial then initial_index = index end
+      end
+      assert(initial_index ~= nil, "initial VST3 patch is unavailable: " .. tostring(initial))
+      local selector = self:constant { value = initial_index - 1 }
+      bank.preset = selector.value
+      bank.current_patch = patches[initial_index].id
+      for index, patch in ipairs(patches) do
+        local instance_id = index == 1 and (values.id or "vst3_patch_bank")
+          or (values.id or "vst3_patch_bank") .. "__" .. patch.id
+        local instance = self:vst3 { plugin = values.plugin, paths = values.paths,
+          id = instance_id, state_file = patch.file,
+          midi_channels = values.midi_channels }
+        bank.instances[index] = instance
+        bank.patch_ids[index] = patch.id
+        bank.patch_names[index] = patch.name
+        bank.preset_names[index] = patch.name
+      end
+      local left, right = bank.instances[1].left, bank.instances[1].right
+      for index = 2, #bank.instances do
+        local left_switch = self:switch { threshold = index - 1.5 }
+        local right_switch = self:switch { threshold = index - 1.5 }
+        scope:connect(left, left_switch.left); scope:connect(bank.instances[index].left, left_switch.right)
+        scope:connect(right, right_switch.left); scope:connect(bank.instances[index].right, right_switch.right)
+        scope:connect(selector.out, left_switch.select); scope:connect(selector.out, right_switch.select)
+        left, right = left_switch.out, right_switch.out
+      end
+      bank.left, bank.right = left, right
+      bank.out = { left = left, right = right, direction = "stereo_output" }
+      function bank:available_patches()
+        local result = {}
+        for index, id in ipairs(self.patch_ids) do result[index] = {id=id,name=self.patch_names[index]} end
+        return result
+      end
+      function bank:load_patch(id)
+        for index, candidate in ipairs(self.patch_ids) do
+          if candidate == id or self.patch_names[index] == id then
+            local found = false
+            for _, module in ipairs(scope.modules) do
+              if module.id == selector.id then
+                module.values.value = index - 1
+                found = true
+                break
+              end
+            end
+            assert(found, "VST3 patch selector module is unavailable")
+            initial_index = index
+            self.current_patch = candidate
+            return self
+          end
+        end
+        error("VST3 patch is unavailable: " .. tostring(id))
+      end
+      function bank:connect_track(track, sequence)
+        for _, instance in ipairs(self.instances) do instance:connect_track(track, sequence) end
+        return self
+      end
+      function bank:parameter_targets(id)
+        local first, rest = self.instances[1]:parameter(id), {}
+        for index = 2, #self.instances do rest[#rest + 1] = self.instances[index]:parameter(id) end
+        return first, rest
+      end
+      return bank
+    end
     local runtime = meldritch._vst3(values)
     local handle = scope:module(values.id or self:_id("vst3"), "vst3", {}, runtime)
     handle._midi_channels = values.midi_channels or {1,2,3,4,5,6,7,8}
@@ -2589,19 +2659,74 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
                     vst3_root.join(path)
                 };
                 let metadata = std::fs::metadata(&path).map_err(mlua::Error::external)?;
-                const MAX_VST3_STATE_BYTES: u64 = 16 * 1024 * 1024;
+                const MAX_VST3_STATE_BYTES: u64 = 65 * 1024 * 1024;
                 if metadata.len() > MAX_VST3_STATE_BYTES {
                     return Err(mlua::Error::external(format!(
                         "VST3 state file exceeds the {} MiB limit",
                         MAX_VST3_STATE_BYTES / 1024 / 1024
                     )));
                 }
-                loaded.state = Some(std::fs::read(path).map_err(mlua::Error::external)?);
+                let bytes = std::fs::read(path).map_err(mlua::Error::external)?;
+                loaded.state = Some(match crate::vst3::PluginState::from_bytes(&bytes) {
+                    Ok(state) => {
+                        state
+                            .validate(&loaded.descriptor)
+                            .map_err(mlua::Error::external)?;
+                        state.state
+                    }
+                    Err(error) if error == "not a Meldritch VST3 state file" => bytes,
+                    Err(error) => return Err(mlua::Error::external(error)),
+                });
+                let instance =
+                    crate::vst3::Instance::new(&loaded, 48_000.0).map_err(mlua::Error::external)?;
+                let ids = loaded
+                    .parameters
+                    .iter()
+                    .map(|parameter| parameter.id)
+                    .collect::<Vec<_>>();
+                let values = instance
+                    .parameter_values(&ids)
+                    .map_err(mlua::Error::external)?;
+                for (id, value) in ids.into_iter().zip(values) {
+                    loaded.initial_values.insert(id, value);
+                }
             }
             lua.create_userdata(LuaVst3(Arc::new(loaded)))
         })
         .map_err(|e| e.to_string())?;
     meldritch.set("_vst3", vst3).map_err(|e| e.to_string())?;
+    let patch_bank_root = project_root.to_path_buf();
+    let vst3_patch_bank = lua
+        .create_function(move |lua, spec: Table| {
+            let selector: String = spec.get("plugin")?;
+            let paths = lua_vst3_paths(&spec, &patch_bank_root)?;
+            let descriptor =
+                crate::vst3::resolve(&selector, &paths).map_err(mlua::Error::external)?;
+            let directory = PathBuf::from(spec.get::<String>("patch_bank")?);
+            let directory = if directory.is_absolute() {
+                directory
+            } else {
+                patch_bank_root.join(directory)
+            };
+            let bank = crate::vst3::PatchBank::read(&directory, &descriptor)
+                .map_err(mlua::Error::external)?;
+            let patches = lua.create_table()?;
+            for (index, patch) in bank.patches.iter().enumerate() {
+                let item = lua.create_table()?;
+                item.set("id", patch.id.as_str())?;
+                item.set("name", patch.name.as_str())?;
+                item.set(
+                    "file",
+                    directory.join(&patch.file).to_string_lossy().as_ref(),
+                )?;
+                patches.set(index + 1, item)?;
+            }
+            Ok(patches)
+        })
+        .map_err(|e| e.to_string())?;
+    meldritch
+        .set("_vst3_patch_bank", vst3_patch_bank)
+        .map_err(|e| e.to_string())?;
     let discovery_root = project_root.to_path_buf();
     let vst3_plugins = lua
         .create_function(move |lua, paths: Option<Table>| {

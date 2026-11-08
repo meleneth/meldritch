@@ -132,7 +132,7 @@ explicit “return to automation” button; restarting the composition clears
 published overrides. Pattern selection is quantized to bars. VST3 parameter
 changes are block-boundary accurate, not sample-accurate.
 
-## Serum mappings and preset limitation
+## Authentic Serum patch banks
 
 All visible mappings use plugin-reported stable IDs. Important IDs include
 main volume `0`, portamento `3`, oscillator A/B position `1000039`/`1001039`,
@@ -141,20 +141,22 @@ warp amount `1000034`/`1001034`, filter cutoff/resonance/drive
 `3000000`/`3000002`/`3000003`/`3000004`, and macros beginning at `7000000`.
 Values are normalized VST3 values; Serum supplies display conversions.
 
-The three instances have independent parameter state and MIDI/event lanes.
-Pressure System initializes a verified bass, lead, and drone performance patch
-directly through those IDs. It deliberately does **not** present a factory
-preset or wavetable-asset dropdown. Serum 2.1.5 exposes only 128 generically
-named VST3 program slots (`Prog 1` through `Prog 128`); its installed
-`.SerumPreset` files are vendor containers and are not accepted as VST3 state
-streams. Loading them by guessing their binary layout would be unsafe and a
-cosmetic selector would be dishonest. Wavetable **position** is fully live;
-selecting a different wavetable asset awaits a supported Xfer host interface.
+Pressure System loads three identity-checked local banks from
+`~/.local/share/meldritch2/patches/serum2/pressure-system` (override the root
+with `PRESSURE_SERUM_BANK`). Bass offers Master Reese Theatre, Gnarly Reese,
+Sub Sustain - Low, and Harmonic Twist. Lead offers Classic Techno Lead, Deep
+Acid, Hypa Saw, and Crunchwave. Drone offers Dark Shuffle Motion, Dark Space,
+Distant Desolation, and Motion Tech. These are factory presets selected in
+Serum's native browser and captured through component/controller state; no
+factory asset is stored in this repository.
 
-Serum prints an `IRunLoop` warning because it requests a global factory event
-loop used by editor facilities. The current headless audio, events, parameters,
-state, live playback, and offline rendering paths work despite that warning.
-Plugin GUI embedding remains out of scope.
+Each performer plane has an authoritative `*_patch` selector. Bass, lead, and
+drone roles may change only their own selector; conductor can change all, and
+observer is read-only. WebSocket state derives `active_name` from the compiled
+selector value, so clients display what is actually audible. Banks preload
+states during graph construction and switch resident output branches; no file
+I/O or state restoration occurs on the audio callback. Wavetable-position
+controls remain live, though their audible range depends on preset routing.
 
 ## Offline reference render
 
@@ -172,19 +174,22 @@ deterministic. Exact samples can still differ with plugin versions, CPU
 implementations, and plugin-internal behavior. The LSP limiter is final peak
 protection, not a substitute for the mixer's conservative gain staging.
 
-The validated reference render produced 23,520,000 frames per channel,
-490.000 seconds, and 141,120,068 bytes. FFmpeg `astats` measured an overall
-peak of -6.29 dBFS and RMS of -22.14 dBFS, with no full-scale clipping or
-non-finite samples. Representative ten-second RMS values were -22.62 dBFS
-(Ignition), -22.13 (Pressure), -22.24 (Vacuum), -22.47 (Impact), -21.60
-(Overdrive), and -22.42 (Dissolution). The moderate master leaves headroom for
-live macro and parameter changes; the limiter remains final protection rather
-than permanent loudness generation. On the target development host, the
-four-worker offline render ran at 1.09x real time (446.9 seconds DSP time).
+The regression suite renders the authentic captured states, verifies finite
+stereo output, and compares fresh-instance state round-trips against the same
+MIDI phrase. A full 490-second render is intentionally a local release check:
+third-party plugin version and CPU behavior prevent publishing a universal
+sample hash. On the documented Serum 2.1.5 setup, a ten-second opening render
+produced 480,000 24-bit stereo frames at 48 kHz; FFmpeg measured -6.95 dBFS
+overall peak and -21.74 dBFS RMS. Inspect a full local render before using it as
+a live gain reference.
 
 ## Current boundaries
 
-- No Serum factory preset or wavetable-asset loading for the reason above.
+- Serum exposes no supported headless native-preset loader; bank creation needs
+  X11 editor hosting, while runtime recall is headless.
+- Four resident Serum processors per instrument increase CPU/RAM usage. This is
+  the real-time-safety tradeoff until a control-thread plugin-swap primitive is
+  available.
 - PULSE has four parts; “open” hat and auxiliary metallic roles are achieved by
   different patterns and synthesis settings, not imaginary extra plugin parts.
 - Master and gain-reduction diagnostics exist in the engine, but a dedicated

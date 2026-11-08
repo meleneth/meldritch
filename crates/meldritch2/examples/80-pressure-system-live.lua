@@ -10,6 +10,8 @@ local PULSE = "ABCDEF019182FAEB506C7365506C6473"
 local LSP_COMPRESSOR = "647370206B31732020202020756E7363"
 local LSP_LIMITER = "64737020623173202020202072667563"
 local plugin_paths = { home .. "/.vst3", "/usr/lib/vst3" }
+local serum_bank_root = os.getenv("PRESSURE_SERUM_BANK")
+  or (home .. "/.local/share/meldritch2/patches/serum2/pressure-system")
 
 local function notes(sequence, track, name, events, length)
   local pattern = sequence:pattern(name)
@@ -92,33 +94,15 @@ lead_sequence:switch_pattern("Signal")
 drone_sequence:switch_pattern("Reactor")
 drum_sequence:switch_pattern("Iron March")
 
--- Three independent Serum processors. The installed factory files are
--- vendor-native .SerumPreset containers, not VST3 state streams, so these are
--- deterministic verified performance patches rather than cosmetic selectors.
-local function serum(id, track, sequence, values)
-  local plugin = instrument:vst3 {id=id,plugin=SERUM,paths=plugin_paths}
-  plugin:connect_track(track,sequence)
-  for parameter, value in pairs(values) do plugin:set_parameter(parameter,value) end
-  return plugin
-end
-local bass = serum("serum_bass",bass_track,bass_sequence,{
-  [0]=.36,[1000000]=1,[1000001]=.86,[1000034]=.63,[1000035]=.25,[1000039]=.31,
-  [1001000]=1,[1001001]=.42,[1001034]=.38,[1001035]=.18,[1001039]=.68,
-  [2000000]=1,[2000001]=1,[2000003]=.36,[2000004]=.43,[2000005]=.48,
-  [3000000]=.08,[3000002]=.28,[3000003]=.48,[3000004]=.20,[3]=.14,[12]=1,
-})
-local lead = serum("serum_lead",lead_track,lead_sequence,{
-  [0]=.27,[1000000]=1,[1000001]=.70,[1000034]=.48,[1000035]=.31,[1000039]=.57,
-  [1001000]=1,[1001001]=.52,[1001034]=.56,[1001035]=.22,[1001039]=.24,
-  [2000000]=1,[2000001]=1,[2000003]=.58,[2000004]=.36,[2000005]=.41,
-  [3000000]=.12,[3000002]=.31,[3000003]=.38,[3000004]=.31,[3]=.10,[12]=1,
-})
-local drone = serum("serum_drone",drone_track,drone_sequence,{
-  [0]=.21,[1000000]=1,[1000001]=.55,[1000034]=.31,[1000035]=.16,[1000039]=.22,
-  [1001000]=1,[1001001]=.46,[1001034]=.44,[1001035]=.20,[1001039]=.73,
-  [2000000]=1,[2000001]=1,[2000003]=.29,[2000004]=.29,[2000005]=.20,
-  [3000000]=.62,[3000002]=.70,[3000003]=.66,[3000004]=.73,
-})
+-- Authentic Serum states captured from the native editor. Every patch-resident processor
+-- receives the same notes and note-offs; the selector only changes the audible branch, so
+-- no opaque plugin state mutation occurs in the real-time callback.
+local bass = instrument:vst3 {id="serum_bass",plugin=SERUM,paths=plugin_paths,
+  patch_bank=serum_bank_root.."/bass",initial_patch="bass_reese"}:connect_track(bass_track,bass_sequence)
+local lead = instrument:vst3 {id="serum_lead",plugin=SERUM,paths=plugin_paths,
+  patch_bank=serum_bank_root.."/lead",initial_patch="lead_cutting"}:connect_track(lead_track,lead_sequence)
+local drone = instrument:vst3 {id="serum_drone",plugin=SERUM,paths=plugin_paths,
+  patch_bank=serum_bank_root.."/drone",initial_patch="drone_evolving"}:connect_track(drone_track,drone_sequence)
 
 local pulse = instrument:vst3 {id="pulse_drums",plugin=PULSE,paths=plugin_paths,midi_channels={10,10,10,10},state_file=os.getenv("PULSE_STATE")}
 pulse:connect_drum_kit(kit)
@@ -149,25 +133,32 @@ local function bind(group,id,label,target,min,max,targets)
   group[#group+1]=id
 end
 local function serum_controls(prefix,plugin,group)
-  bind(group,prefix.."_level","Level",plugin:parameter(0),0,1)
-  bind(group,prefix.."_a_position","Osc A Position",plugin:parameter(1000039),0,1)
-  bind(group,prefix.."_b_position","Osc B Position",plugin:parameter(1001039),0,1)
-  bind(group,prefix.."_a_warp","Osc A Warp",plugin:parameter(1000034),0,1)
-  bind(group,prefix.."_b_warp","Osc B Warp",plugin:parameter(1001034),0,1)
-  bind(group,prefix.."_cutoff","Filter Cutoff",plugin:parameter(2000003),0,1)
-  bind(group,prefix.."_resonance","Filter Resonance",plugin:parameter(2000004),0,1)
-  bind(group,prefix.."_drive","Filter Drive",plugin:parameter(2000005),0,1)
-  bind(group,prefix.."_attack","Attack",plugin:parameter(3000000),0,1)
-  bind(group,prefix.."_decay","Decay",plugin:parameter(3000002),0,1)
-  bind(group,prefix.."_sustain","Sustain",plugin:parameter(3000003),0,1)
-  bind(group,prefix.."_release","Release",plugin:parameter(3000004),0,1)
-  bind(group,prefix.."_portamento","Portamento",plugin:parameter(3),0,1)
-  bind(group,prefix.."_macro1","Macro 1",plugin:parameter(7000000),0,1)
-  bind(group,prefix.."_macro2","Macro 2",plugin:parameter(7001000),0,1)
+  local function patch_parameter(id) return plugin:parameter_targets(id) end
+  local function patch_bind(id,label,parameter)
+    local first,rest=patch_parameter(parameter); bind(group,id,label,first,0,1,rest)
+  end
+  patch_bind(prefix.."_level","Level",0)
+  patch_bind(prefix.."_a_position","Osc A Position",1000039)
+  patch_bind(prefix.."_b_position","Osc B Position",1001039)
+  patch_bind(prefix.."_a_warp","Osc A Warp",1000034)
+  patch_bind(prefix.."_b_warp","Osc B Warp",1001034)
+  patch_bind(prefix.."_cutoff","Filter Cutoff",2000003)
+  patch_bind(prefix.."_resonance","Filter Resonance",2000004)
+  patch_bind(prefix.."_drive","Filter Drive",2000005)
+  patch_bind(prefix.."_attack","Attack",3000000)
+  patch_bind(prefix.."_decay","Decay",3000002)
+  patch_bind(prefix.."_sustain","Sustain",3000003)
+  patch_bind(prefix.."_release","Release",3000004)
+  patch_bind(prefix.."_portamento","Portamento",3)
+  patch_bind(prefix.."_macro1","Macro 1",7000000)
+  patch_bind(prefix.."_macro2","Macro 2",7001000)
 end
 serum_controls("bass",bass,control_ids.bass)
 serum_controls("lead",lead,control_ids.lead)
 serum_controls("drone",drone,control_ids.drone)
+bind(control_ids.bass,"bass_patch","Serum Patch",bass.preset,0,#bass.patch_names-1)
+bind(control_ids.lead,"lead_patch","Serum Patch",lead.preset,0,#lead.patch_names-1)
+bind(control_ids.drone,"drone_patch","Serum Patch",drone.preset,0,#drone.patch_names-1)
 for name,id in pairs(P) do bind(control_ids.drums,"pulse_"..name,name,pulse:parameter(id),0,1) end
 
 -- Kick-triggered deterministic bass ducking is explicit and bounded. PULSE is
@@ -208,11 +199,22 @@ instrument:connect(limiter.out.left,instrument.output.left);instrument:connect(l
 for name,id in pairs(C) do bind(control_ids.master,"compressor_"..name,"Compressor "..name,compressor:parameter(id),0,1) end
 for name,id in pairs(L) do bind(control_ids.master,"limiter_"..name,"Limiter "..name,limiter:parameter(id),0,1) end
 
--- Cross-instrument macros fan out to verified normalized VST3 parameters.
-bind(control_ids.macros,"PRESSURE","PRESSURE",bass:parameter(1000001),0,1,{bass:parameter(1001001),(bass:parameter(2000006))})
-bind(control_ids.macros,"HEAT","HEAT",lead:parameter(1000001),0,1,{lead:parameter(1001001),(lead:parameter(2000006))})
-bind(control_ids.macros,"MOTION","MOTION",drone:parameter(1000031),0,1,{drone:parameter(1001031),(drone:parameter(7002000))})
-bind(control_ids.macros,"SPACE","SPACE",drone:parameter(2000007),0,1,{lead:parameter(2000007),(drone:parameter(2000001))})
+-- Cross-instrument macros fan out to every resident patch so switching never reveals stale
+-- control values. Preset-dependent modulation routings can still make a macro less audible.
+local function macro_bind(id, assignments)
+  local targets={}
+  for _,assignment in ipairs(assignments) do
+    local first,rest=assignment[1]:parameter_targets(assignment[2])
+    targets[#targets+1]=first
+    for _,target in ipairs(rest) do targets[#targets+1]=target end
+  end
+  local first=table.remove(targets,1)
+  bind(control_ids.macros,id,id,first,0,1,targets)
+end
+macro_bind("PRESSURE",{{bass,1000001},{bass,1001001},{bass,2000006}})
+macro_bind("HEAT",{{lead,1000001},{lead,1001001},{lead,2000006}})
+macro_bind("MOTION",{{drone,1000031},{drone,1001031},{drone,7002000}})
+macro_bind("SPACE",{{drone,2000007},{lead,2000007},{drone,2000001}})
 
 -- Ten arrangement sections. Bar 257 intentionally has no stop command: live
 -- playback settles into the final patterns, while an offline render chooses
@@ -241,9 +243,9 @@ local server=meldritch.server {host=os.getenv("PRESSURE_HOST") or "127.0.0.1",po
 server:websocket("/performance",{})
 local performance=server:performance {name="Pressure System Live"}
 performance:role("conductor",{controls="*"})
-performance:role("bass",{controls={"bass_level","bass_a_position","bass_b_position","bass_a_warp","bass_b_warp","bass_cutoff","bass_resonance","bass_drive","bass_portamento","duck_depth","duck_release"}})
-performance:role("lead",{controls={"lead_level","lead_a_position","lead_b_position","lead_a_warp","lead_cutoff","lead_resonance","lead_drive","lead_portamento","lead_macro1","lead_macro2"}})
-performance:role("drone",{controls={"drone_level","drone_a_position","drone_b_position","drone_a_warp","drone_b_warp","drone_cutoff","drone_resonance","drone_drive","drone_macro1","drone_macro2"}})
+performance:role("bass",{controls={"bass_patch","bass_level","bass_a_position","bass_b_position","bass_a_warp","bass_b_warp","bass_cutoff","bass_resonance","bass_drive","bass_portamento","duck_depth","duck_release"}})
+performance:role("lead",{controls={"lead_patch","lead_level","lead_a_position","lead_b_position","lead_a_warp","lead_cutoff","lead_resonance","lead_drive","lead_portamento","lead_macro1","lead_macro2"}})
+performance:role("drone",{controls={"drone_patch","drone_level","drone_a_position","drone_b_position","drone_a_warp","drone_b_warp","drone_cutoff","drone_resonance","drone_drive","drone_macro1","drone_macro2"}})
 performance:role("drummer",{controls={"pulse_kick_freq","pulse_kick_level","pulse_kick_noise","pulse_kick_volume","pulse_snare_freq","pulse_snare_noise","pulse_snare_tone","pulse_hat_filter","pulse_hat_tone","pulse_perc_freq","pulse_perc_wave","pulse_perc_noise"}})
 performance:role("observer",{controls={}})
 server:credential("pressure-conductor","conductor")
@@ -256,18 +258,21 @@ server:credential("pressure-observer","observer")
 local bass_plane=performance:plane {id="bass",label="SERUM // BASS",roles={"bass","conductor"},read_only_roles={"observer"}}
 bass_plane:piano_roll {id="bass_roll",label="Bass Phrase",track=bass_track,steps=16,pitch_min=24,pitch_max=48}
 bass_plane:pattern_selector {id="bass_patterns",label="Bass Pattern",sequencer=bass_sequence,boundary="bar"}
+bass_plane:preset_selector {id="bass_patch",label="Serum Patch",target="bass_patch",presets=bass.patch_names}
 for _,item in ipairs({{"bass_level","Level"},{"bass_a_position","A Position"},{"bass_b_position","B Position"},{"bass_a_warp","A Warp"},{"bass_b_warp","B Warp"},{"bass_cutoff","Cutoff"},{"bass_resonance","Resonance"},{"bass_drive","Drive"},{"bass_portamento","Portamento"},{"duck_depth","Kick Duck"},{"duck_release","Duck Release"}}) do bass_plane:knob {id=item[1],label=item[2],target=item[1],min=item[1]=="duck_release" and .001 or 0,max=item[1]=="duck_release" and 3 or 1} end
 bass_plane:adsr {id="bass_adsr",label="Amp Envelope",normalized=true,attack="bass_attack",decay="bass_decay",sustain="bass_sustain",release="bass_release"}
 
 local lead_plane=performance:plane {id="lead",label="SERUM // LEAD",roles={"lead","conductor"},read_only_roles={"observer"}}
 lead_plane:piano_roll {id="lead_roll",label="Lead Phrase",track=lead_track,steps=16,pitch_min=48,pitch_max=84}
 lead_plane:pattern_selector {id="lead_patterns",label="Lead Pattern",sequencer=lead_sequence,boundary="bar"}
+lead_plane:preset_selector {id="lead_patch",label="Serum Patch",target="lead_patch",presets=lead.patch_names}
 for _,item in ipairs({{"lead_level","Level"},{"lead_a_position","A Position"},{"lead_b_position","B Position"},{"lead_a_warp","A Warp"},{"lead_cutoff","Cutoff"},{"lead_resonance","Resonance"},{"lead_drive","Drive"},{"lead_portamento","Portamento"},{"lead_macro1","Macro 1"},{"lead_macro2","Macro 2"}}) do lead_plane:knob {id=item[1],label=item[2],target=item[1],min=0,max=1} end
 lead_plane:adsr {id="lead_adsr",label="Amp Envelope",normalized=true,attack="lead_attack",decay="lead_decay",sustain="lead_sustain",release="lead_release"}
 
 local drone_plane=performance:plane {id="drone",label="SERUM // DRONE",roles={"drone","conductor"},read_only_roles={"observer"}}
 drone_plane:piano_roll {id="drone_roll",label="Drone Voicing",track=drone_track,steps=16,pitch_min=24,pitch_max=60}
 drone_plane:pattern_selector {id="drone_modes",label="Drone State",sequencer=drone_sequence,boundary="bar"}
+drone_plane:preset_selector {id="drone_patch",label="Serum Patch",target="drone_patch",presets=drone.patch_names}
 for _,item in ipairs({{"drone_level","Level"},{"drone_a_position","A Position"},{"drone_b_position","B Position"},{"drone_a_warp","A Warp"},{"drone_b_warp","B Warp"},{"drone_cutoff","Cutoff"},{"drone_resonance","Resonance"},{"drone_drive","Drive"},{"drone_macro1","Motion"},{"drone_macro2","Width"}}) do drone_plane:knob {id=item[1],label=item[2],target=item[1],min=0,max=1} end
 drone_plane:adsr {id="drone_adsr",label="Long Envelope",normalized=true,attack="drone_attack",decay="drone_decay",sustain="drone_sustain",release="drone_release"}
 

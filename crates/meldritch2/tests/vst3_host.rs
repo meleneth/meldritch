@@ -436,6 +436,98 @@ fn installed_serum_supports_real_notes_parameters_audio_and_teardown() {
     drop(serum);
 }
 
+fn render_serum_state(spec: &vst3::Spec) -> Vec<f64> {
+    let frames = 1024;
+    let pitch = vec![130.812_782; frames];
+    let velocity = vec![0.82; frames];
+    let tempo = vec![128.0; frames];
+    let extra = vec![0.0; frames * vst3::EXTRA_NOTE_INPUTS];
+    let values = spec
+        .parameters
+        .iter()
+        .map(|parameter| spec.initial_value(parameter))
+        .collect::<Vec<_>>();
+    let mut plugin = Instance::new(spec, 48_000.0).expect("instantiate Serum state");
+    let mut rendered = Vec::new();
+    for block in 0..10 {
+        let gate = vec![if block < 6 { 1.0 } else { 0.0 }; frames];
+        let mut output = vec![0.0; frames * 2];
+        plugin.process(
+            [&pitch, &gate, &velocity, &tempo, &extra],
+            &values,
+            &mut output,
+        );
+        assert!(!plugin.failed());
+        rendered.extend(output);
+    }
+    rendered
+}
+
+#[test]
+fn installed_serum_authentic_states_round_trip_and_remain_distinct() {
+    let _lock = installed_plugin_lock();
+    const SERUM_ID: &str = "56534558667350736572756D20320000";
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return;
+    };
+    let plugin_root = home.join(".vst3");
+    let bank_root = home.join(".local/share/meldritch2/patches/serum2/pressure-system");
+    if !plugin_root.join("Serum2.vst3").is_dir() || !bank_root.join("bass/manifest.json").is_file()
+    {
+        eprintln!("installed Serum authentic patch bank unavailable; skipping conditional test");
+        return;
+    }
+    let base = vst3::load(SERUM_ID, &[plugin_root]).expect("inspect Serum");
+    let bank = vst3::PatchBank::read(&bank_root.join("bass"), &base.descriptor)
+        .expect("validate bass bank");
+    let mut renders = Vec::new();
+    for patch in bank.patches.iter().take(3) {
+        let document = vst3::PluginState::from_bytes(
+            &std::fs::read(bank_root.join("bass").join(&patch.file)).expect("read authentic state"),
+        )
+        .expect("decode authentic state");
+        document.validate(&base.descriptor).expect("state identity");
+        let mut spec = base.clone();
+        spec.state = Some(document.state.clone());
+        let first = render_serum_state(&spec);
+        assert!(energy(&first) > 0.001, "{} rendered silence", patch.id);
+
+        let instance = Instance::new(&spec, 48_000.0).expect("instantiate captured state");
+        let round_trip = instance.save_state().expect("capture restored state");
+        drop(instance);
+        let mut restored = base.clone();
+        restored.state = Some(round_trip);
+        let second = render_serum_state(&restored);
+        let error = first
+            .iter()
+            .zip(&second)
+            .map(|(left, right)| (left - right).abs())
+            .sum::<f64>()
+            / first
+                .iter()
+                .map(|sample| sample.abs())
+                .sum::<f64>()
+                .max(1e-12);
+        assert!(
+            error < 1e-6,
+            "{} state round-trip audio error was {error}",
+            patch.id
+        );
+        renders.push(first);
+    }
+    for pair in renders.windows(2) {
+        let difference = pair[0]
+            .iter()
+            .zip(&pair[1])
+            .map(|(left, right)| (left - right).abs())
+            .sum::<f64>();
+        assert!(
+            difference > 1.0,
+            "authentic Serum patches produced indistinguishable audio"
+        );
+    }
+}
+
 #[test]
 fn pressure_system_hosts_isolated_instruments_and_lsp_master_chain() {
     let _lock = installed_plugin_lock();
@@ -452,7 +544,11 @@ fn pressure_system_hosts_isolated_instruments_and_lsp_master_chain() {
     }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script = std::fs::read_to_string(root.join("examples/80-pressure-system-live.lua"))
-        .expect("read Pressure System composition");
+        .expect("read Pressure System composition")
+        .replace(
+            "local lead = instrument:vst3",
+            "bass:load_patch(\"bass_distorted\")\nlocal lead = instrument:vst3",
+        );
     let graph = lua::read_with_root(&script, &root).expect("load Pressure System composition");
     let machine = compile_at_rate(&graph, 48_000.0).expect("compile Pressure System composition");
     let order = machine.order();
@@ -480,6 +576,9 @@ fn pressure_system_hosts_isolated_instruments_and_lsp_master_chain() {
             .is_ok()
     );
     for control in [
+        "bass_patch",
+        "lead_patch",
+        "drone_patch",
         "bass_cutoff",
         "lead_a_position",
         "drone_release",
@@ -493,6 +592,38 @@ fn pressure_system_hosts_isolated_instruments_and_lsp_master_chain() {
             "missing {control}"
         );
     }
+    let bass_patch = machine
+        .control_handle("bass_patch")
+        .expect("bass patch selector");
+    let lead_patch = machine
+        .control_handle("lead_patch")
+        .expect("lead patch selector");
+    let drone_patch = machine
+        .control_handle("drone_patch")
+        .expect("drone patch selector");
+    assert_eq!(
+        bass_patch.effective_value(),
+        1.0,
+        "Lua load_patch must change the authored initial selector"
+    );
+    let lead_state = machine
+        .vst3_state("instrument/serum_lead")
+        .expect("lead state");
+    let drone_state = machine
+        .vst3_state("instrument/serum_drone")
+        .expect("drone state");
+    bass_patch.publish(2.0).expect("select authentic sub patch");
+    assert_eq!(bass_patch.effective_value(), 2.0);
+    assert_eq!(lead_patch.effective_value(), 0.0);
+    assert_eq!(drone_patch.effective_value(), 0.0);
+    assert_eq!(
+        machine.vst3_state("instrument/serum_lead").unwrap(),
+        lead_state
+    );
+    assert_eq!(
+        machine.vst3_state("instrument/serum_drone").unwrap(),
+        drone_state
+    );
     let part_mutes = [
         "master_mute_drums",
         "master_mute_bass",
@@ -502,6 +633,21 @@ fn pressure_system_hosts_isolated_instruments_and_lsp_master_chain() {
     .map(|id| machine.control_handle(id).expect("master part mute"));
 
     let mut renderer = OfflineRenderer::new(machine, 1024, 2).expect("Pressure renderer");
+    for selection in (0..32).map(|index| (index % 4) as f64) {
+        bass_patch
+            .publish(selection)
+            .expect("rapidly switch authentic bass patch");
+        let mut transition_left = vec![f64::NAN; 1024];
+        let mut transition_right = vec![f64::NAN; 1024];
+        renderer.process_stereo(&mut transition_left, &mut transition_right);
+        assert!(
+            transition_left
+                .iter()
+                .chain(&transition_right)
+                .all(|sample| sample.is_finite()),
+            "rapid patch switching produced invalid audio"
+        );
+    }
     let mut left = vec![0.0; 48_000 * 2];
     let mut right = vec![0.0; 48_000 * 2];
     for (left, right) in left.chunks_mut(1024).zip(right.chunks_mut(1024)) {

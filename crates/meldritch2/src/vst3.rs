@@ -10,6 +10,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use serde::{Deserialize, Serialize};
+
 use vst3_host::{
     Plugin, PluginInfo, ProcessMode, Vst3Host,
     audio::{AudioBuffers, BusAudioBuffers, BusDirection, MediaType},
@@ -19,6 +21,296 @@ use vst3_host::{
 pub const MAX_BLOCK_SIZE: usize = 1024;
 pub const NOTE_LANES: usize = 8;
 pub const EXTRA_NOTE_INPUTS: usize = (NOTE_LANES - 1) * 3;
+const STATE_FILE_MAGIC: &[u8; 16] = b"MELDRITCH_VST3\0\0";
+const STATE_FILE_VERSION: u32 = 1;
+const STATE_FILE_HEADER_BYTES: usize = 16 + 4 + 4 + 8;
+const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StateMetadata {
+    pub class_id: String,
+    pub vendor: String,
+    pub plugin_name: String,
+    pub plugin_version: String,
+    pub patch_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<serde_json::Value>,
+    pub component_state_bytes: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controller_state_bytes: Option<usize>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginState {
+    pub format_version: u32,
+    pub metadata: StateMetadata,
+    /// The byte-exact, versioned component/controller snapshot produced by vst3-host.
+    pub state: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PatchBankPlugin {
+    pub class_id: String,
+    pub vendor: String,
+    pub name: String,
+    pub version: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PatchEntry {
+    pub id: String,
+    pub name: String,
+    pub file: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PatchBank {
+    pub format_version: u32,
+    pub plugin: PatchBankPlugin,
+    pub patches: Vec<PatchEntry>,
+}
+
+impl PatchBank {
+    pub fn new(descriptor: &Descriptor) -> Self {
+        Self {
+            format_version: 1,
+            plugin: PatchBankPlugin {
+                class_id: descriptor.class_id.clone(),
+                vendor: descriptor.vendor.clone(),
+                name: descriptor.name.clone(),
+                version: descriptor.version.clone(),
+            },
+            patches: Vec::new(),
+        }
+    }
+
+    pub fn read(directory: &Path, descriptor: &Descriptor) -> Result<Self, String> {
+        let manifest_path = directory.join("manifest.json");
+        let bytes = std::fs::read(&manifest_path).map_err(|error| {
+            format!(
+                "failed to read patch-bank manifest '{}': {error}",
+                manifest_path.display()
+            )
+        })?;
+        let bank: Self = serde_json::from_slice(&bytes).map_err(|error| {
+            format!(
+                "invalid patch-bank manifest '{}': {error}",
+                manifest_path.display()
+            )
+        })?;
+        bank.validate(directory, descriptor)?;
+        Ok(bank)
+    }
+
+    pub fn validate(&self, directory: &Path, descriptor: &Descriptor) -> Result<(), String> {
+        if self.format_version != 1 {
+            return Err(format!(
+                "unsupported VST3 patch-bank format version {}",
+                self.format_version
+            ));
+        }
+        if !self
+            .plugin
+            .class_id
+            .eq_ignore_ascii_case(&descriptor.class_id)
+        {
+            return Err(format!(
+                "patch bank is for {} ({}) but the configured plugin is {} ({})",
+                self.plugin.name, self.plugin.class_id, descriptor.name, descriptor.class_id
+            ));
+        }
+        if self.patches.len() < 2 {
+            return Err("a VST3 patch bank requires at least two patches".into());
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        let mut names = std::collections::BTreeSet::new();
+        for patch in &self.patches {
+            if patch.id.is_empty()
+                || patch.name.is_empty()
+                || !ids.insert(&patch.id)
+                || !names.insert(&patch.name)
+            {
+                return Err("VST3 patch IDs and names must be non-empty and unique".into());
+            }
+            if patch.file.is_absolute()
+                || patch
+                    .file
+                    .components()
+                    .any(|part| matches!(part, std::path::Component::ParentDir))
+            {
+                return Err(format!(
+                    "patch '{}' must use a relative file inside its bank",
+                    patch.id
+                ));
+            }
+            let state = PluginState::from_bytes(
+                &std::fs::read(directory.join(&patch.file))
+                    .map_err(|error| format!("failed to read patch '{}': {error}", patch.id))?,
+            )?;
+            state.validate(descriptor)?;
+        }
+        Ok(())
+    }
+
+    pub fn write(&self, directory: &Path) -> Result<(), String> {
+        std::fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+        let bytes = serde_json::to_vec_pretty(self).map_err(|error| error.to_string())?;
+        let temporary = directory.join(".manifest.json.tmp");
+        std::fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
+        std::fs::rename(temporary, directory.join("manifest.json"))
+            .map_err(|error| error.to_string())
+    }
+}
+
+impl PluginState {
+    pub fn capture(
+        descriptor: &Descriptor,
+        patch_name: String,
+        state: Vec<u8>,
+    ) -> Result<Self, String> {
+        let (component_state_bytes, controller_state_bytes) = state_stream_sizes(&state)?;
+        Ok(Self {
+            format_version: STATE_FILE_VERSION,
+            metadata: StateMetadata {
+                class_id: descriptor.class_id.clone(),
+                vendor: descriptor.vendor.clone(),
+                plugin_name: descriptor.name.clone(),
+                plugin_version: descriptor.version.clone(),
+                patch_name,
+                source: None,
+                component_state_bytes,
+                controller_state_bytes,
+            },
+            state,
+        })
+    }
+
+    pub fn validate(&self, descriptor: &Descriptor) -> Result<(), String> {
+        if self.format_version != STATE_FILE_VERSION {
+            return Err(format!(
+                "unsupported Meldritch VST3 state format version {}",
+                self.format_version
+            ));
+        }
+        if !self
+            .metadata
+            .class_id
+            .eq_ignore_ascii_case(&descriptor.class_id)
+        {
+            return Err(format!(
+                "VST3 state is for {} ({}) but the configured plugin is {} ({})",
+                self.metadata.plugin_name,
+                self.metadata.class_id,
+                descriptor.name,
+                descriptor.class_id
+            ));
+        }
+        if self.metadata.vendor != descriptor.vendor
+            || self.metadata.plugin_name != descriptor.name
+            || self.metadata.plugin_version != descriptor.version
+        {
+            return Err(format!(
+                "VST3 state metadata identifies {} {} by {}, but the installed plugin is {} {} by {}",
+                self.metadata.plugin_name,
+                self.metadata.plugin_version,
+                self.metadata.vendor,
+                descriptor.name,
+                descriptor.version,
+                descriptor.vendor
+            ));
+        }
+        let (component, controller) = state_stream_sizes(&self.state)?;
+        if component != self.metadata.component_state_bytes
+            || controller != self.metadata.controller_state_bytes
+        {
+            return Err("VST3 state stream sizes do not match its metadata".into());
+        }
+        Ok(())
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
+        if self.state.len() > MAX_STATE_BYTES {
+            return Err("VST3 state exceeds the 64 MiB limit".into());
+        }
+        let metadata = serde_json::to_vec(&self.metadata).map_err(|error| error.to_string())?;
+        let metadata_len =
+            u32::try_from(metadata.len()).map_err(|_| "VST3 state metadata is too large")?;
+        let state_len = u64::try_from(self.state.len()).map_err(|_| "VST3 state is too large")?;
+        let mut bytes =
+            Vec::with_capacity(STATE_FILE_HEADER_BYTES + metadata.len() + self.state.len());
+        bytes.extend_from_slice(STATE_FILE_MAGIC);
+        bytes.extend_from_slice(&self.format_version.to_le_bytes());
+        bytes.extend_from_slice(&metadata_len.to_le_bytes());
+        bytes.extend_from_slice(&state_len.to_le_bytes());
+        bytes.extend_from_slice(&metadata);
+        bytes.extend_from_slice(&self.state);
+        Ok(bytes)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        if !bytes.starts_with(STATE_FILE_MAGIC) {
+            return Err("not a Meldritch VST3 state file".into());
+        }
+        if bytes.len() < STATE_FILE_HEADER_BYTES {
+            return Err("truncated Meldritch VST3 state header".into());
+        }
+        let version = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
+        let metadata_len = u32::from_le_bytes(bytes[20..24].try_into().unwrap()) as usize;
+        let state_len = usize::try_from(u64::from_le_bytes(bytes[24..32].try_into().unwrap()))
+            .map_err(|_| "VST3 state size is not representable")?;
+        if state_len > MAX_STATE_BYTES {
+            return Err("VST3 state exceeds the 64 MiB limit".into());
+        }
+        let metadata_end = STATE_FILE_HEADER_BYTES
+            .checked_add(metadata_len)
+            .ok_or("VST3 state size overflow")?;
+        let expected = metadata_end
+            .checked_add(state_len)
+            .ok_or("VST3 state size overflow")?;
+        if expected != bytes.len() {
+            return Err(format!(
+                "invalid VST3 state file size: header describes {expected} bytes, got {}",
+                bytes.len()
+            ));
+        }
+        let metadata = serde_json::from_slice(&bytes[STATE_FILE_HEADER_BYTES..metadata_end])
+            .map_err(|error| format!("invalid VST3 state metadata: {error}"))?;
+        Ok(Self {
+            format_version: version,
+            metadata,
+            state: bytes[metadata_end..].to_vec(),
+        })
+    }
+}
+
+fn state_stream_sizes(state: &[u8]) -> Result<(usize, Option<usize>), String> {
+    const HOST_MAGIC: &[u8; 16] = b"VST3HOST_STATE\0\0";
+    if !state.starts_with(HOST_MAGIC) {
+        return Ok((state.len(), None));
+    }
+    if state.len() < 28 {
+        return Err("truncated vst3-host state snapshot".into());
+    }
+    let version = u32::from_le_bytes(state[16..20].try_into().unwrap());
+    if version != 1 {
+        return Err(format!(
+            "unsupported vst3-host state snapshot version {version}"
+        ));
+    }
+    let component = u32::from_le_bytes(state[20..24].try_into().unwrap()) as usize;
+    let encoded_controller = u32::from_le_bytes(state[24..28].try_into().unwrap());
+    let controller = (encoded_controller != u32::MAX).then_some(encoded_controller as usize);
+    let expected = 28usize
+        .checked_add(component)
+        .and_then(|size| size.checked_add(controller.unwrap_or(0)))
+        .ok_or("VST3 state size overflow")?;
+    if expected != state.len() {
+        return Err("invalid vst3-host state snapshot size".into());
+    }
+    Ok((component, controller))
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Descriptor {
@@ -513,6 +805,16 @@ impl Instance {
         self.plugin.save_state().map_err(|error| error.to_string())
     }
 
+    pub fn parameter_values(&self, ids: &[u32]) -> Result<Vec<f64>, String> {
+        ids.iter()
+            .map(|id| {
+                self.plugin
+                    .get_parameter(*id)
+                    .map_err(|error| error.to_string())
+            })
+            .collect()
+    }
+
     pub fn latency_samples(&self) -> u32 {
         self.plugin.latency_samples()
     }
@@ -855,5 +1157,46 @@ mod tests {
         assert_eq!(Spec::parameter_name(42), "parameter_42");
         assert_eq!(spec.parameter_id("parameter_42"), Some(42));
         assert_eq!(spec.parameter_id("parameter_7"), None);
+    }
+
+    #[test]
+    fn meldritch_state_file_preserves_component_and_controller_bytes() {
+        let descriptor = Descriptor {
+            path: "fixture.vst3".into(),
+            class_id: "00112233445566778899AABBCCDDEEFF".into(),
+            name: "Fixture".into(),
+            vendor: "Meldritch".into(),
+            category: "Instrument".into(),
+            version: "1.2.3".into(),
+            instrument: true,
+        };
+        let component = [0, 1, 2, 0xff];
+        let controller = [9, 8, 0, 7, 6];
+        let mut snapshot = Vec::from(&b"VST3HOST_STATE\0\0"[..]);
+        snapshot.extend_from_slice(&1u32.to_le_bytes());
+        snapshot.extend_from_slice(&(component.len() as u32).to_le_bytes());
+        snapshot.extend_from_slice(&(controller.len() as u32).to_le_bytes());
+        snapshot.extend_from_slice(&component);
+        snapshot.extend_from_slice(&controller);
+
+        let state = PluginState::capture(&descriptor, "Opaque patch".into(), snapshot.clone())
+            .expect("capture state document");
+        assert_eq!(state.metadata.component_state_bytes, component.len());
+        assert_eq!(
+            state.metadata.controller_state_bytes,
+            Some(controller.len())
+        );
+        let decoded = PluginState::from_bytes(&state.to_bytes().expect("serialize state"))
+            .expect("decode state");
+        assert_eq!(decoded.state, snapshot);
+        decoded.validate(&descriptor).expect("validate identity");
+
+        let mut other = descriptor.clone();
+        other.class_id = "FFEEDDCCBBAA99887766554433221100".into();
+        assert!(decoded.validate(&other).is_err());
+        let mut other_version = descriptor.clone();
+        other_version.version = "2.0.0".into();
+        assert!(decoded.validate(&other_version).is_err());
+        assert!(PluginState::from_bytes(STATE_FILE_MAGIC).is_err());
     }
 }

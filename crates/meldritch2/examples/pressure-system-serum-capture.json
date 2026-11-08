@@ -1,0 +1,16 @@
+{
+  "patches": [
+    { "id": "bass_reese", "name": "BA - Master Reese Theatre" },
+    { "id": "bass_distorted", "name": "BA - Gnarly Reese" },
+    { "id": "bass_sub", "name": "BA - Sub Sustain - Low" },
+    { "id": "bass_rhythmic", "name": "BA - Harmonic Twist" },
+    { "id": "lead_cutting", "name": "LD - Classic Techno Lead" },
+    { "id": "lead_acid", "name": "LD - Deep Acid" },
+    { "id": "lead_wide", "name": "LD - Hypa Saw" },
+    { "id": "lead_modulated", "name": "LD - Crunchwave" },
+    { "id": "drone_evolving", "name": "PD - Dark Shuffle Motion" },
+    { "id": "drone_atmosphere", "name": "PD - Dark Space" },
+    { "id": "drone_industrial", "name": "PD - Distant Desolation" },
+    { "id": "drone_harmonic", "name": "PD - Motion Tech" }
+  ]
+}

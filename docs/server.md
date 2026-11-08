@@ -356,9 +356,10 @@ plane:preset_selector {
 The target is an existing compiled control; clients can select only one of the
 configured names and cannot submit paths. Rust revalidates the plane role and
 index/name before publishing the control. The snapshot reports `active`,
-`active_name`, `pending`, and `failed`. The initial Serum integration preloads
-every patch as an isolated instance, so selection is a bounded graph parameter
-change rather than filesystem or plugin initialization work.
+`active_name`, `pending`, and `failed`. Authentic Serum banks preload every
+captured patch as an isolated processor, so selection is a bounded graph
+parameter change rather than filesystem access or plugin state mutation on the
+audio callback.
 
 Rust revalidates every field and role independently of the Vue interface.
 Unauthorized clients neither receive hidden plane state nor mutate it.
@@ -498,7 +499,7 @@ selector, curated parameter surface, and safe preloaded patch selector; the
 leader receives every plane; the observer receives read-only projections.
 All note scheduling remains in the Rust sequencer and all plugin changes flow
 through compiled control handles. See `docs/vst3.md` for Serum installation,
-factory-preset limitations, and offline rendering.
+factory-preset capture workflow, state-bank limitations, and offline rendering.
 
 ## Performer roles and credentials
 
