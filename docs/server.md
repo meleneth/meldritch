@@ -287,6 +287,10 @@ Lua steps are one-based; wire and Rust steps are zero-based. Pitch accepts MIDI
 is 1–127 and duration is a positive count of sequencer steps wholly contained
 in the pattern. IDs are positive and unique within a logical track/pattern.
 Rests are simply steps without notes. Multiple events may share a step.
+`sequence:logical_notes(pattern, track)` returns the authoritative current
+length and logical notes, including edits accepted from browser and hardware
+control paths. This is the introspection primitive for readable Lua successor
+generation; it is not a second note store.
 
 The compiler assigns notes deterministically to the lowest free voice lane. If
 a later note exceeds configured polyphony it steals the oldest sounding lane
@@ -558,7 +562,7 @@ duration. These are atomics read outside the audio path; no separate telemetry
 stack is introduced.
 
 The server currently runs only with the interactive `perform` owner loop. It
-does not provide TLS, durable sessions, arbitrary piano-roll step counts,
+does not provide TLS, durable sessions,
 cross-cycle notes, per-note automation, a browser arrangement editor, database
 storage, or process isolation for Lua. Logical note metadata is composition
 state and is not yet included in the older canonical sequencer project-save

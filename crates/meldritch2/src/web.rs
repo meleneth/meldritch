@@ -470,7 +470,10 @@ impl Application {
                         } => json!({"id":id,"label":label,"kind":kind,"min":min,"max":max,"scale":scale,"unit":unit}),
                         PlaneControl::Steps { id,label,steps,.. } => json!({"id":id,"label":label,"kind":"step_sequencer","step_count":steps}),
                         PlaneControl::Trigger { id,label,.. } => json!({"id":id,"label":label,"kind":"trigger"}),
-                        PlaneControl::PianoRoll { id,label,steps,pitch_min,pitch_max,tracks,.. } => json!({"id":id,"label":label,"kind":"piano_roll","step_count":steps,"pitch_min":pitch_min,"pitch_max":pitch_max,"voices":tracks.len()}),
+                        PlaneControl::PianoRoll { id,label,steps,pitch_min,pitch_max,tracks,sequencer } => {
+                            let step_count=sequencer.pattern_length(sequencer.active_pattern(),tracks[0]).unwrap_or(*steps);
+                            json!({"id":id,"label":label,"kind":"piano_roll","step_count":step_count,"pitch_min":pitch_min,"pitch_max":pitch_max,"voices":tracks.len()})
+                        },
                         PlaneControl::DrumGrid { id,label,kit_name,steps,lanes,.. } => {
                             let rows=lanes.iter().map(|lane| json!({"id":lane.id,"label":lane.label,"note":lane.note})).collect::<Vec<_>>();
                             json!({"id":id,"label":label,"kind":"drum_grid","kit":kit_name,"step_count":steps,"rows":rows})
@@ -588,6 +591,7 @@ impl Application {
                         ..
                     } => {
                         let pattern = sequencer.active_pattern();
+                        let step_count = sequencer.pattern_length(pattern, tracks[0]).unwrap_or(16);
                         let notes = sequencer
                             .note_events(pattern, tracks[0])
                             .into_iter()
@@ -595,7 +599,7 @@ impl Application {
                             .collect::<Vec<_>>();
                         (
                             id,
-                            json!({"pattern":pattern,"notes":notes,"position":sequencer.current_step()}),
+                            json!({"pattern":pattern,"step_count":step_count,"notes":notes,"position":sequencer.current_step()}),
                         )
                     }
                     PlaneControl::DrumGrid {
@@ -768,7 +772,6 @@ impl Application {
                 PlaneControl::PianoRoll {
                     sequencer,
                     tracks,
-                    steps,
                     pitch_min,
                     pitch_max,
                     ..
@@ -782,6 +785,11 @@ impl Application {
                 if pattern >= sequencer.pattern_names().len() {
                     return Err(DispatchError::bad_request("unknown piano-roll pattern"));
                 }
+                let steps = sequencer
+                    .pattern_length(pattern, tracks[0])
+                    .ok_or_else(|| {
+                        DispatchError::bad_request("unknown piano-roll pattern length")
+                    })?;
                 let id = message
                     .get("id")
                     .and_then(Value::as_u64)
@@ -1048,7 +1056,10 @@ impl Application {
                         ..
                     } => {
                         let pattern = sequencer.active_pattern();
-                        let mut value = (pattern as u64) << 56 | sequencer.current_step() as u64;
+                        let length = sequencer.pattern_length(pattern, tracks[0]).unwrap_or(0);
+                        let mut value = (pattern as u64) << 56
+                            | (length as u64) << 48
+                            | sequencer.current_step() as u64;
                         for note in sequencer.note_events(pattern, tracks[0]) {
                             value = value
                                 .wrapping_mul(1_099_511_628_211)

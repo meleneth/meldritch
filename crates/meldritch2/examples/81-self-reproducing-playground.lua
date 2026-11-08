@@ -12,6 +12,7 @@ local STATE = {
   arp = {octaves = 2, division = 1, gate = 0.72, seed = 1949},
   plugins = {serum_patch = ""},
   pulse = {kick_freq=.25,kick_noise=.04,snare_tone=.54,hat_filter=.62,perc_wave=.48},
+  drum_patterns = {},
   controls = {bpm = 118, master = 0.42, drums = 0.72, melody = 0.62, arp = 0.42,
     live = 0.28, duck_depth = 0.64, duck_release = 0.14, sidechain_route = 0, morph = 0.5},
   patterns = {
@@ -120,9 +121,11 @@ end
 
 local LAST_SUCCESSOR
 local performance
+local sync_persistent_state = function() end
 local function reproduce()
   local path = CURRENT_SOURCE
   local source = read_all(path)
+  sync_persistent_state()
   local begin_marker, end_marker = "-- BEGIN SELF STATE\n", "-- END SELF STATE"
   local first, after_first = assert(source:find(begin_marker, 1, true))
   local last = assert(source:find(end_marker, after_first + 1, true))
@@ -213,6 +216,7 @@ local kit = sequence:drum_kit {name="PULSE Playground",voices={
 
 local patterns, patterns_by_name = {}, {}
 local function arp_notes(definition)
+  if definition.arp_notes then return definition.arp_notes end
   local arp = meldritch.arp.new {mode=definition.arp_mode,octaves=STATE.arp.octaves,
     clock_division=STATE.arp.division,gate=STATE.arp.gate,seed=STATE.arp.seed}
   local events = arp:events(definition.length,
@@ -227,7 +231,7 @@ local function write_pattern(index)
   local definition, pattern = STATE.patterns[index], patterns[index]
   pattern:notes(melody_track, definition.notes, definition.length)
   pattern:notes(arp_track, arp_notes(definition), definition.length)
-  pattern:drums(kit, STATE.drums, 16)
+  pattern:drums(kit, STATE.drum_patterns[definition.name] or STATE.drums, 16)
 end
 
 for index, definition in ipairs(STATE.patterns) do
@@ -236,6 +240,31 @@ for index, definition in ipairs(STATE.patterns) do
   write_pattern(index)
 end
 sequence:switch_pattern(STATE.patterns[1].name)
+
+local function captured_notes(pattern, track)
+  local snapshot=sequence:logical_notes(pattern,track)
+  local result={}
+  for index,note in ipairs(snapshot.notes) do result[index]={id=note.id,step=note.step,pitch=note.pitch,
+    velocity=note.velocity,duration=note.duration,legato=note.legato} end
+  return snapshot.length,result
+end
+
+sync_persistent_state=function()
+  for index,definition in ipairs(STATE.patterns) do
+    local pattern=patterns[index]
+    definition.length,definition.notes=captured_notes(pattern,melody_track)
+    local _,arp_events=captured_notes(pattern,arp_track);definition.arp_notes=arp_events
+    local lanes={}
+    for _,voice in ipairs(kit.voices) do
+      local _,events=captured_notes(pattern,voice)
+      local hits={}
+      for hit_index,event in ipairs(events) do hits[hit_index]={id=event.id,step=event.step,
+        velocity=event.velocity,duration=event.duration} end
+      lanes[voice.id]=hits
+    end
+    STATE.drum_patterns[definition.name]=lanes
+  end
+end
 
 local function active_definition()
   local index = sequence:state().viewed_pattern
@@ -408,7 +437,7 @@ server:websocket("/performance",{})
 performance=server:performance {name="Self-Reproducing Lua Playground · generation "..STATE.generation}
 performance:role("leader",{controls="*"});performance:role("observer",{controls={}})
 local editor=performance:plane {id="editor",label="Lua-Owned Musical Editor",roles={"leader"},read_only_roles={"observer"}}
-editor:piano_roll {id="melody_roll",label="Melody (16-step browser viewport)",track=melody_track,steps=16,pitch_min=36,pitch_max=84}
+editor:piano_roll {id="melody_roll",label="Variable-length Melody",track=melody_track,steps=32,pitch_min=36,pitch_max=84}
 editor:pattern_selector {id="patterns",label="Variable-length patterns",sequencer=sequence,boundary="bar"}
 editor:preset_selector {id="key_root",label="Key",target="key_root_target",presets=ROOT_NAMES}
 editor:preset_selector {id="scale_mode",label="Scale / mode",target="scale_mode_target",presets=MODE_NAMES}
@@ -443,8 +472,7 @@ if STATE.editor.variant=="expanded" then
 end
 
 server:get("/api/playground",function() return {generation=STATE.generation,successor=LAST_SUCCESSOR,
-  editor=STATE.editor,key=STATE.key,patterns=STATE.patterns,limitations={live_midi_chord_arp="unsupported: no retained Lua MIDI chord snapshot",
-  browser_pattern_tail="unsupported: piano-roll projection is fixed at 16 steps"}} end)
+  editor=STATE.editor,key=STATE.key,patterns=STATE.patterns,limitations={live_midi_chord_arp="unsupported: no retained Lua MIDI chord snapshot"}} end)
 server:post("/api/playground/save",function() sync_controls();return {successor=reproduce()},201 end)
 
 instrument:performance {layout="step_grid",sequencer=sequence,

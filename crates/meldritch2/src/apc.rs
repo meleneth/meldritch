@@ -1222,6 +1222,24 @@ mod tests {
         for name in ["Kick", "Snare", "Hat", "Bass"] {
             sequence.add_track(name.into()).unwrap();
         }
+        for (track, pitch) in [(0, 36), (1, 38), (2, 42)] {
+            sequence
+                .set_note_events(
+                    0,
+                    &[track],
+                    64,
+                    &[crate::sequencer::NoteEvent {
+                        id: 99,
+                        step: 63,
+                        pitch,
+                        velocity: 80,
+                        duration: 1,
+                        legato: false,
+                    }],
+                )
+                .unwrap();
+        }
+        sequence.set_note_events(0, &[3], 64, &[]).unwrap();
         sequence.select_track(3).unwrap();
         sequence.set_key_root(36).unwrap();
         sequence.set_key_track(3).unwrap();
@@ -1244,6 +1262,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sequence.pattern().velocities[0][0], 1.0);
+        assert!(
+            sequence
+                .note_events(0, 0)
+                .iter()
+                .any(|note| note.step == 0 && note.pitch == 36)
+        );
 
         apply_authored(
             &mut state,
@@ -1264,6 +1288,12 @@ mod tests {
         let pattern = sequence.pattern();
         assert!((pattern.pitches_hz[3][1] - midi_hz(36)).abs() < 0.01);
         assert_eq!(pattern.gates[3][1], 3.0);
+        assert!(
+            sequence
+                .note_events(0, 3)
+                .iter()
+                .any(|note| note.step == 1 && note.pitch == 36 && note.duration == 3)
+        );
 
         apply_authored(
             &mut state,
@@ -1275,6 +1305,36 @@ mod tests {
         .unwrap();
         assert_eq!(sequence.key_root(), 37);
         assert!((sequence.pattern().pitches_hz[3][1] - midi_hz(37)).abs() < 0.01);
+        assert!(
+            sequence
+                .note_events(0, 3)
+                .iter()
+                .any(|note| note.step == 1 && note.pitch == 37)
+        );
+
+        sequence.set_step_bank(2).unwrap();
+        apply_authored(
+            &mut state,
+            Input::Grid(1, true),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        apply_authored(
+            &mut state,
+            Input::Grid(1, false),
+            &sequence,
+            &mapping,
+            &handles,
+        )
+        .unwrap();
+        assert!(
+            sequence
+                .note_events(0, 3)
+                .iter()
+                .any(|note| note.step == 17 && note.pitch == 37)
+        );
     }
 
     #[test]

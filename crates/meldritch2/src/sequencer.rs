@@ -27,6 +27,12 @@ pub struct NoteEvent {
     pub legato: bool,
 }
 
+#[derive(Clone, Debug)]
+struct LogicalTrackGroup {
+    tracks: Vec<usize>,
+    default_pitch: Option<u8>,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Pattern {
     pub velocities: [[f32; MAX_STEPS]; MAX_TRACKS],
@@ -103,6 +109,7 @@ pub struct SequencerControl {
     track_names: Mutex<Vec<String>>,
     track_count: AtomicU8,
     pattern: Mutex<PublishedPattern>,
+    logical_tracks: Mutex<BTreeMap<usize, LogicalTrackGroup>>,
     command: AtomicU8,
     playing: AtomicBool,
     current_step: AtomicU8,
@@ -170,6 +177,7 @@ impl SequencerControl {
                 note_events: BTreeMap::new(),
                 pending_revision: true,
             }),
+            logical_tracks: Mutex::new(BTreeMap::new()),
             command: AtomicU8::new(1),
             playing: AtomicBool::new(true),
             current_step: AtomicU8::new(0),
@@ -515,6 +523,15 @@ impl SequencerControl {
         if tracks.iter().any(|track| *track >= track_count) {
             return Err("piano roll references an unknown sequencer voice".into());
         }
+        if self
+            .logical_tracks
+            .lock()
+            .map_err(|_| "sequencer logical track state poisoned")?
+            .get(&tracks[0])
+            .is_some_and(|group| group.tracks != tracks)
+        {
+            return Err("logical note track voice membership changed".into());
+        }
         let mut ids = std::collections::BTreeSet::new();
         if events.iter().any(|event| {
             event.id == 0
@@ -589,6 +606,20 @@ impl SequencerControl {
         }
         state.note_events.insert((pattern, tracks[0]), ordered);
         state.pending_revision = true;
+        drop(state);
+        let mut logical_tracks = self
+            .logical_tracks
+            .lock()
+            .map_err(|_| "sequencer logical track state poisoned")?;
+        let group = logical_tracks
+            .entry(tracks[0])
+            .or_insert_with(|| LogicalTrackGroup {
+                tracks: tracks.to_vec(),
+                default_pitch: None,
+            });
+        if group.default_pitch.is_none() {
+            group.default_pitch = events.first().map(|event| event.pitch);
+        }
         Ok(())
     }
 
@@ -598,6 +629,77 @@ impl SequencerControl {
             .ok()
             .and_then(|state| state.note_events.get(&(pattern, first_track)).cloned())
             .unwrap_or_default()
+    }
+
+    pub fn pattern_length(&self, pattern: usize, track: usize) -> Option<usize> {
+        if track >= MAX_TRACKS {
+            return None;
+        }
+        self.pattern
+            .lock()
+            .ok()
+            .and_then(|state| {
+                state
+                    .authored
+                    .get(pattern)
+                    .map(|pattern| pattern.lengths[track])
+            })
+            .map(usize::from)
+    }
+
+    fn logical_track(&self, first_track: usize) -> Option<LogicalTrackGroup> {
+        self.logical_tracks
+            .lock()
+            .ok()
+            .and_then(|groups| groups.get(&first_track).cloned())
+    }
+
+    fn midi_pitch(frequency: f32) -> u8 {
+        (69.0 + 12.0 * (frequency / 440.0).log2())
+            .round()
+            .clamp(0.0, 127.0) as u8
+    }
+
+    fn toggle_logical_note(
+        &self,
+        pattern: usize,
+        track: usize,
+        step: usize,
+    ) -> Result<bool, String> {
+        let Some(group) = self.logical_track(track) else {
+            return Ok(false);
+        };
+        let length = self
+            .pattern_length(pattern, track)
+            .ok_or_else(|| "unknown logical note pattern".to_owned())?;
+        if step >= length {
+            return Err("sequencer step is beyond the pattern length".into());
+        }
+        let mut events = self.note_events(pattern, track);
+        if events.iter().any(|event| usize::from(event.step) == step) {
+            events.retain(|event| usize::from(event.step) != step);
+        } else {
+            let id = events
+                .iter()
+                .map(|event| event.id)
+                .max()
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or_else(|| "note ID space exhausted".to_owned())?;
+            let fallback = self
+                .pattern_at(pattern)
+                .map(|pattern| Self::midi_pitch(pattern.pitches_hz[track][step]));
+            events.push(NoteEvent {
+                id,
+                step: step as u8,
+                pitch: group.default_pitch.or(fallback).unwrap_or(60),
+                velocity: 127,
+                duration: 1,
+                legato: false,
+            });
+        }
+        self.set_note_events(pattern, &group.tracks, length, &events)?;
+        Ok(true)
     }
 
     pub fn edit_note_events<F>(
@@ -617,6 +719,9 @@ impl SequencerControl {
     pub fn toggle(&self, track: usize, step: usize) -> Result<(), String> {
         if track >= self.track_names().len() || step >= MAX_STEPS {
             return Err("sequencer cell is out of range".into());
+        }
+        if self.toggle_logical_note(self.viewed_pattern(), track, step)? {
+            return Ok(());
         }
         let mut state = self
             .pattern
@@ -645,6 +750,9 @@ impl SequencerControl {
         if track >= self.track_names().len() || step >= MAX_STEPS {
             return Err("sequencer cell is out of range".into());
         }
+        if self.toggle_logical_note(pattern, track, step)? {
+            return Ok(());
+        }
         let mut state = self
             .pattern
             .lock()
@@ -663,6 +771,18 @@ impl SequencerControl {
         Ok(())
     }
     pub fn clear_track(&self, track: usize) -> Result<(), String> {
+        if let Some(group) = self.logical_track(track) {
+            let viewed = self.viewed_pattern();
+            let length = self
+                .pattern_length(viewed, track)
+                .ok_or_else(|| "unknown logical note pattern".to_owned())?;
+            self.set_note_events(viewed, &group.tracks, length, &[])?;
+            self.set_status(format!(
+                "Cleared {}",
+                self.track_names().get(track).cloned().unwrap_or_default()
+            ));
+            return Ok(());
+        }
         let mut state = self
             .pattern
             .lock()
@@ -739,6 +859,19 @@ impl SequencerControl {
         if track >= self.track_names().len() {
             return Err("track is out of range".into());
         }
+        if let Some(group) = self.logical_track(track) {
+            let viewed = self.viewed_pattern();
+            let length = self
+                .pattern_length(viewed, track)
+                .ok_or_else(|| "unknown logical note pattern".to_owned())?;
+            let mut events = self.note_events(viewed, track);
+            for event in &mut events {
+                event.step = (i32::from(event.step) + amount).rem_euclid(length as i32) as u8;
+                let remaining = length - usize::from(event.step);
+                event.duration = event.duration.min(remaining as u8);
+            }
+            return self.set_note_events(viewed, &group.tracks, length, &events);
+        }
         let mut state = self
             .pattern
             .lock()
@@ -772,6 +905,14 @@ impl SequencerControl {
         if track >= self.track_names().len() {
             return Err("track is out of range".into());
         }
+        if let Some(group) = self.logical_track(track) {
+            let mut events = self.note_events(pattern, track);
+            events.retain(|event| usize::from(event.step) < length);
+            for event in &mut events {
+                event.duration = event.duration.min((length - usize::from(event.step)) as u8);
+            }
+            return self.set_note_events(pattern, &group.tracks, length, &events);
+        }
         let mut state = self
             .pattern
             .lock()
@@ -803,6 +944,43 @@ impl SequencerControl {
             || !(0.0..=MAX_STEPS as f32).contains(&gate_steps)
         {
             return Err("sequencer note values are invalid".into());
+        }
+        if let Some(group) = self.logical_track(track) {
+            let pattern = self.viewed_pattern();
+            let length = self
+                .pattern_length(pattern, track)
+                .ok_or_else(|| "unknown logical note pattern".to_owned())?;
+            if step >= length {
+                return Err("sequencer note is beyond the track pattern length".into());
+            }
+            let pitch = Self::midi_pitch(pitch_hz);
+            let mut events = self.note_events(pattern, track);
+            if velocity == 0.0 {
+                events.retain(|event| usize::from(event.step) != step || event.pitch != pitch);
+            } else if let Some(event) = events
+                .iter_mut()
+                .find(|event| usize::from(event.step) == step && event.pitch == pitch)
+            {
+                event.velocity = (velocity * 127.0).round().clamp(1.0, 127.0) as u8;
+                event.duration = gate_steps.round().clamp(1.0, (length - step) as f32) as u8;
+            } else {
+                let id = events
+                    .iter()
+                    .map(|event| event.id)
+                    .max()
+                    .unwrap_or(0)
+                    .checked_add(1)
+                    .ok_or_else(|| "note ID space exhausted".to_owned())?;
+                events.push(NoteEvent {
+                    id,
+                    step: step as u8,
+                    pitch,
+                    velocity: (velocity * 127.0).round().clamp(1.0, 127.0) as u8,
+                    duration: gate_steps.round().clamp(1.0, (length - step) as f32) as u8,
+                    legato: false,
+                });
+            }
+            return self.set_note_events(pattern, &group.tracks, length, &events);
         }
         let mut state = self
             .pattern
@@ -1020,12 +1198,28 @@ impl SequencerControl {
         if actual == 0 {
             return Ok(());
         }
+        let track = usize::from(self.key_track.load(Ordering::Acquire));
+        if let Some(group) = self.logical_track(track) {
+            let patterns = self.pattern_names().len();
+            for pattern in 0..patterns {
+                let Some(length) = self.pattern_length(pattern, track) else {
+                    continue;
+                };
+                let mut events = self.note_events(pattern, track);
+                for event in &mut events {
+                    event.pitch = (i16::from(event.pitch) + i16::from(actual)).clamp(0, 127) as u8;
+                }
+                self.set_note_events(pattern, &group.tracks, length, &events)?;
+            }
+            self.key_root.store(next, Ordering::Release);
+            self.set_status(format!("Key root MIDI {next}"));
+            return Ok(());
+        }
         let ratio = 2.0_f32.powf(actual as f32 / 12.0);
         let mut state = self
             .pattern
             .lock()
             .map_err(|_| "sequencer pattern state poisoned")?;
-        let track = usize::from(self.key_track.load(Ordering::Acquire));
         for pattern in &mut state.authored {
             for step in 0..usize::from(pattern.lengths[track]) {
                 if pattern.velocities[track][step] > 0.0 {

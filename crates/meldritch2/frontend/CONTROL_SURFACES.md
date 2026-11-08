@@ -77,10 +77,11 @@ notifications. They must not import a Pinia store.
 
 The implementation uses only `control.set`, `note.create/update/delete`, and
 `adsr.set`; server-projected `read_only` remains enforced in both UI and server.
-It introduces no persistence format and makes no Rust changes.
+It introduces no frontend persistence format: Rust remains the authoritative
+logical-note store, and Lua reads that store when producing a successor.
 
-The current Lua piano-roll interface exposes one viewed 16-step pattern at a
-time, so the interpolation function is reusable/tested but cannot offer a
+The current Lua piano-roll interface exposes one viewed pattern at its
+authoritative length, so the interpolation function is reusable/tested but cannot offer a
 two-pattern picker until both source patterns are present in the existing
 frontend snapshot. Transformation batches are sent as existing per-note
 semantic commands because no batch/undo protocol exists. ADSR curve shapes are

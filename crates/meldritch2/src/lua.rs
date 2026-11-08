@@ -488,14 +488,14 @@ impl UserData for LuaWebPlane {
             let pitch_min = spec.get::<Option<u8>>("pitch_min")?.unwrap_or(36);
             let pitch_max = spec.get::<Option<u8>>("pitch_max")?.unwrap_or(60);
             if id.is_empty()
-                || steps != 16
+                || !(1..=crate::sequencer::MAX_STEPS).contains(&steps)
                 || tracks.is_empty()
                 || tracks.len() > crate::sequencer::MAX_NOTE_VOICES
                 || pitch_min >= pitch_max
                 || pitch_max > 127
             {
                 return Err(mlua::Error::external(
-                    "piano roll requires an ID, 16 steps, 1..4 voices, and an increasing MIDI pitch range",
+                    "piano roll requires an ID, 1..128 steps, 1..4 voices, and an increasing MIDI pitch range",
                 ));
             }
             let label = spec
@@ -927,6 +927,35 @@ impl UserData for LuaSequencer {
                 this.control
                     .set_note_events(pattern, &tracks, length, &parsed)
                     .map_err(mlua::Error::external)
+            },
+        );
+        methods.add_method(
+            "logical_notes",
+            |lua, this, (pattern, first_track): (usize, usize)| {
+                let length = this
+                    .control
+                    .pattern_length(pattern, first_track)
+                    .ok_or_else(|| mlua::Error::external("unknown logical note pattern"))?;
+                let result = lua.create_table()?;
+                result.set("length", length)?;
+                let notes = lua.create_table()?;
+                for (index, event) in this
+                    .control
+                    .note_events(pattern, first_track)
+                    .into_iter()
+                    .enumerate()
+                {
+                    let note = lua.create_table()?;
+                    note.set("id", event.id)?;
+                    note.set("step", usize::from(event.step) + 1)?;
+                    note.set("pitch", event.pitch)?;
+                    note.set("velocity", event.velocity)?;
+                    note.set("duration", event.duration)?;
+                    note.set("legato", event.legato)?;
+                    notes.set(index + 1, note)?;
+                }
+                result.set("notes", notes)?;
+                Ok(result)
             },
         );
         methods.add_method("queue_pattern", |_, this, pattern: usize| {
@@ -2021,6 +2050,12 @@ local function decorate_scope(facade, scope, prefix)
     end
     function sequence:copy_pattern(from,to)
       self._native:copy_pattern(assert(self._patterns[from],"unknown pattern"),assert(self._patterns[to],"unknown pattern"))
+    end
+    function sequence:logical_notes(pattern, track)
+      local pattern_index=type(pattern)=="table" and pattern.index or assert(self._patterns[pattern],"unknown pattern: "..tostring(pattern))
+      local tracks=type(track)=="table" and track._track_indices or nil
+      assert(tracks and tracks[1],"logical_notes requires a logical note track or drum voice")
+      return self._native:logical_notes(pattern_index,tracks[1])
     end
     function sequence:duplicate_pattern(from,to)
       local from_index=assert(self._patterns[from],"unknown pattern: "..tostring(from))

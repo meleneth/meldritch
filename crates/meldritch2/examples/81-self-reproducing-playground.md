@@ -27,20 +27,32 @@ two-pattern interpolation, pattern-driven arpeggiation, editor variants, and
 successor generation. APC and Stream Deck use existing control surfaces; the
 browser uses the existing Vue/Pinia/Phaser projection.
 
-## Demonstrated host gaps
+## Persistent-state ownership
+
+Browser/Phaser note commands and APC mini grid edits converge on the
+sequencer's retained logical-note representation. At Save, Lua reads that
+authoritative representation through `sequence:logical_notes(...)`; it does
+not infer the edit source or rely on a controller-specific shadow store. Pitch,
+step, duration, velocity, logical ID, pattern length, and the supported legato
+flag are emitted as readable Lua and reconstructed before playback starts.
+
+The browser piano roll follows the active pattern length and supports the
+playground's 16-, 20-, 24-, and 32-step patterns, including note edits after
+step 16. APC and browser edits to the same pattern therefore reproduce in the
+same successor.
+
+## Remaining host gaps
 
 - MicroLab can audition the independent monophonic live voice, but Lua cannot observe its
   retained held-note set. Live held-chord arpeggiation and record-style MIDI
   note entry are therefore unsupported. No fixed chord is substituted.
-- The host plays 16-, 20-, 24-, and 32-step melodic patterns, but the browser
-  piano-roll projection is fixed at 16 steps. The tail remains audible and
-  editable through Lua/APC actions but is not a complete browser viewport.
-- Direct browser piano-roll and drum-grid edits mutate authoritative host
-  patterns without a Lua-readable note snapshot. Reproducing edits must use
-  the Lua-owned entry/transform controls. The quine does not use the older
-  project-save format and preserves its logical note IDs in its source state.
 - Visual arrangement authoring is absent. Pattern selection and transport use
   the existing Lua-authored selector and hardware mappings.
+
+Transport position, held MIDI notes, pending boundary transitions, and the
+instantaneous arpeggiator cursor are performance state rather than persistent
+composition state and are intentionally not serialized. The quine does not use
+the older project-save format; it owns its readable source and mutable state.
 
 Run the focused three-generation regression with:
 

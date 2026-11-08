@@ -37,7 +37,7 @@ export const usePerformanceStore = defineStore("performance", () => {
         if (control.kind === "piano_roll") {
           const state = value as Pick<
             typeof control,
-            "pattern" | "notes" | "position"
+            "pattern" | "step_count" | "notes" | "position"
           >;
           return { ...control, ...state };
         }

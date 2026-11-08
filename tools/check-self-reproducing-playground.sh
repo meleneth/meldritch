@@ -7,6 +7,11 @@ source_file="$root/crates/meldritch2/examples/81-self-reproducing-playground.lua
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+cargo test -p meldritch2 --manifest-path "$root/Cargo.toml" --lib \
+  apc::tests::authored_keylocked_piano_roll_edits_drums_notes_durations_and_key
+cargo test -p meldritch2 --manifest-path "$root/Cargo.toml" --test web_server \
+  playground_successor_reproduces_browser_and_apc_logical_notes
+
 if [[ ! -x "$binary" ]]; then
   cargo build -p meldritch2 --bin meldritch2 --manifest-path "$root/Cargo.toml"
 fi
@@ -33,6 +38,9 @@ done
 grep -q 'bpm = 127' "$work/81-self-reproducing-playground.g1.lua"
 grep -q 'variant = "expanded"' "$work/81-self-reproducing-playground.g1.lua"
 grep -q 'step = 15' "$work/81-self-reproducing-playground.g1.lua"
+for length in 16 20 24 32; do
+  grep -q "length = $length" "$work/81-self-reproducing-playground.g1.lua"
+done
 
 normalize() {
   sed -E \

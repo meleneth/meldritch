@@ -61,7 +61,9 @@ class PianoRuntime implements SurfaceRuntime<PatternModel> {
     this.graphics = scene.add.graphics();
     this.model = binding.read();
     this.stop = binding.subscribe(({ value }) => {
+      const lengthChanged = this.model.length !== value.length;
       this.model = value;
+      if (lengthChanged) this.fitModel();
       this.render();
     });
     this.gesture = new SurfaceGestureController(canvas, {
@@ -75,6 +77,18 @@ class PianoRuntime implements SurfaceRuntime<PatternModel> {
         this.render();
       },
     });
+  }
+
+  private fitModel() {
+    this.viewport.fit(
+      {
+        x: 0,
+        y: 0,
+        width: this.model.length,
+        height: this.options.pitchMax - this.options.pitchMin + 1,
+      },
+      4,
+    );
   }
 
   private noteRect(note: PatternNote) {
@@ -248,16 +262,7 @@ class PianoRuntime implements SurfaceRuntime<PatternModel> {
     this.width = Math.max(1, width);
     this.height = Math.max(1, height);
     this.viewport.resize(width, height);
-    if (this.viewport.zoomX === 1 && this.viewport.zoomY === 1)
-      this.viewport.fit(
-        {
-          x: 0,
-          y: 0,
-          width: this.model.length,
-          height: this.options.pitchMax - this.options.pitchMin + 1,
-        },
-        4,
-      );
+    if (this.viewport.zoomX === 1 && this.viewport.zoomY === 1) this.fitModel();
     this.render();
   }
   setBinding(binding: SurfaceBinding<PatternModel>) {
@@ -265,7 +270,9 @@ class PianoRuntime implements SurfaceRuntime<PatternModel> {
     this.binding = binding;
     this.model = binding.read();
     this.stop = binding.subscribe(({ value }) => {
+      const lengthChanged = this.model.length !== value.length;
       this.model = value;
+      if (lengthChanged) this.fitModel();
       this.render();
     });
     this.render();

@@ -1,4 +1,5 @@
 use std::{
+    sync::Arc,
     thread,
     time::{Duration, Instant},
 };
@@ -95,6 +96,50 @@ fn agent() -> ureq::Agent {
         .http_status_as_error(false)
         .build()
         .new_agent()
+}
+
+fn save_playground(program: &mut lua::Program) -> std::path::PathBuf {
+    let machine = compile(program.graph()).unwrap();
+    let controls = machine
+        .control_ids()
+        .map(|id| {
+            let handle = machine.control_handle(id).unwrap();
+            let value = handle.effective_value();
+            (handle, value)
+        })
+        .collect();
+    let address = program
+        .events_mut()
+        .start_server(controls)
+        .unwrap()
+        .unwrap();
+    let save = thread::spawn(move || {
+        let mut response = agent()
+            .post(format!("http://{address}/api/playground/save"))
+            .send_empty()
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 201);
+        response_json(&mut response)
+    });
+    let saved = poll_thread(program, save);
+    std::path::PathBuf::from(saved["successor"].as_str().unwrap())
+}
+
+fn normalized_successor(source: &str) -> String {
+    source
+        .lines()
+        .map(|line| {
+            let field = line.trim_start();
+            if field.starts_with("generation = ") {
+                "  generation = N,".to_owned()
+            } else if field.starts_with("source = ") {
+                "  source = \"SOURCE\",".to_owned()
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn start() -> (
@@ -1001,6 +1046,173 @@ return instrument
     );
     assert!(sequencer.muted(0));
     assert!(!sequencer.muted(1));
+}
+
+#[test]
+fn playground_successor_reproduces_browser_and_apc_logical_notes() {
+    let root = std::env::temp_dir().join(format!(
+        "meldritch-self-reproduction-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let source_path = root.join("81-self-reproducing-playground.lua");
+    let original = include_str!("../examples/81-self-reproducing-playground.lua");
+    let source = original
+        .replace(
+            "crates/meldritch2/examples/81-self-reproducing-playground.lua",
+            source_path.to_str().unwrap(),
+        )
+        .replace(
+            "local native_only = os.getenv(\"MELDRITCH_PLAYGROUND_NATIVE_ONLY\") == \"1\"",
+            "local native_only = true",
+        )
+        .replace(
+            "port=tonumber(os.getenv(\"MELDRITCH_PLAYGROUND_PORT\") or \"8081\")",
+            "port=0",
+        );
+    std::fs::write(&source_path, &source).unwrap();
+
+    let mut program = lua::read_program_with_root(&source, &root).unwrap();
+    let machine = compile(program.graph()).unwrap();
+    let sequence = Arc::clone(&machine.sequencer_controls()[0]);
+    sequence.set_arrangement(&[(1, 1)]).unwrap();
+    sequence.view_pattern(1).unwrap();
+    assert_eq!(sequence.active_pattern(), 1);
+    assert_eq!(sequence.pattern_length(1, 0), Some(24));
+
+    let controls = machine
+        .control_ids()
+        .map(|id| {
+            let handle = machine.control_handle(id).unwrap();
+            let value = handle.effective_value();
+            (handle, value)
+        })
+        .collect();
+    let address = program
+        .events_mut()
+        .start_server(controls)
+        .unwrap()
+        .unwrap();
+    let browser = thread::spawn(move || {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async move {
+                let (mut socket, _) = connect_async(format!("ws://{address}/performance"))
+                    .await
+                    .unwrap();
+                let snapshot: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                let roll = snapshot["state"]["planes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .flat_map(|plane| plane["controls"].as_array().unwrap())
+                    .find(|control| control["id"] == "melody_roll")
+                    .unwrap();
+                assert_eq!(roll["step_count"], 24);
+                socket
+                    .send(Message::Text(
+                        json!({"type":"note.create","plane":"editor","control":"melody_roll",
+                        "pattern":1,"step":19,"pitch":65,"velocity":91,"duration":3})
+                        .to_string()
+                        .into(),
+                    ))
+                    .await
+                    .unwrap();
+                let updated: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert!(
+                    updated["state"]["values"]["editor/melody_roll"]["notes"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|note| note["step"] == 19 && note["pitch"] == 65)
+                );
+            })
+    });
+    poll_thread(&mut program, browser);
+
+    // This is the production mutation method used by APC's piano grid. It now
+    // updates the same logical-note collection as the browser command above.
+    sequence
+        .set_note(0, 17, 440.0 * 2.0_f32.powf((62.0 - 69.0) / 12.0), 0.85, 2.0)
+        .unwrap();
+    let retained = sequence.note_events(1, 0);
+    assert!(
+        retained
+            .iter()
+            .any(|note| note.step == 19 && note.pitch == 65)
+    );
+    assert!(
+        retained
+            .iter()
+            .any(|note| note.step == 17 && note.pitch == 62)
+    );
+
+    sequence.stop();
+    let save_url = format!("http://{address}/api/playground/save");
+    let save = thread::spawn(move || {
+        let mut response = agent().post(&save_url).send_empty().unwrap();
+        assert_eq!(response.status().as_u16(), 201);
+        response_json(&mut response)
+    });
+    let saved = poll_thread(&mut program, save);
+    let successor_path = std::path::PathBuf::from(saved["successor"].as_str().unwrap());
+    assert!(successor_path.is_file());
+    let successor = std::fs::read_to_string(&successor_path).unwrap();
+    assert!(!successor.contains("playing ="));
+
+    let successor = successor.replace(
+        "local native_only = os.getenv(\"MELDRITCH_PLAYGROUND_NATIVE_ONLY\") == \"1\"",
+        "local native_only = true",
+    );
+    let mut generation_one = lua::read_program_with_root(&successor, &root).unwrap();
+    let restored = &generation_one
+        .graph()
+        .performance
+        .as_ref()
+        .unwrap()
+        .sequencer;
+    assert_eq!(restored.pattern_length(1, 0), Some(24));
+    assert!(restored.playing());
+    let notes = restored.note_events(1, 0);
+    assert!(notes.iter().any(|note| {
+        note.step == 19 && note.pitch == 65 && note.velocity == 91 && note.duration == 3
+    }));
+    assert!(notes.iter().any(|note| {
+        note.step == 17 && note.pitch == 62 && note.velocity == 108 && note.duration == 2
+    }));
+
+    let generation_two_path = save_playground(&mut generation_one);
+    let generation_two_source = std::fs::read_to_string(&generation_two_path).unwrap();
+    let mut generation_two = lua::read_program_with_root(&generation_two_source, &root).unwrap();
+    let restored_two = &generation_two
+        .graph()
+        .performance
+        .as_ref()
+        .unwrap()
+        .sequencer;
+    assert!(restored_two.note_events(1, 0).iter().any(|note| {
+        note.step == 19 && note.pitch == 65 && note.velocity == 91 && note.duration == 3
+    }));
+    assert!(restored_two.note_events(1, 0).iter().any(|note| {
+        note.step == 17 && note.pitch == 62 && note.velocity == 108 && note.duration == 2
+    }));
+    let generation_three_path = save_playground(&mut generation_two);
+    let generation_three_source = std::fs::read_to_string(generation_three_path).unwrap();
+    assert_eq!(
+        normalized_successor(&successor),
+        normalized_successor(&generation_two_source)
+    );
+    assert_eq!(
+        normalized_successor(&generation_two_source),
+        normalized_successor(&generation_three_source)
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
