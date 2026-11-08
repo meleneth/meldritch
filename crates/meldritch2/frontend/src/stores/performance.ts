@@ -1,7 +1,13 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { PerformanceSocket } from "../transport/websocket";
-import type { Command, Plane, Snapshot } from "../types/protocol";
+import type {
+  AdsrControl,
+  Command,
+  NoteEvent,
+  Plane,
+  Snapshot,
+} from "../types/protocol";
 export const usePerformanceStore = defineStore("performance", () => {
   const status = ref("connecting"),
     revision = ref(-1),
@@ -113,6 +119,33 @@ export const usePerformanceStore = defineStore("performance", () => {
     if (key) pending.value.set(key, value);
     socket.send(command);
   }
+  function patchControl(
+    planeId: string,
+    controlId: string,
+    patch: Record<string, unknown>,
+  ) {
+    planes.value = planes.value.map((plane) =>
+      plane.id !== planeId
+        ? plane
+        : {
+            ...plane,
+            controls: plane.controls.map((control) =>
+              control.id === controlId
+                ? ({ ...control, ...patch } as typeof control)
+                : control,
+            ),
+          },
+    );
+  }
+  const patchRange = (planeId: string, controlId: string, value: number) =>
+    patchControl(planeId, controlId, { value });
+  const patchNotes = (planeId: string, controlId: string, notes: NoteEvent[]) =>
+    patchControl(planeId, controlId, { notes });
+  const patchAdsr = (
+    planeId: string,
+    controlId: string,
+    values: AdsrControl["values"],
+  ) => patchControl(planeId, controlId, { values });
   return {
     status,
     revision,
@@ -126,6 +159,9 @@ export const usePerformanceStore = defineStore("performance", () => {
     connect,
     authenticate,
     send,
+    patchRange,
+    patchNotes,
+    patchAdsr,
     connected: computed(() => status.value === "connected"),
     applySnapshot,
   };

@@ -17,7 +17,7 @@ import Steps from "./controls/StepSequencer.vue";
 import Trigger from "./controls/TriggerControl.vue";
 import Toggle from "./controls/ToggleControl.vue";
 import DrumGrid from "./controls/DrumGrid.vue";
-defineProps<{ control: ControlDefinition }>();
+defineProps<{ control: ControlDefinition; planeId?: string }>();
 defineEmits<{
   set: [string, number];
   setToggle: [string, boolean];
@@ -59,6 +59,7 @@ defineEmits<{
   <PianoRoll
     v-else-if="control.kind === 'piano_roll'"
     :control="control"
+    :plane-id="planeId || 'unknown'"
     @create="$emit('noteCreate', $event)"
     @update="$emit('noteUpdate', $event)"
     @delete="$emit('noteDelete', $event)"
@@ -75,6 +76,7 @@ defineEmits<{
   <Adsr
     v-else-if="control.kind === 'adsr'"
     :control="control"
+    :plane-id="planeId || 'unknown'"
     @change="(name, value) => $emit('adsr', name, value)"
   />
   <Patterns

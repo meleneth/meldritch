@@ -131,6 +131,100 @@ main {
 .plane article:has(.drum-grid) {
   grid-column: 1/-1;
 }
+.plane article.control-surface-playground {
+  grid-column: 1/-1;
+  display: block;
+}
+.control-surface-playground > header,
+.xy-pad > header,
+.xy-pad > footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.control-surface-playground > header > div {
+  display: grid;
+  gap: 0.2rem;
+}
+.control-surface-playground button,
+.surface-toolbar button,
+.surface-toolbar select,
+.envelope-numbers input {
+  min-height: 2.75rem;
+  border: 1px solid #555;
+  border-radius: 0.35rem;
+  background: #292d36;
+  color: inherit;
+  padding: 0.45rem 0.65rem;
+}
+.linked-surfaces {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.xy-pad {
+  min-width: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.xy-pad footer {
+  color: #aaa;
+  font-variant-numeric: tabular-nums;
+}
+.phaser-control-surface {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 0.8rem;
+  touch-action: pan-y;
+  user-select: none;
+}
+.phaser-control-surface canvas {
+  display: block;
+  touch-action: none;
+}
+.phaser-editor {
+  min-width: 0;
+}
+.surface-toolbar {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  align-items: end;
+}
+.surface-toolbar label,
+.envelope-numbers label {
+  display: grid;
+  gap: 0.2rem;
+  color: #aaa;
+  font-size: 0.72rem;
+}
+.envelope-numbers {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(6rem, 1fr));
+  gap: 0.65rem;
+}
+.envelope-numbers label {
+  position: relative;
+}
+.envelope-numbers small {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.75rem;
+}
+@media (max-width: 720px) {
+  .linked-surfaces {
+    grid-template-columns: 1fr;
+  }
+  .envelope-numbers {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .phaser-control-surface {
+    height: 300px !important;
+  }
+}
 .drum-grid {
   width: 100%;
   overflow-x: auto;

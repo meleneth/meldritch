@@ -1,73 +1,93 @@
 <script setup lang="ts">
+import { computed, onBeforeUnmount, watch } from "vue";
+import PhaserControlSurface from "../PhaserControlSurface.vue";
+import { createSurfaceBinding } from "../../control-surfaces/binding";
+import { createAdsrSurface } from "../../control-surfaces/adsr";
+import type {
+  EnvelopeRanges,
+  EnvelopeValues,
+} from "../../control-surfaces/envelope";
+import { usePerformanceStore } from "../../stores/performance";
 import type { AdsrControl } from "../../types/protocol";
-const props = defineProps<{ control: AdsrControl }>();
+
+const props = defineProps<{ control: AdsrControl; planeId: string }>();
 const emit = defineEmits<{
   change: [AdsrControl["parameters"][number]["name"], number];
 }>();
-const normalized = (name: string, min: number, max: number, scale: string) => {
-  const value = props.control.values?.[name] ?? min;
-  return scale === "log"
-    ? (Math.log(value) - Math.log(min)) / (Math.log(max) - Math.log(min))
-    : (value - min) / (max - min);
-};
-const mapped = (raw: number, min: number, max: number, scale: string) =>
-  scale === "log"
-    ? Math.exp(Math.log(min) + (Math.log(max) - Math.log(min)) * raw)
-    : min + (max - min) * raw;
-function change(
-  name: AdsrControl["parameters"][number]["name"],
-  min: number,
-  max: number,
-  scale: string,
-  event: Event,
-) {
-  emit(
-    "change",
-    name,
-    mapped(Number((event.target as HTMLInputElement).value), min, max, scale),
-  );
+const store = usePerformanceStore();
+const parameter = (name: keyof EnvelopeValues) =>
+  props.control.parameters.find((item) => item.name === name)!;
+const ranges = computed(
+  () =>
+    Object.fromEntries(
+      (["attack", "decay", "sustain", "release"] as const).map((name) => {
+        const item = parameter(name);
+        return [name, { min: item.min, max: item.max, scale: item.scale }];
+      }),
+    ) as EnvelopeRanges,
+);
+const values = (): EnvelopeValues => ({
+  attack: props.control.values.attack ?? parameter("attack").min,
+  decay: props.control.values.decay ?? parameter("decay").min,
+  sustain: props.control.values.sustain ?? parameter("sustain").min,
+  release: props.control.values.release ?? parameter("release").min,
+});
+const binding = createSurfaceBinding<EnvelopeValues>({
+  read: values,
+  readOnly: !!props.control.read_only,
+  equals: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  subscribe: (listener) =>
+    watch(
+      () => props.control.values,
+      () => listener(values()),
+    ),
+  optimistic: (value) =>
+    store.patchAdsr(props.planeId, props.control.id, { ...value }),
+  write(value) {
+    const current = values();
+    for (const name of ["attack", "decay", "sustain", "release"] as const)
+      if (value[name] !== current[name]) emit("change", name, value[name]);
+  },
+});
+const surface = computed(() =>
+  createAdsrSurface({
+    id: `${props.planeId}-${props.control.id}`,
+    label: props.control.label,
+    ranges: ranges.value,
+  }),
+);
+function numeric(name: keyof EnvelopeValues, event: Event) {
+  binding.write({
+    ...binding.read(),
+    [name]: Number((event.target as HTMLInputElement).value),
+  });
 }
+onBeforeUnmount(() => binding.dispose());
 </script>
+
 <template>
-  <div class="adsr">
+  <div class="adsr phaser-editor">
     <strong>{{ control.label }}</strong>
-    <svg viewBox="0 0 300 90" aria-hidden="true">
-      <polyline points="5,85 55,8 115,55 220,55 295,85" />
-    </svg>
-    <label v-for="parameter in control.parameters" :key="parameter.name">
-      <span>{{ parameter.name }}</span>
-      <input
-        type="range"
-        min="0"
-        max="1"
-        step="0.001"
-        :value="
-          normalized(
-            parameter.name,
-            parameter.min,
-            parameter.max,
-            parameter.scale,
-          )
-        "
-        :disabled="control.read_only"
-        @input="
-          change(
-            parameter.name,
-            parameter.min,
-            parameter.max,
-            parameter.scale,
-            $event,
-          )
-        "
-      />
-      <output
-        >{{
-          (control.values?.[parameter.name] ?? parameter.min).toFixed(
-            parameter.name === "sustain" ? 2 : 3,
-          )
-        }}
-        {{ parameter.unit }}</output
+    <PhaserControlSurface
+      :surface="surface"
+      :binding="binding"
+      :viewport="{ minZoomX: 0.5, maxZoomX: 8 }"
+      :height="250"
+    />
+    <div class="envelope-numbers">
+      <label v-for="item in control.parameters" :key="item.name"
+        ><span>{{ item.name }}</span
+        ><input
+          type="number"
+          :min="item.min"
+          :max="item.max"
+          :step="item.scale === 'log' ? '0.001' : '0.01'"
+          :value="control.values[item.name] ?? item.min"
+          :disabled="control.read_only"
+          @input="numeric(item.name, $event)"
+        /><small>{{ item.unit }}</small></label
       >
-    </label>
+    </div>
+    <small>Gate on: green attack/decay/sustain · gate off: red release</small>
   </div>
 </template>

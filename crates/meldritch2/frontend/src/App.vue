@@ -10,8 +10,10 @@ import type {
 const store = usePerformanceStore(),
   credential = ref("");
 onMounted(() => store.connect());
-const set = (plane: string, id: string, value: number) =>
-  store.send({ type: "control.set", name: id, value }, id, value);
+const set = (plane: string, id: string, value: number) => (
+  store.patchRange(plane, id, value),
+  store.send({ type: "control.set", name: id, value }, id, value)
+);
 const setToggle = (plane: string, id: string, value: boolean) =>
   store.send({ type: "control.set", name: id, value }, id, value);
 const toggle = (plane: string, id: string, step: number) =>

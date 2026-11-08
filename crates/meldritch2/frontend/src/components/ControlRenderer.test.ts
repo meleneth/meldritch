@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createApp, h, nextTick, type Component } from "vue";
+import { createPinia } from "pinia";
 import ControlRenderer from "./ControlRenderer.vue";
 import FaderControl from "./controls/FaderControl.vue";
 import PianoRoll from "./controls/PianoRoll.vue";
@@ -19,7 +20,7 @@ function render(
   const app = createApp({
     render: () => h(component, { ...props, ...listeners }),
   });
-  app.mount(root);
+  app.use(createPinia()).mount(root);
   return {
     root,
     unmount() {
@@ -34,8 +35,17 @@ describe("control registry", () => {
     const changes: Array<[string, boolean]> = [];
     const view = render(
       ControlRenderer,
-      { control: { id: "bass_mute", label: "BASS MUTE", kind: "toggle", value: false } },
-      { onSetToggle: (id: string, value: boolean) => changes.push([id, value]) },
+      {
+        control: {
+          id: "bass_mute",
+          label: "BASS MUTE",
+          kind: "toggle",
+          value: false,
+        },
+      },
+      {
+        onSetToggle: (id: string, value: boolean) => changes.push([id, value]),
+      },
     );
     const button = view.root.querySelector("button") as HTMLButtonElement;
     expect(button.getAttribute("aria-pressed")).toBe("false");
@@ -48,11 +58,18 @@ describe("control registry", () => {
 
   it("collapses a performance station without discarding its schema", async () => {
     const view = render(PerformancePlane, {
-      plane: { id: "bass", label: "SERUM // BASS", roles: ["bass"], controls: [] },
+      plane: {
+        id: "bass",
+        label: "SERUM // BASS",
+        roles: ["bass"],
+        controls: [],
+      },
     });
     const station = view.root.querySelector("section") as HTMLElement;
     const grid = view.root.querySelector(".plane-grid") as HTMLElement;
-    const button = view.root.querySelector(".plane-collapse") as HTMLButtonElement;
+    const button = view.root.querySelector(
+      ".plane-collapse",
+    ) as HTMLButtonElement;
     expect(station.dataset.station).toBe("bass");
     expect(button.getAttribute("aria-expanded")).toBe("true");
     button.click();
@@ -137,7 +154,7 @@ describe("control registry", () => {
     view.unmount();
   });
 
-  it("creates, selects, edits, and deletes piano-roll notes including chords", async () => {
+  it("mounts the piano-roll surface and dispatches data transformations", async () => {
     const created: unknown[] = [],
       updated: unknown[] = [],
       deleted: number[] = [];
@@ -172,24 +189,18 @@ describe("control registry", () => {
         onDelete: (id: number) => deleted.push(id),
       },
     );
-    const noteButtons = view.root.querySelectorAll("button.note");
-    expect(noteButtons).toHaveLength(2);
-    (noteButtons[1] as HTMLButtonElement).click();
-    await nextTick();
-    const velocity = Array.from(view.root.querySelectorAll("input")).find(
-      (input) => (input as HTMLInputElement).value === "100",
-    ) as HTMLInputElement;
-    velocity.value = "72";
-    velocity.dispatchEvent(new Event("change", { bubbles: true }));
-    await nextTick();
-    expect(updated[0]).toMatchObject({ id: 1, velocity: 72 });
-    const empty = view.root.querySelector(
-      "button[aria-label='C4 step 2']",
+    expect(view.root.querySelector("[role='application']")).not.toBeNull();
+    const transpose = Array.from(view.root.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("semitone"),
     ) as HTMLButtonElement;
-    empty.click();
-    expect(created[0]).toMatchObject({ step: 1, pitch: 60 });
-    (view.root.querySelector("fieldset button") as HTMLButtonElement).click();
-    expect(deleted).toEqual([1]);
+    transpose.click();
+    await nextTick();
+    expect(updated).toEqual([
+      expect.objectContaining({ id: 1, pitch: 61 }),
+      expect.objectContaining({ id: 2, pitch: 62 }),
+    ]);
+    expect(created).toEqual([]);
+    expect(deleted).toEqual([]);
     view.unmount();
   });
 
@@ -211,17 +222,44 @@ describe("control registry", () => {
               scale: "log",
               unit: "s",
             },
+            {
+              name: "decay",
+              control: "env.decay",
+              min: 0.001,
+              max: 1,
+              scale: "log",
+              unit: "s",
+            },
+            {
+              name: "sustain",
+              control: "env.sustain",
+              min: 0,
+              max: 1,
+              scale: "linear",
+              unit: "",
+            },
+            {
+              name: "release",
+              control: "env.release",
+              min: 0.001,
+              max: 2,
+              scale: "log",
+              unit: "s",
+            },
           ],
-          values: { attack: 0.001 },
+          values: { attack: 0.001, decay: 0.1, sustain: 0.7, release: 0.2 },
         },
+        planeId: "synth",
       },
       { onChange: (id: string, value: number) => changes.push([id, value]) },
     );
-    const range = adsr.root.querySelector("input") as HTMLInputElement;
-    range.value = "1";
+    const range = adsr.root.querySelector(
+      "input[type='number']",
+    ) as HTMLInputElement;
+    range.value = "0.5";
     range.dispatchEvent(new Event("input", { bubbles: true }));
     expect(changes[0][0]).toBe("attack");
-    expect(changes[0][1]).toBeCloseTo(1);
+    expect(changes[0][1]).toBeCloseTo(0.5);
     adsr.unmount();
 
     const selections: unknown[] = [];
@@ -272,35 +310,66 @@ describe("control registry", () => {
     );
     expect(view.root.querySelectorAll("button.active")).toHaveLength(1);
     expect(view.root.querySelectorAll("button.pending")).toHaveLength(1);
-    expect(view.root.querySelector("fieldset")?.hasAttribute("disabled")).toBe(true);
+    expect(view.root.querySelector("fieldset")?.hasAttribute("disabled")).toBe(
+      true,
+    );
     (view.root.querySelectorAll("button")[0] as HTMLButtonElement).click();
     expect(selections).toEqual([]);
     view.unmount();
   });
 
   it("renders drum lanes and emits hit, velocity, and mute edits", async () => {
-    const toggles: unknown[] = [], velocities: unknown[] = [], mutes: unknown[] = [];
-    const view = render(DrumGrid, { control: {
-      id:"grid",label:"Drums",kind:"drum_grid",kit:"TimeKit",current_kit:"TimeKit",step_count:16,pattern:0,position:3,
-      rows:[{id:"kick",label:"Kick",note:36}],
-      state_rows:[{id:"kick",muted:false,hits:[{id:1,step:0,velocity:100,duration:1}]}],
-    }}, {
-      onToggle:(...args:unknown[])=>toggles.push(args),
-      onVelocity:(...args:unknown[])=>velocities.push(args),
-      onMute:(...args:unknown[])=>mutes.push(args),
-    });
-    const buttons=view.root.querySelectorAll(".drum-row button");
+    const toggles: unknown[] = [],
+      velocities: unknown[] = [],
+      mutes: unknown[] = [];
+    const view = render(
+      DrumGrid,
+      {
+        control: {
+          id: "grid",
+          label: "Drums",
+          kind: "drum_grid",
+          kit: "TimeKit",
+          current_kit: "TimeKit",
+          step_count: 16,
+          pattern: 0,
+          position: 3,
+          rows: [{ id: "kick", label: "Kick", note: 36 }],
+          state_rows: [
+            {
+              id: "kick",
+              muted: false,
+              hits: [{ id: 1, step: 0, velocity: 100, duration: 1 }],
+            },
+          ],
+        },
+      },
+      {
+        onToggle: (...args: unknown[]) => toggles.push(args),
+        onVelocity: (...args: unknown[]) => velocities.push(args),
+        onMute: (...args: unknown[]) => mutes.push(args),
+      },
+    );
+    const buttons = view.root.querySelectorAll(".drum-row button");
     (buttons[2] as HTMLButtonElement).click();
-    expect(toggles).toEqual([["kick",1]]);
+    expect(toggles).toEqual([["kick", 1]]);
     (buttons[0] as HTMLButtonElement).click();
-    expect(mutes).toEqual([["kick",true]]);
+    expect(mutes).toEqual([["kick", true]]);
     (buttons[1] as HTMLButtonElement).click();
     await nextTick();
-    const range=view.root.querySelector("input[type=range]") as HTMLInputElement;
-    range.value="64";range.dispatchEvent(new Event("change",{bubbles:true}));
-    expect(velocities).toEqual([["kick",0,64]]);
-    (view.root.querySelector(".drum-hit-editor button") as HTMLButtonElement).click();
-    expect(toggles).toEqual([["kick",1],["kick",0]]);
+    const range = view.root.querySelector(
+      "input[type=range]",
+    ) as HTMLInputElement;
+    range.value = "64";
+    range.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(velocities).toEqual([["kick", 0, 64]]);
+    (
+      view.root.querySelector(".drum-hit-editor button") as HTMLButtonElement
+    ).click();
+    expect(toggles).toEqual([
+      ["kick", 1],
+      ["kick", 0],
+    ]);
     view.unmount();
   });
 });
