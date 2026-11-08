@@ -197,6 +197,15 @@ sustainable. At 48 kHz a full block trades roughly 21 ms of output latency for
 reliable callback headroom; an audio backend may return a nearby size instead.
 Startup reports the actual buffer size returned by the backend.
 
+Live shutdown is an explicit two-phase operation. The host first asks the
+device callback to stop entering the graph, return silence, and transfer its
+`LiveRuntime` back to the control thread. Only after that acknowledgement does
+it pause and destroy the CPAL stream. This keeps plugin teardown on the thread
+that created the graph; in particular, JUCE-based plugins must not have their
+message-manager-backed instances destroyed by CPAL's audio worker. Failure to
+quiesce or return the runtime within two seconds is reported instead of waiting
+without a bound.
+
 ## Reproducible native fixture and demo
 
 The repository contains an MIT/Apache-2.0 Rust VST3 test instrument. It is

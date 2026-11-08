@@ -294,11 +294,17 @@ fn main() {
                     output.device_name, output.sample_rate, output.channels, output.buffer_frames
                 );
                 thread::sleep(Duration::from_secs_f64(seconds));
-                if output.stream_errors() > 0 {
+                let stream_errors = output.stream_errors();
+                let first_stream_error = output.first_stream_error();
+                if let Err(error) = output.stop() {
+                    eprintln!("{error}");
+                    process::exit(1);
+                }
+                if stream_errors > 0 {
                     eprintln!(
                         "output stream reported {} errors: {}",
-                        output.stream_errors(),
-                        output.first_stream_error().unwrap_or("unknown error")
+                        stream_errors,
+                        first_stream_error.unwrap_or("unknown error")
                     );
                     process::exit(1);
                 }
@@ -450,30 +456,36 @@ fn main() {
                 } else {
                     None
                 };
-                if let Err(error) = output.start().and_then(|_| {
+                let performance_result = output.start().and_then(|_| {
                     tui::perform(
                         &output,
                         midi_session.as_ref(),
                         keyboard,
                         Some(program.events_mut()),
                     )
-                }) {
+                });
+                let stream_errors = output.stream_errors();
+                let first_stream_error = output.first_stream_error();
+                let timed_note_errors = output.timed_note_errors();
+                let stop_result = output.stop();
+                if let Err(error) = performance_result {
                     eprintln!("{error}");
                     process::exit(1);
                 }
-                if output.stream_errors() > 0 {
+                if let Err(error) = stop_result {
+                    eprintln!("{error}");
+                    process::exit(1);
+                }
+                if stream_errors > 0 {
                     eprintln!(
                         "output stream reported {} errors: {}",
-                        output.stream_errors(),
-                        output.first_stream_error().unwrap_or("unknown error")
+                        stream_errors,
+                        first_stream_error.unwrap_or("unknown error")
                     );
                     process::exit(1);
                 }
-                if output.timed_note_errors() > 0 {
-                    eprintln!(
-                        "timed note output reported {} errors",
-                        output.timed_note_errors()
-                    );
+                if timed_note_errors > 0 {
+                    eprintln!("timed note output reported {} errors", timed_note_errors);
                     process::exit(1);
                 }
                 if let Some(session) = &midi_session {

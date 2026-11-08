@@ -1,7 +1,9 @@
 use std::sync::{
-    Arc,
-    atomic::{AtomicU8, AtomicU64, Ordering},
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
+    mpsc::{Receiver, sync_channel},
 };
+use std::time::{Duration, Instant};
 
 use cpal::{
     BufferSize, FromSample, Sample, SampleFormat, SupportedBufferSize,
@@ -20,6 +22,18 @@ use crate::{
 // deadlines even when its DSP load is otherwise sustainable. Keep host calls
 // at the VST3 adapter's maximum block and request the same device period.
 const CHUNK_FRAMES: usize = crate::vst3::MAX_BLOCK_SIZE;
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+
+fn silence_if_stopping<T: Sample + FromSample<f64>>(
+    stopping: &AtomicBool,
+    output: &mut [T],
+) -> bool {
+    if !stopping.load(Ordering::Acquire) {
+        return false;
+    }
+    output.fill(T::from_sample(0.0));
+    true
+}
 
 fn requested_buffer_frames(supported: &SupportedBufferSize) -> u32 {
     match supported {
@@ -150,6 +164,11 @@ pub fn fill_interleaved_timed<T: Sample + FromSample<f64>>(
 
 pub struct DeviceOutput {
     stream: cpal::Stream,
+    started: AtomicBool,
+    stopping: Arc<AtomicBool>,
+    quiesced: Arc<AtomicBool>,
+    returned_runtime: Mutex<Receiver<LiveRuntime>>,
+    retired_runtime: Mutex<Option<LiveRuntime>>,
     control: LiveControl,
     controls: Vec<(ControlHandle, f64)>,
     screens: Vec<Screen>,
@@ -327,22 +346,37 @@ impl DeviceOutput {
         let errors = Arc::new(AtomicU64::new(0));
         let timed_note_errors = Arc::new(AtomicU64::new(0));
         let first_error = Arc::new(AtomicU8::new(0));
+        let stopping = Arc::new(AtomicBool::new(false));
+        let quiesced = Arc::new(AtomicBool::new(false));
+        let (return_runtime, returned_runtime) = sync_channel(1);
         let channels = usize::from(config.channels);
         macro_rules! build {
             ($sample:ty) => {{
-                let mut runtime = runtime;
+                let mut runtime = Some(runtime);
                 let mut scratch = [0.0; CHUNK_FRAMES];
                 let mut right_scratch = [0.0; CHUNK_FRAMES];
                 let errors = Arc::clone(&errors);
                 let first_error = Arc::clone(&first_error);
                 let note_errors = Arc::clone(&timed_note_errors);
+                let callback_stopping = Arc::clone(&stopping);
+                let callback_quiesced = Arc::clone(&quiesced);
                 let mut note_active = true;
                 device.build_output_stream(
                     config,
                     move |output: &mut [$sample], _| {
+                        if silence_if_stopping(&callback_stopping, output) {
+                            if let Some(runtime) = runtime.take() {
+                                let _ = return_runtime.send(runtime);
+                            }
+                            callback_quiesced.store(true, Ordering::Release);
+                            return;
+                        }
+                        let runtime = runtime
+                            .as_mut()
+                            .expect("stopped audio stream cannot be restarted");
                         if let Some(consumer) = &mut note_consumer {
                             fill_interleaved_timed(
-                                &mut runtime,
+                                runtime,
                                 consumer,
                                 &mut note_active,
                                 output,
@@ -352,7 +386,7 @@ impl DeviceOutput {
                             );
                         } else {
                             fill_interleaved(
-                                &mut runtime,
+                                runtime,
                                 output,
                                 channels,
                                 &mut scratch,
@@ -384,6 +418,11 @@ impl DeviceOutput {
         let buffer_frames = stream.buffer_size().unwrap_or(requested_frames);
         Ok(Self {
             stream,
+            started: AtomicBool::new(false),
+            stopping,
+            quiesced,
+            returned_runtime: Mutex::new(returned_runtime),
+            retired_runtime: Mutex::new(None),
             control,
             controls,
             screens,
@@ -408,9 +447,59 @@ impl DeviceOutput {
     }
 
     pub fn start(&self) -> Result<(), String> {
+        if self.started.load(Ordering::Acquire) {
+            return Err("output stream is already running".into());
+        }
+        if self
+            .retired_runtime
+            .lock()
+            .map_err(|_| "retired audio runtime lock was poisoned".to_owned())?
+            .is_some()
+        {
+            return Err("a stopped output stream cannot be restarted".into());
+        }
+        self.stopping.store(false, Ordering::Release);
+        self.quiesced.store(false, Ordering::Release);
         self.stream
             .play()
-            .map_err(|error| format!("failed to start output stream: {error}"))
+            .map_err(|error| format!("failed to start output stream: {error}"))?;
+        self.started.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    /// Stop plugin processing before asking the backend to pause its callback.
+    /// This ordering prevents backend teardown from joining a callback that is
+    /// still blocked inside a plugin's process function.
+    pub fn stop(&self) -> Result<(), String> {
+        if !self.started.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        self.stopping.store(true, Ordering::Release);
+        let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
+        while !self.quiesced.load(Ordering::Acquire) {
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "audio callback did not quiesce within {} seconds",
+                    SHUTDOWN_TIMEOUT.as_secs()
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let runtime = self
+            .returned_runtime
+            .lock()
+            .map_err(|_| "audio runtime return channel lock was poisoned".to_owned())?
+            .recv_timeout(SHUTDOWN_TIMEOUT)
+            .map_err(|error| format!("audio callback did not return its runtime: {error}"))?;
+        *self
+            .retired_runtime
+            .lock()
+            .map_err(|_| "retired audio runtime lock was poisoned".to_owned())? = Some(runtime);
+        self.stream
+            .pause()
+            .map_err(|error| format!("failed to stop output stream: {error}"))?;
+        self.started.store(false, Ordering::Release);
+        Ok(())
     }
 
     pub fn control(&self) -> &LiveControl {
@@ -465,11 +554,19 @@ impl DeviceOutput {
     }
 }
 
+impl Drop for DeviceOutput {
+    fn drop(&mut self) {
+        // Normal CLI paths report stop failures explicitly. This fallback
+        // preserves teardown ordering for early returns and unwinding.
+        let _ = self.stop();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         CHUNK_FRAMES, fill_interleaved, fill_interleaved_timed, record_stream_error,
-        requested_buffer_frames, stream_error_label, unique_name_match,
+        requested_buffer_frames, silence_if_stopping, stream_error_label, unique_name_match,
     };
     use crate::{
         compiler::compile,
@@ -480,7 +577,19 @@ mod tests {
         timed::{TimedNotePlan, TimedNoteState},
     };
     use cpal::SupportedBufferSize;
-    use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+
+    #[test]
+    fn stopping_callback_silences_output_without_touching_the_graph() {
+        let stopping = AtomicBool::new(false);
+        let mut output = [0.5_f32; 4];
+        assert!(!silence_if_stopping(&stopping, &mut output));
+        assert_eq!(output, [0.5; 4]);
+
+        stopping.store(true, Ordering::Release);
+        assert!(silence_if_stopping(&stopping, &mut output));
+        assert_eq!(output, [0.0; 4]);
+    }
 
     #[test]
     fn configured_device_names_prefer_exact_and_require_unique_matches() {
