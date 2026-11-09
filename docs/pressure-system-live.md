@@ -43,16 +43,16 @@ Set `PRESSURE_HOST=0.0.0.0` only on a trusted LAN, then use the host's LAN
 address from phones and tablets. Plain HTTP has no TLS; do not expose it to the
 public Internet.
 
-Use one of the composition-issued credentials in the browser's Join field:
+Open the direct link for the musician's role:
 
 | Credential | Role | Writable station |
 |---|---|---|
-| `pressure-conductor` | Conductor | All stations, master, macros, transport actions |
-| `pressure-bass` | Bass performer | Bass piano roll, patterns, tone, envelope, ducking |
-| `pressure-lead` | Lead performer | Lead piano roll, patterns, tone, envelope |
-| `pressure-drone` | Drone performer | Drone voicings, states, tone, long envelope |
-| `pressure-drums` | Drummer | PULSE grid, velocity, lane mutes, grooves, synthesis |
-| `pressure-observer` | Observer | Read-only projection of every station |
+| [`pressure-conductor`](http://127.0.0.1:8080/#credential=pressure-conductor) | Conductor | All stations, master, macros, transport actions |
+| [`pressure-bass`](http://127.0.0.1:8080/#credential=pressure-bass) | Bass performer | Bass piano roll, patterns, tone, envelope, ducking |
+| [`pressure-lead`](http://127.0.0.1:8080/#credential=pressure-lead) | Lead performer | Lead piano roll, patterns, tone, envelope |
+| [`pressure-drone`](http://127.0.0.1:8080/#credential=pressure-drone) | Drone performer | Drone voicings, states, tone, long envelope |
+| [`pressure-drums`](http://127.0.0.1:8080/#credential=pressure-drums) | Drummer | PULSE grid, velocity, lane mutes, grooves, synthesis |
+| [`pressure-observer`](http://127.0.0.1:8080/#credential=pressure-observer) | Observer | Read-only projection of every station |
 
 The first four controls in the Conductor's Master station are authoritative
 `DRUMS`, `BASS`, `LEAD`, and `DRONE` mutes. They multiply the corresponding

@@ -10,7 +10,7 @@ Install Serum 2 at `~/.vst3/Serum2.vst3`, PULSE Drum Synth at `~/.vst3/PULSE Dru
 bin/instrument-playground
 ```
 
-Open `http://127.0.0.1:8080`, authenticate with `instrument-playground`, and start the transport. Override the credential with `MELDRITCH_PLAYGROUND_TOKEN`, the catalog with `MELDRITCH_SERUM_CATALOG`, and device names with `MICROLAB_MIDI` or `APC_MINI_MIDI`.
+Open the musician link `http://127.0.0.1:8080/#credential=instrument-playground` and start the transport. Override the credential with `MELDRITCH_PLAYGROUND_TOKEN`, the catalog with `MELDRITCH_SERUM_CATALOG`, and device names with `MICROLAB_MIDI` or `APC_MINI_MIDI`.
 
 The interface has one tab for each of the six instruments plus a Master / Mixer tab. Only the selected tab is mounted, so hidden piano rolls and envelopes do not retain rendering contexts. Phaser surfaces explicitly use its Canvas renderer and therefore consume no WebGL contexts. The instrument tabs contain independent mute, solo, level, pattern, and preset controls; the master tab exposes output level and compressor settings. PULSE tabs use 32-step four-lane drum grids with velocity editing. Serum tabs use piano rolls; the lead's fourth voice accepts live MicroLab notes through Meldritch's existing live arpeggiator path. The Stream Deck page exposes the six instrument mutes, while APC and keyboard behavior continues through the shared device infrastructure and clean shutdown path.
 
@@ -26,7 +26,7 @@ The selector is an ordinary authoritative graph control and the loaded processor
 
 Meldritch reads `manifest.json`, validates every state document against the installed plugin class/vendor/name/version, and exposes every successfully converted entry. It never builds a hardcoded Serum list. Bank/category metadata is used when present; the current converter manifest lacks it, so `Factory` is the bank and category is conservatively derived from the stable `factory_<category>_...` ID.
 
-At implementation time the local Serum 2.1.5 manifest contains 364 successfully converted factory states. The upstream native inventory is larger: the current scraper is blocked by another preset filename containing a single quote. Those unconverted files are intentionally not advertised. Fixing/resuming the scraper and updating the manifest automatically expands all four browsers.
+The local Serum 2.1.5 manifest currently contains 367 successfully converted factory states. The capture has passed the apostrophe-bearing `PD - Brass 'n' Plucks` preset and remains resumable across the remaining native inventory. Unconverted files are intentionally not advertised. Resuming the scraper and updating the manifest automatically expands all Serum browsers; their numeric control ranges come from the authoritative catalog count.
 
 The starting sounds are real converted states: `BA - Gnarly Reese`, `PD - Analog Silk Sweep`, `LD - Classic Techno Lead`, and `ARP - Aardvark`.
 
@@ -54,7 +54,7 @@ Live playback uses the same preallocated dependency-level block scheduler. This 
 
 Known limitations:
 
-- The converted Serum inventory is currently 364 entries because of the single-quote scraper failure described above.
+- The converted Serum inventory is currently 367 of 626 entries; native-editor capture remains intentionally resumable.
 - PULSE has no usable native factory program list. Sample-based user states are path-dependent.
 - Activating two solo controls simultaneously is not a grouped-solo operation; each solo independently gates the other five channels. Single-instrument solo is the intended performance gesture.
 - Serum state preparation can take perceptible time on this machine. The old sound continues until the replacement is ready and the browser remains pending.

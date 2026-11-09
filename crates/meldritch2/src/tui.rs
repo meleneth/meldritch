@@ -1333,6 +1333,7 @@ pub fn perform(
             events.set_audio_telemetry(output.audio_telemetry());
             events.dispatch();
             events.dispatch_server();
+            events.service_plugin_editors();
             for error in events.take_errors() {
                 if callback_errors.len() < 32 {
                     callback_errors.push(error);

@@ -291,6 +291,8 @@ fn preset_selector_is_typed_authoritative_and_server_validated() {
                 socket.next().await.unwrap().unwrap().to_text().unwrap(),
             )
             .unwrap();
+            assert_eq!(updated["type"], "state.updated");
+            assert!(updated["state"]["planes"].is_null());
             assert_eq!(updated["state"]["values"]["main/patch"]["active"], 1);
             socket
                 .send(Message::Text(
@@ -1490,4 +1492,25 @@ fn instrument_playground_declares_its_websocket_and_credential() {
     assert!(
         source.contains("os.getenv(\"MELDRITCH_PLAYGROUND_TOKEN\") or \"instrument-playground\"")
     );
+}
+
+#[test]
+fn serum_playground_is_single_instance_direct_output() {
+    let source = include_str!("../examples/83-serum-playground.lua");
+    assert_eq!(source.matches("instrument:vst3 {").count(), 1);
+    assert!(source.contains("instrument:connect(serum.out.left,instrument.output.left)"));
+    assert!(source.contains("instrument:connect(serum.out.right,instrument.output.right)"));
+    for external_dsp in [
+        "instrument:mixer",
+        "instrument:gain",
+        "instrument:stereo_compressor",
+        "instrument:limiter",
+    ] {
+        assert!(!source.contains(external_dsp), "unexpected {external_dsp}");
+    }
+    assert!(source.contains("MELDRITCH_SERUM_TOKEN"));
+    assert!(source.contains("server:websocket(\"/performance\",{})"));
+    assert!(source.contains("editor=true"));
+    assert!(source.contains("label=\"Open Serum UI on host\""));
+    assert!(source.contains("serum:open_editor()"));
 }

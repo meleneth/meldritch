@@ -8,7 +8,6 @@ import type {
   PatternControl,
 } from "./types/protocol";
 const store = usePerformanceStore(),
-  credential = ref(""),
   activePlaneId = ref("");
 const activePlane = computed(() =>
   store.visiblePlanes.find((plane) => plane.id === activePlaneId.value),
@@ -112,11 +111,9 @@ const muteDrum = (
         :class="{ alarm: (store.audio?.buffer_underruns || 0) > 0 }"
         :title="store.audio?.first_stream_error || 'No audio backend errors'"
         >XRUNS {{ store.audio?.buffer_underruns || 0 }}</span
-      ><input
-        v-model="credential"
-        type="password"
-        placeholder="performer credential"
-      /><button @click="store.authenticate(credential)">Join</button>
+      ><span v-if="!store.role" class="access-hint"
+        >Open your musician access link to join</span
+      >
     </div>
   </header>
   <nav v-if="store.visiblePlanes.length" class="instrument-tabs" role="tablist">

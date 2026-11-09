@@ -14,7 +14,7 @@
 //! The main thread owns controller, lifecycle and native editor operations. A worker
 //! reads commands and executes audio processing, forwarding all other commands to the
 //! main event loop. This keeps controller calls serialized with native UI callbacks.
-//! Other platforms process commands on the main stdin thread (GUI is unsupported).
+//! Linux processes commands and native X11 editor events on the main stdin thread.
 
 use std::io::{self, BufRead, Write};
 use std::sync::{Arc, Mutex};
@@ -22,11 +22,11 @@ use std::sync::{Arc, Mutex};
 use vst3_host::{
     audio::AudioBuffers,
     process_isolation::{HostCommand, HostResponse, ProtocolChannel},
-    Plugin, Vst3Host,
+    Plugin, PluginWindow, Vst3Host,
 };
 
 /// Loaded plugin shared between the command worker and (on macOS) the UI main thread.
-type SharedPlugin = Arc<Mutex<Option<Plugin>>>;
+type SharedPlugin = Arc<Mutex<Option<Arc<Mutex<Plugin>>>>>;
 
 fn main() {
     // Before anything else — certainly before a plugin binary is loaded and can run its own
@@ -47,10 +47,10 @@ fn main() {
 
     #[cfg(not(target_os = "macos"))]
     {
-        // No UI run loop needed: process commands on this (main) thread directly.
         let mut protocol = protocol;
         let stdin = io::stdin();
         let mut sample_rate = 44100.0;
+        let mut window: Option<PluginWindow> = None;
         for line in stdin.lock().lines() {
             let Some(command) = parse_line(line, &mut protocol) else {
                 continue;
@@ -59,10 +59,52 @@ fn main() {
                 eprintln!("Shutting down helper process");
                 break;
             }
-            let response = handle(command, &plugin, &mut sample_rate);
+            if matches!(command, HostCommand::LoadPlugin { .. }) {
+                window.take();
+            }
+            let response = match command {
+                HostCommand::CreateGui => match shared_plugin(&plugin) {
+                    Ok(shared) => {
+                        let (width, height) = shared
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .get_editor_size()
+                            .unwrap_or((800, 600));
+                        let mut opened = PluginWindow::new(shared);
+                        match opened.open() {
+                            Ok(()) => {
+                                window = Some(opened);
+                                HostResponse::GuiCreated { width, height }
+                            }
+                            Err(error) => err("CreateGui", error),
+                        }
+                    }
+                    Err(error) => HostResponse::Error { message: error },
+                },
+                HostCommand::CloseGui => {
+                    window.take();
+                    HostResponse::Success {
+                        message: "editor closed".into(),
+                    }
+                }
+                command => handle(command, &plugin, &mut sample_rate),
+            };
+            if let Some(opened) = &window {
+                let _ = opened.service_platform_events();
+            }
             respond(&mut protocol, &response);
         }
+        window.take();
     }
+}
+
+fn shared_plugin(plugin: &SharedPlugin) -> Result<Arc<Mutex<Plugin>>, String> {
+    plugin
+        .lock()
+        .map_err(|_| "plugin lock poisoned".to_string())?
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "No plugin loaded".to_string())
 }
 
 /// Parse one stdin line into a command, reporting (and skipping) blank/invalid lines.
@@ -115,20 +157,14 @@ struct MainRequest {
 fn handle(command: HostCommand, plugin: &SharedPlugin, sample_rate: &mut f64) -> HostResponse {
     // Convenience: run a closure against the loaded plugin or report "no plugin".
     fn with<F: FnOnce(&mut Plugin) -> HostResponse>(p: &SharedPlugin, f: F) -> HostResponse {
-        let mut guard = match p.lock() {
-            Ok(g) => g,
-            Err(_) => {
-                return HostResponse::Error {
-                    message: "plugin lock poisoned".to_string(),
-                }
-            }
+        let shared = match shared_plugin(p) {
+            Ok(shared) => shared,
+            Err(message) => return HostResponse::Error { message },
         };
-        match guard.as_mut() {
-            Some(pl) => f(pl),
-            None => HostResponse::Error {
-                message: "No plugin loaded".to_string(),
-            },
-        }
+        let mut plugin = shared
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        f(&mut plugin)
     }
 
     match command {
@@ -217,7 +253,7 @@ fn handle(command: HostCommand, plugin: &SharedPlugin, sample_rate: &mut f64) ->
                     let info = p.info().clone();
                     let compatibility = p.class_compatibility().to_vec();
                     let output_channels = p.output_channel_count() as i32;
-                    *plugin.lock().unwrap() = Some(p);
+                    *plugin.lock().unwrap() = Some(Arc::new(Mutex::new(p)));
                     HostResponse::PluginInfo {
                         vendor: info.vendor,
                         name: info.name,
@@ -514,10 +550,13 @@ fn handle(command: HostCommand, plugin: &SharedPlugin, sample_rate: &mut f64) ->
                     block_size: frames as usize,
                 };
                 match p.process_audio(&mut buffers) {
-                    Ok(()) => HostResponse::AudioOutput {
-                        outputs: buffers.outputs,
-                        output_events: p.take_output_events(),
-                    },
+                    Ok(()) => {
+                        p.service_run_loop();
+                        HostResponse::AudioOutput {
+                            outputs: buffers.outputs,
+                            output_events: p.take_output_events(),
+                        }
+                    }
                     Err(e) => err("Process", e),
                 }
             })
@@ -554,10 +593,13 @@ fn handle(command: HostCommand, plugin: &SharedPlugin, sample_rate: &mut f64) ->
                     block_size: frames as usize,
                 };
                 match p.process_bus_audio(&mut buffers) {
-                    Ok(()) => HostResponse::BusAudioOutput {
-                        outputs: buffers.outputs,
-                        output_events: p.take_output_events(),
-                    },
+                    Ok(()) => {
+                        p.service_run_loop();
+                        HostResponse::BusAudioOutput {
+                            outputs: buffers.outputs,
+                            output_events: p.take_output_events(),
+                        }
+                    }
                     Err(e) => err("ProcessBuses", e),
                 }
             })
@@ -830,12 +872,10 @@ mod macos {
         mtm: MainThreadMarker,
         app: &NSApplication,
     ) -> std::result::Result<(Retained<NSWindow>, i32, i32), String> {
-        let mut guard = plugin
+        let shared = shared_plugin(plugin)?;
+        let mut p = shared
             .lock()
             .map_err(|_| "plugin lock poisoned".to_string())?;
-        let p = guard
-            .as_mut()
-            .ok_or_else(|| "No plugin loaded".to_string())?;
         if !p.has_editor() {
             return Err("Plugin does not have a GUI editor".to_string());
         }
@@ -893,10 +933,11 @@ mod macos {
     }
 
     fn close_editor_window(plugin: &SharedPlugin, window: Option<Retained<NSWindow>>) {
-        if let Ok(mut guard) = plugin.lock() {
-            if let Some(p) = guard.as_mut() {
-                let _ = p.close_editor();
-            }
+        if let Ok(shared) = shared_plugin(plugin) {
+            let _ = shared
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .close_editor();
         }
         if let Some(w) = window {
             w.close();

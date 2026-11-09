@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cargo build --release -p vst3-host --bin vst3-host-helper
+cargo build --release -p meldritch2 --bin meldritch2
+exec target/release/meldritch2 perform \
+  crates/meldritch2/examples/83-serum-playground.lua "$@"

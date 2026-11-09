@@ -5,14 +5,20 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 preset_root="${SERUM_FACTORY_PRESETS:-$HOME/Documents/Xfer/Serum 2 Presets/Presets/Factory}"
 bank="${SERUM_FACTORY_BANK:-$HOME/.local/share/meldritch2/patches/serum2/factory}"
 plan_only=false
+capture_limit=0
 
 usage() {
-  echo "usage: tools/capture-serum-factory.sh [--plan] [BANK_DIRECTORY]" >&2
+  echo "usage: tools/capture-serum-factory.sh [--plan] [--limit COUNT] [BANK_DIRECTORY]" >&2
 }
 
 while (($#)); do
   case "$1" in
     --plan) plan_only=true ;;
+    --limit)
+      shift
+      [[ "${1:-}" =~ ^[1-9][0-9]*$ ]] || { usage; exit 2; }
+      capture_limit="$1"
+      ;;
     -h|--help) usage; exit 0 ;;
     -*) usage; exit 2 ;;
     *)
@@ -47,7 +53,7 @@ while IFS= read -r -d '' preset; do
   case "$label" in
     "GTR - 70's Funk Guitar") search="Funk Guitar" ;;
     "LOOP - Apollo's Aria") search="Apollo" ;;
-    "PD - Brass 'n' Plucks") search="Brass Plucks" ;;
+    "PD - Brass 'n' Plucks") search="Plucks" ;;
     "PD - Cal's Chimes") search="Cal Chimes" ;;
     "FX - Didn't Hit Me") search="Hit Me" ;;
   esac
@@ -184,11 +190,14 @@ for index in "${!ids[@]}"; do
   capture_pid=""
   rm -f "$fifo"
   sleep 3
+  if ((capture_limit > 0 && captured >= capture_limit)); then
+    break
+  fi
 done
 
 manifest_count="$(grep -c '"id": "factory_' "$bank/manifest.json")"
-if [[ "$manifest_count" != "$total" ]]; then
+if ((capture_limit == 0)) && [[ "$manifest_count" != "$total" ]]; then
   echo "factory bank is incomplete: manifest has $manifest_count patches, expected $total" >&2
   exit 1
 fi
-echo "captured $captured and retained $skipped verified Serum factory patches in $bank ($total total)"
+echo "captured $captured and retained $skipped verified Serum factory patches in $bank ($manifest_count of $total total)"

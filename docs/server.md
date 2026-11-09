@@ -421,6 +421,10 @@ future note-ons for only that lane and lowers its gate at the next engine
 frame. Rust authorizes and serializes every edit through the existing pattern
 mutation boundary. The browser never schedules notes.
 
+For every demo credential below, the musician URL is
+`http://127.0.0.1:8080/#credential=TOKEN`; substitute the listed token. The
+browser authenticates that link directly, with no separate login form.
+
 Run `examples/74-geonkick-performance.lua` with `meldritch2 perform`, open
 `http://127.0.0.1:8080`, and use `drummer-demo-token`, `serum-demo-token`,
 `leader-demo-token`, or `observer-demo-token`. `GEONKICK_VST3` and
@@ -517,7 +521,7 @@ With native Serum 2 installed, the multi-user plugin demonstration is:
 cargo run -p meldritch2 -- perform crates/meldritch2/examples/73-serum-performance.lua
 ```
 
-Join with `drummer-demo-token`, `serum-demo-token`,
+Open a direct musician link with `drummer-demo-token`, `serum-demo-token`,
 `leader-demo-token`, or `observer-demo-token`. The drummer receives only the
 kick/fill plane; the Serum performer receives the piano roll, quantized pattern
 selector, curated parameter surface, and safe preloaded patch selector; the
@@ -546,10 +550,12 @@ Lua may change an existing role during a performance with
 every mutation, so connected clients gain or lose authority immediately.
 
 Credentials must be at least 12 characters. HTTP uses an `Authorization:
-Bearer ...` header. The browser's performer button sends the credential in a
-WebSocket `authenticate` message; it is never placed in a URL or log. A claimed
-role in arbitrary JSON has no effect. Credentials only map to roles declared
-by the composition.
+Bearer ...` header. Browser musicians open a role-specific link such as
+`http://127.0.0.1:8080/#credential=bass-performer-token`; the fragment is not
+sent in the HTTP request or server logs. The frontend retains it in session
+storage and sends it in a WebSocket `authenticate` message. A claimed role in
+arbitrary JSON has no effect. Credentials only map to roles declared by the
+composition.
 
 Loopback compositions may choose an `anonymous_role`. Non-loopback/LAN binds
 are rejected unless credentials exist, anonymous control is disabled, and at
@@ -570,8 +576,9 @@ system, not identity proof or a comprehensive account service.
 - Plain HTTP has no TLS. Use only a trusted LAN or place Meldritch behind a
   correctly configured TLS reverse proxy. The server does not implement custom
   cryptography.
-- Browser credentials live in session storage for the tab lifetime. This is
-  adequate for the initial trusted-LAN workflow, not hostile shared devices.
+- Browser credentials live in link fragments and session storage. Treat the
+  musician links as capabilities: this is adequate for the initial
+  trusted-LAN workflow, not hostile shared devices.
 
 ## Diagnostics and limits
 

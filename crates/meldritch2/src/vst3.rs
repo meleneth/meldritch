@@ -9,7 +9,7 @@ use std::{
     env,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, OnceLock,
+        Arc, Mutex, OnceLock, Weak,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, sync_channel},
     },
@@ -17,11 +17,103 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(target_os = "linux"))]
+use vst3_host::PluginWindow;
 use vst3_host::{
     Plugin, PluginInfo, ProcessMode, Vst3Host,
     audio::{AudioBuffers, BusAudioBuffers, BusDirection, MediaType},
     midi::{MidiChannel, MidiEvent},
 };
+
+#[derive(Debug, Default)]
+pub struct EditorControl {
+    requested: AtomicBool,
+    plugin: Mutex<Weak<Mutex<Plugin>>>,
+}
+
+impl EditorControl {
+    pub fn request(&self) {
+        self.requested.store(true, Ordering::Release);
+    }
+
+    pub fn take_request(&self) -> bool {
+        self.requested.swap(false, Ordering::AcqRel)
+    }
+
+    fn attach(&self, plugin: &Arc<Mutex<Plugin>>) {
+        *self
+            .plugin
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::downgrade(plugin);
+    }
+
+    pub fn plugin(&self) -> Option<Arc<Mutex<Plugin>>> {
+        self.plugin
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .upgrade()
+    }
+}
+
+pub struct EditorSession {
+    pub control: Arc<EditorControl>,
+    plugin: Arc<Mutex<Plugin>>,
+    #[cfg(not(target_os = "linux"))]
+    window: PluginWindow,
+}
+
+impl EditorSession {
+    pub fn open(control: Arc<EditorControl>) -> Result<Self, String> {
+        let plugin = control
+            .plugin()
+            .ok_or("VST3 processor is not ready for its editor")?;
+        #[cfg(target_os = "linux")]
+        {
+            plugin
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .open_editor(vst3_host::WindowHandle::from_x11(0))
+                .map_err(|error| error.to_string())?;
+            return Ok(Self { control, plugin });
+        }
+        #[cfg(not(target_os = "linux"))]
+        let mut window = PluginWindow::new(Arc::clone(&plugin));
+        #[cfg(not(target_os = "linux"))]
+        window.open().map_err(|error| error.to_string())?;
+        #[cfg(not(target_os = "linux"))]
+        Ok(Self {
+            control,
+            plugin,
+            window,
+        })
+    }
+
+    pub fn service(&mut self) -> Result<bool, String> {
+        #[cfg(not(target_os = "linux"))]
+        self.window
+            .service_platform_events()
+            .map_err(|error| error.to_string())?;
+        let replaced = self
+            .control
+            .plugin()
+            .is_none_or(|current| !Arc::ptr_eq(&current, &self.plugin));
+        #[cfg(target_os = "linux")]
+        return Ok(replaced);
+        #[cfg(not(target_os = "linux"))]
+        Ok(replaced || self.window.closed_by_user())
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for EditorSession {
+    fn drop(&mut self) {
+        let _ = self
+            .plugin
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .close_editor();
+    }
+}
 
 pub const MAX_BLOCK_SIZE: usize = 1024;
 pub const NOTE_LANES: usize = 8;
@@ -505,6 +597,8 @@ pub struct Spec {
     pub preset_catalog: Option<Arc<PresetCatalog>>,
     /// Small host-managed parameter presets applied to one persistent plugin.
     pub managed_presets: Option<Arc<ManagedPresetBank>>,
+    /// Optional host-native editor access for explicitly opted-in compositions.
+    pub editor: Option<Arc<EditorControl>>,
 }
 
 impl Spec {
@@ -745,6 +839,7 @@ pub fn inspect(descriptor: Descriptor) -> Result<Spec, String> {
         patch_index: None,
         preset_catalog: None,
         managed_presets: None,
+        editor: None,
     })
 }
 
@@ -753,7 +848,7 @@ pub fn load(selector: &str, paths: &[PathBuf]) -> Result<Spec, String> {
 }
 
 pub struct Instance {
-    plugin: Plugin,
+    plugin: Arc<Mutex<Plugin>>,
     buffers: ProcessingBuffers,
     parameters: Vec<(usize, u32)>,
     previous_parameters: Vec<f64>,
@@ -774,10 +869,14 @@ enum ProcessingBuffers {
 
 impl std::fmt::Debug for Instance {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let plugin = self
+            .plugin
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         formatter
             .debug_struct("Vst3Instance")
-            .field("plugin", &self.plugin.info().name)
-            .field("class_id", &self.plugin.info().uid)
+            .field("plugin", &plugin.info().name)
+            .field("class_id", &plugin.info().uid)
             .field("failed", &self.failed)
             .field("offline_fallback", &self.offline_fallback)
             .finish()
@@ -795,7 +894,7 @@ impl Instance {
             .block_size(MAX_BLOCK_SIZE)
             .input_channels(spec.audio_inputs)
             .output_channels(2)
-            .with_process_isolation(false)
+            .with_process_isolation(spec.editor.is_some())
             .build()
             .map_err(|error| error.to_string())?;
         let mut plugin = host
@@ -888,6 +987,10 @@ impl Instance {
                     )
                 })?;
         }
+        let plugin = Arc::new(Mutex::new(plugin));
+        if let Some(editor) = &spec.editor {
+            editor.attach(&plugin);
+        }
         Ok(Self {
             plugin,
             buffers,
@@ -908,15 +1011,19 @@ impl Instance {
         if self.failed {
             return;
         }
-        if self.plugin.stop_processing().is_err() {
+        let mut plugin = self
+            .plugin
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if plugin.stop_processing().is_err() {
             self.failed = true;
             return;
         }
-        if self.plugin.set_process_mode(ProcessMode::Offline).is_err() {
+        if plugin.set_process_mode(ProcessMode::Offline).is_err() {
             self.offline_fallback = true;
-            let _ = self.plugin.set_process_mode(ProcessMode::Realtime);
+            let _ = plugin.set_process_mode(ProcessMode::Realtime);
         }
-        if self.plugin.start_processing().is_err() {
+        if plugin.start_processing().is_err() {
             self.failed = true;
         }
     }
@@ -930,24 +1037,35 @@ impl Instance {
     }
 
     pub fn save_state(&self) -> Result<Vec<u8>, String> {
-        self.plugin.save_state().map_err(|error| error.to_string())
+        self.plugin
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .save_state()
+            .map_err(|error| error.to_string())
     }
 
     pub fn parameter_values(&self, ids: &[u32]) -> Result<Vec<f64>, String> {
+        let plugin = self
+            .plugin
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         ids.iter()
-            .map(|id| {
-                self.plugin
-                    .get_parameter(*id)
-                    .map_err(|error| error.to_string())
-            })
+            .map(|id| plugin.get_parameter(*id).map_err(|error| error.to_string()))
             .collect()
     }
 
     pub fn latency_samples(&self) -> u32 {
-        self.plugin.latency_samples()
+        self.plugin
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .latency_samples()
     }
 
-    fn apply_parameters(&mut self, parameter_values: &[f64]) -> Result<(), ()> {
+    fn apply_parameters(
+        &mut self,
+        plugin: &mut Plugin,
+        parameter_values: &[f64],
+    ) -> Result<(), ()> {
         for (active_index, (&(parameter_index, id), previous)) in self
             .parameters
             .iter()
@@ -963,7 +1081,7 @@ impl Instance {
                 continue;
             }
             if value.to_bits() != previous.to_bits() {
-                if self.plugin.set_parameter_at(id, value, 0).is_err() {
+                if plugin.set_parameter_at(id, value, 0).is_err() {
                     self.failed = true;
                     return Err(());
                 }
@@ -994,10 +1112,15 @@ impl Instance {
             self.failed |= frames > MAX_BLOCK_SIZE;
             return;
         }
+        let plugin = Arc::clone(&self.plugin);
+        let Ok(mut plugin) = plugin.try_lock() else {
+            output.fill(0.0);
+            return;
+        };
 
         let tempo = tempo[0];
         if tempo.is_finite() && tempo > 0.0 && tempo.to_bits() != self.previous_tempo.to_bits() {
-            if self.plugin.set_tempo(tempo).is_err() {
+            if plugin.set_tempo(tempo).is_err() {
                 self.failed = true;
                 output.fill(0.0);
                 return;
@@ -1005,7 +1128,10 @@ impl Instance {
             self.previous_tempo = tempo;
         }
 
-        if self.apply_parameters(parameter_values).is_err() {
+        if self
+            .apply_parameters(&mut plugin, parameter_values)
+            .is_err()
+        {
             output.fill(0.0);
             return;
         }
@@ -1031,7 +1157,7 @@ impl Instance {
                             note,
                             velocity: normalized_velocity(lane_velocity),
                         };
-                        if self.plugin.send_midi_event_at(event, frame as i32).is_err() {
+                        if plugin.send_midi_event_at(event, frame as i32).is_err() {
                             self.failed = true;
                             break;
                         }
@@ -1043,7 +1169,7 @@ impl Instance {
                             note: active,
                             velocity: 0,
                         };
-                        if self.plugin.send_midi_event_at(event, frame as i32).is_err() {
+                        if plugin.send_midi_event_at(event, frame as i32).is_err() {
                             self.failed = true;
                             break;
                         }
@@ -1060,8 +1186,8 @@ impl Instance {
                             note,
                             velocity: normalized_velocity(lane_velocity),
                         };
-                        if self.plugin.send_midi_event_at(off, frame as i32).is_err()
-                            || self.plugin.send_midi_event_at(on, frame as i32).is_err()
+                        if plugin.send_midi_event_at(off, frame as i32).is_err()
+                            || plugin.send_midi_event_at(on, frame as i32).is_err()
                         {
                             self.failed = true;
                             break;
@@ -1086,7 +1212,7 @@ impl Instance {
                 for channel in &mut buffers.outputs {
                     channel[..frames].fill(0.0);
                 }
-                if self.plugin.process_audio(buffers).is_err() {
+                if plugin.process_audio(buffers).is_err() {
                     self.failed = true;
                     output.fill(0.0);
                     return;
@@ -1101,7 +1227,7 @@ impl Instance {
             ProcessingBuffers::Buses(buffers) => {
                 buffers.block_size = frames;
                 buffers.clear();
-                if self.plugin.process_bus_audio(buffers).is_err() {
+                if plugin.process_bus_audio(buffers).is_err() {
                     self.failed = true;
                     output.fill(0.0);
                     return;
@@ -1179,7 +1305,15 @@ impl Instance {
             self.failed |= frames > MAX_BLOCK_SIZE;
             return;
         }
-        if self.apply_parameters(parameter_values).is_err() {
+        let plugin = Arc::clone(&self.plugin);
+        let Ok(mut plugin) = plugin.try_lock() else {
+            output.fill(0.0);
+            return;
+        };
+        if self
+            .apply_parameters(&mut plugin, parameter_values)
+            .is_err()
+        {
             output.fill(0.0);
             return;
         }
@@ -1199,7 +1333,7 @@ impl Instance {
                 for channel in &mut buffers.outputs {
                     channel[..frames].fill(0.0);
                 }
-                if self.plugin.process_audio(buffers).is_err() {
+                if plugin.process_audio(buffers).is_err() {
                     self.failed = true;
                     output.fill(0.0);
                     return;
@@ -1228,7 +1362,7 @@ impl Instance {
                     input.channels[0][frame] = left_input[frame] as f32;
                     input.channels[1][frame] = right_input[frame] as f32;
                 }
-                if self.plugin.process_bus_audio(buffers).is_err() {
+                if plugin.process_bus_audio(buffers).is_err() {
                     self.failed = true;
                     output.fill(0.0);
                     return;
@@ -1256,7 +1390,11 @@ impl Instance {
 impl Drop for Instance {
     fn drop(&mut self) {
         let _lifecycle = plugin_lifecycle_lock();
-        let _ = self.plugin.stop_processing();
+        let _ = self
+            .plugin
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .stop_processing();
     }
 }
 
@@ -1704,6 +1842,7 @@ mod tests {
             patch_index: None,
             preset_catalog: None,
             managed_presets: None,
+            editor: None,
         };
         assert_eq!(Spec::parameter_name(42), "parameter_42");
         assert_eq!(spec.parameter_id("parameter_42"), Some(42));

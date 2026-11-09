@@ -49,6 +49,7 @@ class PianoRuntime implements SurfaceRuntime<PatternModel> {
   private gestureStart?: PatternModel;
   private width = 1;
   private height = 1;
+  private fitted = false;
   private readonly handleSize = 18;
 
   constructor(
@@ -89,6 +90,7 @@ class PianoRuntime implements SurfaceRuntime<PatternModel> {
       },
       4,
     );
+    this.fitted = true;
   }
 
   private noteRect(note: PatternNote) {
@@ -262,7 +264,7 @@ class PianoRuntime implements SurfaceRuntime<PatternModel> {
     this.width = Math.max(1, width);
     this.height = Math.max(1, height);
     this.viewport.resize(width, height);
-    if (this.viewport.zoomX === 1 && this.viewport.zoomY === 1) this.fitModel();
+    if (!this.fitted) this.fitModel();
     this.render();
   }
   setBinding(binding: SurfaceBinding<PatternModel>) {

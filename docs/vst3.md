@@ -293,6 +293,8 @@ The default destination is
 `~/.local/share/meldritch2/patches/serum2/factory`. `--plan` prints the stable
 ID, display name, browser search text, and source-relative path without opening
 Serum. Existing state files are skipped, so an interrupted run can be resumed.
+Use `--limit COUNT` to capture a bounded number of new presets in one session;
+the manifest remains valid and the next run resumes after those states.
 Each preset uses a fresh editor process because Serum 2.1.5 can retain the
 previous search result when the embedded browser is reused programmatically.
 The extractor enumerates filenames only; it loads every preset through Serum's

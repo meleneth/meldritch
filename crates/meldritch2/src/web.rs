@@ -519,6 +519,11 @@ impl Application {
             .controls
             .iter()
             .map(|(name, definition)| {
+                let choices = if include_schema {
+                    definition.choices.as_slice()
+                } else {
+                    &[]
+                };
                 let raw = runtime
                     .handles
                     .get(&definition.target)
@@ -549,13 +554,17 @@ impl Application {
                         "type": definition.kind,
                         "min": definition.min,
                         "max": definition.max,
-                        "choices": definition.choices,
+                        "choices": choices,
                         "value": value,
                     }),
                 )
             })
             .collect::<serde_json::Map<_, _>>();
-        let definitions = self.plane_definitions();
+        let definitions = if include_schema {
+            self.plane_definitions()
+        } else {
+            Vec::new()
+        };
         let planes = self.planes.borrow();
         let mut values = serde_json::Map::new();
         for plane in planes.values() {

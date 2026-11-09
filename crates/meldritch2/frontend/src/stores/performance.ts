@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { PerformanceSocket } from "../transport/websocket";
+import { credentialFromLocation } from "../transport/credential";
 import type {
   AdsrControl,
   AudioTelemetry,
@@ -10,6 +11,8 @@ import type {
   Snapshot,
 } from "../types/protocol";
 export const usePerformanceStore = defineStore("performance", () => {
+  const linkedToken = credentialFromLocation(window.location);
+  if (linkedToken) sessionStorage.setItem("meldritch-token", linkedToken);
   const status = ref("connecting"),
     revision = ref(-1),
     schemaRevision = ref(-1),
@@ -20,7 +23,7 @@ export const usePerformanceStore = defineStore("performance", () => {
     audio = ref<AudioTelemetry | null>(null),
     pending = ref(new Map<string, unknown>()),
     errors = ref<string[]>([]),
-    token = ref(sessionStorage.getItem("meldritch-token") || "");
+    token = ref(linkedToken || sessionStorage.getItem("meldritch-token") || "");
   let socket: PerformanceSocket;
   function applyValues(values: Record<string, unknown> = {}) {
     planes.value = planes.value.map((plane) => ({

@@ -99,6 +99,29 @@ impl UserData for LuaVst3 {
                         .map(|bank| bank.catalog.initial)
                 }))
         });
+        methods.add_method("preset_count", |_, this, ()| {
+            Ok(this
+                .0
+                .preset_catalog
+                .as_ref()
+                .map(|catalog| catalog.patches.len())
+                .or_else(|| {
+                    this.0
+                        .managed_presets
+                        .as_ref()
+                        .map(|bank| bank.catalog.patches.len())
+                })
+                .unwrap_or(0))
+        });
+        methods.add_method("open_editor", |_, this, ()| {
+            let editor = this
+                .0
+                .editor
+                .as_ref()
+                .ok_or_else(|| mlua::Error::external("VST3 editor access was not enabled"))?;
+            editor.request();
+            Ok(())
+        });
         methods.add_method_mut("set_parameter", |_, this, (id, value): (u32, f64)| {
             if !value.is_finite() || !(0.0..=1.0).contains(&value) {
                 return Err(mlua::Error::external(
@@ -1659,10 +1682,12 @@ local function decorate_scope(facade, scope, prefix)
     handle.out = { left = handle.left, right = handle.right, direction = "stereo_output" }
     handle.preset_catalog = runtime:preset_catalog()
     if handle.preset_catalog ~= nil then
+      handle.preset_count = runtime:preset_count()
       local selector = self:constant { value = runtime:preset_initial() }
       scope:connect(selector.out, handle.patch_selector)
       handle.preset = selector.value
     end
+    function handle:open_editor() runtime:open_editor(); return self end
     handle.parameters = {}
     for _, info in ipairs(runtime:parameters()) do
       if info.automatable and not info.read_only then
@@ -2586,6 +2611,8 @@ pub struct EventOwner {
     lua: Lua,
     web_application: Option<crate::web::Application>,
     web_runtime: Option<(crate::web::ServerSession, crate::web::ControlExecutor)>,
+    editor_controls: Vec<Arc<crate::vst3::EditorControl>>,
+    editor_sessions: Vec<crate::vst3::EditorSession>,
 }
 
 impl EventOwner {
@@ -2638,6 +2665,34 @@ impl EventOwner {
     pub fn dispatch_server(&mut self) {
         if let Some((_, executor)) = &mut self.web_runtime {
             executor.poll(&self.lua, 64);
+        }
+    }
+    pub fn service_plugin_editors(&mut self) {
+        for control in &self.editor_controls {
+            if control.take_request()
+                && !self
+                    .editor_sessions
+                    .iter()
+                    .any(|session| Arc::ptr_eq(&session.control, control))
+            {
+                match crate::vst3::EditorSession::open(Arc::clone(control)) {
+                    Ok(session) => self.editor_sessions.push(session),
+                    Err(error) => self.runtime.report_error(error),
+                }
+            }
+        }
+        let mut index = 0;
+        while index < self.editor_sessions.len() {
+            match self.editor_sessions[index].service() {
+                Ok(false) => index += 1,
+                Ok(true) => {
+                    self.editor_sessions.swap_remove(index);
+                }
+                Err(error) => {
+                    self.runtime.report_error(error);
+                    self.editor_sessions.swap_remove(index);
+                }
+            }
         }
     }
     pub fn server_diagnostics(&self) -> Option<crate::web::Diagnostics> {
@@ -2730,6 +2785,7 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
     let web_applications = Rc::new(RefCell::new(
         Vec::<Rc<RefCell<crate::web::Application>>>::new(),
     ));
+    let editor_controls = Rc::new(RefCell::new(Vec::new()));
     let registered_web_applications = Rc::clone(&web_applications);
     let server = lua
         .create_function(move |lua, spec: Table| {
@@ -2813,6 +2869,7 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
         .set("samples", samples)
         .map_err(|e| e.to_string())?;
     let vst3_root = project_root.to_path_buf();
+    let registered_editor_controls = Rc::clone(&editor_controls);
     let vst3 = lua
         .create_function(move |lua, spec: Table| {
             let selector: String = spec.get("plugin")?;
@@ -3046,6 +3103,13 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
                     loaded.initial_values.insert(id, value);
                 }
             }
+            if spec.get::<Option<bool>>("editor")?.unwrap_or(false) {
+                let editor = Arc::new(crate::vst3::EditorControl::default());
+                registered_editor_controls
+                    .borrow_mut()
+                    .push(Arc::clone(&editor));
+                loaded.editor = Some(editor);
+            }
             lua.create_userdata(LuaVst3(Arc::new(loaded)))
         })
         .map_err(|e| e.to_string())?;
@@ -3194,6 +3258,8 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
             lua,
             web_application,
             web_runtime: None,
+            editor_controls: editor_controls.borrow().clone(),
+            editor_sessions: Vec::new(),
         },
     })
 }

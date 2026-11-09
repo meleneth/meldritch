@@ -647,6 +647,15 @@ impl EventRuntime {
         self.registry.0.borrow_mut().errors.drain(..).collect()
     }
 
+    pub(crate) fn report_error(&mut self, error: String) {
+        let mut registry = self.registry.0.borrow_mut();
+        registry.failures += 1;
+        if registry.errors.len() == 32 {
+            registry.errors.pop_front();
+        }
+        registry.errors.push_back(error);
+    }
+
     pub fn callback_count(&self) -> u64 {
         self.registry.0.borrow().callbacks
     }
