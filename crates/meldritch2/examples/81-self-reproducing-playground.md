@@ -27,6 +27,12 @@ two-pattern interpolation, pattern-driven arpeggiation, editor variants, and
 successor generation. APC and Stream Deck use existing control surfaces; the
 browser uses the existing Vue/Pinia/Phaser projection.
 
+MicroLab note events enter the live `meldritch-arp` processor before final
+MIDI-to-synth resolution. The sequencer supplies tempo and transport, and the
+processor emits ordinary timestamped MIDI note-on/note-off events. Its held
+chord and cursor are transient performance state; its Lua-authored mode,
+octaves, rate, gate, and seed reproduce with the program.
+
 ## Persistent-state ownership
 
 Browser/Phaser note commands and APC mini grid edits converge on the
@@ -43,14 +49,13 @@ same successor.
 
 ## Remaining host gaps
 
-- MicroLab can audition the independent monophonic live voice, but Lua cannot observe its
-  retained held-note set. Live held-chord arpeggiation and record-style MIDI
-  note entry are therefore unsupported. No fixed chord is substituted.
+- Live MicroLab held-chord arpeggiation is supported, but record-style MIDI
+  note entry remains intentionally unsupported; the playground is not a MIDI recorder.
 - Visual arrangement authoring is absent. Pattern selection and transport use
   the existing Lua-authored selector and hardware mappings.
 
 Transport position, held MIDI notes, pending boundary transitions, and the
-instantaneous arpeggiator cursor are performance state rather than persistent
+instantaneous live-arpeggiator cursor are performance state rather than persistent
 composition state and are intentionally not serialized. The quine does not use
 the older project-save format; it owns its readable source and mutable state.
 

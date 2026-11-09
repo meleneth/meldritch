@@ -1581,6 +1581,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "meldritch-arp"
+version = "0.1.0"
+dependencies = [
+ "meldritch-interface",
+]
+
+[[package]]
 name = "meldritch-audio"
 version = "0.1.0"
 dependencies = [
@@ -1641,6 +1648,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "meldritch-interface"
+version = "0.1.0"
+
+[[package]]
 name = "meldritch-render"
 version = "0.1.0"
 dependencies = [
@@ -1685,6 +1696,8 @@ dependencies = [
  "hound",
  "image",
  "lewton",
+ "meldritch-arp",
+ "meldritch-interface",
  "meldritch-vst3-fixture",
  "mi-plaits-dsp",
  "midir",

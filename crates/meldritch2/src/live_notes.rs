@@ -6,6 +6,8 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering},
 };
 
+use meldritch_interface::{MidiEvent, MidiMessage, MidiProcessor, Tempo};
+
 use crate::compiler::{MAX_POLY_VOICES, Machine, PolyVoiceTarget, TimedNoteTarget};
 use crate::timed::{MAX_EVENTS, MAX_FRAMES_PER_RENDER, TimedNoteState, TimedRenderError};
 
@@ -21,6 +23,11 @@ struct Event {
     gate: bool,
     velocity: f64,
     reset_epoch: u64,
+    arp_route: Option<usize>,
+    midi_note: u8,
+    midi_velocity: u8,
+    midi_on: bool,
+    midi_all_off: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -45,6 +52,11 @@ struct Slot {
     gate: AtomicBool,
     velocity_bits: AtomicU64,
     reset_epoch: AtomicU64,
+    arp_route: AtomicUsize,
+    midi_note: AtomicU8,
+    midi_velocity: AtomicU8,
+    midi_on: AtomicBool,
+    midi_all_off: AtomicBool,
 }
 
 impl Slot {
@@ -60,6 +72,11 @@ impl Slot {
             gate: AtomicBool::new(false),
             velocity_bits: AtomicU64::new(1.0_f64.to_bits()),
             reset_epoch: AtomicU64::new(0),
+            arp_route: AtomicUsize::new(usize::MAX),
+            midi_note: AtomicU8::new(0),
+            midi_velocity: AtomicU8::new(0),
+            midi_on: AtomicBool::new(false),
+            midi_all_off: AtomicBool::new(false),
         }
     }
 
@@ -79,6 +96,14 @@ impl Slot {
         self.velocity_bits
             .store(event.velocity.to_bits(), Ordering::Relaxed);
         self.reset_epoch.store(event.reset_epoch, Ordering::Relaxed);
+        self.arp_route
+            .store(event.arp_route.unwrap_or(usize::MAX), Ordering::Relaxed);
+        self.midi_note.store(event.midi_note, Ordering::Relaxed);
+        self.midi_velocity
+            .store(event.midi_velocity, Ordering::Relaxed);
+        self.midi_on.store(event.midi_on, Ordering::Relaxed);
+        self.midi_all_off
+            .store(event.midi_all_off, Ordering::Relaxed);
     }
 
     fn read(&self) -> Event {
@@ -96,6 +121,14 @@ impl Slot {
             gate: self.gate.load(Ordering::Relaxed),
             velocity: f64::from_bits(self.velocity_bits.load(Ordering::Relaxed)),
             reset_epoch: self.reset_epoch.load(Ordering::Relaxed),
+            arp_route: match self.arp_route.load(Ordering::Relaxed) {
+                usize::MAX => None,
+                route => Some(route),
+            },
+            midi_note: self.midi_note.load(Ordering::Relaxed),
+            midi_velocity: self.midi_velocity.load(Ordering::Relaxed),
+            midi_on: self.midi_on.load(Ordering::Relaxed),
+            midi_all_off: self.midi_all_off.load(Ordering::Relaxed),
         }
     }
 }
@@ -136,6 +169,22 @@ pub struct LiveNoteProducer {
     targets: [Option<TimedNoteTarget>; 16],
     poly_targets: [Option<[Option<PolyVoiceTarget>; MAX_POLY_VOICES]>; 16],
     last_frame: [u64; 16],
+    arp_inputs: [Option<usize>; 16],
+}
+
+struct LiveArpRuntime {
+    processor: meldritch_arp::Arpeggiator,
+    input_channel: u8,
+    output_channel: u8,
+    tempo: Arc<crate::sequencer::SequencerControl>,
+    target: LiveArpTarget,
+}
+
+struct LiveArpTarget {
+    pitch_index: usize,
+    gate_index: usize,
+    velocity_index: Option<usize>,
+    voice_slot: usize,
 }
 
 /// The sole reader; owns the sequential DSP cursor and held note state.
@@ -146,6 +195,7 @@ pub struct LiveNoteConsumer {
     active: [Option<Event>; 16 * (MAX_POLY_VOICES + 1)],
     seen_reset: [u64; 16],
     pending: [Option<PendingEvent>; MAX_EVENTS],
+    arpeggiators: Vec<LiveArpRuntime>,
 }
 
 pub fn live_note_queue(
@@ -168,6 +218,45 @@ pub fn live_note_queue(
                 .expect("validated polyphonic mapping"),
         );
     }
+    let mut arp_inputs = [None; 16];
+    let arpeggiators = machine
+        .live_arpeggiators()
+        .iter()
+        .enumerate()
+        .map(|(index, route)| {
+            arp_inputs[usize::from(route.input_channel - 1)] = Some(index);
+            let target = if let Ok(target) = machine.timed_note_target(route.output_channel) {
+                LiveArpTarget {
+                    pitch_index: target.pitch_index,
+                    gate_index: target.gate_index,
+                    velocity_index: target.velocity_index,
+                    voice_slot: usize::from(route.output_channel - 1),
+                }
+            } else {
+                let target = machine
+                    .poly_note_targets(route.output_channel)
+                    .expect("validated live arpeggiator output")
+                    .into_iter()
+                    .flatten()
+                    .next()
+                    .expect("validated polyphonic MIDI target");
+                LiveArpTarget {
+                    pitch_index: target.pitch_index,
+                    gate_index: target.gate_index,
+                    velocity_index: Some(target.velocity_index),
+                    voice_slot: 16 + usize::from(route.output_channel - 1) * MAX_POLY_VOICES,
+                }
+            };
+            LiveArpRuntime {
+                processor: meldritch_arp::Arpeggiator::new(route.config, route.output_channel)
+                    .expect("validated live arpeggiator"),
+                input_channel: route.input_channel,
+                output_channel: route.output_channel,
+                tempo: Arc::clone(&route.tempo),
+                target,
+            }
+        })
+        .collect();
     let queue = Arc::new(Queue {
         slots: array::from_fn(|_| Slot::new()),
         head: AtomicU64::new(0),
@@ -182,6 +271,7 @@ pub fn live_note_queue(
             targets,
             poly_targets,
             last_frame: [start_frame; 16],
+            arp_inputs,
         },
         LiveNoteConsumer {
             queue,
@@ -190,6 +280,7 @@ pub fn live_note_queue(
             active: [None; 16 * (MAX_POLY_VOICES + 1)],
             seen_reset: [0; 16],
             pending: [None; MAX_EVENTS],
+            arpeggiators,
         },
     )
 }
@@ -210,12 +301,76 @@ impl LiveNoteProducer {
                 .get(index)
                 .and_then(|target| *target)
                 .is_none()
+            && self
+                .arp_inputs
+                .get(index)
+                .and_then(|route| *route)
+                .is_none()
         {
             return Err(PushError::UnmappedChannel);
         }
         self.queue.reset_epoch[index].fetch_add(1, Ordering::Release);
         self.last_frame[index] = self.first_unrendered_frame();
         Ok(())
+    }
+
+    pub(crate) fn has_arp_input(&self, channel: u8) -> bool {
+        self.arp_inputs
+            .get(usize::from(channel).wrapping_sub(1))
+            .and_then(|route| *route)
+            .is_some()
+    }
+
+    pub(crate) fn try_push_arp(&mut self, event: MidiEvent) -> Result<PushOutcome, PushError> {
+        let channel = event.message.channel();
+        let channel_index = usize::from(channel).wrapping_sub(1);
+        let route = self
+            .arp_inputs
+            .get(channel_index)
+            .and_then(|route| *route)
+            .ok_or(PushError::UnmappedChannel)?;
+        let tail = self.queue.tail.load(Ordering::Relaxed);
+        let head = self.queue.head.load(Ordering::Acquire);
+        if self.queue.pending_count.load(Ordering::Acquire) >= MAX_EVENTS
+            || tail.wrapping_sub(head) >= MAX_EVENTS as u64
+        {
+            return Err(PushError::Full);
+        }
+        let frame = event
+            .frame
+            .max(self.last_frame[channel_index])
+            .max(self.first_unrendered_frame());
+        let (note, velocity, on, all_off) = match event.message {
+            MidiMessage::NoteOn { note, velocity, .. } => (note, velocity, velocity > 0, false),
+            MidiMessage::NoteOff { note, velocity, .. } => (note, velocity, false, false),
+            MidiMessage::AllNotesOff { .. } => (0, 0, false, true),
+        };
+        self.queue.pending_count.fetch_add(1, Ordering::AcqRel);
+        self.queue.slots[(tail as usize) % MAX_EVENTS].write(Event {
+            frame,
+            channel,
+            voice_slot: 0,
+            pitch_index: 0,
+            gate_index: 0,
+            velocity_index: None,
+            pitch_hz: 0.0,
+            gate: false,
+            velocity: 0.0,
+            reset_epoch: self.queue.reset_epoch[channel_index].load(Ordering::Relaxed),
+            arp_route: Some(route),
+            midi_note: note,
+            midi_velocity: velocity,
+            midi_on: on,
+            midi_all_off: all_off,
+        });
+        self.queue
+            .tail
+            .store(tail.wrapping_add(1), Ordering::Release);
+        self.last_frame[channel_index] = frame;
+        Ok(PushOutcome {
+            frame,
+            clamped: frame != event.frame,
+        })
     }
 
     /// Enqueue with unity velocity. Stale or reordered frames clamp per channel.
@@ -316,6 +471,11 @@ impl LiveNoteProducer {
             gate: state.gate,
             velocity,
             reset_epoch: self.queue.reset_epoch[channel].load(Ordering::Relaxed),
+            arp_route: None,
+            midi_note: 0,
+            midi_velocity: 0,
+            midi_on: false,
+            midi_all_off: false,
         });
         self.queue
             .tail
@@ -331,6 +491,123 @@ impl LiveNoteProducer {
 impl LiveNoteConsumer {
     pub fn cursor(&self) -> u64 {
         self.cursor
+    }
+
+    fn tempo(&self, route: usize, sample_rate: f64) -> Tempo {
+        let route = &self.arpeggiators[route];
+        Tempo {
+            bpm: route.tempo.bpm(),
+            sample_rate: sample_rate.round().clamp(1.0, u32::MAX as f64) as u32,
+            playing: route.tempo.playing(),
+        }
+    }
+
+    fn apply_arp_output(&mut self, machine: &mut Machine, route: usize, event: MidiEvent) {
+        let route = &self.arpeggiators[route];
+        let (note, velocity, gate) = match event.message {
+            MidiMessage::NoteOn { note, velocity, .. } if velocity > 0 => {
+                (note, f64::from(velocity) / 127.0, true)
+            }
+            MidiMessage::NoteOn { note, .. } | MidiMessage::NoteOff { note, .. } => {
+                (note, 0.0, false)
+            }
+            MidiMessage::AllNotesOff { .. } => {
+                let slot = route.target.voice_slot;
+                if let Some(active) = self.active[slot] {
+                    machine.apply_timed_note(
+                        active.pitch_index,
+                        active.gate_index,
+                        active.pitch_hz,
+                        false,
+                    );
+                    self.active[slot] = Some(Event {
+                        gate: false,
+                        ..active
+                    });
+                }
+                return;
+            }
+        };
+        let pitch_hz = 440.0 * 2.0_f64.powf((f64::from(note) - 69.0) / 12.0);
+        let resolved = Event {
+            frame: event.frame,
+            channel: route.output_channel,
+            voice_slot: route.target.voice_slot,
+            pitch_index: route.target.pitch_index,
+            gate_index: route.target.gate_index,
+            velocity_index: route.target.velocity_index,
+            pitch_hz,
+            gate,
+            velocity,
+            reset_epoch: 0,
+            arp_route: None,
+            midi_note: 0,
+            midi_velocity: 0,
+            midi_on: false,
+            midi_all_off: false,
+        };
+        machine.apply_timed_note(
+            resolved.pitch_index,
+            resolved.gate_index,
+            resolved.pitch_hz,
+            resolved.gate,
+        );
+        machine.apply_timed_velocity(resolved.velocity_index, resolved.velocity);
+        self.active[resolved.voice_slot] = Some(resolved);
+    }
+
+    fn advance_arp(&mut self, machine: &mut Machine, route: usize, end: u64, tempo: Tempo) {
+        let mut generated = [None; 4];
+        let mut count = 0;
+        self.arpeggiators[route]
+            .processor
+            .advance(end, tempo, &mut |event| {
+                if count < generated.len() {
+                    generated[count] = Some(event);
+                    count += 1;
+                }
+            });
+        for event in generated.into_iter().flatten() {
+            self.apply_arp_output(machine, route, event);
+        }
+    }
+
+    fn input_arp(&mut self, machine: &mut Machine, event: Event) {
+        let route = event.arp_route.expect("arpeggiator input event");
+        let message = if event.midi_all_off {
+            MidiMessage::AllNotesOff {
+                channel: event.channel,
+            }
+        } else if event.midi_on {
+            MidiMessage::NoteOn {
+                channel: event.channel,
+                note: event.midi_note,
+                velocity: event.midi_velocity,
+            }
+        } else {
+            MidiMessage::NoteOff {
+                channel: event.channel,
+                note: event.midi_note,
+                velocity: event.midi_velocity,
+            }
+        };
+        let mut generated = [None; 2];
+        let mut count = 0;
+        self.arpeggiators[route].processor.input(
+            MidiEvent {
+                frame: event.frame,
+                message,
+            },
+            &mut |event| {
+                if count < generated.len() {
+                    generated[count] = Some(event);
+                    count += 1;
+                }
+            },
+        );
+        for event in generated.into_iter().flatten() {
+            self.apply_arp_output(machine, route, event);
+        }
     }
 
     /// Applies events before each sample; events at the exclusive end wait.
@@ -379,7 +656,35 @@ impl LiveNoteConsumer {
                         event.gate = false;
                     }
                 }
+                for route in 0..self.arpeggiators.len() {
+                    if usize::from(self.arpeggiators[route].input_channel - 1) == channel {
+                        self.input_arp(
+                            machine,
+                            Event {
+                                frame: self.cursor,
+                                channel: channel as u8 + 1,
+                                voice_slot: 0,
+                                pitch_index: 0,
+                                gate_index: 0,
+                                velocity_index: None,
+                                pitch_hz: 0.0,
+                                gate: false,
+                                velocity: 0.0,
+                                reset_epoch: epoch,
+                                arp_route: Some(route),
+                                midi_note: 0,
+                                midi_velocity: 0,
+                                midi_on: false,
+                                midi_all_off: true,
+                            },
+                        );
+                    }
+                }
             }
+        }
+        for route in 0..self.arpeggiators.len() {
+            let tempo = self.tempo(route, machine.sample_rate());
+            self.advance_arp(machine, route, self.cursor, tempo);
         }
         for event in self.active.iter().flatten() {
             machine.apply_timed_note(
@@ -428,7 +733,7 @@ impl LiveNoteConsumer {
             self.queue.head.store(head, Ordering::Release);
         }
         loop {
-            let next = self
+            let pending = self
                 .pending
                 .iter()
                 .enumerate()
@@ -442,29 +747,116 @@ impl LiveNoteConsumer {
                         .map(|pending| (index, pending))
                 })
                 .min_by_key(|(_, pending)| (pending.event.frame, pending.sequence));
-            let Some((index, pending)) = next else { break };
-            let event = pending.event;
-            // Never revisit samples already written in this block.
-            let requested = event.frame.saturating_sub(self.cursor) as usize;
+            let scheduled = self
+                .arpeggiators
+                .iter()
+                .enumerate()
+                .filter_map(|(route, arp)| {
+                    let tempo = Tempo {
+                        bpm: arp.tempo.bpm(),
+                        sample_rate: machine.sample_rate().round() as u32,
+                        playing: arp.tempo.playing(),
+                    };
+                    arp.processor
+                        .next_frame(tempo)
+                        .filter(|frame| *frame < end)
+                        .map(|frame| (route, frame, tempo))
+                })
+                .min_by_key(|(route, frame, _)| (*frame, *route));
+            let pending_first = match (pending, scheduled) {
+                (Some((_, pending)), Some((_, frame, _))) => pending.event.frame <= frame,
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (None, None) => break,
+            };
+            let (frame, pending_index, scheduled_route) = if pending_first {
+                let (index, pending) = pending.expect("selected pending event");
+                (pending.event.frame, Some(index), None)
+            } else {
+                let (route, frame, tempo) = scheduled.expect("selected scheduled event");
+                (frame, None, Some((route, tempo)))
+            };
+            let requested = frame.saturating_sub(self.cursor) as usize;
             let offset = requested.max(rendered);
             machine.process_prepared(&mut buffer[rendered..offset]);
-            machine.apply_timed_note(
-                event.pitch_index,
-                event.gate_index,
-                event.pitch_hz,
-                event.gate,
-            );
-            machine.apply_timed_velocity(event.velocity_index, event.velocity);
-            self.active[event.voice_slot] = Some(event);
+            if let Some(index) = pending_index {
+                let event = self.pending[index].expect("selected pending event").event;
+                if event.arp_route.is_some() {
+                    self.input_arp(machine, event);
+                } else {
+                    machine.apply_timed_note(
+                        event.pitch_index,
+                        event.gate_index,
+                        event.pitch_hz,
+                        event.gate,
+                    );
+                    machine.apply_timed_velocity(event.velocity_index, event.velocity);
+                    self.active[event.voice_slot] = Some(event);
+                }
+                self.pending[index] = None;
+                self.queue.pending_count.fetch_sub(1, Ordering::AcqRel);
+            } else if let Some((route, tempo)) = scheduled_route {
+                self.advance_arp(machine, route, frame.saturating_add(1), tempo);
+            }
             report.applied += 1;
-            report.late += usize::from(event.frame < self.cursor || offset > requested);
+            report.late += usize::from(frame < self.cursor || offset > requested);
             rendered = offset;
-            self.pending[index] = None;
-            self.queue.pending_count.fetch_sub(1, Ordering::AcqRel);
         }
         machine.process_prepared(&mut buffer[rendered..]);
         self.cursor = end;
         self.queue.cursor.store(end, Ordering::Release);
         Ok(report)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::live_note_queue;
+    use crate::{compiler::compile, lua, midi::TimedMidiRouter};
+
+    const LIVE_ARP: &str = r#"
+local instrument=meldritch.instrument("Live arp test")
+local sequence=instrument:sequencer {bpm=120,steps=16,steps_per_beat=4}
+local input=instrument:midi_input {channel=1}
+local arp=instrument:arpeggiator {notes=input.notes,tempo=sequence,output_channel=2,
+  mode="up",octaves=1,rate=4,gate=.5}
+instrument:note_source(arp.notes)
+local synth=instrument:plaits {model="virtual_analog"}
+instrument:connect(instrument.note.pitch,synth.pitch)
+instrument:connect(instrument.note.gate,synth.gate)
+instrument:connect(instrument.note.velocity,synth.velocity)
+instrument:connect(synth.main,instrument.output.left)
+instrument:connect(synth.main,instrument.output.right)
+return instrument
+"#;
+
+    #[test]
+    fn lua_wired_live_arp_transforms_held_midi_before_note_resolution() {
+        let graph = lua::read(LIVE_ARP).unwrap();
+        assert_eq!(graph.live_arpeggiators.len(), 1);
+        assert_eq!(graph.live_arpeggiators[0].input_channel, 1);
+        assert_eq!(graph.live_arpeggiators[0].output_channel, 2);
+        let mut machine = compile(&graph).unwrap();
+        let pitch = machine.control_handle("__voice_1_pitch").unwrap();
+        let gate = machine.control_handle("__voice_1_gate").unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+        midi.dispatch(1_000_000, &[0x90, 60, 100]).unwrap();
+        midi.dispatch(1_000_000, &[0x90, 64, 90]).unwrap();
+        let mut pcm = [0.0; 1024];
+        for _ in 0..7 {
+            consumer.render_next(&mut machine, &mut pcm).unwrap();
+        }
+        let actual_pitch = machine.runtime_value(pitch.target()).unwrap();
+        assert!(
+            (actual_pitch - 329.627_556).abs() < 0.01,
+            "expected E4 after the second tick, got {actual_pitch}"
+        );
+        assert!(machine.runtime_value(gate.target()).unwrap() > 0.5);
+        assert!(pcm.iter().any(|sample| sample.abs() > 1e-6));
+        midi.dispatch(1_150_000, &[0x80, 60, 0]).unwrap();
+        midi.dispatch(1_150_000, &[0x80, 64, 0]).unwrap();
+        consumer.render_next(&mut machine, &mut pcm).unwrap();
+        assert!(machine.runtime_value(gate.target()).unwrap() < 0.5);
     }
 }

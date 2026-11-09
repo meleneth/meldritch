@@ -10,8 +10,8 @@ use rayon::prelude::*;
 use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
 use crate::model::{
-    Action, AutomationInterpolation, Connection, ControlScale, Graph, MidiButton, MidiCc,
-    MidiNotes, MidiPacket, ModuleRuntime, Navigation, ParameterId, Screen, Widget,
+    Action, AutomationInterpolation, Connection, ControlScale, Graph, LiveArpeggiator, MidiButton,
+    MidiCc, MidiNotes, MidiPacket, ModuleRuntime, Navigation, ParameterId, Screen, Widget,
 };
 use crate::plaits::PlaitsRuntime;
 use crate::sample::PreparedSample;
@@ -561,6 +561,7 @@ pub struct Machine {
     screens: Vec<Screen>,
     midi_ccs: Vec<MidiCc>,
     midi_notes: Vec<MidiNotes>,
+    live_arpeggiators: Vec<LiveArpeggiator>,
     midi_buttons: Vec<MidiButton>,
     midi_packets: Vec<MidiPacket>,
     actions: Vec<Action>,
@@ -1382,6 +1383,10 @@ impl Machine {
     pub fn authored_value(&self, id: &ParameterId) -> Option<f64> {
         self.param_ids.get(id).map(|&i| self.authored[i])
     }
+    #[cfg(test)]
+    pub(crate) fn runtime_value(&self, id: &ParameterId) -> Option<f64> {
+        self.param_ids.get(id).map(|&i| self.params[i])
+    }
     pub fn effective_value(&self, id: &ParameterId) -> Option<f64> {
         self.param_ids.get(id).map(|&i| {
             let bits = self.published[i].load(Ordering::Acquire);
@@ -1423,6 +1428,9 @@ impl Machine {
     }
     pub fn midi_notes(&self) -> &[MidiNotes] {
         &self.midi_notes
+    }
+    pub fn live_arpeggiators(&self) -> &[LiveArpeggiator] {
+        &self.live_arpeggiators
     }
     pub fn midi_buttons(&self) -> &[MidiButton] {
         &self.midi_buttons
@@ -1927,6 +1935,39 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
     }
     let expanded = crate::expand::expand(graph)?;
     let graph = &expanded;
+    let mut arp_inputs = BTreeSet::new();
+    let mut arp_outputs = BTreeSet::new();
+    for route in &graph.live_arpeggiators {
+        if !(1..=16).contains(&route.input_channel) || !(1..=16).contains(&route.output_channel) {
+            return Err("live arpeggiator channels must be in 1..=16".into());
+        }
+        if !arp_inputs.insert(route.input_channel) {
+            return Err(format!(
+                "MIDI channel {} feeds more than one live arpeggiator",
+                route.input_channel
+            ));
+        }
+        if !arp_outputs.insert(route.output_channel) {
+            return Err(format!(
+                "MIDI channel {} receives more than one live arpeggiator",
+                route.output_channel
+            ));
+        }
+        if !graph
+            .midi_notes
+            .iter()
+            .any(|binding| binding.channel == route.output_channel)
+            && !graph
+                .midi_poly
+                .iter()
+                .any(|binding| binding.channel == route.output_channel)
+        {
+            return Err(format!(
+                "live arpeggiator output channel {} has no MIDI note target",
+                route.output_channel
+            ));
+        }
+    }
     let mut ids = BTreeMap::new();
     for (index, module) in graph.modules.iter().enumerate() {
         if module.id.is_empty() {
@@ -2824,6 +2865,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         screens: graph.screens.clone(),
         midi_ccs: graph.midi_ccs.clone(),
         midi_notes: graph.midi_notes.clone(),
+        live_arpeggiators: graph.live_arpeggiators.clone(),
         midi_buttons: graph.midi_buttons.clone(),
         midi_packets: graph.midi_packets.clone(),
         actions: graph.actions.clone(),

@@ -3,6 +3,8 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
+use meldritch_interface::{MidiEvent, MidiMessage};
+
 use crate::compiler::{ControlHandle, MAX_POLY_VOICES, Machine};
 use crate::model::{Action, MidiButtonEdge, MidiButtonMessage, PolyOverflow};
 use crate::panel::Panel;
@@ -118,12 +120,19 @@ impl TimedMidiRouter {
 
     pub(crate) fn first_mapped_channel(&self) -> Option<u8> {
         (0..16)
-            .find(|&index| self.notes[index].is_some() || self.poly[index].is_some())
+            .find(|&index| {
+                self.notes[index].is_some()
+                    || self.poly[index].is_some()
+                    || self.producer.has_arp_input(index as u8 + 1)
+            })
             .map(|index| index as u8 + 1)
     }
 
     fn release_channel(&mut self, channel: usize) -> bool {
-        if self.notes[channel].is_none() && self.poly[channel].is_none() {
+        if self.notes[channel].is_none()
+            && self.poly[channel].is_none()
+            && !self.producer.has_arp_input(channel as u8 + 1)
+        {
             return false;
         }
         self.producer
@@ -168,6 +177,34 @@ impl TimedMidiRouter {
             return Ok(false);
         }
         let channel = usize::from(message[0] & 0x0F);
+        if self.producer.has_arp_input(channel as u8 + 1) {
+            let mut clock = self.clock.clone();
+            let frame = clock
+                .map(midi_us, self.producer.first_unrendered_frame())
+                .map_err(TimedMidiError::Clock)?
+                .frame;
+            let midi = if message[0] & 0xF0 == 0x90 && message[2] != 0 {
+                MidiMessage::NoteOn {
+                    channel: channel as u8 + 1,
+                    note: message[1],
+                    velocity: message[2],
+                }
+            } else {
+                MidiMessage::NoteOff {
+                    channel: channel as u8 + 1,
+                    note: message[1],
+                    velocity: message[2],
+                }
+            };
+            self.producer
+                .try_push_arp(MidiEvent {
+                    frame,
+                    message: midi,
+                })
+                .map_err(TimedMidiError::Queue)?;
+            self.clock = clock;
+            return Ok(true);
+        }
         if self.poly[channel].is_some() {
             return self.dispatch_poly(midi_us, message, channel);
         }

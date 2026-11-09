@@ -1,55 +1,6 @@
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Domain {
-    MonoAudio,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FanIn {
-    One,
-    Sum,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Role {
-    Processor,
-    Output,
-    StereoOutput,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct InputPort {
-    pub name: &'static str,
-    pub domain: Domain,
-    pub fan_in: FanIn,
-    /// Neutral input sample when no cable is connected; None means required.
-    pub unconnected: Option<f64>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct OutputPort {
-    pub name: &'static str,
-    pub domain: Domain,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Param {
-    pub name: &'static str,
-    pub default: f64,
-    pub range: Option<(f64, f64)>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Contract {
-    pub name: &'static str,
-    pub role: Role,
-    pub process: ProcessFn,
-    pub state_len: usize,
-    pub inputs: &'static [InputPort],
-    pub outputs: &'static [OutputPort],
-    pub params: &'static [Param],
-}
-
-pub type ProcessFn = fn(&mut [f64], &[f64], &[f64], f64, &mut [f64]);
+pub use meldritch_interface::{
+    Contract, Domain, FanIn, InputPort, OutputPort, Param, ProcessFn, Role,
+};
 
 const CONTRACTS: [Contract; 39] = [
     crate::units::constant::CONTRACT,

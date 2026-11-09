@@ -302,6 +302,26 @@ stop, restart, and pattern changes clear gates and scheduled work. A pattern
 change inserts a single low sample before a logical note lane's first event so
 ADSR modules retrigger deterministically.
 
+### Live MIDI arpeggiator
+
+`meldritch-interface` owns the shared timestamped MIDI, tempo, port-domain, and
+processor contracts. `meldritch-arp` depends only on that interface; it does
+not depend on the Meldritch host. Lua wires the live processor explicitly:
+
+```lua
+local input = instrument:midi_input { channel=1 }
+local arp = instrument:arpeggiator {
+  notes=input.notes, tempo=sequence, output_channel=2,
+  mode="up_down", octaves=2, rate=4, gate=.65,
+}
+instrument:note_source(arp.notes)
+```
+
+Physical MIDI remains musical note-on/note-off data until after the arp has
+processed it. Its output then enters the existing sample-accurate live-note
+queue and MIDI note target. Held notes, transport phase, and the current arp
+cursor are transient; authored configuration remains Lua state.
+
 ADSR controls bind four ordinary compiled control targets, so hardware, Lua,
 automation, and browsers share the same parameter identities:
 

@@ -207,6 +207,11 @@ instrument:devices {
 }
 
 local sequence = instrument:sequencer {bpm=STATE.controls.bpm,steps=32,steps_per_beat=4}
+local live_midi = instrument:midi_input {channel=1}
+local live_arp = instrument:arpeggiator {notes=live_midi.notes,tempo=sequence,output_channel=2,
+  mode=STATE.patterns[1].arp_mode,octaves=STATE.arp.octaves,
+  rate=math.max(1,math.floor(4/STATE.arp.division+.5)),gate=STATE.arp.gate,seed=STATE.arp.seed}
+instrument:note_source(live_arp.notes)
 local melody_track = sequence:note_track("Melody", {voices=4})
 local arp_track = sequence:note_track("Arpeggiator", {voices=2})
 local kit = sequence:drum_kit {name="PULSE Playground",voices={
@@ -472,7 +477,7 @@ if STATE.editor.variant=="expanded" then
 end
 
 server:get("/api/playground",function() return {generation=STATE.generation,successor=LAST_SUCCESSOR,
-  editor=STATE.editor,key=STATE.key,patterns=STATE.patterns,limitations={live_midi_chord_arp="unsupported: no retained Lua MIDI chord snapshot"}} end)
+  editor=STATE.editor,key=STATE.key,patterns=STATE.patterns} end)
 server:post("/api/playground/save",function() sync_controls();return {successor=reproduce()},201 end)
 
 instrument:performance {layout="step_grid",sequencer=sequence,
@@ -499,7 +504,7 @@ instrument:control_surface {id="arp_deck",device="stream_deck_xl",initial_page="
 local screen=instrument:screen("playground","Self-Reproducing Lua Playground")
 screen:performance_status();screen:pattern_grid();screen:performance_controls()
 screen:label("Browser: http://127.0.0.1:"..tostring(os.getenv("MELDRITCH_PLAYGROUND_PORT") or 8081).." · SAVE writes generation "..(STATE.generation+1))
-screen:label("Live MIDI chord arpeggiation is unavailable; all five modes use authored chord patterns.")
+screen:label("MicroLab held chords feed the live tempo-synchronised MIDI arpeggiator.")
 sequence:start()
 
 -- Deterministic non-interactive acceptance driver used by the focused shell

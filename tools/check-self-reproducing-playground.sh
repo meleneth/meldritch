@@ -32,6 +32,8 @@ for generation in 1 2 3; do
   [[ -s "$file" ]]
   grep -q 'SAVE SUCCESSOR LUA' "$file"
   grep -q 'instrument:control_surface' "$file"
+  grep -q 'instrument:arpeggiator' "$file"
+  grep -q 'instrument:note_source' "$file"
   grep -q 'local STATE = {' "$file"
 done
 
