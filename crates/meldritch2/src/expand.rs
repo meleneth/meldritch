@@ -51,6 +51,7 @@ pub fn expand(graph: &Graph) -> Result<Graph, String> {
         midi_packets: graph.midi_packets.clone(),
         midi_poly: graph.midi_poly.clone(),
         live_arpeggiators: graph.live_arpeggiators.clone(),
+        live_key_locks: graph.live_key_locks.clone(),
         screens: graph.screens.clone(),
         navigation: graph.navigation.clone(),
         performance: graph.performance.clone(),

@@ -123,7 +123,7 @@ impl TimedMidiRouter {
             .find(|&index| {
                 self.notes[index].is_some()
                     || self.poly[index].is_some()
-                    || self.producer.has_arp_input(index as u8 + 1)
+                    || self.producer.has_processor_input(index as u8 + 1)
             })
             .map(|index| index as u8 + 1)
     }
@@ -131,7 +131,7 @@ impl TimedMidiRouter {
     fn release_channel(&mut self, channel: usize) -> bool {
         if self.notes[channel].is_none()
             && self.poly[channel].is_none()
-            && !self.producer.has_arp_input(channel as u8 + 1)
+            && !self.producer.has_processor_input(channel as u8 + 1)
         {
             return false;
         }
@@ -177,7 +177,7 @@ impl TimedMidiRouter {
             return Ok(false);
         }
         let channel = usize::from(message[0] & 0x0F);
-        if self.producer.has_arp_input(channel as u8 + 1) {
+        if self.producer.has_processor_input(channel as u8 + 1) {
             let mut clock = self.clock.clone();
             let frame = clock
                 .map(midi_us, self.producer.first_unrendered_frame())
@@ -196,12 +196,16 @@ impl TimedMidiRouter {
                     velocity: message[2],
                 }
             };
-            self.producer
-                .try_push_arp(MidiEvent {
-                    frame,
-                    message: midi,
-                })
-                .map_err(TimedMidiError::Queue)?;
+            let event = MidiEvent {
+                frame,
+                message: midi,
+            };
+            if self.producer.has_key_lock_input(channel as u8 + 1) {
+                self.producer.try_push_key_lock(event)
+            } else {
+                self.producer.try_push_arp(event)
+            }
+            .map_err(TimedMidiError::Queue)?;
             self.clock = clock;
             return Ok(true);
         }

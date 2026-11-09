@@ -8,6 +8,7 @@ members = [
     "crates/meldritch-dsl",
     "crates/meldritch-interface",
     "crates/meldritch-arp",
+    "crates/meldritch-midi-utils",
     "crates/meldritch-render",
     "crates/meldritch-tui",
     "crates/meldritch2",
@@ -63,6 +64,7 @@ lewton = "0.10"
 image = { version = "0.25", default-features = false }
 meldritch-interface = { path = "crates/meldritch-interface" }
 meldritch-arp = { path = "crates/meldritch-arp" }
+meldritch-midi-utils = { path = "crates/meldritch-midi-utils" }
 midir = "0.11"
 percent-encoding = "2"
 ratatui = "0.30"

@@ -10,8 +10,9 @@ use rayon::prelude::*;
 use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
 use crate::model::{
-    Action, AutomationInterpolation, Connection, ControlScale, Graph, LiveArpeggiator, MidiButton,
-    MidiCc, MidiNotes, MidiPacket, ModuleRuntime, Navigation, ParameterId, Screen, Widget,
+    Action, AutomationInterpolation, Connection, ControlScale, Graph, LiveArpeggiator, LiveKeyLock,
+    MidiButton, MidiCc, MidiNotes, MidiPacket, ModuleRuntime, Navigation, ParameterId, Screen,
+    Widget,
 };
 use crate::plaits::PlaitsRuntime;
 use crate::sample::PreparedSample;
@@ -562,6 +563,7 @@ pub struct Machine {
     midi_ccs: Vec<MidiCc>,
     midi_notes: Vec<MidiNotes>,
     live_arpeggiators: Vec<LiveArpeggiator>,
+    live_key_locks: Vec<LiveKeyLock>,
     midi_buttons: Vec<MidiButton>,
     midi_packets: Vec<MidiPacket>,
     actions: Vec<Action>,
@@ -1432,6 +1434,9 @@ impl Machine {
     pub fn live_arpeggiators(&self) -> &[LiveArpeggiator] {
         &self.live_arpeggiators
     }
+    pub fn live_key_locks(&self) -> &[LiveKeyLock] {
+        &self.live_key_locks
+    }
     pub fn midi_buttons(&self) -> &[MidiButton] {
         &self.midi_buttons
     }
@@ -1967,6 +1972,41 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 route.output_channel
             ));
         }
+    }
+    let mut consumed_inputs = arp_inputs.clone();
+    let mut utility_outputs = arp_outputs;
+    for route in &graph.live_key_locks {
+        if !(1..=16).contains(&route.key_channel)
+            || !(1..=16).contains(&route.notes_channel)
+            || !(1..=16).contains(&route.output_channel)
+        {
+            return Err("live key-lock channels must be in 1..=16".into());
+        }
+        if route.key_channel == route.notes_channel {
+            return Err("live key-lock key and note inputs require distinct MIDI channels".into());
+        }
+        for channel in [route.key_channel, route.notes_channel] {
+            if !consumed_inputs.insert(channel) {
+                return Err(format!(
+                    "MIDI channel {channel} feeds more than one live MIDI processor input"
+                ));
+            }
+        }
+        if !utility_outputs.insert(route.output_channel) {
+            return Err(format!(
+                "MIDI channel {} receives more than one live MIDI processor output",
+                route.output_channel
+            ));
+        }
+        let feeds_arp = arp_inputs.contains(&route.output_channel);
+        if !feeds_arp {
+            return Err(format!(
+                "live key-lock output channel {} must feed a live arpeggiator input",
+                route.output_channel
+            ));
+        }
+        meldritch_midi_utils::KeyLock::new(route.config, route.output_channel)
+            .map_err(str::to_owned)?;
     }
     let mut ids = BTreeMap::new();
     for (index, module) in graph.modules.iter().enumerate() {
@@ -2866,6 +2906,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         midi_ccs: graph.midi_ccs.clone(),
         midi_notes: graph.midi_notes.clone(),
         live_arpeggiators: graph.live_arpeggiators.clone(),
+        live_key_locks: graph.live_key_locks.clone(),
         midi_buttons: graph.midi_buttons.clone(),
         midi_packets: graph.midi_packets.clone(),
         actions: graph.actions.clone(),

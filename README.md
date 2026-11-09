@@ -117,6 +117,30 @@ The subtractive instrument uses MIDI channel 1 when a MIDI input is selected;
 without one, the existing TUI note keys play it. The drone begins sounding as
 soon as its audio stream starts and needs no MIDI input.
 
+Live MIDI processors are independent crates over the shared timestamped MIDI
+types in `meldritch-interface`. `meldritch-midi-utils` currently provides a
+two-input key lock: one MIDI stream selects the root, while another is either
+scale-filtered or converged to the nearest legal note. Converged pitches are
+reference-counted to avoid duplicate NoteOn/NoteOff edges. In Lua it composes
+directly before the live arpeggiator:
+
+```lua
+local notes = instrument:midi_input { channel = 1 }
+local key = instrument:midi_input { channel = 2 }
+local locked = instrument:key_lock {
+  key = key.notes, notes = notes.notes, output_channel = 3,
+  scale = "major", wrong_notes = "nearest", tie_break = "down",
+}
+local arp = instrument:arpeggiator {
+  notes = locked.notes, tempo = sequence, output_channel = 4,
+}
+instrument:note_source(arp.notes)
+```
+
+A nonzero-velocity key NoteOn selects its pitch class; key NoteOff is ignored.
+Supported scales are `major`, `minor`, `dorian`, `mixolydian`, `pentatonic`,
+and `chromatic`. Wrong notes may be `nearest` or `suppress`.
+
 The TR-909 starts its authored pattern immediately. On first launch it fetches
 only the eight required WAV files and stores pinned, hash-checked entries under
 `$XDG_CACHE_HOME/meldritch/samples` (normally

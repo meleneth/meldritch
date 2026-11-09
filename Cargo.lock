@@ -1652,6 +1652,13 @@ name = "meldritch-interface"
 version = "0.1.0"
 
 [[package]]
+name = "meldritch-midi-utils"
+version = "0.1.0"
+dependencies = [
+ "meldritch-interface",
+]
+
+[[package]]
 name = "meldritch-render"
 version = "0.1.0"
 dependencies = [
@@ -1698,6 +1705,7 @@ dependencies = [
  "lewton",
  "meldritch-arp",
  "meldritch-interface",
+ "meldritch-midi-utils",
  "meldritch-vst3-fixture",
  "mi-plaits-dsp",
  "midir",

@@ -24,6 +24,8 @@ struct Event {
     velocity: f64,
     reset_epoch: u64,
     arp_route: Option<usize>,
+    key_lock_route: Option<usize>,
+    key_lock_key: bool,
     midi_note: u8,
     midi_velocity: u8,
     midi_on: bool,
@@ -53,6 +55,8 @@ struct Slot {
     velocity_bits: AtomicU64,
     reset_epoch: AtomicU64,
     arp_route: AtomicUsize,
+    key_lock_route: AtomicUsize,
+    key_lock_key: AtomicBool,
     midi_note: AtomicU8,
     midi_velocity: AtomicU8,
     midi_on: AtomicBool,
@@ -73,6 +77,8 @@ impl Slot {
             velocity_bits: AtomicU64::new(1.0_f64.to_bits()),
             reset_epoch: AtomicU64::new(0),
             arp_route: AtomicUsize::new(usize::MAX),
+            key_lock_route: AtomicUsize::new(usize::MAX),
+            key_lock_key: AtomicBool::new(false),
             midi_note: AtomicU8::new(0),
             midi_velocity: AtomicU8::new(0),
             midi_on: AtomicBool::new(false),
@@ -98,6 +104,12 @@ impl Slot {
         self.reset_epoch.store(event.reset_epoch, Ordering::Relaxed);
         self.arp_route
             .store(event.arp_route.unwrap_or(usize::MAX), Ordering::Relaxed);
+        self.key_lock_route.store(
+            event.key_lock_route.unwrap_or(usize::MAX),
+            Ordering::Relaxed,
+        );
+        self.key_lock_key
+            .store(event.key_lock_key, Ordering::Relaxed);
         self.midi_note.store(event.midi_note, Ordering::Relaxed);
         self.midi_velocity
             .store(event.midi_velocity, Ordering::Relaxed);
@@ -125,6 +137,11 @@ impl Slot {
                 usize::MAX => None,
                 route => Some(route),
             },
+            key_lock_route: match self.key_lock_route.load(Ordering::Relaxed) {
+                usize::MAX => None,
+                route => Some(route),
+            },
+            key_lock_key: self.key_lock_key.load(Ordering::Relaxed),
             midi_note: self.midi_note.load(Ordering::Relaxed),
             midi_velocity: self.midi_velocity.load(Ordering::Relaxed),
             midi_on: self.midi_on.load(Ordering::Relaxed),
@@ -170,6 +187,7 @@ pub struct LiveNoteProducer {
     poly_targets: [Option<[Option<PolyVoiceTarget>; MAX_POLY_VOICES]>; 16],
     last_frame: [u64; 16],
     arp_inputs: [Option<usize>; 16],
+    key_lock_inputs: [Option<(usize, bool)>; 16],
 }
 
 struct LiveArpRuntime {
@@ -187,6 +205,12 @@ struct LiveArpTarget {
     voice_slot: usize,
 }
 
+struct LiveKeyLockRuntime {
+    processor: meldritch_midi_utils::KeyLock,
+    notes_channel: u8,
+    output_channel: u8,
+}
+
 /// The sole reader; owns the sequential DSP cursor and held note state.
 pub struct LiveNoteConsumer {
     queue: Arc<Queue>,
@@ -196,6 +220,7 @@ pub struct LiveNoteConsumer {
     seen_reset: [u64; 16],
     pending: [Option<PendingEvent>; MAX_EVENTS],
     arpeggiators: Vec<LiveArpRuntime>,
+    key_locks: Vec<LiveKeyLockRuntime>,
 }
 
 pub fn live_note_queue(
@@ -257,6 +282,22 @@ pub fn live_note_queue(
             }
         })
         .collect();
+    let mut key_lock_inputs = [None; 16];
+    let key_locks = machine
+        .live_key_locks()
+        .iter()
+        .enumerate()
+        .map(|(index, route)| {
+            key_lock_inputs[usize::from(route.key_channel - 1)] = Some((index, true));
+            key_lock_inputs[usize::from(route.notes_channel - 1)] = Some((index, false));
+            LiveKeyLockRuntime {
+                processor: meldritch_midi_utils::KeyLock::new(route.config, route.output_channel)
+                    .expect("validated live key lock"),
+                notes_channel: route.notes_channel,
+                output_channel: route.output_channel,
+            }
+        })
+        .collect();
     let queue = Arc::new(Queue {
         slots: array::from_fn(|_| Slot::new()),
         head: AtomicU64::new(0),
@@ -272,6 +313,7 @@ pub fn live_note_queue(
             poly_targets,
             last_frame: [start_frame; 16],
             arp_inputs,
+            key_lock_inputs,
         },
         LiveNoteConsumer {
             queue,
@@ -281,6 +323,7 @@ pub fn live_note_queue(
             seen_reset: [0; 16],
             pending: [None; MAX_EVENTS],
             arpeggiators,
+            key_locks,
         },
     )
 }
@@ -306,6 +349,11 @@ impl LiveNoteProducer {
                 .get(index)
                 .and_then(|route| *route)
                 .is_none()
+            && self
+                .key_lock_inputs
+                .get(index)
+                .and_then(|route| *route)
+                .is_none()
         {
             return Err(PushError::UnmappedChannel);
         }
@@ -321,6 +369,17 @@ impl LiveNoteProducer {
             .is_some()
     }
 
+    pub(crate) fn has_key_lock_input(&self, channel: u8) -> bool {
+        self.key_lock_inputs
+            .get(usize::from(channel).wrapping_sub(1))
+            .and_then(|route| *route)
+            .is_some()
+    }
+
+    pub(crate) fn has_processor_input(&self, channel: u8) -> bool {
+        self.has_arp_input(channel) || self.has_key_lock_input(channel)
+    }
+
     pub(crate) fn try_push_arp(&mut self, event: MidiEvent) -> Result<PushOutcome, PushError> {
         let channel = event.message.channel();
         let channel_index = usize::from(channel).wrapping_sub(1);
@@ -329,6 +388,27 @@ impl LiveNoteProducer {
             .get(channel_index)
             .and_then(|route| *route)
             .ok_or(PushError::UnmappedChannel)?;
+        self.push_midi_processor(event, Some(route), None)
+    }
+
+    pub(crate) fn try_push_key_lock(&mut self, event: MidiEvent) -> Result<PushOutcome, PushError> {
+        let channel = event.message.channel();
+        let route = self
+            .key_lock_inputs
+            .get(usize::from(channel).wrapping_sub(1))
+            .and_then(|route| *route)
+            .ok_or(PushError::UnmappedChannel)?;
+        self.push_midi_processor(event, None, Some(route))
+    }
+
+    fn push_midi_processor(
+        &mut self,
+        event: MidiEvent,
+        arp_route: Option<usize>,
+        key_lock_route: Option<(usize, bool)>,
+    ) -> Result<PushOutcome, PushError> {
+        let channel = event.message.channel();
+        let channel_index = usize::from(channel).wrapping_sub(1);
         let tail = self.queue.tail.load(Ordering::Relaxed);
         let head = self.queue.head.load(Ordering::Acquire);
         if self.queue.pending_count.load(Ordering::Acquire) >= MAX_EVENTS
@@ -357,7 +437,9 @@ impl LiveNoteProducer {
             gate: false,
             velocity: 0.0,
             reset_epoch: self.queue.reset_epoch[channel_index].load(Ordering::Relaxed),
-            arp_route: Some(route),
+            arp_route,
+            key_lock_route: key_lock_route.map(|(route, _)| route),
+            key_lock_key: key_lock_route.is_some_and(|(_, key)| key),
             midi_note: note,
             midi_velocity: velocity,
             midi_on: on,
@@ -472,6 +554,8 @@ impl LiveNoteProducer {
             velocity,
             reset_epoch: self.queue.reset_epoch[channel].load(Ordering::Relaxed),
             arp_route: None,
+            key_lock_route: None,
+            key_lock_key: false,
             midi_note: 0,
             midi_velocity: 0,
             midi_on: false,
@@ -541,6 +625,8 @@ impl LiveNoteConsumer {
             velocity,
             reset_epoch: 0,
             arp_route: None,
+            key_lock_route: None,
+            key_lock_key: false,
             midi_note: 0,
             midi_velocity: 0,
             midi_on: false,
@@ -591,22 +677,79 @@ impl LiveNoteConsumer {
                 velocity: event.midi_velocity,
             }
         };
-        let mut generated = [None; 2];
-        let mut count = 0;
-        self.arpeggiators[route].processor.input(
+        self.input_arp_message(
+            machine,
+            route,
             MidiEvent {
                 frame: event.frame,
                 message,
             },
-            &mut |event| {
+        );
+    }
+
+    fn input_arp_message(&mut self, machine: &mut Machine, route: usize, event: MidiEvent) {
+        let mut generated = [None; 2];
+        let mut count = 0;
+        self.arpeggiators[route]
+            .processor
+            .input(event, &mut |event| {
                 if count < generated.len() {
                     generated[count] = Some(event);
                     count += 1;
                 }
-            },
-        );
+            });
         for event in generated.into_iter().flatten() {
             self.apply_arp_output(machine, route, event);
+        }
+    }
+
+    fn input_key_lock(&mut self, machine: &mut Machine, event: Event) {
+        let route = event.key_lock_route.expect("key-lock input event");
+        let message = if event.midi_all_off {
+            MidiMessage::AllNotesOff {
+                channel: event.channel,
+            }
+        } else if event.midi_on {
+            MidiMessage::NoteOn {
+                channel: event.channel,
+                note: event.midi_note,
+                velocity: event.midi_velocity,
+            }
+        } else {
+            MidiMessage::NoteOff {
+                channel: event.channel,
+                note: event.midi_note,
+                velocity: event.midi_velocity,
+            }
+        };
+        let input = MidiEvent {
+            frame: event.frame,
+            message,
+        };
+        // A key change can turn every retained note off and back on. Keep the
+        // collection bounded and allocation-free on the audio thread.
+        let mut generated = [None; 256];
+        let mut count = 0;
+        let processor = &mut self.key_locks[route].processor;
+        let mut output = |event| {
+            if count < generated.len() {
+                generated[count] = Some(event);
+                count += 1;
+            }
+        };
+        if event.key_lock_key {
+            processor.key_input(input, &mut output);
+        } else {
+            processor.note_input(input, &mut output);
+        }
+        let output_channel = self.key_locks[route].output_channel;
+        let arp_route = self
+            .arpeggiators
+            .iter()
+            .position(|arp| arp.input_channel == output_channel)
+            .expect("validated key-lock output route");
+        for event in generated.into_iter().flatten() {
+            self.input_arp_message(machine, arp_route, event);
         }
     }
 
@@ -672,6 +815,34 @@ impl LiveNoteConsumer {
                                 velocity: 0.0,
                                 reset_epoch: epoch,
                                 arp_route: Some(route),
+                                key_lock_route: None,
+                                key_lock_key: false,
+                                midi_note: 0,
+                                midi_velocity: 0,
+                                midi_on: false,
+                                midi_all_off: true,
+                            },
+                        );
+                    }
+                }
+                for route in 0..self.key_locks.len() {
+                    if usize::from(self.key_locks[route].notes_channel - 1) == channel {
+                        self.input_key_lock(
+                            machine,
+                            Event {
+                                frame: self.cursor,
+                                channel: channel as u8 + 1,
+                                voice_slot: 0,
+                                pitch_index: 0,
+                                gate_index: 0,
+                                velocity_index: None,
+                                pitch_hz: 0.0,
+                                gate: false,
+                                velocity: 0.0,
+                                reset_epoch: epoch,
+                                arp_route: None,
+                                key_lock_route: Some(route),
+                                key_lock_key: false,
                                 midi_note: 0,
                                 midi_velocity: 0,
                                 midi_on: false,
@@ -781,7 +952,9 @@ impl LiveNoteConsumer {
             machine.process_prepared(&mut buffer[rendered..offset]);
             if let Some(index) = pending_index {
                 let event = self.pending[index].expect("selected pending event").event;
-                if event.arp_route.is_some() {
+                if event.key_lock_route.is_some() {
+                    self.input_key_lock(machine, event);
+                } else if event.arp_route.is_some() {
                     self.input_arp(machine, event);
                 } else {
                     machine.apply_timed_note(
@@ -830,6 +1003,25 @@ instrument:connect(synth.main,instrument.output.right)
 return instrument
 "#;
 
+    const KEY_LOCKED_LIVE_ARP: &str = r#"
+local instrument=meldritch.instrument("Key-locked live arp test")
+local sequence=instrument:sequencer {bpm=120,steps=16,steps_per_beat=4}
+local notes=instrument:midi_input {channel=1}
+local key=instrument:midi_input {channel=2}
+local locked=instrument:key_lock {key=key.notes,notes=notes.notes,output_channel=3,
+  scale="major",wrong_notes="nearest",tie_break="down",initial_key=60}
+local arp=instrument:arpeggiator {notes=locked.notes,tempo=sequence,output_channel=4,
+  mode="up",octaves=1,rate=4,gate=.5}
+instrument:note_source(arp.notes)
+local synth=instrument:plaits {model="virtual_analog"}
+instrument:connect(instrument.note.pitch,synth.pitch)
+instrument:connect(instrument.note.gate,synth.gate)
+instrument:connect(instrument.note.velocity,synth.velocity)
+instrument:connect(synth.main,instrument.output.left)
+instrument:connect(synth.main,instrument.output.right)
+return instrument
+"#;
+
     #[test]
     fn lua_wired_live_arp_transforms_held_midi_before_note_resolution() {
         let graph = lua::read(LIVE_ARP).unwrap();
@@ -858,5 +1050,30 @@ return instrument
         midi.dispatch(1_150_000, &[0x80, 64, 0]).unwrap();
         consumer.render_next(&mut machine, &mut pcm).unwrap();
         assert!(machine.runtime_value(gate.target()).unwrap() < 0.5);
+    }
+
+    #[test]
+    fn lua_key_lock_routes_two_midi_inputs_into_live_arp() {
+        let graph = lua::read(KEY_LOCKED_LIVE_ARP).unwrap();
+        assert_eq!(graph.live_key_locks.len(), 1);
+        assert_eq!(graph.live_key_locks[0].key_channel, 2);
+        assert_eq!(graph.live_key_locks[0].notes_channel, 1);
+        assert_eq!(graph.live_key_locks[0].output_channel, 3);
+        let mut machine = compile(&graph).unwrap();
+        let pitch = machine.control_handle("__voice_1_pitch").unwrap();
+        let (producer, mut consumer) = live_note_queue(&machine, 0);
+        let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
+
+        // D selects D major. C4 is outside that scale and an equidistant tie;
+        // the configured downward convergence maps it to B3.
+        midi.dispatch(1_000_000, &[0x91, 62, 127]).unwrap();
+        midi.dispatch(1_000_000, &[0x90, 60, 100]).unwrap();
+        let mut pcm = [0.0; 1024];
+        consumer.render_next(&mut machine, &mut pcm).unwrap();
+        let actual_pitch = machine.runtime_value(pitch.target()).unwrap();
+        assert!(
+            (actual_pitch - 246.941_651).abs() < 0.01,
+            "expected B3 from D-major key lock, got {actual_pitch}"
+        );
     }
 }

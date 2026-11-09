@@ -127,6 +127,14 @@ pub struct LiveArpeggiator {
     pub config: meldritch_arp::Config,
 }
 
+#[derive(Clone, Debug)]
+pub struct LiveKeyLock {
+    pub key_channel: u8,
+    pub notes_channel: u8,
+    pub output_channel: u8,
+    pub config: meldritch_midi_utils::KeyLockConfig,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum PolyOverflow {
     #[default]
@@ -223,6 +231,7 @@ pub struct Graph {
     pub midi_packets: Vec<MidiPacket>,
     pub midi_poly: Vec<MidiPoly>,
     pub live_arpeggiators: Vec<LiveArpeggiator>,
+    pub live_key_locks: Vec<LiveKeyLock>,
     pub screens: Vec<Screen>,
     pub navigation: Option<Navigation>,
     pub performance: Option<Performance>,
