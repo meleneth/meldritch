@@ -1400,3 +1400,74 @@ fn pressure_system_roles_resolve_to_public_controls_and_server_starts() {
         Some(1.0)
     );
 }
+
+#[test]
+fn instrument_playground_advertises_and_authenticates_its_websocket() {
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
+    let home = std::path::PathBuf::from(home);
+    if !home.join(".vst3/Serum2.vst3").is_dir()
+        || !home.join(".vst3/PULSE Drum Synth.vst3").is_dir()
+        || !home
+            .join(".local/share/meldritch2/patches/serum2/factory/manifest.json")
+            .is_file()
+    {
+        eprintln!("Instrument Playground plugins/catalog unavailable; skipping server test");
+        return;
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(root.join("examples/82-instrument-playground.lua"))
+        .expect("read Instrument Playground")
+        .replace("port=8080", "port=0");
+    let mut program =
+        lua::read_program_with_root(&source, root).expect("load Instrument Playground program");
+    let machine = compile(program.graph()).expect("compile Instrument Playground");
+    let controls = machine
+        .control_ids()
+        .map(|id| {
+            let handle = machine.control_handle(id).unwrap();
+            let value = handle.effective_value();
+            (handle, value)
+        })
+        .collect();
+    let address = program
+        .events_mut()
+        .start_server(controls)
+        .expect("start Instrument Playground server")
+        .expect("Instrument Playground listener");
+    let (status, config) = get_json(&mut program, format!("http://{address}/api/browser-config"));
+    assert_eq!(status, 200);
+    assert_eq!(config["websocket"], "/performance");
+
+    let client = thread::spawn(move || {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async move {
+                let (mut socket, _) = connect_async(format!("ws://{address}/performance"))
+                    .await
+                    .unwrap();
+                let initial: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(initial["state"]["name"], "Instrument Playground");
+                socket
+                    .send(Message::Text(
+                        json!({"type":"authenticate","token":"instrument-playground"})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await
+                    .unwrap();
+                let session: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(session, json!({"type":"session","role":"performer"}));
+                let snapshot: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(snapshot["state"]["planes"].as_array().unwrap().len(), 6);
+            })
+    });
+    poll_thread(&mut program, client);
+}
