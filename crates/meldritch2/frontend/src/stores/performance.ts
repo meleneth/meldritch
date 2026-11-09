@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { PerformanceSocket } from "../transport/websocket";
 import type {
   AdsrControl,
+  AudioTelemetry,
   Command,
   NoteEvent,
   Plane,
@@ -16,6 +17,7 @@ export const usePerformanceStore = defineStore("performance", () => {
     name = ref("Meldritch"),
     role = ref<string | null>(null),
     planes = ref<Plane[]>([]),
+    audio = ref<AudioTelemetry | null>(null),
     pending = ref(new Map<string, unknown>()),
     errors = ref<string[]>([]),
     token = ref(sessionStorage.getItem("meldritch-token") || "");
@@ -89,6 +91,7 @@ export const usePerformanceStore = defineStore("performance", () => {
     revision.value = message.revision;
     schemaRevision.value = message.schema_revision ?? schemaRevision.value;
     name.value = message.state.name || name.value;
+    if (message.state.audio !== undefined) audio.value = message.state.audio;
     if (message.state.planes) planes.value = message.state.planes;
     applyValues(message.state.values);
     pending.value.clear();
@@ -153,6 +156,7 @@ export const usePerformanceStore = defineStore("performance", () => {
     name,
     role,
     planes,
+    audio,
     visiblePlanes,
     pending,
     errors,

@@ -13,6 +13,16 @@ const snapshot = (
   schema_revision: 1,
   state: {
     name: "Test",
+    audio: {
+      buffer_underruns: revision,
+      stream_errors: revision,
+      timed_note_errors: 0,
+      first_stream_error: revision ? "audio buffer underrun or overrun" : null,
+      sample_rate: 48000,
+      channels: 2,
+      buffer_frames: 1024,
+      dsp_workers: 10,
+    },
     planes:
       type === "state.snapshot"
         ? [
@@ -52,6 +62,7 @@ describe("performance store", () => {
     const store = usePerformanceStore();
     store.applySnapshot(snapshot(4));
     expect(store.revision).toBe(4);
+    expect(store.audio?.buffer_underruns).toBe(4);
     expect(store.planes[0].controls[0]).toMatchObject({
       id: "cutoff",
       value: 880,

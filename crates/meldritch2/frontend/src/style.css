@@ -53,6 +53,14 @@ body {
 .connected {
   color: #77e09a;
 }
+.xrun-count {
+  color: #77e09a;
+  font-variant-numeric: tabular-nums;
+}
+.xrun-count.alarm {
+  color: #ff6b5f;
+  font-weight: 800;
+}
 main {
   padding: 1.5rem;
   display: grid;

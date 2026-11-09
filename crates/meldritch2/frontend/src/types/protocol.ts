@@ -122,6 +122,16 @@ export interface Plane {
   read_only?: boolean;
   controls: ControlDefinition[];
 }
+export interface AudioTelemetry {
+  buffer_underruns: number;
+  stream_errors: number;
+  timed_note_errors: number;
+  first_stream_error: string | null;
+  sample_rate: number;
+  channels: number;
+  buffer_frames: number;
+  dsp_workers: number;
+}
 export interface Snapshot {
   type: "state.snapshot" | "state.updated";
   epoch?: string;
@@ -133,6 +143,7 @@ export interface Snapshot {
     planes?: Plane[];
     values?: Record<string, unknown>;
     controls?: Record<string, unknown>;
+    audio?: AudioTelemetry | null;
   };
 }
 export type Command =

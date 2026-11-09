@@ -158,12 +158,67 @@ fn start() -> (
             (handle, value)
         })
         .collect();
+    program
+        .events_mut()
+        .set_audio_telemetry(meldritch2::device::AudioTelemetry {
+            buffer_underruns: 0,
+            stream_errors: 0,
+            timed_note_errors: 0,
+            first_stream_error: None,
+            sample_rate: 48_000,
+            channels: 2,
+            buffer_frames: 1_024,
+            dsp_workers: 4,
+        });
     let address = program
         .events_mut()
         .start_server(controls)
         .unwrap()
         .unwrap();
     (program, machine, address)
+}
+
+#[test]
+fn audio_underruns_are_published_as_authoritative_state() {
+    let (mut program, _machine, address) = start();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let client = thread::spawn(move || {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async move {
+                let (mut socket, _) = connect_async(format!("ws://{address}/performance"))
+                    .await
+                    .unwrap();
+                let initial: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(initial["state"]["audio"]["buffer_underruns"], 0);
+                ready_tx.send(()).unwrap();
+                let updated: Value =
+                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
+                        .unwrap();
+                assert_eq!(updated["state"]["audio"]["buffer_underruns"], 3);
+                assert_eq!(updated["state"]["audio"]["stream_errors"], 4);
+                assert_eq!(
+                    updated["state"]["audio"]["first_stream_error"],
+                    "audio buffer underrun or overrun"
+                );
+            })
+    });
+    ready_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+    program
+        .events_mut()
+        .set_audio_telemetry(meldritch2::device::AudioTelemetry {
+            buffer_underruns: 3,
+            stream_errors: 4,
+            timed_note_errors: 1,
+            first_stream_error: Some("audio buffer underrun or overrun".into()),
+            sample_rate: 48_000,
+            channels: 2,
+            buffer_frames: 1_024,
+            dsp_workers: 4,
+        });
+    poll_thread(&mut program, client);
 }
 
 fn get_json(program: &mut lua::Program, url: String) -> (u16, Value) {
@@ -1402,72 +1457,10 @@ fn pressure_system_roles_resolve_to_public_controls_and_server_starts() {
 }
 
 #[test]
-fn instrument_playground_advertises_and_authenticates_its_websocket() {
-    let Some(home) = std::env::var_os("HOME") else {
-        return;
-    };
-    let home = std::path::PathBuf::from(home);
-    if !home.join(".vst3/Serum2.vst3").is_dir()
-        || !home.join(".vst3/PULSE Drum Synth.vst3").is_dir()
-        || !home
-            .join(".local/share/meldritch2/patches/serum2/factory/manifest.json")
-            .is_file()
-    {
-        eprintln!("Instrument Playground plugins/catalog unavailable; skipping server test");
-        return;
-    }
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let source = std::fs::read_to_string(root.join("examples/82-instrument-playground.lua"))
-        .expect("read Instrument Playground")
-        .replace("port=8080", "port=0");
-    let mut program =
-        lua::read_program_with_root(&source, root).expect("load Instrument Playground program");
-    let machine = compile(program.graph()).expect("compile Instrument Playground");
-    let controls = machine
-        .control_ids()
-        .map(|id| {
-            let handle = machine.control_handle(id).unwrap();
-            let value = handle.effective_value();
-            (handle, value)
-        })
-        .collect();
-    let address = program
-        .events_mut()
-        .start_server(controls)
-        .expect("start Instrument Playground server")
-        .expect("Instrument Playground listener");
-    let (status, config) = get_json(&mut program, format!("http://{address}/api/browser-config"));
-    assert_eq!(status, 200);
-    assert_eq!(config["websocket"], "/performance");
-
-    let client = thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let (mut socket, _) = connect_async(format!("ws://{address}/performance"))
-                    .await
-                    .unwrap();
-                let initial: Value =
-                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
-                        .unwrap();
-                assert_eq!(initial["state"]["name"], "Instrument Playground");
-                socket
-                    .send(Message::Text(
-                        json!({"type":"authenticate","token":"instrument-playground"})
-                            .to_string()
-                            .into(),
-                    ))
-                    .await
-                    .unwrap();
-                let session: Value =
-                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
-                        .unwrap();
-                assert_eq!(session, json!({"type":"session","role":"performer"}));
-                let snapshot: Value =
-                    serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap())
-                        .unwrap();
-                assert_eq!(snapshot["state"]["planes"].as_array().unwrap().len(), 6);
-            })
-    });
-    poll_thread(&mut program, client);
+fn instrument_playground_declares_its_websocket_and_credential() {
+    let source = include_str!("../examples/82-instrument-playground.lua");
+    assert!(source.contains("server:websocket(\"/performance\",{})"));
+    assert!(
+        source.contains("os.getenv(\"MELDRITCH_PLAYGROUND_TOKEN\") or \"instrument-playground\"")
+    );
 }

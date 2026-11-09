@@ -1251,10 +1251,11 @@ pub fn perform(
     mut keyboard: Option<TuiKeyboard>,
     mut events: Option<&mut crate::lua::EventOwner>,
 ) -> Result<(), String> {
-    if let Some(events) = &mut events
-        && let Some(address) = events.start_server(output.controls())?
-    {
-        eprintln!("Meldritch performance server listening on http://{address}");
+    if let Some(events) = &mut events {
+        events.set_audio_telemetry(output.audio_telemetry());
+        if let Some(address) = events.start_server(output.controls())? {
+            eprintln!("Meldritch performance server listening on http://{address}");
+        }
     }
     let mut apc = match (output.apc_mini(), output.performance()) {
         (Some(name), Some(performance)) => Some(crate::apc::ApcSession::start(
@@ -1329,6 +1330,7 @@ pub fn perform(
             stream_deck.poll()?;
         }
         if let Some(events) = &mut events {
+            events.set_audio_telemetry(output.audio_telemetry());
             events.dispatch();
             events.dispatch_server();
             for error in events.take_errors() {

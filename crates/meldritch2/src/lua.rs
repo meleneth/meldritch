@@ -2589,6 +2589,14 @@ pub struct EventOwner {
 }
 
 impl EventOwner {
+    pub fn set_audio_telemetry(&mut self, telemetry: crate::device::AudioTelemetry) {
+        if let Some((_, executor)) = &mut self.web_runtime {
+            executor.update_audio_telemetry(telemetry);
+        } else if let Some(application) = &mut self.web_application {
+            application.set_audio_telemetry(telemetry);
+        }
+    }
+
     pub fn mount_screen(&mut self, screen: &str) -> Result<(), String> {
         self.runtime.mount_screen(screen)
     }

@@ -5,6 +5,8 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+use serde::Serialize;
+
 use cpal::{
     BufferSize, FromSample, Sample, SampleFormat, SupportedBufferSize,
     traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -97,7 +99,12 @@ fn stream_error_label(code: u8) -> Option<&'static str> {
     }
 }
 
-fn record_stream_error(kind: cpal::ErrorKind, errors: &AtomicU64, first_error: &AtomicU8) {
+fn record_stream_error(
+    kind: cpal::ErrorKind,
+    errors: &AtomicU64,
+    xruns: &AtomicU64,
+    first_error: &AtomicU8,
+) {
     let _ = first_error.compare_exchange(
         0,
         stream_error_code(kind),
@@ -105,6 +112,21 @@ fn record_stream_error(kind: cpal::ErrorKind, errors: &AtomicU64, first_error: &
         Ordering::Relaxed,
     );
     errors.fetch_add(1, Ordering::Relaxed);
+    if kind == cpal::ErrorKind::Xrun {
+        xruns.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct AudioTelemetry {
+    pub buffer_underruns: u64,
+    pub stream_errors: u64,
+    pub timed_note_errors: u64,
+    pub first_stream_error: Option<String>,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub buffer_frames: u32,
+    pub dsp_workers: usize,
 }
 
 /// Copy graph output to device channels without allocating. Mono graphs are
@@ -197,6 +219,7 @@ pub struct DeviceOutput {
     midi_router: MidiRouter,
     timed_midi_router: Option<TimedMidiRouter>,
     errors: Arc<AtomicU64>,
+    xruns: Arc<AtomicU64>,
     timed_note_errors: Arc<AtomicU64>,
     first_error: Arc<AtomicU8>,
     pub device_name: String,
@@ -361,6 +384,7 @@ impl DeviceOutput {
             };
         let (runtime, control) = LiveRuntime::new(machine);
         let errors = Arc::new(AtomicU64::new(0));
+        let xruns = Arc::new(AtomicU64::new(0));
         let timed_note_errors = Arc::new(AtomicU64::new(0));
         let first_error = Arc::new(AtomicU8::new(0));
         let stopping = Arc::new(AtomicBool::new(false));
@@ -373,6 +397,7 @@ impl DeviceOutput {
                 let mut scratch = [0.0; CHUNK_FRAMES];
                 let mut right_scratch = [0.0; CHUNK_FRAMES];
                 let errors = Arc::clone(&errors);
+                let xruns = Arc::clone(&xruns);
                 let first_error = Arc::clone(&first_error);
                 let note_errors = Arc::clone(&timed_note_errors);
                 let callback_stopping = Arc::clone(&stopping);
@@ -412,7 +437,7 @@ impl DeviceOutput {
                         }
                     },
                     move |error| {
-                        record_stream_error(error.kind(), &errors, &first_error);
+                        record_stream_error(error.kind(), &errors, &xruns, &first_error);
                     },
                     None,
                 )
@@ -454,6 +479,7 @@ impl DeviceOutput {
             midi_router,
             timed_midi_router,
             errors,
+            xruns,
             timed_note_errors,
             first_error,
             device_name,
@@ -567,8 +593,25 @@ impl DeviceOutput {
         self.errors.load(Ordering::Relaxed)
     }
 
+    pub fn buffer_underruns(&self) -> u64 {
+        self.xruns.load(Ordering::Relaxed)
+    }
+
     pub fn first_stream_error(&self) -> Option<&'static str> {
         stream_error_label(self.first_error.load(Ordering::Acquire))
+    }
+
+    pub fn audio_telemetry(&self) -> AudioTelemetry {
+        AudioTelemetry {
+            buffer_underruns: self.buffer_underruns(),
+            stream_errors: self.stream_errors(),
+            timed_note_errors: self.timed_note_errors(),
+            first_stream_error: self.first_stream_error().map(str::to_owned),
+            sample_rate: self.sample_rate,
+            channels: self.channels,
+            buffer_frames: self.buffer_frames,
+            dsp_workers: self.dsp_workers,
+        }
     }
 }
 
@@ -639,10 +682,12 @@ mod tests {
     #[test]
     fn stream_error_recording_keeps_first_kind_without_formatting() {
         let errors = AtomicU64::new(0);
+        let xruns = AtomicU64::new(0);
         let first = AtomicU8::new(0);
-        record_stream_error(cpal::ErrorKind::Xrun, &errors, &first);
-        record_stream_error(cpal::ErrorKind::DeviceNotAvailable, &errors, &first);
+        record_stream_error(cpal::ErrorKind::Xrun, &errors, &xruns, &first);
+        record_stream_error(cpal::ErrorKind::DeviceNotAvailable, &errors, &xruns, &first);
         assert_eq!(errors.load(Ordering::Relaxed), 2);
+        assert_eq!(xruns.load(Ordering::Relaxed), 1);
         assert_eq!(
             stream_error_label(first.load(Ordering::Acquire)),
             Some("audio buffer underrun or overrun")

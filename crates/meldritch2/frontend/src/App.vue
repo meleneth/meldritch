@@ -96,6 +96,11 @@ const muteDrum = (
     <div class="session">
       <span :class="store.status">{{ store.status }}</span
       ><span>{{ store.role || "guest" }} · r{{ store.revision }}</span
+      ><span
+        class="xrun-count"
+        :class="{ alarm: (store.audio?.buffer_underruns || 0) > 0 }"
+        :title="store.audio?.first_stream_error || 'No audio backend errors'"
+        >XRUNS {{ store.audio?.buffer_underruns || 0 }}</span
       ><input
         v-model="credential"
         type="password"

@@ -272,6 +272,7 @@ pub struct Application {
     pub credentials: BTreeMap<String, String>,
     pub anonymous_role: Option<String>,
     pub planes: Rc<RefCell<BTreeMap<String, ControlPlane>>>,
+    audio_telemetry: Option<crate::device::AudioTelemetry>,
     runtime: Rc<RefCell<PerformanceRuntime>>,
 }
 
@@ -294,8 +295,13 @@ impl Application {
             credentials: BTreeMap::new(),
             anonymous_role: None,
             planes: Rc::new(RefCell::new(BTreeMap::new())),
+            audio_telemetry: None,
             runtime: Rc::new(RefCell::new(PerformanceRuntime::default())),
         }
+    }
+
+    pub fn set_audio_telemetry(&mut self, telemetry: crate::device::AudioTelemetry) {
+        self.audio_telemetry = Some(telemetry);
     }
 
     pub fn attach_controls(&mut self, controls: Vec<(ControlHandle, f64)>) -> Result<(), String> {
@@ -707,7 +713,7 @@ impl Application {
                 (role.clone(), controls.unwrap_or(Value::Null))
             })
             .collect::<serde_json::Map<_, _>>();
-        let mut state = json!({ "name": self.name, "controls": controls, "values": values, "_role_controls": role_controls });
+        let mut state = json!({ "name": self.name, "controls": controls, "values": values, "audio": self.audio_telemetry, "_role_controls": role_controls });
         if include_schema {
             state["planes"] = Value::Array(definitions);
         }
@@ -1284,6 +1290,13 @@ pub struct ControlExecutor {
 }
 
 impl ControlExecutor {
+    pub fn update_audio_telemetry(&mut self, telemetry: crate::device::AudioTelemetry) {
+        if self.application.audio_telemetry.as_ref() != Some(&telemetry) {
+            self.application.audio_telemetry = Some(telemetry);
+            self.publish();
+        }
+    }
+
     pub fn poll(&mut self, lua: &mlua::Lua, limit: usize) {
         let started = Instant::now();
         let mut processed = 0;
