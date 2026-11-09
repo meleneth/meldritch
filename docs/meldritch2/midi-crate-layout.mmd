@@ -1,0 +1,22 @@
+flowchart LR
+  interface["meldritch-interface<br/>MidiEvent · Tempo<br/>MidiModuleContract<br/>MidiModule"]
+  arp["meldritch-arp<br/>named notes input/output<br/>tempo-aware scheduler"]
+  utils["meldritch-midi-utils<br/>key + notes inputs<br/>scale-locked notes output"]
+  host["meldritch2<br/>Lua graph compiler<br/>generic MIDI executor<br/>polyphonic note sink"]
+  lua["Lua instrument DSL<br/>midi_input · key_lock<br/>arpeggiator · note_source"]
+  synth["Audio graph / VST3<br/>voice pitch · gate · velocity"]
+
+  arp -->|depends on| interface
+  utils -->|depends on| interface
+  host -->|depends on| interface
+  host -->|constructs through contract| arp
+  host -->|constructs through contract| utils
+  lua -->|authors named-port graph| host
+  host -->|resolved MIDI events| synth
+
+  classDef shared fill:#264653,color:#fff,stroke:#8ecae6,stroke-width:2px
+  classDef crate fill:#2a9d8f,color:#fff,stroke:#b7e4c7,stroke-width:2px
+  classDef host fill:#e76f51,color:#fff,stroke:#ffd6a5,stroke-width:2px
+  class interface shared
+  class arp,utils crate
+  class host host

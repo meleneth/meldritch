@@ -7,7 +7,16 @@
 //! are reference-counted, so two held source notes that converge on one pitch
 //! produce one NoteOn and one final NoteOff.
 
-use meldritch_interface::{MidiEvent, MidiMessage};
+use meldritch_interface::{
+    MidiEvent, MidiMessage, MidiModule, MidiModuleContext, MidiModuleContract, MidiPort,
+};
+
+pub const KEY_LOCK_CONTRACT: MidiModuleContract = MidiModuleContract {
+    name: "key_lock",
+    inputs: &[MidiPort { name: "key" }, MidiPort { name: "notes" }],
+    outputs: &[MidiPort { name: "notes" }],
+    needs_tempo: false,
+};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Scale {
@@ -344,6 +353,38 @@ impl KeyLock {
             }
         }
         self.output_refs = new_refs;
+    }
+}
+
+impl MidiModule for KeyLock {
+    fn contract(&self) -> &'static MidiModuleContract {
+        &KEY_LOCK_CONTRACT
+    }
+
+    fn process_input(
+        &mut self,
+        port: usize,
+        event: MidiEvent,
+        _context: MidiModuleContext,
+        output: &mut dyn FnMut(MidiEvent),
+    ) {
+        match port {
+            0 => self.key_input(event, output),
+            1 => self.note_input(event, output),
+            _ => panic!("validated key-lock input port"),
+        }
+    }
+
+    fn scheduled_frame(&self, _context: MidiModuleContext) -> Option<u64> {
+        None
+    }
+
+    fn process_until(
+        &mut self,
+        _end: u64,
+        _context: MidiModuleContext,
+        _output: &mut dyn FnMut(MidiEvent),
+    ) {
     }
 }
 

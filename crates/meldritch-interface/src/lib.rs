@@ -79,11 +79,29 @@ pub struct MidiEvent {
     pub message: MidiMessage,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MidiPort {
+    pub name: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MidiModuleContract {
+    pub name: &'static str,
+    pub inputs: &'static [MidiPort],
+    pub outputs: &'static [MidiPort],
+    pub needs_tempo: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tempo {
     pub bpm: f64,
     pub sample_rate: u32,
     pub playing: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MidiModuleContext {
+    pub tempo: Option<Tempo>,
 }
 
 impl Tempo {
@@ -98,4 +116,24 @@ pub trait MidiProcessor {
     fn input(&mut self, event: MidiEvent, output: &mut dyn FnMut(MidiEvent));
     fn next_frame(&self, tempo: Tempo) -> Option<u64>;
     fn advance(&mut self, end: u64, tempo: Tempo, output: &mut dyn FnMut(MidiEvent));
+}
+
+/// A named-port MIDI graph node. The host routes events solely from the
+/// contract; implementations do not know which modules precede or follow them.
+pub trait MidiModule: Send {
+    fn contract(&self) -> &'static MidiModuleContract;
+    fn process_input(
+        &mut self,
+        port: usize,
+        event: MidiEvent,
+        context: MidiModuleContext,
+        output: &mut dyn FnMut(MidiEvent),
+    );
+    fn scheduled_frame(&self, context: MidiModuleContext) -> Option<u64>;
+    fn process_until(
+        &mut self,
+        end: u64,
+        context: MidiModuleContext,
+        output: &mut dyn FnMut(MidiEvent),
+    );
 }

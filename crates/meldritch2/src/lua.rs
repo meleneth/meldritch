@@ -17,7 +17,8 @@ use crate::event_bridge::{
 use crate::model::{
     Action, Automation, AutomationInterpolation, Connection, Control, ControlPage, ControlScale,
     ControlSurface, Endpoint, ExternalInput, ExternalParameter, ExternalPort, Graph,
-    LiveArpeggiator, LiveKeyLock, MidiButton, MidiButtonEdge, MidiButtonMessage, MidiCc, MidiNotes,
+    LiveMidiConnection, LiveMidiEndpoint, LiveMidiInput, LiveMidiModule, LiveMidiModuleKind,
+    LiveMidiNoteSource, MidiButton, MidiButtonEdge, MidiButtonMessage, MidiCc, MidiNotes,
     MidiPacket, MidiPoly, MidiPolyVoice, Module, ModuleRuntime, Navigation, NavigationBinding,
     NavigationEvent, ParameterId, Performance, PerformanceSurface, PerformanceTrackView,
     PolyOverflow, Screen, Subpatch, SubpatchInstance, SurfaceAction, SurfaceButton,
@@ -1134,7 +1135,8 @@ meldritch = { _subpatches = {} }
 function meldritch.graph()
   local graph = { modules = {}, instances = {}, connections = {}, normalizations = {},
     controls = {}, midi_ccs = {}, note_bindings = {}, poly_bindings = {}, external_inputs = {}, external_outputs = {},
-    external_parameters = {}, screens = {}, actions = {}, midi_buttons = {}, midi_packets = {}, live_arpeggiators = {}, live_key_locks = {},
+    external_parameters = {}, screens = {}, actions = {}, midi_buttons = {}, midi_packets = {},
+    live_midi_inputs = {}, live_midi_modules = {}, live_midi_connections = {}, live_midi_note_source = nil,
     performance = nil, _navigation = nil, _devices = {}, _event_handles = {}, _control_surfaces = {}, automations = {} }
   function graph:devices(devices)
     assert(type(devices) == "table", "devices must be a table")
@@ -2160,8 +2162,11 @@ function meldritch.instrument(name)
     _actions = {},
     _midi_buttons = {},
     _midi_packets = {},
-    _live_arpeggiators = {},
-    _live_key_locks = {},
+    _live_midi_inputs = {},
+    _live_midi_modules = {},
+    _live_midi_connections = {},
+    _live_midi_note_source = nil,
+    _live_midi_serial = 0,
     _note_channel = 1,
     _event_handles = {},
     _screens = {},
@@ -2183,42 +2188,46 @@ function meldritch.instrument(name)
     local channel = spec.channel or 1
     assert(type(channel)=="number" and channel>=1 and channel<=16 and channel%1==0,
       "MIDI input channel must be an integer in 1..16")
-    return {notes={direction="midi",channel=channel}}
+    self._live_midi_serial = self._live_midi_serial + 1
+    local id = "midi_input_" .. self._live_midi_serial
+    table.insert(self._live_midi_inputs,{id=id,channel=channel})
+    return {notes={direction="midi_output",node=id,port="notes"}}
   end
 
   function instrument:arpeggiator(spec)
-    assert(type(spec)=="table" and type(spec.notes)=="table" and spec.notes.direction=="midi",
+    assert(type(spec)=="table" and type(spec.notes)=="table" and spec.notes.direction=="midi_output",
       "arpeggiator requires a MIDI note input")
     assert(type(spec.tempo)=="table" and spec.tempo._native,
       "arpeggiator requires a sequencer tempo input")
-    local output_channel=spec.output_channel or 2
-    assert(type(output_channel)=="number" and output_channel>=1 and output_channel<=16 and output_channel%1==0,
-      "arpeggiator output channel must be an integer in 1..16")
-    table.insert(self._live_arpeggiators,{input_channel=spec.notes.channel,output_channel=output_channel,
+    self._live_midi_serial = self._live_midi_serial + 1
+    local id = "arpeggiator_" .. self._live_midi_serial
+    table.insert(self._live_midi_modules,{id=id,kind="arpeggiator",
       tempo=spec.tempo._native,mode=spec.mode or "up",octaves=spec.octaves or 1,
       rate=spec.rate or 4,gate=spec.gate or .72,restart_on_change=spec.restart_on_change~=false,
       seed=spec.seed or 1})
-    return {notes={direction="midi",channel=output_channel}}
+    table.insert(self._live_midi_connections,{source=spec.notes,destination={node=id,port="notes"}})
+    return {notes={direction="midi_output",node=id,port="notes"}}
   end
 
   function instrument:key_lock(spec)
-    assert(type(spec)=="table" and type(spec.key)=="table" and spec.key.direction=="midi",
+    assert(type(spec)=="table" and type(spec.key)=="table" and spec.key.direction=="midi_output",
       "key lock requires a MIDI key input")
-    assert(type(spec.notes)=="table" and spec.notes.direction=="midi",
+    assert(type(spec.notes)=="table" and spec.notes.direction=="midi_output",
       "key lock requires a MIDI note input")
-    local output_channel=spec.output_channel or 3
-    assert(type(output_channel)=="number" and output_channel>=1 and output_channel<=16 and output_channel%1==0,
-      "key-lock output channel must be an integer in 1..16")
-    table.insert(self._live_key_locks,{key_channel=spec.key.channel,notes_channel=spec.notes.channel,
-      output_channel=output_channel,scale=spec.scale or "major",wrong_notes=spec.wrong_notes or "nearest",
+    self._live_midi_serial = self._live_midi_serial + 1
+    local id = "key_lock_" .. self._live_midi_serial
+    table.insert(self._live_midi_modules,{id=id,kind="key_lock",
+      scale=spec.scale or "major",wrong_notes=spec.wrong_notes or "nearest",
       tie_break=spec.tie_break or "down",initial_key=spec.initial_key or 60})
-    return {notes={direction="midi",channel=output_channel}}
+    table.insert(self._live_midi_connections,{source=spec.key,destination={node=id,port="key"}})
+    table.insert(self._live_midi_connections,{source=spec.notes,destination={node=id,port="notes"}})
+    return {notes={direction="midi_output",node=id,port="notes"}}
   end
 
   function instrument:note_source(source)
-    assert(type(source)=="table" and source.direction=="midi" and type(source.channel)=="number",
+    assert(type(source)=="table" and source.direction=="midi_output" and type(source.node)=="string",
       "note source must be a MIDI output")
-    self._note_channel=source.channel
+    self._live_midi_note_source=source
     return self
   end
 
@@ -2363,8 +2372,12 @@ function meldritch.instrument(name)
     root._navigation = self._navigation
     root._event_handles = self._event_handles
     root._control_surfaces = definition._control_surfaces
-    root.live_arpeggiators = self._live_arpeggiators
-    root.live_key_locks = self._live_key_locks
+    root.live_midi_inputs = self._live_midi_inputs
+    root.live_midi_modules = self._live_midi_modules
+    root.live_midi_connections = self._live_midi_connections
+    if self._live_midi_note_source then
+      root.live_midi_note_source = {source=self._live_midi_note_source,sink_channel=self._note_channel}
+    end
     root.automations = self._automations
     local terminal = root:module("output", "stereo_output")
     if self._uses_notes then
@@ -3755,96 +3768,134 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
             },
         });
     }
-    let live_arpeggiators: Table = table
-        .get("live_arpeggiators")
-        .map_err(|e| format!("graph.live_arpeggiators: {e}"))?;
-    for item in live_arpeggiators.sequence_values::<Table>() {
+    let live_midi_inputs: Table = table
+        .get("live_midi_inputs")
+        .map_err(|e| format!("graph.live_midi_inputs: {e}"))?;
+    for item in live_midi_inputs.sequence_values::<Table>() {
         let item = item.map_err(|e| e.to_string())?;
-        let tempo: AnyUserData = item.get("tempo").map_err(|e| e.to_string())?;
-        let tempo = Arc::clone(
-            &tempo
-                .borrow::<LuaSequencer>()
-                .map_err(|e| e.to_string())?
-                .control,
-        );
-        let mode = match item
-            .get::<String>("mode")
-            .map_err(|e| e.to_string())?
-            .as_str()
-        {
-            "up" => meldritch_arp::Mode::Up,
-            "down" => meldritch_arp::Mode::Down,
-            "up_down" => meldritch_arp::Mode::UpDown,
-            "played" => meldritch_arp::Mode::Played,
-            "random" => meldritch_arp::Mode::Random,
-            other => return Err(format!("unknown live arpeggiator mode '{other}'")),
-        };
-        let config = meldritch_arp::Config {
-            mode,
-            octaves: item.get("octaves").map_err(|e| e.to_string())?,
-            rate: item.get("rate").map_err(|e| e.to_string())?,
-            gate: item.get("gate").map_err(|e| e.to_string())?,
-            restart_on_change: item.get("restart_on_change").map_err(|e| e.to_string())?,
-            seed: item.get("seed").map_err(|e| e.to_string())?,
-        }
-        .validate()
-        .map_err(str::to_owned)?;
-        graph.live_arpeggiators.push(LiveArpeggiator {
-            input_channel: item.get("input_channel").map_err(|e| e.to_string())?,
-            output_channel: item.get("output_channel").map_err(|e| e.to_string())?,
-            tempo,
-            config,
+        graph.live_midi_inputs.push(LiveMidiInput {
+            id: item.get("id").map_err(|e| e.to_string())?,
+            channel: item.get("channel").map_err(|e| e.to_string())?,
         });
     }
-    let live_key_locks: Table = table
-        .get("live_key_locks")
-        .map_err(|e| format!("graph.live_key_locks: {e}"))?;
-    for item in live_key_locks.sequence_values::<Table>() {
+    let live_midi_modules: Table = table
+        .get("live_midi_modules")
+        .map_err(|e| format!("graph.live_midi_modules: {e}"))?;
+    for item in live_midi_modules.sequence_values::<Table>() {
         let item = item.map_err(|e| e.to_string())?;
-        let scale = match item
-            .get::<String>("scale")
+        let id = item.get("id").map_err(|e| e.to_string())?;
+        let kind = match item
+            .get::<String>("kind")
             .map_err(|e| e.to_string())?
             .as_str()
         {
-            "major" => meldritch_midi_utils::Scale::Major,
-            "minor" | "natural_minor" => meldritch_midi_utils::Scale::NaturalMinor,
-            "dorian" => meldritch_midi_utils::Scale::Dorian,
-            "mixolydian" => meldritch_midi_utils::Scale::Mixolydian,
-            "pentatonic" => meldritch_midi_utils::Scale::Pentatonic,
-            "chromatic" => meldritch_midi_utils::Scale::Chromatic,
-            other => return Err(format!("unknown key-lock scale '{other}'")),
+            "arpeggiator" => {
+                let tempo: AnyUserData = item.get("tempo").map_err(|e| e.to_string())?;
+                let tempo = Arc::clone(
+                    &tempo
+                        .borrow::<LuaSequencer>()
+                        .map_err(|e| e.to_string())?
+                        .control,
+                );
+                let mode = match item
+                    .get::<String>("mode")
+                    .map_err(|e| e.to_string())?
+                    .as_str()
+                {
+                    "up" => meldritch_arp::Mode::Up,
+                    "down" => meldritch_arp::Mode::Down,
+                    "up_down" => meldritch_arp::Mode::UpDown,
+                    "played" => meldritch_arp::Mode::Played,
+                    "random" => meldritch_arp::Mode::Random,
+                    other => return Err(format!("unknown live arpeggiator mode '{other}'")),
+                };
+                let config = meldritch_arp::Config {
+                    mode,
+                    octaves: item.get("octaves").map_err(|e| e.to_string())?,
+                    rate: item.get("rate").map_err(|e| e.to_string())?,
+                    gate: item.get("gate").map_err(|e| e.to_string())?,
+                    restart_on_change: item.get("restart_on_change").map_err(|e| e.to_string())?,
+                    seed: item.get("seed").map_err(|e| e.to_string())?,
+                }
+                .validate()
+                .map_err(str::to_owned)?;
+                LiveMidiModuleKind::Arpeggiator { tempo, config }
+            }
+            "key_lock" => {
+                let scale = match item
+                    .get::<String>("scale")
+                    .map_err(|e| e.to_string())?
+                    .as_str()
+                {
+                    "major" => meldritch_midi_utils::Scale::Major,
+                    "minor" | "natural_minor" => meldritch_midi_utils::Scale::NaturalMinor,
+                    "dorian" => meldritch_midi_utils::Scale::Dorian,
+                    "mixolydian" => meldritch_midi_utils::Scale::Mixolydian,
+                    "pentatonic" => meldritch_midi_utils::Scale::Pentatonic,
+                    "chromatic" => meldritch_midi_utils::Scale::Chromatic,
+                    other => return Err(format!("unknown key-lock scale '{other}'")),
+                };
+                let wrong_notes = match item
+                    .get::<String>("wrong_notes")
+                    .map_err(|e| e.to_string())?
+                    .as_str()
+                {
+                    "suppress" => meldritch_midi_utils::WrongNotePolicy::Suppress,
+                    "nearest" => meldritch_midi_utils::WrongNotePolicy::Nearest,
+                    other => return Err(format!("unknown key-lock wrong-note policy '{other}'")),
+                };
+                let tie_break = match item
+                    .get::<String>("tie_break")
+                    .map_err(|e| e.to_string())?
+                    .as_str()
+                {
+                    "down" => meldritch_midi_utils::TieBreak::Down,
+                    "up" => meldritch_midi_utils::TieBreak::Up,
+                    other => return Err(format!("unknown key-lock tie break '{other}'")),
+                };
+                LiveMidiModuleKind::KeyLock {
+                    config: meldritch_midi_utils::KeyLockConfig {
+                        scale,
+                        wrong_notes,
+                        tie_break,
+                        initial_key: item.get("initial_key").map_err(|e| e.to_string())?,
+                    },
+                }
+            }
+            other => return Err(format!("unknown live MIDI module '{other}'")),
         };
-        let wrong_notes = match item
-            .get::<String>("wrong_notes")
-            .map_err(|e| e.to_string())?
-            .as_str()
-        {
-            "suppress" => meldritch_midi_utils::WrongNotePolicy::Suppress,
-            "nearest" => meldritch_midi_utils::WrongNotePolicy::Nearest,
-            other => return Err(format!("unknown key-lock wrong-note policy '{other}'")),
-        };
-        let tie_break = match item
-            .get::<String>("tie_break")
-            .map_err(|e| e.to_string())?
-            .as_str()
-        {
-            "down" => meldritch_midi_utils::TieBreak::Down,
-            "up" => meldritch_midi_utils::TieBreak::Up,
-            other => return Err(format!("unknown key-lock tie break '{other}'")),
-        };
-        graph.live_key_locks.push(LiveKeyLock {
-            key_channel: item.get("key_channel").map_err(|e| e.to_string())?,
-            notes_channel: item.get("notes_channel").map_err(|e| e.to_string())?,
-            output_channel: item.get("output_channel").map_err(|e| e.to_string())?,
-            config: meldritch_midi_utils::KeyLockConfig {
-                scale,
-                wrong_notes,
-                tie_break,
-                initial_key: item.get("initial_key").map_err(|e| e.to_string())?,
-            },
+        graph.live_midi_modules.push(LiveMidiModule { id, kind });
+    }
+    let live_midi_connections: Table = table
+        .get("live_midi_connections")
+        .map_err(|e| format!("graph.live_midi_connections: {e}"))?;
+    for item in live_midi_connections.sequence_values::<Table>() {
+        let item = item.map_err(|e| e.to_string())?;
+        let source: Table = item.get("source").map_err(|e| e.to_string())?;
+        let destination: Table = item.get("destination").map_err(|e| e.to_string())?;
+        graph.live_midi_connections.push(LiveMidiConnection {
+            source: live_midi_endpoint(source)?,
+            destination: live_midi_endpoint(destination)?,
+        });
+    }
+    if let Some(item) = table
+        .get::<Option<Table>>("live_midi_note_source")
+        .map_err(|e| e.to_string())?
+    {
+        let source: Table = item.get("source").map_err(|e| e.to_string())?;
+        graph.live_midi_note_source = Some(LiveMidiNoteSource {
+            source: live_midi_endpoint(source)?,
+            sink_channel: item.get("sink_channel").map_err(|e| e.to_string())?,
         });
     }
     Ok(graph)
+}
+
+fn live_midi_endpoint(table: Table) -> Result<LiveMidiEndpoint, String> {
+    Ok(LiveMidiEndpoint {
+        node: table.get("node").map_err(|e| e.to_string())?,
+        port: table.get("port").map_err(|e| e.to_string())?,
+    })
 }
 
 fn endpoint(table: Table) -> Result<Endpoint, String> {

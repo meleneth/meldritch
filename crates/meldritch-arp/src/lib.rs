@@ -1,6 +1,16 @@
 //! Real-time MIDI arpeggiator with no dependency on the Meldritch host.
 
-use meldritch_interface::{MidiEvent, MidiMessage, MidiProcessor, Tempo};
+use meldritch_interface::{
+    MidiEvent, MidiMessage, MidiModule, MidiModuleContext, MidiModuleContract, MidiPort,
+    MidiProcessor, Tempo,
+};
+
+pub const CONTRACT: MidiModuleContract = MidiModuleContract {
+    name: "arpeggiator",
+    inputs: &[MidiPort { name: "notes" }],
+    outputs: &[MidiPort { name: "notes" }],
+    needs_tempo: true,
+};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Mode {
@@ -288,6 +298,44 @@ impl MidiProcessor for Arpeggiator {
                 self.next_tick = self.next_tick.map(|tick| tick + interval);
             }
         }
+    }
+}
+
+impl MidiModule for Arpeggiator {
+    fn contract(&self) -> &'static MidiModuleContract {
+        &CONTRACT
+    }
+
+    fn process_input(
+        &mut self,
+        port: usize,
+        event: MidiEvent,
+        _context: MidiModuleContext,
+        output: &mut dyn FnMut(MidiEvent),
+    ) {
+        assert_eq!(port, 0, "validated arpeggiator input port");
+        MidiProcessor::input(self, event, output);
+    }
+
+    fn scheduled_frame(&self, context: MidiModuleContext) -> Option<u64> {
+        MidiProcessor::next_frame(
+            self,
+            context.tempo.expect("validated arpeggiator tempo input"),
+        )
+    }
+
+    fn process_until(
+        &mut self,
+        end: u64,
+        context: MidiModuleContext,
+        output: &mut dyn FnMut(MidiEvent),
+    ) {
+        MidiProcessor::advance(
+            self,
+            end,
+            context.tempo.expect("validated arpeggiator tempo input"),
+            output,
+        );
     }
 }
 

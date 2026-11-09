@@ -1,0 +1,51 @@
+flowchart TB
+  subgraph browser["Browser interaction and visualization"]
+    phaser["Phaser control surfaces<br/>piano roll · XY · ADSR"]
+    vue["Vue components"]
+    pinia["Pinia performance store<br/>optimistic projection"]
+    socket["WebSocket transport<br/>semantic commands + snapshots"]
+    phaser <-->|SurfaceBinding| vue
+    vue <-->|reactive state| pinia
+    pinia <-->|commands / authoritative echo| socket
+  end
+
+  subgraph lua["Lua application layer"]
+    editor["Editor composition<br/>controls · mappings · structure"]
+    music["Musical behavior<br/>patterns · transforms · scales"]
+    quine["Readable successor generation<br/>structure + current state"]
+    midi_dsl["Named-port MIDI graph DSL<br/>inputs · key lock · arp · sink"]
+    editor --> music
+    editor --> quine
+    music --> midi_dsl
+  end
+
+  subgraph rust["Rust host and retained runtime"]
+    web["HTTP / WebSocket control plane"]
+    retained["Authoritative retained state<br/>logical notes · patterns · controls"]
+    compiler["Graph compiler<br/>audio + generic MIDI topology"]
+    midi["Generic MIDI executor<br/>contract-driven named ports"]
+    audio["Audio engine<br/>native DSP · VST3 · mixing"]
+    hardware["Controller adapters<br/>APC mini · MIDI · Stream Deck"]
+    web --> retained
+    retained --> compiler
+    compiler --> midi
+    compiler --> audio
+    midi -->|pitch / gate / velocity| audio
+    hardware -->|semantic mutations + MIDI events| retained
+    hardware -->|live MIDI streams| midi
+  end
+
+  socket <-->|JSON| web
+  editor <-->|existing Lua APIs| retained
+  midi_dsl -->|module contracts + connections| compiler
+  retained -->|revisioned snapshots| pinia
+  retained -->|state introspection at Save| quine
+  quine -->|executable Lua successor| editor
+  audio --> output["Audio / MIDI output"]
+
+  classDef browser fill:#4361ee,color:#fff,stroke:#bde0fe,stroke-width:2px
+  classDef lua fill:#9b5de5,color:#fff,stroke:#e0aaff,stroke-width:2px
+  classDef rust fill:#e76f51,color:#fff,stroke:#ffd6a5,stroke-width:2px
+  class phaser,vue,pinia,socket browser
+  class editor,music,quine,midi_dsl lua
+  class web,retained,compiler,midi,audio,hardware rust

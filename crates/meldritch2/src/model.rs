@@ -120,19 +120,54 @@ pub struct MidiPoly {
 }
 
 #[derive(Clone, Debug)]
-pub struct LiveArpeggiator {
-    pub input_channel: u8,
-    pub output_channel: u8,
-    pub tempo: Arc<SequencerControl>,
-    pub config: meldritch_arp::Config,
+pub enum LiveMidiModuleKind {
+    Arpeggiator {
+        tempo: Arc<SequencerControl>,
+        config: meldritch_arp::Config,
+    },
+    KeyLock {
+        config: meldritch_midi_utils::KeyLockConfig,
+    },
+}
+
+impl LiveMidiModuleKind {
+    pub fn contract(&self) -> &'static meldritch_interface::MidiModuleContract {
+        match self {
+            Self::Arpeggiator { .. } => &meldritch_arp::CONTRACT,
+            Self::KeyLock { .. } => &meldritch_midi_utils::KEY_LOCK_CONTRACT,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
-pub struct LiveKeyLock {
-    pub key_channel: u8,
-    pub notes_channel: u8,
-    pub output_channel: u8,
-    pub config: meldritch_midi_utils::KeyLockConfig,
+pub struct LiveMidiModule {
+    pub id: String,
+    pub kind: LiveMidiModuleKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LiveMidiEndpoint {
+    pub node: String,
+    pub port: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct LiveMidiInput {
+    pub id: String,
+    pub channel: u8,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LiveMidiConnection {
+    pub source: LiveMidiEndpoint,
+    pub destination: LiveMidiEndpoint,
+}
+
+#[derive(Clone, Debug)]
+pub struct LiveMidiNoteSource {
+    pub source: LiveMidiEndpoint,
+    /// Existing note bindings remain the final MIDI-to-voice boundary.
+    pub sink_channel: u8,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -230,8 +265,10 @@ pub struct Graph {
     pub midi_buttons: Vec<MidiButton>,
     pub midi_packets: Vec<MidiPacket>,
     pub midi_poly: Vec<MidiPoly>,
-    pub live_arpeggiators: Vec<LiveArpeggiator>,
-    pub live_key_locks: Vec<LiveKeyLock>,
+    pub live_midi_inputs: Vec<LiveMidiInput>,
+    pub live_midi_modules: Vec<LiveMidiModule>,
+    pub live_midi_connections: Vec<LiveMidiConnection>,
+    pub live_midi_note_source: Option<LiveMidiNoteSource>,
     pub screens: Vec<Screen>,
     pub navigation: Option<Navigation>,
     pub performance: Option<Performance>,

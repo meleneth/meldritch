@@ -208,7 +208,7 @@ instrument:devices {
 
 local sequence = instrument:sequencer {bpm=STATE.controls.bpm,steps=32,steps_per_beat=4}
 local live_midi = instrument:midi_input {channel=1}
-local live_arp = instrument:arpeggiator {notes=live_midi.notes,tempo=sequence,output_channel=2,
+local live_arp = instrument:arpeggiator {notes=live_midi.notes,tempo=sequence,
   mode=STATE.patterns[1].arp_mode,octaves=STATE.arp.octaves,
   rate=math.max(1,math.floor(4/STATE.arp.division+.5)),gate=STATE.arp.gate,seed=STATE.arp.seed}
 instrument:note_source(live_arp.notes)

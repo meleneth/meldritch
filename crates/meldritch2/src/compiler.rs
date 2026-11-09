@@ -10,9 +10,9 @@ use rayon::prelude::*;
 use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
 use crate::model::{
-    Action, AutomationInterpolation, Connection, ControlScale, Graph, LiveArpeggiator, LiveKeyLock,
-    MidiButton, MidiCc, MidiNotes, MidiPacket, ModuleRuntime, Navigation, ParameterId, Screen,
-    Widget,
+    Action, AutomationInterpolation, Connection, ControlScale, Graph, LiveMidiConnection,
+    LiveMidiInput, LiveMidiModule, LiveMidiModuleKind, LiveMidiNoteSource, MidiButton, MidiCc,
+    MidiNotes, MidiPacket, ModuleRuntime, Navigation, ParameterId, Screen, Widget,
 };
 use crate::plaits::PlaitsRuntime;
 use crate::sample::PreparedSample;
@@ -562,8 +562,10 @@ pub struct Machine {
     screens: Vec<Screen>,
     midi_ccs: Vec<MidiCc>,
     midi_notes: Vec<MidiNotes>,
-    live_arpeggiators: Vec<LiveArpeggiator>,
-    live_key_locks: Vec<LiveKeyLock>,
+    live_midi_inputs: Vec<LiveMidiInput>,
+    live_midi_modules: Vec<LiveMidiModule>,
+    live_midi_connections: Vec<LiveMidiConnection>,
+    live_midi_note_source: Option<LiveMidiNoteSource>,
     midi_buttons: Vec<MidiButton>,
     midi_packets: Vec<MidiPacket>,
     actions: Vec<Action>,
@@ -1431,11 +1433,17 @@ impl Machine {
     pub fn midi_notes(&self) -> &[MidiNotes] {
         &self.midi_notes
     }
-    pub fn live_arpeggiators(&self) -> &[LiveArpeggiator] {
-        &self.live_arpeggiators
+    pub fn live_midi_inputs(&self) -> &[LiveMidiInput] {
+        &self.live_midi_inputs
     }
-    pub fn live_key_locks(&self) -> &[LiveKeyLock] {
-        &self.live_key_locks
+    pub fn live_midi_modules(&self) -> &[LiveMidiModule] {
+        &self.live_midi_modules
+    }
+    pub fn live_midi_connections(&self) -> &[LiveMidiConnection] {
+        &self.live_midi_connections
+    }
+    pub fn live_midi_note_source(&self) -> Option<&LiveMidiNoteSource> {
+        self.live_midi_note_source.as_ref()
     }
     pub fn midi_buttons(&self) -> &[MidiButton] {
         &self.midi_buttons
@@ -1940,73 +1948,146 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
     }
     let expanded = crate::expand::expand(graph)?;
     let graph = &expanded;
-    let mut arp_inputs = BTreeSet::new();
-    let mut arp_outputs = BTreeSet::new();
-    for route in &graph.live_arpeggiators {
-        if !(1..=16).contains(&route.input_channel) || !(1..=16).contains(&route.output_channel) {
-            return Err("live arpeggiator channels must be in 1..=16".into());
+    let mut live_ids = BTreeSet::new();
+    let mut live_channels = BTreeSet::new();
+    for input in &graph.live_midi_inputs {
+        if input.id.is_empty() || !live_ids.insert(input.id.as_str()) {
+            return Err(format!("duplicate or empty live MIDI node '{}'", input.id));
         }
-        if !arp_inputs.insert(route.input_channel) {
+        if !(1..=16).contains(&input.channel) || !live_channels.insert(input.channel) {
             return Err(format!(
-                "MIDI channel {} feeds more than one live arpeggiator",
-                route.input_channel
-            ));
-        }
-        if !arp_outputs.insert(route.output_channel) {
-            return Err(format!(
-                "MIDI channel {} receives more than one live arpeggiator",
-                route.output_channel
-            ));
-        }
-        if !graph
-            .midi_notes
-            .iter()
-            .any(|binding| binding.channel == route.output_channel)
-            && !graph
-                .midi_poly
-                .iter()
-                .any(|binding| binding.channel == route.output_channel)
-        {
-            return Err(format!(
-                "live arpeggiator output channel {} has no MIDI note target",
-                route.output_channel
+                "live MIDI input channel {} must be unique and in 1..=16",
+                input.channel
             ));
         }
     }
-    let mut consumed_inputs = arp_inputs.clone();
-    let mut utility_outputs = arp_outputs;
-    for route in &graph.live_key_locks {
-        if !(1..=16).contains(&route.key_channel)
-            || !(1..=16).contains(&route.notes_channel)
-            || !(1..=16).contains(&route.output_channel)
-        {
-            return Err("live key-lock channels must be in 1..=16".into());
+    let mut live_module_indices = BTreeMap::new();
+    for (index, module) in graph.live_midi_modules.iter().enumerate() {
+        if module.id.is_empty() || !live_ids.insert(module.id.as_str()) {
+            return Err(format!("duplicate or empty live MIDI node '{}'", module.id));
         }
-        if route.key_channel == route.notes_channel {
-            return Err("live key-lock key and note inputs require distinct MIDI channels".into());
+        live_module_indices.insert(module.id.as_str(), index);
+        match &module.kind {
+            LiveMidiModuleKind::Arpeggiator { config, .. } => {
+                meldritch_arp::Arpeggiator::new(*config, 1).map_err(str::to_owned)?;
+            }
+            LiveMidiModuleKind::KeyLock { config } => {
+                meldritch_midi_utils::KeyLock::new(*config, 1).map_err(str::to_owned)?;
+            }
         }
-        for channel in [route.key_channel, route.notes_channel] {
-            if !consumed_inputs.insert(channel) {
+    }
+    let external_ids = graph
+        .live_midi_inputs
+        .iter()
+        .map(|input| input.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let valid_source = |source: &crate::model::LiveMidiEndpoint| -> Result<Option<usize>, String> {
+        if external_ids.contains(source.node.as_str()) {
+            if source.port != "notes" {
                 return Err(format!(
-                    "MIDI channel {channel} feeds more than one live MIDI processor input"
+                    "live MIDI input '{}' has no output '{}'",
+                    source.node, source.port
+                ));
+            }
+            return Ok(None);
+        }
+        let Some(&index) = live_module_indices.get(source.node.as_str()) else {
+            return Err(format!("unknown live MIDI source '{}'", source.node));
+        };
+        let contract = graph.live_midi_modules[index].kind.contract();
+        if !contract.outputs.iter().any(|port| port.name == source.port) {
+            return Err(format!(
+                "live MIDI module '{}' has no output '{}'",
+                source.node, source.port
+            ));
+        }
+        Ok(Some(index))
+    };
+    let mut connected_inputs = BTreeSet::new();
+    let mut indegree = vec![0_usize; graph.live_midi_modules.len()];
+    let mut edges = vec![Vec::new(); graph.live_midi_modules.len()];
+    for connection in &graph.live_midi_connections {
+        let source = valid_source(&connection.source)?;
+        let Some(&destination) = live_module_indices.get(connection.destination.node.as_str())
+        else {
+            return Err(format!(
+                "unknown live MIDI destination '{}'",
+                connection.destination.node
+            ));
+        };
+        let contract = graph.live_midi_modules[destination].kind.contract();
+        if !contract
+            .inputs
+            .iter()
+            .any(|port| port.name == connection.destination.port)
+        {
+            return Err(format!(
+                "live MIDI module '{}' has no input '{}'",
+                connection.destination.node, connection.destination.port
+            ));
+        }
+        if !connected_inputs.insert((
+            connection.destination.node.as_str(),
+            connection.destination.port.as_str(),
+        )) {
+            return Err(format!(
+                "live MIDI input '{}.{}' has more than one source",
+                connection.destination.node, connection.destination.port
+            ));
+        }
+        if let Some(source) = source {
+            edges[source].push(destination);
+            indegree[destination] += 1;
+        }
+    }
+    for module in &graph.live_midi_modules {
+        for input in module.kind.contract().inputs {
+            if !connected_inputs.contains(&(module.id.as_str(), input.name)) {
+                return Err(format!(
+                    "live MIDI input '{}.{}' is not connected",
+                    module.id, input.name
                 ));
             }
         }
-        if !utility_outputs.insert(route.output_channel) {
+    }
+    let mut ready = indegree
+        .iter()
+        .enumerate()
+        .filter_map(|(index, degree)| (*degree == 0).then_some(index))
+        .collect::<Vec<_>>();
+    let mut visited = 0;
+    while let Some(index) = ready.pop() {
+        visited += 1;
+        for &destination in &edges[index] {
+            indegree[destination] -= 1;
+            if indegree[destination] == 0 {
+                ready.push(destination);
+            }
+        }
+    }
+    if visited != graph.live_midi_modules.len() {
+        return Err("live MIDI module graph contains a cycle".into());
+    }
+    if !graph.live_midi_inputs.is_empty() || !graph.live_midi_modules.is_empty() {
+        let sink = graph
+            .live_midi_note_source
+            .as_ref()
+            .ok_or("live MIDI graph has no note source sink")?;
+        valid_source(&sink.source)?;
+        if !graph
+            .midi_notes
+            .iter()
+            .any(|binding| binding.channel == sink.sink_channel)
+            && !graph
+                .midi_poly
+                .iter()
+                .any(|binding| binding.channel == sink.sink_channel)
+        {
             return Err(format!(
-                "MIDI channel {} receives more than one live MIDI processor output",
-                route.output_channel
+                "live MIDI note sink channel {} has no note target",
+                sink.sink_channel
             ));
         }
-        let feeds_arp = arp_inputs.contains(&route.output_channel);
-        if !feeds_arp {
-            return Err(format!(
-                "live key-lock output channel {} must feed a live arpeggiator input",
-                route.output_channel
-            ));
-        }
-        meldritch_midi_utils::KeyLock::new(route.config, route.output_channel)
-            .map_err(str::to_owned)?;
     }
     let mut ids = BTreeMap::new();
     for (index, module) in graph.modules.iter().enumerate() {
@@ -2905,8 +2986,10 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         screens: graph.screens.clone(),
         midi_ccs: graph.midi_ccs.clone(),
         midi_notes: graph.midi_notes.clone(),
-        live_arpeggiators: graph.live_arpeggiators.clone(),
-        live_key_locks: graph.live_key_locks.clone(),
+        live_midi_inputs: graph.live_midi_inputs.clone(),
+        live_midi_modules: graph.live_midi_modules.clone(),
+        live_midi_connections: graph.live_midi_connections.clone(),
+        live_midi_note_source: graph.live_midi_note_source.clone(),
         midi_buttons: graph.midi_buttons.clone(),
         midi_packets: graph.midi_packets.clone(),
         actions: graph.actions.clone(),
