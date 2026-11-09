@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import type {
   AdsrParameter,
   NoteEvent,
@@ -7,15 +7,7 @@ import type {
   Plane,
 } from "../types/protocol";
 import ControlRenderer from "./ControlRenderer.vue";
-import XyPad from "./controls/XyPad.vue";
-import type { RangeControl } from "../types/protocol";
 const props = defineProps<{ plane: Plane }>();
-const ranges = computed(() =>
-  props.plane.controls.filter(
-    (control): control is RangeControl =>
-      control.kind === "fader" || control.kind === "knob",
-  ),
-);
 const collapsed = ref(false);
 defineEmits<{
   set: [string, number];
@@ -118,45 +110,6 @@ defineEmits<{
           "
           @drum-mute="(row, muted) => $emit('drumMute', control.id, row, muted)"
         />
-      </article>
-      <article v-if="ranges.length >= 2" class="control-surface-playground">
-        <header>
-          <div>
-            <strong>Linked parameter surfaces</strong
-            ><small>Two Phaser instances · one Pinia state</small>
-          </div>
-          <button
-            type="button"
-            :disabled="plane.read_only"
-            @click="
-              $emit(
-                'set',
-                ranges[0].id,
-                ranges[0].value === ranges[0].min
-                  ? ranges[0].max
-                  : ranges[0].min,
-              )
-            "
-          >
-            External mutation
-          </button>
-        </header>
-        <div class="linked-surfaces">
-          <XyPad
-            :plane-id="plane.id"
-            :x="ranges[0]"
-            :y="ranges[1]"
-            instance="A"
-            @set="(id, value) => $emit('set', id, value)"
-          />
-          <XyPad
-            :plane-id="plane.id"
-            :x="ranges[0]"
-            :y="ranges[1]"
-            instance="B"
-            @set="(id, value) => $emit('set', id, value)"
-          />
-        </div>
       </article>
     </div>
   </section>

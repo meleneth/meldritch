@@ -12,7 +12,7 @@ bin/instrument-playground
 
 Open `http://127.0.0.1:8080`, authenticate with `instrument-playground`, and start the transport. Override the credential with `MELDRITCH_PLAYGROUND_TOKEN`, the catalog with `MELDRITCH_SERUM_CATALOG`, and device names with `MICROLAB_MIDI` or `APC_MINI_MIDI`.
 
-The six planes contain independent mute, solo, level, pattern, and preset controls. PULSE planes use 32-step four-lane drum grids with velocity editing. Serum planes use piano rolls; the lead's fourth voice accepts live MicroLab notes through Meldritch's existing live arpeggiator path. The Stream Deck page exposes the six instrument mutes, while APC and keyboard behavior continues through the shared device infrastructure and clean shutdown path.
+The interface has one tab for each of the six instruments plus a Master / Mixer tab. Only the selected tab is mounted, so hidden piano rolls and envelopes do not retain rendering contexts. Phaser surfaces explicitly use its Canvas renderer and therefore consume no WebGL contexts. The instrument tabs contain independent mute, solo, level, pattern, and preset controls; the master tab exposes output level and compressor settings. PULSE tabs use 32-step four-lane drum grids with velocity editing. Serum tabs use piano rolls; the lead's fourth voice accepts live MicroLab notes through Meldritch's existing live arpeggiator path. The Stream Deck page exposes the six instrument mutes, while APC and keyboard behavior continues through the shared device infrastructure and clean shutdown path.
 
 ## Preset browser and synchronization
 

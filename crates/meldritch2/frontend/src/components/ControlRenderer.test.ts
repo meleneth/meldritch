@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp, h, nextTick, type Component } from "vue";
 import { createPinia } from "pinia";
 import ControlRenderer from "./ControlRenderer.vue";
@@ -9,6 +9,8 @@ import PatternSelector from "./controls/PatternSelector.vue";
 import PresetSelector from "./controls/PresetSelector.vue";
 import DrumGrid from "./controls/DrumGrid.vue";
 import PerformancePlane from "./PerformancePlane.vue";
+import App from "../App.vue";
+import { usePerformanceStore } from "../stores/performance";
 
 function render(
   component: Component,
@@ -20,9 +22,11 @@ function render(
   const app = createApp({
     render: () => h(component, { ...props, ...listeners }),
   });
-  app.use(createPinia()).mount(root);
+  const pinia = createPinia();
+  app.use(pinia).mount(root);
   return {
     root,
+    pinia,
     unmount() {
       app.unmount();
       root.remove();
@@ -31,6 +35,48 @@ function render(
 }
 
 describe("control registry", () => {
+  it("mounts only the selected instrument or master tab", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ json: async () => ({ websocket: null }) })),
+    );
+    const view = render(App, {});
+    const store = usePerformanceStore(view.pinia);
+    store.applySnapshot({
+      type: "state.snapshot",
+      epoch: "tabs",
+      revision: 0,
+      schema_revision: 1,
+      state: {
+        name: "Tabbed Playground",
+        values: {},
+        planes: [
+          "pulse808",
+          "pulse909",
+          "bass",
+          "drone",
+          "lead",
+          "arp",
+          "master",
+        ].map((id) => ({ id, label: id, controls: [] })),
+      },
+    });
+    await nextTick();
+    expect(view.root.querySelectorAll("[role=tab]")).toHaveLength(7);
+    expect(view.root.querySelectorAll(".plane")).toHaveLength(1);
+    expect(
+      view.root.querySelector(".plane")?.getAttribute("data-station"),
+    ).toBe("pulse808");
+    (view.root.querySelector("#tab-master") as HTMLButtonElement).click();
+    await nextTick();
+    expect(view.root.querySelectorAll(".plane")).toHaveLength(1);
+    expect(
+      view.root.querySelector(".plane")?.getAttribute("data-station"),
+    ).toBe("master");
+    view.unmount();
+    vi.unstubAllGlobals();
+  });
+
   it("renders an authoritative mute toggle and emits its inverse state", async () => {
     const changes: Array<[string, boolean]> = [];
     const view = render(

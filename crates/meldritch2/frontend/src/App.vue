@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { computed, ref, onMounted, watch } from "vue";
 import { usePerformanceStore } from "./stores/performance";
 import PerformancePlane from "./components/PerformancePlane.vue";
 import type {
@@ -8,7 +8,18 @@ import type {
   PatternControl,
 } from "./types/protocol";
 const store = usePerformanceStore(),
-  credential = ref("");
+  credential = ref(""),
+  activePlaneId = ref("");
+const activePlane = computed(() =>
+  store.visiblePlanes.find((plane) => plane.id === activePlaneId.value),
+);
+watch(
+  () => store.visiblePlanes.map((plane) => plane.id),
+  (ids) => {
+    if (!ids.includes(activePlaneId.value)) activePlaneId.value = ids[0] || "";
+  },
+  { immediate: true },
+);
 onMounted(() => store.connect());
 const set = (plane: string, id: string, value: number) => (
   store.patchRange(plane, id, value),
@@ -108,38 +119,59 @@ const muteDrum = (
       /><button @click="store.authenticate(credential)">Join</button>
     </div>
   </header>
+  <nav v-if="store.visiblePlanes.length" class="instrument-tabs" role="tablist">
+    <button
+      v-for="plane in store.visiblePlanes"
+      :id="`tab-${plane.id}`"
+      :key="plane.id"
+      type="button"
+      role="tab"
+      :aria-controls="`panel-${plane.id}`"
+      :aria-selected="plane.id === activePlaneId"
+      :class="{ active: plane.id === activePlaneId }"
+      @click="activePlaneId = plane.id"
+    >
+      {{ plane.label }}
+    </button>
+  </nav>
   <main>
     <PerformancePlane
-      v-for="plane in store.visiblePlanes"
-      :key="plane.id"
-      :plane="plane"
-      @set="(id, value) => set(plane.id, id, value)"
-      @set-toggle="(id, value) => setToggle(plane.id, id, value)"
-      @toggle="(id, step) => toggle(plane.id, id, step)"
-      @fire="(id) => fire(plane.id, id)"
+      v-if="activePlane"
+      :id="`panel-${activePlane.id}`"
+      :key="activePlane.id"
+      :plane="activePlane"
+      role="tabpanel"
+      :aria-labelledby="`tab-${activePlane.id}`"
+      @set="(id, value) => set(activePlaneId, id, value)"
+      @set-toggle="(id, value) => setToggle(activePlaneId, id, value)"
+      @toggle="(id, step) => toggle(activePlaneId, id, step)"
+      @fire="(id) => fire(activePlaneId, id)"
       @note-create="
-        (id, pattern, note) => createNote(plane.id, id, pattern, note)
+        (id, pattern, note) => createNote(activePlaneId, id, pattern, note)
       "
       @note-update="
-        (id, pattern, note) => updateNote(plane.id, id, pattern, note)
+        (id, pattern, note) => updateNote(activePlaneId, id, pattern, note)
       "
       @note-delete="
-        (id, pattern, noteId) => deleteNote(plane.id, id, pattern, noteId)
+        (id, pattern, noteId) => deleteNote(activePlaneId, id, pattern, noteId)
       "
       @pattern="
         (id, pattern, boundary) =>
-          selectPattern(plane.id, id, pattern, boundary)
+          selectPattern(activePlaneId, id, pattern, boundary)
       "
-      @adsr="(id, parameter, value) => setAdsr(plane.id, id, parameter, value)"
-      @preset="(id, preset) => selectPreset(plane.id, id, preset)"
+      @adsr="
+        (id, parameter, value) => setAdsr(activePlaneId, id, parameter, value)
+      "
+      @preset="(id, preset) => selectPreset(activePlaneId, id, preset)"
       @drum-toggle="
-        (id, row, pattern, step) => toggleDrum(plane.id, id, row, pattern, step)
+        (id, row, pattern, step) =>
+          toggleDrum(activePlaneId, id, row, pattern, step)
       "
       @drum-velocity="
         (id, row, pattern, step, velocity) =>
-          setDrumVelocity(plane.id, id, row, pattern, step, velocity)
+          setDrumVelocity(activePlaneId, id, row, pattern, step, velocity)
       "
-      @drum-mute="(id, row, muted) => muteDrum(plane.id, id, row, muted)"
+      @drum-mute="(id, row, muted) => muteDrum(activePlaneId, id, row, muted)"
     />
     <p v-if="!store.visiblePlanes.length" class="empty">
       Waiting for an authorized control plane…

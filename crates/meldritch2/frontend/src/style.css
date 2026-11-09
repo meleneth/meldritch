@@ -61,6 +61,31 @@ body {
   color: #ff6b5f;
   font-weight: 800;
 }
+.instrument-tabs {
+  position: sticky;
+  top: 5.8rem;
+  z-index: 1;
+  display: flex;
+  gap: 0.45rem;
+  overflow-x: auto;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid #34323a;
+  background: #0f1117ee;
+}
+.instrument-tabs button {
+  flex: 0 0 auto;
+  min-height: 2.6rem;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid #484751;
+  border-radius: 0.55rem;
+  background: #181a20;
+  color: #c9c6cf;
+}
+.instrument-tabs button.active {
+  border-color: #f15b3d;
+  background: #2b1e20;
+  color: #fff;
+}
 main {
   padding: 1.5rem;
   display: grid;

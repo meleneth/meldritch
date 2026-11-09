@@ -50,7 +50,9 @@ async function mountGame() {
   }
   const rect = container.value.getBoundingClientRect();
   const config = {
-    type: Phaser.AUTO,
+    // These compact control surfaces do not need a GPU renderer. Canvas avoids
+    // exhausting the browser's WebGL-context budget when switching instruments.
+    type: Phaser.CANVAS,
     parent: container.value,
     width: Math.max(1, rect.width),
     height: Math.max(1, rect.height),
