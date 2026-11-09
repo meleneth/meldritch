@@ -1801,7 +1801,10 @@ async fn run_server(
 
 async fn index() -> impl IntoResponse {
     (
-        [("content-type", "text/html; charset=utf-8")],
+        [
+            ("content-type", "text/html; charset=utf-8"),
+            ("cache-control", "no-store"),
+        ],
         include_str!("../web/dist/index.html"),
     )
 }
@@ -1810,13 +1813,19 @@ async fn browser_config(State(shared): State<Shared>) -> impl IntoResponse {
 }
 async fn css() -> impl IntoResponse {
     (
-        [("content-type", "text/css; charset=utf-8")],
+        [
+            ("content-type", "text/css; charset=utf-8"),
+            ("cache-control", "no-store"),
+        ],
         include_str!("../web/dist/assets/app.css"),
     )
 }
 async fn javascript() -> impl IntoResponse {
     (
-        [("content-type", "text/javascript; charset=utf-8")],
+        [
+            ("content-type", "text/javascript; charset=utf-8"),
+            ("cache-control", "no-store"),
+        ],
         include_str!("../web/dist/assets/app.js"),
     )
 }

@@ -221,6 +221,33 @@ fn audio_underruns_are_published_as_authoritative_state() {
     poll_thread(&mut program, client);
 }
 
+#[test]
+fn embedded_frontend_serves_phaser_without_an_external_chunk() {
+    let (mut program, _machine, address) = start();
+    let request = thread::spawn(move || {
+        let mut response = agent()
+            .get(format!("http://{address}/assets/app.js"))
+            .call()
+            .unwrap();
+        let status = response.status().as_u16();
+        let cache = response
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = response.body_mut().read_to_string().unwrap();
+        (status, cache, body)
+    });
+    let (status, cache, body) = poll_thread(&mut program, request);
+    assert_eq!(status, 200);
+    assert_eq!(cache.as_deref(), Some("no-store"));
+    assert!(body.len() > 1_000_000, "embedded Phaser payload is absent");
+    assert!(
+        !body.contains("import("),
+        "embedded app must not request an unserved dynamic chunk"
+    );
+}
+
 fn get_json(program: &mut lua::Program, url: String) -> (u16, Value) {
     let request = thread::spawn(move || {
         let mut response = ureq::get(&url).call().unwrap();

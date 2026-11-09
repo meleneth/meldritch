@@ -9,6 +9,10 @@ export default defineConfig({
       output: {
         entryFileNames: "assets/app.js",
         assetFileNames: "assets/app.[ext]",
+        // Rust embeds a fixed app.js/app.css surface. Keep lazy modules in the
+        // same JavaScript artifact so a content-hashed chunk cannot become an
+        // unserved runtime dependency.
+        inlineDynamicImports: true,
       },
     },
   },

@@ -58,4 +58,4 @@ Known limitations:
 - PULSE has no usable native factory program list. Sample-based user states are path-dependent.
 - Activating two solo controls simultaneously is not a grouped-solo operation; each solo independently gates the other five channels. Single-instrument solo is the intended performance gesture.
 - Serum state preparation can take perceptible time on this machine. The old sound continues until the replacement is ready and the browser remains pending.
-- The web build retains the existing large Phaser chunk warning.
+- Phaser is bundled into the single embedded `app.js` artifact because the Rust server exposes fixed asset names. The uncompressed local bundle is about 1.61 MB; this avoids runtime requests for unserved content-hashed chunks.
