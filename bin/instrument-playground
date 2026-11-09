@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec cargo run --release -p meldritch2 -- perform \
+  crates/meldritch2/examples/82-instrument-playground.lua "$@"

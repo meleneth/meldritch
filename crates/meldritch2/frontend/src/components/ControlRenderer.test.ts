@@ -290,7 +290,7 @@ describe("control registry", () => {
   });
 
   it("renders authoritative preset state and honors read-only projection", () => {
-    const selections: number[] = [];
+    const selections: string[] = [];
     const view = render(
       PresetSelector,
       {
@@ -299,6 +299,12 @@ describe("control registry", () => {
           label: "Performance Patch",
           kind: "preset_selector",
           presets: ["Clean", "Glass", "Driven"],
+          entries: ["Clean", "Glass", "Driven"].map((name) => ({
+            id: name.toLowerCase(),
+            name,
+            bank: "Factory",
+            category: "Lead",
+          })),
           active: 1,
           active_name: "Glass",
           pending: 2,
@@ -306,15 +312,54 @@ describe("control registry", () => {
           read_only: true,
         },
       },
-      { onSelect: (preset: number) => selections.push(preset) },
+      { onSelect: (preset: string) => selections.push(preset) },
     );
     expect(view.root.querySelectorAll("button.active")).toHaveLength(1);
-    expect(view.root.querySelectorAll("button.pending")).toHaveLength(1);
+    expect(view.root.querySelectorAll(".pending")).toHaveLength(1);
     expect(view.root.querySelector("fieldset")?.hasAttribute("disabled")).toBe(
       true,
     );
     (view.root.querySelectorAll("button")[0] as HTMLButtonElement).click();
     expect(selections).toEqual([]);
+    view.unmount();
+  });
+
+  it("searches a large preset catalog and emits stable identifiers", async () => {
+    const selections: string[] = [];
+    const entries = Array.from({ length: 250 }, (_, index) => ({
+      id: `stable-${index}`,
+      name: index === 173 ? "Needle Lead" : `Patch ${index}`,
+      bank: index % 2 ? "Factory" : "User",
+      category: index % 3 ? "Lead" : "Pad",
+    }));
+    const view = render(
+      PresetSelector,
+      {
+        control: {
+          id: "catalog",
+          label: "Catalog",
+          kind: "preset_selector",
+          presets: entries.map((entry) => entry.name),
+          entries,
+          active: 173,
+          active_name: entries[173].name,
+          pending: null,
+          failed: null,
+        },
+      },
+      { onSelect: (preset: string) => selections.push(preset) },
+    );
+    expect(
+      view.root.querySelectorAll("[role=option]").length,
+    ).toBeLessThanOrEqual(40);
+    const input = view.root.querySelector("input") as HTMLInputElement;
+    input.value = "needle";
+    input.dispatchEvent(new Event("input"));
+    await nextTick();
+    expect(view.root.querySelectorAll("[role=option]")).toHaveLength(1);
+    expect(view.root.querySelectorAll("button.active")).toHaveLength(1);
+    (view.root.querySelector("[role=option]") as HTMLButtonElement).click();
+    expect(selections).toEqual(["stable-173"]);
     view.unmount();
   });
 

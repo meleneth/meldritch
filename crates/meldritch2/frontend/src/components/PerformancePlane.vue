@@ -27,7 +27,7 @@ defineEmits<{
   noteDelete: [string, number, number];
   pattern: [string, number, PatternControl["boundary"]];
   adsr: [string, AdsrParameter["name"], number];
-  preset: [string, number];
+  preset: [string, number | string];
   drumToggle: [string, string, number, number];
   drumVelocity: [string, string, number, number, number];
   drumMute: [string, string, boolean];

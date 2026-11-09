@@ -47,6 +47,8 @@ struct LuaSequencerTempo(Arc<SequencerControl>);
 struct LuaPlaitsModel(crate::plaits::PlaitsModel);
 #[derive(Clone, Debug)]
 struct LuaVst3(Arc<crate::vst3::Spec>);
+#[derive(Clone, Debug)]
+struct LuaPresetCatalog(Arc<crate::vst3::PresetCatalog>);
 #[derive(Clone)]
 struct LuaWebServer(Rc<RefCell<crate::web::Application>>);
 #[derive(Clone)]
@@ -70,6 +72,33 @@ impl UserData for LuaVst3 {
             descriptor_table(lua, &this.0.descriptor)
         });
         methods.add_method("parameters", |lua, this, ()| parameter_table(lua, &this.0));
+        methods.add_method("preset_catalog", |lua, this, ()| {
+            this.0
+                .preset_catalog
+                .as_ref()
+                .cloned()
+                .or_else(|| {
+                    this.0
+                        .managed_presets
+                        .as_ref()
+                        .map(|bank| Arc::clone(&bank.catalog))
+                })
+                .map(|catalog| lua.create_userdata(LuaPresetCatalog(catalog)))
+                .transpose()
+        });
+        methods.add_method("preset_initial", |_, this, ()| {
+            Ok(this
+                .0
+                .preset_catalog
+                .as_ref()
+                .map(|catalog| catalog.initial)
+                .or_else(|| {
+                    this.0
+                        .managed_presets
+                        .as_ref()
+                        .map(|bank| bank.catalog.initial)
+                }))
+        });
         methods.add_method_mut("set_parameter", |_, this, (id, value): (u32, f64)| {
             if !value.is_finite() || !(0.0..=1.0).contains(&value) {
                 return Err(mlua::Error::external(
@@ -100,6 +129,7 @@ impl UserData for LuaVst3 {
         });
     }
 }
+impl UserData for LuaPresetCatalog {}
 
 impl UserData for LuaWebServer {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
@@ -540,9 +570,9 @@ impl UserData for LuaWebPlane {
                 });
             }
             let steps = spec.get::<Option<usize>>("steps")?.unwrap_or(16);
-            if id.is_empty() || steps != 16 || lanes.is_empty() || lanes.len() > 8 {
+            if id.is_empty() || !(1..=64).contains(&steps) || lanes.is_empty() || lanes.len() > 8 {
                 return Err(mlua::Error::external(
-                    "drum grid requires an ID, 16 steps, and 1..8 kit voices",
+                    "drum grid requires an ID, 1..64 steps, and 1..8 kit voices",
                 ));
             }
             let label = spec
@@ -598,15 +628,48 @@ impl UserData for LuaWebPlane {
         methods.add_method("preset_selector", |_, this, spec: Table| {
             let id: String = spec.get("id")?;
             let target: String = spec.get("target")?;
-            let names = spec
-                .get::<Table>("presets")?
-                .sequence_values::<String>()
-                .collect::<mlua::Result<Vec<_>>>()?;
+            let catalog = spec.get::<Option<AnyUserData>>("catalog")?;
+            let (names, entries, status) = if let Some(catalog) = catalog {
+                let catalog = catalog.borrow::<LuaPresetCatalog>()?;
+                let names = catalog
+                    .0
+                    .patches
+                    .iter()
+                    .map(|patch| patch.name.clone())
+                    .collect::<Vec<_>>();
+                let entries = catalog
+                    .0
+                    .patches
+                    .iter()
+                    .map(|patch| crate::web::PresetEntry {
+                        id: patch.id.clone(),
+                        name: patch.name.clone(),
+                        bank: patch.bank.clone(),
+                        category: patch.category.clone(),
+                    })
+                    .collect();
+                (names, entries, Some(Arc::clone(&catalog.0.status)))
+            } else {
+                let names = spec
+                    .get::<Table>("presets")?
+                    .sequence_values::<String>()
+                    .collect::<mlua::Result<Vec<_>>>()?;
+                let entries = names
+                    .iter()
+                    .map(|name| crate::web::PresetEntry {
+                        id: name.clone(),
+                        name: name.clone(),
+                        bank: "Authored".into(),
+                        category: "Uncategorized".into(),
+                    })
+                    .collect();
+                (names, entries, None)
+            };
             if id.is_empty()
                 || target.is_empty()
                 || names.len() < 2
                 || names.iter().any(String::is_empty)
-                || names.iter().collect::<BTreeSet<_>>().len() != names.len()
+                || (status.is_none() && names.iter().collect::<BTreeSet<_>>().len() != names.len())
             {
                 return Err(mlua::Error::external(
                     "preset selector requires an ID, target, and at least two unique named presets",
@@ -645,6 +708,8 @@ impl UserData for LuaWebPlane {
                 label,
                 target,
                 names,
+                entries,
+                status,
             });
             Ok(())
         });
@@ -1592,6 +1657,12 @@ local function decorate_scope(facade, scope, prefix)
     local handle = scope:module(values.id or self:_id("vst3"), "vst3", {}, runtime)
     handle._midi_channels = values.midi_channels or {1,2,3,4,5,6,7,8}
     handle.out = { left = handle.left, right = handle.right, direction = "stereo_output" }
+    handle.preset_catalog = runtime:preset_catalog()
+    if handle.preset_catalog ~= nil then
+      local selector = self:constant { value = runtime:preset_initial() }
+      scope:connect(selector.out, handle.patch_selector)
+      handle.preset = selector.value
+    end
     handle.parameters = {}
     for _, info in ipairs(runtime:parameters()) do
       if info.automatable and not info.read_only then
@@ -1726,7 +1797,7 @@ local function decorate_scope(facade, scope, prefix)
       assert(type(preset.name) == "string" and preset.name ~= "" and type(preset.parameters) == "table",
         "each VST3 performance preset requires a name and parameter table")
       local instance = self:vst3 { plugin = values.plugin, paths = values.paths,
-        id = (values.id or "vst3_bank") .. "_" .. index }
+        id = (values.id or "vst3_bank") .. "_" .. index, midi_channels = values.midi_channels }
       for id, value in pairs(preset.parameters) do instance:set_parameter(id, value) end
       bank.instances[index] = instance
       bank.preset_names[index] = preset.name
@@ -1741,8 +1812,13 @@ local function decorate_scope(facade, scope, prefix)
       left, right = left_switch.out, right_switch.out
     end
     bank.out = { left = left, right = right, direction = "stereo_output" }
+    bank.left, bank.right = left, right
     function bank:connect_track(track, sequence)
       for _, instance in ipairs(self.instances) do instance:connect_track(track, sequence) end
+      return self
+    end
+    function bank:connect_drum_kit(kit)
+      for _, instance in ipairs(self.instances) do instance:connect_drum_kit(kit) end
       return self
     end
     function bank:parameter_targets(id)
@@ -1751,6 +1827,19 @@ local function decorate_scope(facade, scope, prefix)
       return first, rest
     end
     return bank
+  end
+  function facade:vst3_managed_bank(values)
+    assert(type(values) == "table" and type(values.plugin) == "string"
+      and type(values.presets) == "table" and #values.presets >= 2,
+      "vst3_managed_bank requires plugin and at least two parameter presets")
+    local handle = self:vst3 {plugin=values.plugin,paths=values.paths,id=values.id,
+      midi_channels=values.midi_channels,parameter_presets=values.presets,
+      initial_preset=values.initial_preset,preset_bank=values.preset_bank,
+      preset_category=values.preset_category}
+    handle.preset_names={}
+    for index,preset in ipairs(values.presets) do handle.preset_names[index]=preset.name end
+    handle.instances={handle}
+    return handle
   end
   function facade:multiply(values)
     assert(values == nil or next(values) == nil, "multiply has no authored values")
@@ -2746,6 +2835,164 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
                 );
             }
             loaded.patch_index = spec.get::<Option<u32>>("patch_index")?;
+            if let Some(presets) = spec.get::<Option<Table>>("parameter_presets")? {
+                let mut patches = Vec::new();
+                let mut values = Vec::new();
+                for (index, preset) in presets.sequence_values::<Table>().enumerate() {
+                    let preset = preset?;
+                    let name: String = preset.get("name")?;
+                    if name.is_empty() {
+                        return Err(mlua::Error::external(
+                            "managed preset names must not be empty",
+                        ));
+                    }
+                    let id = preset
+                        .get::<Option<String>>("id")?
+                        .unwrap_or_else(|| format!("managed_{index}"));
+                    let parameters = preset.get::<Table>("parameters")?;
+                    let mut parameter_values = BTreeMap::new();
+                    for pair in parameters.pairs::<u32, f64>() {
+                        let (id, value) = pair?;
+                        if !value.is_finite()
+                            || !(0.0..=1.0).contains(&value)
+                            || !loaded.parameters.iter().any(|parameter| {
+                                parameter.id == id && parameter.automatable && !parameter.read_only
+                            })
+                        {
+                            return Err(mlua::Error::external(format!(
+                                "managed preset references invalid parameter {id}"
+                            )));
+                        }
+                        parameter_values.insert(id, value);
+                    }
+                    patches.push(crate::vst3::CatalogPatch {
+                        id,
+                        name,
+                        bank: spec
+                            .get::<Option<String>>("preset_bank")?
+                            .unwrap_or_else(|| "Meldritch".into()),
+                        category: spec
+                            .get::<Option<String>>("preset_category")?
+                            .unwrap_or_else(|| "Drums".into()),
+                        file: PathBuf::new(),
+                    });
+                    values.push(parameter_values);
+                }
+                let initial_name = spec.get::<Option<String>>("initial_preset")?;
+                let initial = initial_name
+                    .as_ref()
+                    .map_or(Some(0), |name| {
+                        patches
+                            .iter()
+                            .position(|patch| patch.id == *name || patch.name == *name)
+                    })
+                    .ok_or_else(|| {
+                        mlua::Error::external("initial managed preset is unavailable")
+                    })?;
+                for (id, value) in &values[initial] {
+                    loaded.initial_values.insert(*id, *value);
+                }
+                let catalog = Arc::new(
+                    crate::vst3::PresetCatalog::new(patches, initial)
+                        .map_err(mlua::Error::external)?,
+                );
+                loaded.managed_presets =
+                    Some(Arc::new(crate::vst3::ManagedPresetBank { catalog, values }));
+            }
+            if let Some(catalog_directory) = spec.get::<Option<String>>("preset_catalog")? {
+                if loaded.state.is_some() || spec.get::<Option<String>>("state_file")?.is_some() {
+                    return Err(mlua::Error::external(
+                        "VST3 preset_catalog cannot be combined with state or state_file",
+                    ));
+                }
+                let directory = PathBuf::from(catalog_directory);
+                let directory = if directory.is_absolute() {
+                    directory
+                } else {
+                    vst3_root.join(directory)
+                };
+                let bank = crate::vst3::PatchBank::read(&directory, &loaded.descriptor)
+                    .map_err(mlua::Error::external)?;
+                let initial = spec
+                    .get::<Option<String>>("initial_preset")?
+                    .unwrap_or_else(|| bank.patches[0].id.clone());
+                let initial_index = bank
+                    .patches
+                    .iter()
+                    .position(|patch| patch.id == initial)
+                    .ok_or_else(|| {
+                        mlua::Error::external(format!(
+                            "initial VST3 preset is unavailable: {initial}"
+                        ))
+                    })?;
+                let patches = bank
+                    .patches
+                    .iter()
+                    .map(|patch| {
+                        let category = patch
+                            .source
+                            .as_ref()
+                            .and_then(|source| source.get("category"))
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_owned)
+                            .or_else(|| {
+                                patch
+                                    .id
+                                    .strip_prefix("factory_")
+                                    .and_then(|rest| rest.split('_').next())
+                                    .map(|value| {
+                                        let mut chars = value.chars();
+                                        chars
+                                            .next()
+                                            .map(|first| {
+                                                first.to_uppercase().collect::<String>()
+                                                    + chars.as_str()
+                                            })
+                                            .unwrap_or_default()
+                                    })
+                            })
+                            .unwrap_or_else(|| "Uncategorized".into());
+                        crate::vst3::CatalogPatch {
+                            id: patch.id.clone(),
+                            name: patch.name.clone(),
+                            bank: patch
+                                .source
+                                .as_ref()
+                                .and_then(|source| source.get("bank"))
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("Factory")
+                                .to_owned(),
+                            category,
+                            file: directory.join(&patch.file),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let bytes =
+                    std::fs::read(&patches[initial_index].file).map_err(mlua::Error::external)?;
+                let document =
+                    crate::vst3::PluginState::from_bytes(&bytes).map_err(mlua::Error::external)?;
+                document
+                    .validate(&loaded.descriptor)
+                    .map_err(mlua::Error::external)?;
+                loaded.state = Some(document.state);
+                loaded.preset_catalog = Some(Arc::new(
+                    crate::vst3::PresetCatalog::new(patches, initial_index)
+                        .map_err(mlua::Error::external)?,
+                ));
+                let instance =
+                    crate::vst3::Instance::new(&loaded, 48_000.0).map_err(mlua::Error::external)?;
+                let ids = loaded
+                    .parameters
+                    .iter()
+                    .map(|parameter| parameter.id)
+                    .collect::<Vec<_>>();
+                let values = instance
+                    .parameter_values(&ids)
+                    .map_err(mlua::Error::external)?;
+                for (id, value) in ids.into_iter().zip(values) {
+                    loaded.initial_values.insert(id, value);
+                }
+            }
             if let Some(state_file) = spec.get::<Option<String>>("state_file")? {
                 if loaded.state.is_some() {
                     return Err(mlua::Error::external(

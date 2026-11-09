@@ -177,7 +177,17 @@ pub enum PlaneControl {
         label: String,
         target: String,
         names: Vec<String>,
+        entries: Vec<PresetEntry>,
+        status: Option<Arc<crate::vst3::PresetStatus>>,
     },
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PresetEntry {
+    pub id: String,
+    pub name: String,
+    pub bank: String,
+    pub category: String,
 }
 
 #[derive(Clone)]
@@ -483,7 +493,7 @@ impl Application {
                             json!({"id":id,"label":label,"kind":"adsr","parameters":parameters})
                         }
                         PlaneControl::Patterns { id,label,sequencer,default_boundary } => json!({"id":id,"label":label,"kind":"pattern_selector","patterns":sequencer.pattern_names(),"boundaries":["immediate","beat","bar","cycle"],"default_boundary":default_boundary}),
-                        PlaneControl::Presets { id,label,names,.. } => json!({"id":id,"label":label,"kind":"preset_selector","presets":names}),
+                        PlaneControl::Presets { id,label,names,entries,.. } => json!({"id":id,"label":label,"kind":"preset_selector","presets":names,"entries":entries}),
                     })
                     .collect::<Vec<_>>();
                 json!({"id":plane.id,"label":plane.label,"layout":plane.layout,"roles":plane.roles,"read_only_roles":plane.read_only_roles,"controls":controls})
@@ -654,18 +664,32 @@ impl Application {
                         )
                     }
                     PlaneControl::Presets {
-                        id, target, names, ..
+                        id,
+                        target,
+                        names,
+                        status,
+                        ..
                     } => {
-                        let active = runtime
-                            .handles
-                            .get(target)
-                            .map_or(0.0, ControlHandle::effective_value)
-                            .round()
-                            .clamp(0.0, names.len().saturating_sub(1) as f64)
-                            as usize;
+                        let active = status.as_ref().map_or_else(
+                            || {
+                                runtime
+                                    .handles
+                                    .get(target)
+                                    .map_or(0.0, ControlHandle::effective_value)
+                                    .round()
+                                    .clamp(0.0, names.len().saturating_sub(1) as f64)
+                                    as usize
+                            },
+                            |status| status.active(),
+                        );
+                        let pending = status
+                            .as_ref()
+                            .filter(|status| status.pending())
+                            .map(|status| status.requested());
+                        let failed = status.as_ref().and_then(|status| status.failure());
                         (
                             id,
-                            json!({"active":active,"active_name":names.get(active),"pending":Value::Null,"failed":Value::Null}),
+                            json!({"active":active,"active_name":names.get(active),"pending":pending,"failed":failed}),
                         )
                     }
                 };
@@ -947,11 +971,21 @@ impl Application {
                     message.get("value").cloned().unwrap_or(Value::Null),
                 )
             }
-            (Some("preset.select"), PlaneControl::Presets { id, names, .. }) => {
+            (
+                Some("preset.select"),
+                PlaneControl::Presets {
+                    id,
+                    names,
+                    entries,
+                    status,
+                    ..
+                },
+            ) => {
                 let index = match message.get("preset") {
-                    Some(Value::String(name)) => names
+                    Some(Value::String(name)) => entries
                         .iter()
-                        .position(|candidate| candidate == name)
+                        .position(|candidate| candidate.id == *name)
+                        .or_else(|| names.iter().position(|candidate| candidate == name))
                         .ok_or_else(|| DispatchError::bad_request("unknown configured preset"))?,
                     Some(value) => value
                         .as_u64()
@@ -962,6 +996,9 @@ impl Application {
                         return Err(DispatchError::bad_request("preset.select requires preset"));
                     }
                 };
+                if let Some(status) = status {
+                    status.request(index);
+                }
                 self.set_control(
                     Some("__meldritch_trusted"),
                     &id,
@@ -1075,6 +1112,18 @@ impl Application {
                         let value = sequencer.active_pattern() as u64
                             | (sequencer.queued_pattern().unwrap_or(255) as u64) << 16
                             | (sequencer.queued_pattern_quantization() as u64) << 32;
+                        (format!("{}/{}", plane.id, id), value)
+                    }
+                    PlaneControl::Presets {
+                        id,
+                        status: Some(status),
+                        ..
+                    } => {
+                        let value = status.active() as u64
+                            ^ (status.requested() as u64).rotate_left(16)
+                            ^ status.generation().rotate_left(32)
+                            ^ status.request_epoch().rotate_left(48)
+                            ^ u64::from(status.pending()).rotate_left(63);
                         (format!("{}/{}", plane.id, id), value)
                     }
                     PlaneControl::Range { .. }

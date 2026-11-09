@@ -28,7 +28,7 @@ defineEmits<{
   noteUpdate: [NoteEvent];
   noteDelete: [number];
   pattern: [number, PatternControl["boundary"]];
-  preset: [number];
+  preset: [number | string];
   drumToggle: [string, number];
   drumVelocity: [string, number, number];
   drumMute: [string, boolean];

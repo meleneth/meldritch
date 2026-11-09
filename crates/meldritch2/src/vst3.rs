@@ -8,6 +8,11 @@ use std::{
     collections::BTreeMap,
     env,
     path::{Path, PathBuf},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, sync_channel},
+    },
 };
 
 use serde::{Deserialize, Serialize};
@@ -28,6 +33,14 @@ const STATE_FILE_MAGIC: &[u8; 16] = b"MELDRITCH_VST3\0\0";
 const STATE_FILE_VERSION: u32 = 1;
 const STATE_FILE_HEADER_BYTES: usize = 16 + 4 + 4 + 8;
 const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
+static PLUGIN_LIFECYCLE: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn plugin_lifecycle_lock() -> std::sync::MutexGuard<'static, ()> {
+    PLUGIN_LIFECYCLE
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StateMetadata {
@@ -73,6 +86,102 @@ pub struct PatchBank {
     pub format_version: u32,
     pub plugin: PatchBankPlugin,
     pub patches: Vec<PatchEntry>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CatalogPatch {
+    pub id: String,
+    pub name: String,
+    pub bank: String,
+    pub category: String,
+    pub file: PathBuf,
+}
+
+#[derive(Debug)]
+pub struct PresetStatus {
+    requested: AtomicUsize,
+    active: AtomicUsize,
+    pending: AtomicBool,
+    generation: AtomicU64,
+    request_epoch: AtomicU64,
+    failure: Mutex<Option<(u64, String)>>,
+}
+
+impl PresetStatus {
+    fn new(active: usize) -> Self {
+        Self {
+            requested: AtomicUsize::new(active),
+            active: AtomicUsize::new(active),
+            pending: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
+            request_epoch: AtomicU64::new(0),
+            failure: Mutex::new(None),
+        }
+    }
+
+    pub fn request(&self, index: usize) {
+        self.request_realtime(index);
+        if let Ok(mut failure) = self.failure.lock() {
+            *failure = None;
+        }
+    }
+
+    fn request_realtime(&self, index: usize) {
+        self.request_epoch.fetch_add(1, Ordering::AcqRel);
+        self.requested.store(index, Ordering::Release);
+        self.pending
+            .store(index != self.active(), Ordering::Release);
+    }
+
+    pub fn active(&self) -> usize {
+        self.active.load(Ordering::Acquire)
+    }
+    pub fn requested(&self) -> usize {
+        self.requested.load(Ordering::Acquire)
+    }
+    pub fn pending(&self) -> bool {
+        self.pending.load(Ordering::Acquire)
+    }
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+    pub fn request_epoch(&self) -> u64 {
+        self.request_epoch.load(Ordering::Acquire)
+    }
+    pub fn failure(&self) -> Option<String> {
+        self.failure
+            .lock()
+            .ok()
+            .and_then(|value| value.as_ref().map(|(_, message)| message.clone()))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PresetCatalog {
+    pub patches: Vec<CatalogPatch>,
+    pub initial: usize,
+    pub status: Arc<PresetStatus>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ManagedPresetBank {
+    pub catalog: Arc<PresetCatalog>,
+    pub values: Vec<BTreeMap<u32, f64>>,
+}
+
+impl PresetCatalog {
+    pub fn new(patches: Vec<CatalogPatch>, initial: usize) -> Result<Self, String> {
+        if patches.len() < 2 || initial >= patches.len() {
+            return Err(
+                "a preset catalog requires at least two entries and a valid initial preset".into(),
+            );
+        }
+        Ok(Self {
+            patches,
+            initial,
+            status: Arc::new(PresetStatus::new(initial)),
+        })
+    }
 }
 
 impl PatchBank {
@@ -128,14 +237,11 @@ impl PatchBank {
             return Err("a VST3 patch bank requires at least two patches".into());
         }
         let mut ids = std::collections::BTreeSet::new();
-        let mut names = std::collections::BTreeSet::new();
         for patch in &self.patches {
-            if patch.id.is_empty()
-                || patch.name.is_empty()
-                || !ids.insert(&patch.id)
-                || !names.insert(&patch.name)
-            {
-                return Err("VST3 patch IDs and names must be non-empty and unique".into());
+            if patch.id.is_empty() || patch.name.is_empty() || !ids.insert(&patch.id) {
+                return Err(
+                    "VST3 patch IDs must be non-empty and unique; names must be non-empty".into(),
+                );
             }
             if patch.file.is_absolute()
                 || patch
@@ -394,6 +500,11 @@ pub struct Spec {
     /// Resident-bank index selected by the `patch_selector` input. Ordinary
     /// VST3 modules leave this unset and process every block.
     pub patch_index: Option<u32>,
+    /// A large, hot-swappable state catalog. Only one processor is resident;
+    /// replacement processors are prepared by a bounded background worker.
+    pub preset_catalog: Option<Arc<PresetCatalog>>,
+    /// Small host-managed parameter presets applied to one persistent plugin.
+    pub managed_presets: Option<Arc<ManagedPresetBank>>,
 }
 
 impl Spec {
@@ -632,6 +743,8 @@ pub fn inspect(descriptor: Descriptor) -> Result<Spec, String> {
         midi_channels: [1, 2, 3, 4, 5, 6, 7, 8],
         audio_inputs,
         patch_index: None,
+        preset_catalog: None,
+        managed_presets: None,
     })
 }
 
@@ -673,6 +786,10 @@ impl std::fmt::Debug for Instance {
 
 impl Instance {
     pub fn new(spec: &Spec, sample_rate: f64) -> Result<Self, String> {
+        // Some third-party factories (notably Serum 2.1.5) are not safe to
+        // construct concurrently even though their prepared processors are
+        // independent. This lock is used only by control/background threads.
+        let _creation = plugin_lifecycle_lock();
         let mut host = Vst3Host::builder()
             .sample_rate(sample_rate)
             .block_size(MAX_BLOCK_SIZE)
@@ -1138,7 +1255,388 @@ impl Instance {
 
 impl Drop for Instance {
     fn drop(&mut self) {
+        let _lifecycle = plugin_lifecycle_lock();
         let _ = self.plugin.stop_processing();
+    }
+}
+
+pub struct ManagedPresetInstance {
+    current: Box<Instance>,
+    bank: Arc<ManagedPresetBank>,
+    parameter_indexes: Vec<Vec<(usize, f64)>>,
+    authored: Vec<f64>,
+    scratch: Vec<f64>,
+    selected: usize,
+}
+
+impl std::fmt::Debug for ManagedPresetInstance {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Vst3ManagedPresetInstance")
+            .field("selected", &self.selected)
+            .field("presets", &self.bank.values.len())
+            .finish()
+    }
+}
+
+impl ManagedPresetInstance {
+    pub fn new(spec: &Spec, sample_rate: f64) -> Result<Self, String> {
+        let bank = Arc::clone(
+            spec.managed_presets
+                .as_ref()
+                .ok_or("missing managed preset bank")?,
+        );
+        let parameter_indexes = bank
+            .values
+            .iter()
+            .map(|values| {
+                values
+                    .iter()
+                    .map(|(id, value)| {
+                        spec.parameters
+                            .iter()
+                            .position(|parameter| parameter.id == *id)
+                            .map(|index| (index, *value))
+                            .ok_or_else(|| {
+                                format!("managed preset references unknown parameter {id}")
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let authored = spec
+            .parameters
+            .iter()
+            .map(|parameter| spec.initial_value(parameter))
+            .collect::<Vec<_>>();
+        Ok(Self {
+            current: Box::new(Instance::new(spec, sample_rate)?),
+            selected: bank.catalog.initial,
+            bank,
+            parameter_indexes,
+            scratch: authored.clone(),
+            authored,
+        })
+    }
+
+    pub fn process(
+        &mut self,
+        note_inputs: [&[f64]; 5],
+        parameter_values: &[f64],
+        patch_selector: &[f64],
+        output: &mut [f64],
+    ) {
+        let selected = patch_selector
+            .first()
+            .copied()
+            .filter(|value| value.is_finite())
+            .map(|value| {
+                value
+                    .round()
+                    .clamp(0.0, self.parameter_indexes.len().saturating_sub(1) as f64)
+                    as usize
+            })
+            .unwrap_or(self.selected);
+        if selected != self.selected {
+            self.selected = selected;
+            self.bank.catalog.status.request_realtime(selected);
+            self.bank
+                .catalog
+                .status
+                .active
+                .store(selected, Ordering::Release);
+            self.bank
+                .catalog
+                .status
+                .pending
+                .store(false, Ordering::Release);
+        }
+        self.scratch.copy_from_slice(parameter_values);
+        for &(index, value) in &self.parameter_indexes[self.selected] {
+            if parameter_values[index].to_bits() == self.authored[index].to_bits() {
+                self.scratch[index] = value;
+            }
+        }
+        self.current.process(note_inputs, &self.scratch, output);
+    }
+    pub fn set_offline(&mut self) {
+        self.current.set_offline();
+    }
+    pub fn failed(&self) -> bool {
+        self.current.failed()
+    }
+    pub fn offline_fallback(&self) -> bool {
+        self.current.offline_fallback()
+    }
+    pub fn save_state(&self) -> Result<Vec<u8>, String> {
+        self.current.save_state()
+    }
+    pub fn latency_samples(&self) -> u32 {
+        self.current.latency_samples()
+    }
+    pub fn status(&self) -> Arc<PresetStatus> {
+        Arc::clone(&self.bank.catalog.status)
+    }
+}
+
+enum CatalogRequest {
+    Load { index: usize, generation: u64 },
+    Retire(Box<Instance>),
+}
+
+struct CatalogResult {
+    index: usize,
+    generation: u64,
+    instance: Result<Box<Instance>, String>,
+}
+
+/// One live processor backed by a potentially large on-disk preset catalog.
+/// The audio callback only uses bounded `try_send`/`try_recv` operations.
+pub struct CatalogInstance {
+    current: Box<Instance>,
+    catalog: Arc<PresetCatalog>,
+    requests: SyncSender<CatalogRequest>,
+    results: Receiver<CatalogResult>,
+    desired: usize,
+    submitted: Option<(usize, u64)>,
+    failed_selection: Option<usize>,
+    retired: Vec<Box<Instance>>,
+    failure_update: Option<Option<(u64, String)>>,
+    offline: Arc<AtomicBool>,
+    seen_request_epoch: u64,
+}
+
+impl std::fmt::Debug for CatalogInstance {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Vst3CatalogInstance")
+            .field("active", &self.catalog.status.active())
+            .field("desired", &self.desired)
+            .field("entries", &self.catalog.patches.len())
+            .finish()
+    }
+}
+
+impl CatalogInstance {
+    pub fn new(spec: &Spec, sample_rate: f64) -> Result<Self, String> {
+        let catalog = Arc::clone(
+            spec.preset_catalog
+                .as_ref()
+                .ok_or("missing preset catalog")?,
+        );
+        let current = Box::new(Instance::new(spec, sample_rate)?);
+        let (request_tx, request_rx) = sync_channel::<CatalogRequest>(4);
+        let (result_tx, result_rx) = sync_channel::<CatalogResult>(2);
+        let mut base = spec.clone();
+        base.preset_catalog = None;
+        base.state = None;
+        let worker_catalog = Arc::clone(&catalog);
+        let offline = Arc::new(AtomicBool::new(false));
+        let worker_offline = Arc::clone(&offline);
+        std::thread::Builder::new()
+            .name(format!("meldritch-preset-{}", spec.descriptor.name))
+            .spawn(move || {
+                while let Ok(request) = request_rx.recv() {
+                    match request {
+                        CatalogRequest::Retire(instance) => drop(instance),
+                        CatalogRequest::Load {
+                            mut index,
+                            mut generation,
+                        } => {
+                            // Coalesce queued selections before doing expensive work.
+                            for queued in request_rx.try_iter() {
+                                match queued {
+                                    CatalogRequest::Load {
+                                        index: next,
+                                        generation: next_generation,
+                                    } => {
+                                        index = next;
+                                        generation = next_generation;
+                                    }
+                                    CatalogRequest::Retire(instance) => drop(instance),
+                                }
+                            }
+                            let result = (|| {
+                                let patch = worker_catalog
+                                    .patches
+                                    .get(index)
+                                    .ok_or_else(|| format!("unknown preset index {index}"))?;
+                                let bytes = std::fs::read(&patch.file).map_err(|error| {
+                                    format!("failed to read preset '{}': {error}", patch.id)
+                                })?;
+                                let document = PluginState::from_bytes(&bytes)?;
+                                document.validate(&base.descriptor)?;
+                                let mut selected = base.clone();
+                                selected.state = Some(document.state);
+                                let mut instance = Box::new(Instance::new(&selected, sample_rate)?);
+                                if worker_offline.load(Ordering::Acquire) {
+                                    instance.set_offline();
+                                }
+                                Ok(instance)
+                            })();
+                            if result_tx
+                                .send(CatalogResult {
+                                    index,
+                                    generation,
+                                    instance: result,
+                                })
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+            })
+            .map_err(|error| format!("failed to start preset loader: {error}"))?;
+        let seen_request_epoch = catalog.status.request_epoch();
+        Ok(Self {
+            current,
+            desired: catalog.initial,
+            catalog,
+            requests: request_tx,
+            results: result_rx,
+            submitted: None,
+            failed_selection: None,
+            // At most the bounded request/result capacity can await retirement.
+            retired: Vec::with_capacity(8),
+            failure_update: None,
+            offline,
+            seen_request_epoch,
+        })
+    }
+
+    fn update_selection(&mut self, patch_selector: &[f64]) {
+        self.try_publish_failure();
+        let request_epoch = self.catalog.status.request_epoch();
+        if request_epoch != self.seen_request_epoch {
+            self.seen_request_epoch = request_epoch;
+            self.failed_selection = None;
+        }
+        let requested = patch_selector
+            .first()
+            .copied()
+            .filter(|value| value.is_finite())
+            .map(|value| {
+                value
+                    .round()
+                    .clamp(0.0, self.catalog.patches.len().saturating_sub(1) as f64)
+                    as usize
+            })
+            .unwrap_or(self.desired);
+        if requested != self.desired {
+            self.desired = requested;
+            self.submitted = None;
+            self.failed_selection = None;
+            self.catalog.status.request_realtime(requested);
+            self.failure_update = Some(None);
+        }
+        if self.desired != self.catalog.status.active()
+            && self.submitted.is_none()
+            && self.failed_selection != Some(self.desired)
+        {
+            let generation = self
+                .catalog
+                .status
+                .generation
+                .fetch_add(1, Ordering::AcqRel)
+                + 1;
+            match self.requests.try_send(CatalogRequest::Load {
+                index: self.desired,
+                generation,
+            }) {
+                Ok(()) => self.submitted = Some((self.desired, generation)),
+                Err(TrySendError::Full(_)) => {}
+                Err(TrySendError::Disconnected(_)) => {
+                    self.catalog.status.pending.store(false, Ordering::Release)
+                }
+            }
+        }
+        loop {
+            match self.results.try_recv() {
+                Ok(result) => {
+                    if self.submitted == Some((result.index, result.generation)) {
+                        self.submitted = None;
+                    }
+                    match result.instance {
+                        Ok(instance) if result.index == self.desired => {
+                            let old = std::mem::replace(&mut self.current, instance);
+                            self.retired.push(old);
+                            self.catalog
+                                .status
+                                .active
+                                .store(result.index, Ordering::Release);
+                            self.catalog.status.pending.store(false, Ordering::Release);
+                            self.failed_selection = None;
+                            self.failure_update = Some(None);
+                        }
+                        Ok(instance) => self.retired.push(instance),
+                        Err(error) if result.index == self.desired => {
+                            self.catalog.status.pending.store(false, Ordering::Release);
+                            self.failure_update = Some(Some((result.generation, error)));
+                            self.failed_selection = Some(result.index);
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            }
+        }
+        while let Some(instance) = self.retired.pop() {
+            match self.requests.try_send(CatalogRequest::Retire(instance)) {
+                Ok(()) => {}
+                Err(
+                    TrySendError::Full(CatalogRequest::Retire(instance))
+                    | TrySendError::Disconnected(CatalogRequest::Retire(instance)),
+                ) => {
+                    self.retired.push(instance);
+                    break;
+                }
+                Err(_) => unreachable!(),
+            }
+        }
+        self.try_publish_failure();
+    }
+
+    fn try_publish_failure(&mut self) {
+        let Some(update) = self.failure_update.take() else {
+            return;
+        };
+        match self.catalog.status.failure.try_lock() {
+            Ok(mut failure) => *failure = update,
+            Err(_) => self.failure_update = Some(update),
+        }
+    }
+
+    pub fn process(
+        &mut self,
+        note_inputs: [&[f64]; 5],
+        parameter_values: &[f64],
+        patch_selector: &[f64],
+        output: &mut [f64],
+    ) {
+        self.update_selection(patch_selector);
+        self.current.process(note_inputs, parameter_values, output);
+    }
+
+    pub fn set_offline(&mut self) {
+        self.offline.store(true, Ordering::Release);
+        self.current.set_offline();
+    }
+    pub fn failed(&self) -> bool {
+        self.current.failed()
+    }
+    pub fn offline_fallback(&self) -> bool {
+        self.current.offline_fallback()
+    }
+    pub fn save_state(&self) -> Result<Vec<u8>, String> {
+        self.current.save_state()
+    }
+    pub fn latency_samples(&self) -> u32 {
+        self.current.latency_samples()
+    }
+    pub fn status(&self) -> Arc<PresetStatus> {
+        Arc::clone(&self.catalog.status)
     }
 }
 
@@ -1204,10 +1702,38 @@ mod tests {
             midi_channels: [1, 2, 3, 4, 5, 6, 7, 8],
             audio_inputs: 0,
             patch_index: None,
+            preset_catalog: None,
+            managed_presets: None,
         };
         assert_eq!(Spec::parameter_name(42), "parameter_42");
         assert_eq!(spec.parameter_id("parameter_42"), Some(42));
         assert_eq!(spec.parameter_id("parameter_7"), None);
+    }
+
+    #[test]
+    fn catalog_keeps_stable_ids_when_display_names_collide() {
+        let patches = vec![
+            CatalogPatch {
+                id: "bank_a_same".into(),
+                name: "Same".into(),
+                bank: "A".into(),
+                category: "Lead".into(),
+                file: "a.state".into(),
+            },
+            CatalogPatch {
+                id: "bank_b_same".into(),
+                name: "Same".into(),
+                bank: "B".into(),
+                category: "Pad".into(),
+                file: "b.state".into(),
+            },
+        ];
+        let catalog = PresetCatalog::new(patches, 0).expect("duplicate display names are valid");
+        assert_ne!(catalog.patches[0].id, catalog.patches[1].id);
+        catalog.status.request(1);
+        assert_eq!(catalog.status.active(), 0);
+        assert_eq!(catalog.status.requested(), 1);
+        assert!(catalog.status.pending());
     }
 
     #[test]

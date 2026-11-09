@@ -50,8 +50,11 @@ const setAdsr = (
   parameter: AdsrParameter["name"],
   value: number,
 ) => store.send({ type: "adsr.set", plane, control, parameter, value });
-const selectPreset = (plane: string, control: string, preset: number) =>
-  store.send({ type: "preset.select", plane, control, preset });
+const selectPreset = (
+  plane: string,
+  control: string,
+  preset: number | string,
+) => store.send({ type: "preset.select", plane, control, preset });
 const toggleDrum = (
   plane: string,
   control: string,

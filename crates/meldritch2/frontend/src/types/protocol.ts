@@ -98,6 +98,7 @@ export interface PatternControl extends BaseControl {
 export interface PresetControl extends BaseControl {
   kind: "preset_selector";
   presets: string[];
+  entries: Array<{ id: string; name: string; bank: string; category: string }>;
   active: number;
   active_name?: string;
   pending: number | null;

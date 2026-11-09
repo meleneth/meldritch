@@ -1,6 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::{Mutex, MutexGuard, OnceLock},
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
 };
 
 use meldritch2::{
@@ -688,6 +688,131 @@ fn pressure_system_hosts_isolated_instruments_and_lsp_master_chain() {
 }
 
 #[test]
+fn instrument_playground_hosts_independent_pulse_banks_and_all_six_roles_render() {
+    let _lock = installed_plugin_lock();
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return;
+    };
+    if !home.join(".vst3/Serum2.vst3").is_dir()
+        || !home.join(".vst3/PULSE Drum Synth.vst3").is_dir()
+        || !home
+            .join(".local/share/meldritch2/patches/serum2/factory/manifest.json")
+            .is_file()
+    {
+        eprintln!("Instrument Playground plugins/catalog unavailable; skipping conditional test");
+        return;
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let graph = lua::read_with_root(
+        &std::fs::read_to_string(root.join("examples/82-instrument-playground.lua")).unwrap(),
+        &root,
+    )
+    .expect("load Instrument Playground");
+    let machine = compile_at_rate(&graph, 48_000.0).expect("compile Instrument Playground");
+    for suffix in [
+        "/pulse_808",
+        "/pulse_909",
+        "/serum_bass",
+        "/serum_drone",
+        "/serum_lead",
+        "/serum_arp",
+    ] {
+        let module = machine
+            .order()
+            .iter()
+            .find(|candidate| candidate.ends_with(suffix))
+            .unwrap_or_else(|| panic!("missing {suffix}: {:?}", machine.order()));
+        assert!(
+            !machine
+                .vst3_state(module)
+                .expect("save independent plugin state")
+                .is_empty()
+        );
+    }
+    let p808 = machine.control_handle("pulse808_preset").unwrap();
+    let p909 = machine.control_handle("pulse909_preset").unwrap();
+    p808.publish(2.0).unwrap();
+    assert_eq!(p808.effective_value(), 2.0);
+    assert_eq!(p909.effective_value(), 0.0);
+    p909.publish(3.0).unwrap();
+    assert_eq!(p808.effective_value(), 2.0);
+    assert_eq!(p909.effective_value(), 3.0);
+
+    let bass_module = machine
+        .order()
+        .iter()
+        .find(|candidate| candidate.ends_with("/serum_bass"))
+        .unwrap()
+        .clone();
+    let bass_status = machine.vst3_preset_status(&bass_module).unwrap();
+    let bass_preset = machine.control_handle("bass_preset").unwrap();
+
+    let names = ["pulse808", "pulse909", "bass", "drone", "lead", "arp"];
+    let mutes = names
+        .iter()
+        .map(|name| machine.control_handle(&format!("{name}_mute")).unwrap())
+        .collect::<Vec<_>>();
+    let mut renderer = OfflineRenderer::new(machine, 1024, 2).expect("playground renderer");
+    bass_preset.publish(1.0).unwrap();
+    bass_preset.publish(2.0).unwrap();
+    bass_preset.publish(3.0).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while bass_status.active() != 3 && std::time::Instant::now() < deadline {
+        let mut left = vec![0.0; 1024];
+        let mut right = vec![0.0; 1024];
+        renderer.process_stereo(&mut left, &mut right);
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        bass_status.active(),
+        3,
+        "rapid preset requests must converge to the latest selection"
+    );
+    assert!(!bass_status.pending());
+    assert_eq!(bass_status.failure(), None);
+    let mut energies = Vec::new();
+    for selected in 0..names.len() {
+        for (index, mute) in mutes.iter().enumerate() {
+            mute.publish(f64::from(index != selected)).unwrap();
+        }
+        let mut left = vec![0.0; 96_000];
+        let mut right = vec![0.0; 96_000];
+        for (left, right) in left.chunks_mut(1024).zip(right.chunks_mut(1024)) {
+            renderer.process_stereo(left, right);
+        }
+        let role_energy = energy(&left) + energy(&right);
+        assert!(role_energy > 1e-5, "{} rendered silence", names[selected]);
+        assert!(
+            left.iter()
+                .chain(&right)
+                .all(|sample| sample.is_finite() && sample.abs() < 2.0),
+            "{} produced invalid or uncontrolled samples",
+            names[selected]
+        );
+        energies.push(role_energy);
+    }
+    eprintln!("Instrument Playground isolated two-second role energies: {energies:?}");
+    assert!(renderer.machine().failed_vst3_modules().next().is_none());
+    let pulse808 = renderer
+        .machine()
+        .order()
+        .iter()
+        .find(|candidate| candidate.ends_with("/pulse_808"))
+        .unwrap();
+    let pulse909 = renderer
+        .machine()
+        .order()
+        .iter()
+        .find(|candidate| candidate.ends_with("/pulse_909"))
+        .unwrap();
+    assert_ne!(
+        renderer.machine().vst3_state(pulse808).unwrap(),
+        renderer.machine().vst3_state(pulse909).unwrap(),
+        "independently selected PULSE presets must produce independent saved state"
+    );
+}
+
+#[test]
 fn native_plugin_vertical_slice_covers_discovery_lifecycle_events_parameters_and_state() {
     let directory = fixture_directory().clone();
     let paths = [directory];
@@ -776,6 +901,88 @@ fn native_plugin_vertical_slice_covers_discovery_lifecycle_events_parameters_and
         drop(Instance::new(&spec, 48_000.0).expect("repeat instance creation"));
     }
     assert!(vst3::resolve("missing-plugin-id", &paths).is_err());
+}
+
+#[test]
+fn catalog_loader_reports_missing_state_without_silencing_or_retrying_forever() {
+    let directory = fixture_directory().clone();
+    let paths = [directory];
+    let descriptor = vst3::discover(&paths).unwrap().remove(0);
+    let mut spec = vst3::load(&descriptor.class_id, &paths).unwrap();
+    spec.initial_values.insert(0, 0.5);
+    let state = Instance::new(&spec, 48_000.0)
+        .unwrap()
+        .save_state()
+        .unwrap();
+    let temp =
+        std::env::temp_dir().join(format!("meldritch-catalog-failure-{}", std::process::id()));
+    std::fs::create_dir_all(&temp).unwrap();
+    let valid = temp.join("valid.state");
+    std::fs::write(
+        &valid,
+        vst3::PluginState::capture(&descriptor, "Valid".into(), state.clone())
+            .unwrap()
+            .to_bytes()
+            .unwrap(),
+    )
+    .unwrap();
+    spec.state = Some(state);
+    let catalog = Arc::new(
+        vst3::PresetCatalog::new(
+            vec![
+                vst3::CatalogPatch {
+                    id: "valid".into(),
+                    name: "Same".into(),
+                    bank: "Test".into(),
+                    category: "Lead".into(),
+                    file: valid,
+                },
+                vst3::CatalogPatch {
+                    id: "missing".into(),
+                    name: "Same".into(),
+                    bank: "Test".into(),
+                    category: "Pad".into(),
+                    file: temp.join("missing.state"),
+                },
+            ],
+            0,
+        )
+        .unwrap(),
+    );
+    let status = Arc::clone(&catalog.status);
+    spec.preset_catalog = Some(catalog);
+    let mut plugin = vst3::CatalogInstance::new(&spec, 48_000.0).unwrap();
+    let frames = 128;
+    let pitch = vec![440.0; frames];
+    let gate = vec![1.0; frames];
+    let velocity = vec![0.8; frames];
+    let tempo = vec![120.0; frames];
+    let extra = vec![0.0; frames * vst3::EXTRA_NOTE_INPUTS];
+    let selector = vec![1.0; frames];
+    let mut output = vec![0.0; frames * 2];
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while (status.pending() || status.failure().is_none()) && std::time::Instant::now() < deadline {
+        plugin.process(
+            [&pitch, &gate, &velocity, &tempo, &extra],
+            &[0.5],
+            &selector,
+            &mut output,
+        );
+        std::thread::yield_now();
+    }
+    assert_eq!(status.active(), 0);
+    assert!(!status.pending());
+    assert!(
+        status
+            .failure()
+            .unwrap()
+            .contains("failed to read preset 'missing'")
+    );
+    assert!(
+        energy(&output) > 0.001,
+        "the previous preset must continue sounding after a failed load"
+    );
+    std::fs::remove_dir_all(temp).unwrap();
 }
 
 #[test]

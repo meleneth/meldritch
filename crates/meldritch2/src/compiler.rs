@@ -42,6 +42,8 @@ enum OpProcessor {
     },
     SequencerTempo(Arc<SequencerControl>),
     Vst3(Box<crate::vst3::Instance>),
+    Vst3Catalog(Box<crate::vst3::CatalogInstance>),
+    Vst3Managed(Box<crate::vst3::ManagedPresetInstance>),
     Vst3Effect(Box<crate::vst3::Instance>),
 }
 
@@ -1185,6 +1187,30 @@ impl Machine {
                     &inputs[4 + crate::vst3::EXTRA_NOTE_INPUTS..],
                     outputs,
                 ),
+                OpProcessor::Vst3Catalog(plugin) => plugin.process(
+                    [
+                        &inputs[0..1],
+                        &inputs[1..2],
+                        &inputs[2..3],
+                        &inputs[3..4],
+                        &inputs[4..4 + crate::vst3::EXTRA_NOTE_INPUTS],
+                    ],
+                    params,
+                    &inputs[4 + crate::vst3::EXTRA_NOTE_INPUTS..],
+                    outputs,
+                ),
+                OpProcessor::Vst3Managed(plugin) => plugin.process(
+                    [
+                        &inputs[0..1],
+                        &inputs[1..2],
+                        &inputs[2..3],
+                        &inputs[3..4],
+                        &inputs[4..4 + crate::vst3::EXTRA_NOTE_INPUTS],
+                    ],
+                    params,
+                    &inputs[4 + crate::vst3::EXTRA_NOTE_INPUTS..],
+                    outputs,
+                ),
                 OpProcessor::Vst3Effect(plugin) => {
                     plugin.process_effect(&inputs[0..1], &inputs[1..2], params, outputs)
                 }
@@ -1252,6 +1278,30 @@ impl Machine {
                 }
                 OpProcessor::Plaits(plaits) => plaits.process(inputs, params, outputs),
                 OpProcessor::Vst3(plugin) => plugin.process_selected(
+                    [
+                        &inputs[0..1],
+                        &inputs[1..2],
+                        &inputs[2..3],
+                        &inputs[3..4],
+                        &inputs[4..4 + crate::vst3::EXTRA_NOTE_INPUTS],
+                    ],
+                    params,
+                    &inputs[4 + crate::vst3::EXTRA_NOTE_INPUTS..],
+                    outputs,
+                ),
+                OpProcessor::Vst3Catalog(plugin) => plugin.process(
+                    [
+                        &inputs[0..1],
+                        &inputs[1..2],
+                        &inputs[2..3],
+                        &inputs[3..4],
+                        &inputs[4..4 + crate::vst3::EXTRA_NOTE_INPUTS],
+                    ],
+                    params,
+                    &inputs[4 + crate::vst3::EXTRA_NOTE_INPUTS..],
+                    outputs,
+                ),
+                OpProcessor::Vst3Managed(plugin) => plugin.process(
                     [
                         &inputs[0..1],
                         &inputs[1..2],
@@ -1491,6 +1541,8 @@ impl Machine {
                 OpProcessor::Vst3(plugin) | OpProcessor::Vst3Effect(plugin) => {
                     plugin.set_offline();
                 }
+                OpProcessor::Vst3Catalog(plugin) => plugin.set_offline(),
+                OpProcessor::Vst3Managed(plugin) => plugin.set_offline(),
                 _ => {}
             }
         }
@@ -1504,6 +1556,8 @@ impl Machine {
             .ok_or_else(|| format!("unknown module '{module}'"))?;
         match &self.ops[index].processor {
             OpProcessor::Vst3(plugin) | OpProcessor::Vst3Effect(plugin) => plugin.save_state(),
+            OpProcessor::Vst3Catalog(plugin) => plugin.save_state(),
+            OpProcessor::Vst3Managed(plugin) => plugin.save_state(),
             _ => Err(format!("module '{module}' is not a VST3 plugin")),
         }
     }
@@ -1518,7 +1572,25 @@ impl Machine {
             OpProcessor::Vst3(plugin) | OpProcessor::Vst3Effect(plugin) => {
                 Ok(plugin.latency_samples())
             }
+            OpProcessor::Vst3Catalog(plugin) => Ok(plugin.latency_samples()),
+            OpProcessor::Vst3Managed(plugin) => Ok(plugin.latency_samples()),
             _ => Err(format!("module '{module}' is not a VST3 plugin")),
+        }
+    }
+
+    pub fn vst3_preset_status(
+        &self,
+        module: &str,
+    ) -> Result<Arc<crate::vst3::PresetStatus>, String> {
+        let index = self
+            .op_ids
+            .iter()
+            .position(|id| id == module)
+            .ok_or_else(|| format!("unknown module '{module}'"))?;
+        match &self.ops[index].processor {
+            OpProcessor::Vst3Catalog(plugin) => Ok(plugin.status()),
+            OpProcessor::Vst3Managed(plugin) => Ok(plugin.status()),
+            _ => Err(format!("module '{module}' has no dynamic preset catalog")),
         }
     }
 
@@ -1530,6 +1602,8 @@ impl Machine {
                 OpProcessor::Vst3(plugin) | OpProcessor::Vst3Effect(plugin) if plugin.failed() => {
                     Some(id.as_str())
                 }
+                OpProcessor::Vst3Catalog(plugin) if plugin.failed() => Some(id.as_str()),
+                OpProcessor::Vst3Managed(plugin) if plugin.failed() => Some(id.as_str()),
                 _ => None,
             })
     }
@@ -1544,6 +1618,8 @@ impl Machine {
                 {
                     Some(id.as_str())
                 }
+                OpProcessor::Vst3Catalog(plugin) if plugin.offline_fallback() => Some(id.as_str()),
+                OpProcessor::Vst3Managed(plugin) if plugin.offline_fallback() => Some(id.as_str()),
                 _ => None,
             })
     }
@@ -1645,7 +1721,10 @@ impl OfflineRenderer {
             && machine.ops.iter().any(|op| {
                 matches!(
                     op.processor,
-                    OpProcessor::Vst3(_) | OpProcessor::Vst3Effect(_)
+                    OpProcessor::Vst3(_)
+                        | OpProcessor::Vst3Catalog(_)
+                        | OpProcessor::Vst3Managed(_)
+                        | OpProcessor::Vst3Effect(_)
                 )
             })
         {
@@ -1853,7 +1932,10 @@ fn process_offline_op(
         return;
     }
     let output_count = op.outputs.len();
-    if let OpProcessor::Vst3(plugin) = &mut op.processor {
+    if matches!(
+        op.processor,
+        OpProcessor::Vst3(_) | OpProcessor::Vst3Catalog(_) | OpProcessor::Vst3Managed(_)
+    ) {
         for (input_index, input) in op.inputs.iter().enumerate() {
             for frame in 0..frames {
                 inputs[input_index * frames + frame] = if input.sources.is_empty() {
@@ -1872,18 +1954,34 @@ fn process_offline_op(
         let (tempo, rest) = rest.split_at_mut(frames);
         let (extra_note_inputs, patch_selector) =
             rest.split_at_mut(frames * crate::vst3::EXTRA_NOTE_INPUTS);
-        plugin.process_selected(
-            [
-                pitch,
-                gate,
-                velocity,
-                tempo,
-                &extra_note_inputs[..frames * crate::vst3::EXTRA_NOTE_INPUTS],
-            ],
-            params,
-            patch_selector,
-            &mut outputs[..frames * output_count],
-        );
+        let note_inputs = [
+            pitch as &[f64],
+            gate,
+            velocity,
+            tempo,
+            &extra_note_inputs[..frames * crate::vst3::EXTRA_NOTE_INPUTS],
+        ];
+        match &mut op.processor {
+            OpProcessor::Vst3(plugin) => plugin.process_selected(
+                note_inputs,
+                params,
+                patch_selector,
+                &mut outputs[..frames * output_count],
+            ),
+            OpProcessor::Vst3Catalog(plugin) => plugin.process(
+                note_inputs,
+                params,
+                patch_selector,
+                &mut outputs[..frames * output_count],
+            ),
+            OpProcessor::Vst3Managed(plugin) => plugin.process(
+                note_inputs,
+                params,
+                patch_selector,
+                &mut outputs[..frames * output_count],
+            ),
+            _ => unreachable!(),
+        }
         return;
     }
     if let OpProcessor::Vst3Effect(plugin) = &mut op.processor {
@@ -1930,7 +2028,10 @@ fn process_offline_op(
                 delay.process(inputs, params, sample_rate, frame_outputs)
             }
             OpProcessor::Plaits(plaits) => plaits.process(inputs, params, frame_outputs),
-            OpProcessor::Vst3(_) | OpProcessor::Vst3Effect(_) => {
+            OpProcessor::Vst3(_)
+            | OpProcessor::Vst3Catalog(_)
+            | OpProcessor::Vst3Managed(_)
+            | OpProcessor::Vst3Effect(_) => {
                 unreachable!("VST3 block path returned above")
             }
             OpProcessor::SequencerTrack { .. } | OpProcessor::SequencerTempo(_) => unreachable!(),
@@ -2894,6 +2995,22 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 ModuleRuntime::SequencerTempo(sequencer) if module.kind == "sequencer_tempo" => {
                     OpProcessor::SequencerTempo(Arc::clone(sequencer))
                 }
+                ModuleRuntime::Vst3(spec)
+                    if module.kind == "vst3" && spec.preset_catalog.is_some() =>
+                {
+                    OpProcessor::Vst3Catalog(Box::new(crate::vst3::CatalogInstance::new(
+                        spec,
+                        sample_rate,
+                    )?))
+                }
+                ModuleRuntime::Vst3(spec)
+                    if module.kind == "vst3" && spec.managed_presets.is_some() =>
+                {
+                    OpProcessor::Vst3Managed(Box::new(crate::vst3::ManagedPresetInstance::new(
+                        spec,
+                        sample_rate,
+                    )?))
+                }
                 ModuleRuntime::Vst3(spec) if module.kind == "vst3" => {
                     OpProcessor::Vst3(Box::new(crate::vst3::Instance::new(spec, sample_rate)?))
                 }
@@ -2936,7 +3053,10 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
     let has_vst3 = ops.iter().any(|op| {
         matches!(
             op.processor,
-            OpProcessor::Vst3(_) | OpProcessor::Vst3Effect(_)
+            OpProcessor::Vst3(_)
+                | OpProcessor::Vst3Catalog(_)
+                | OpProcessor::Vst3Managed(_)
+                | OpProcessor::Vst3Effect(_)
         )
     });
     let mut machine = Machine {

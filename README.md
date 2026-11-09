@@ -1,5 +1,7 @@
 # Meldritch
 
+For the six-instrument preset and performance environment, see [Instrument Playground](docs/instrument-playground.md).
+
 Meldritch is a programmable environment for creating musical machines. It is
 not a fixed synthesizer with a scripting layer. The instrument itself—its
 behaviors, signals, modules, relationships, controls, and performance
