@@ -50,6 +50,8 @@ The real-plugin integration test saves state for both PULSE banks and all four S
 
 The recorded validation render was 20.000 seconds / 960,000 stereo frames at 48 kHz and used the four-worker, 1,024-frame offline executor. It rendered at 1.46x realtime with an overall peak of -8.97 dBFS, RMS -23.61 dBFS, no clipped samples, and no failed VST3 module. Its SHA-256 was `320b25a8e3f6be85daa0cb03b369c4716517b393bf6772c92b7df55db2eaa6d6`. Isolated two-second role energies (left plus right squared-sample sum) were PULSE 808 566.63, PULSE 909 62.69, bass 7.35, drone 39.77, lead 42.89, and arp 13.62; every role was finite, non-silent, and below the test's absolute sample bound of 2.0.
 
+Live playback uses the same preallocated dependency-level block scheduler. This is necessary for this graph: the serialized live-equivalent path measured only 0.53x realtime, while the ten-worker schedule measured 1.56x realtime on the documented Ryzen 9 7940HS host. The `play` command's startup line reports the selected worker count. By default Meldritch uses up to ten available logical CPUs; set `MELDRITCH_LIVE_WORKERS` to a positive integer to tune a different machine. Worker threads and buffers are created before the stream starts, and graph reloads retain the configured count.
+
 Known limitations:
 
 - The converted Serum inventory is currently 364 entries because of the single-quote scraper failure described above.

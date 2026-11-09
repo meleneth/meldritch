@@ -290,8 +290,12 @@ fn main() {
                     process::exit(1);
                 }
                 println!(
-                    "playing on {} at {} Hz ({} channels, {}-frame buffer)",
-                    output.device_name, output.sample_rate, output.channels, output.buffer_frames
+                    "playing on {} at {} Hz ({} channels, {}-frame buffer, {} DSP workers)",
+                    output.device_name,
+                    output.sample_rate,
+                    output.channels,
+                    output.buffer_frames,
+                    output.dsp_workers
                 );
                 thread::sleep(Duration::from_secs_f64(seconds));
                 let stream_errors = output.stream_errors();

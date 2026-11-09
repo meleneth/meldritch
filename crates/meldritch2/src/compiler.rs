@@ -585,6 +585,21 @@ pub struct Machine {
     level_ranges: Vec<std::ops::Range<usize>>,
     automations: Vec<AutomationRuntime>,
     block_scratch: Option<BlockScratch>,
+    live_pool: Option<ProcessingPool>,
+}
+
+struct ProcessingPool {
+    pool: rayon::ThreadPool,
+    workers: usize,
+}
+
+impl std::fmt::Debug for ProcessingPool {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProcessingPool")
+            .field("workers", &self.workers)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug)]
@@ -989,6 +1004,31 @@ fn validate_navigation(navigation: &Navigation, screens: &[Screen]) -> Result<()
 }
 
 impl Machine {
+    /// Enable dependency-level block parallelism for the live device path.
+    /// The pool and every scratch buffer are created before audio starts.
+    pub fn enable_live_parallelism(&mut self, workers: usize) -> Result<(), String> {
+        if workers > 64 {
+            return Err("live DSP worker count must be at most 64".into());
+        }
+        if workers <= 1 || self.block_scratch.is_none() {
+            self.live_pool = None;
+            return Ok(());
+        }
+        self.live_pool = Some(ProcessingPool {
+            pool: rayon::ThreadPoolBuilder::new()
+                .num_threads(workers)
+                .thread_name(|index| format!("meldritch-live-dsp-{index}"))
+                .build()
+                .map_err(|error| format!("failed to create live DSP workers: {error}"))?,
+            workers,
+        });
+        Ok(())
+    }
+
+    pub(crate) fn live_parallel_workers(&self) -> usize {
+        self.live_pool.as_ref().map_or(1, |pool| pool.workers)
+    }
+
     pub fn screens(&self) -> &[Screen] {
         &self.screens
     }
@@ -1664,16 +1704,50 @@ fn process_machine_block(machine: &mut Machine, scratch: &mut BlockScratch, fram
         }
     }
     for range in machine.level_ranges.clone() {
-        for op_index in range.clone() {
-            process_offline_op(
-                &mut machine.ops[op_index],
-                &mut scratch.op_inputs[op_index],
-                &scratch.op_params[op_index],
-                &mut scratch.op_outputs[op_index],
-                &scratch.slot_buffers,
-                machine.sample_rate,
-                frames,
-            );
+        let slots = &scratch.slot_buffers;
+        let params = &scratch.op_params[range.clone()];
+        let op_slice = &mut machine.ops[range.clone()];
+        let output_slice = &mut scratch.op_outputs[range.clone()];
+        let input_slice = &mut scratch.op_inputs[range.clone()];
+        let worthwhile = machine.live_pool.is_some()
+            && range.len() > 1
+            && frames.saturating_mul(range.len()) >= 2_048;
+        if worthwhile {
+            machine.live_pool.as_ref().unwrap().pool.install(|| {
+                op_slice
+                    .par_iter_mut()
+                    .zip(output_slice.par_iter_mut())
+                    .zip(input_slice.par_iter_mut())
+                    .zip(params.par_iter())
+                    .for_each(|(((op, outputs), inputs), params)| {
+                        process_offline_op(
+                            op,
+                            inputs,
+                            params,
+                            outputs,
+                            slots,
+                            machine.sample_rate,
+                            frames,
+                        );
+                    });
+            });
+        } else {
+            for (((op, outputs), inputs), params) in op_slice
+                .iter_mut()
+                .zip(output_slice.iter_mut())
+                .zip(input_slice.iter_mut())
+                .zip(params)
+            {
+                process_offline_op(
+                    op,
+                    inputs,
+                    params,
+                    outputs,
+                    slots,
+                    machine.sample_rate,
+                    frames,
+                );
+            }
         }
         for op_index in range {
             let op = &machine.ops[op_index];
@@ -1733,6 +1807,9 @@ impl OfflineRenderer {
                 crate::vst3::MAX_BLOCK_SIZE
             ));
         }
+        // An imported live machine may already own a pool. Offline rendering
+        // has its own executor and must not retain a second set of idle workers.
+        machine.live_pool = None;
         machine.set_offline_processing();
         let pool = (workers > 1)
             .then(|| {
@@ -3133,6 +3210,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         level_ranges,
         automations,
         block_scratch: None,
+        live_pool: None,
     };
     if has_vst3 {
         machine.block_scratch = Some(BlockScratch::new(&machine, crate::vst3::MAX_BLOCK_SIZE));

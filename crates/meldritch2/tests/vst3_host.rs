@@ -708,7 +708,10 @@ fn instrument_playground_hosts_independent_pulse_banks_and_all_six_roles_render(
         &root,
     )
     .expect("load Instrument Playground");
-    let machine = compile_at_rate(&graph, 48_000.0).expect("compile Instrument Playground");
+    let mut machine = compile_at_rate(&graph, 48_000.0).expect("compile Instrument Playground");
+    machine
+        .enable_live_parallelism(4)
+        .expect("prepare live dependency-level DSP workers");
     for suffix in [
         "/pulse_808",
         "/pulse_909",
@@ -752,7 +755,6 @@ fn instrument_playground_hosts_independent_pulse_banks_and_all_six_roles_render(
         .iter()
         .map(|name| machine.control_handle(&format!("{name}_mute")).unwrap())
         .collect::<Vec<_>>();
-    let mut renderer = OfflineRenderer::new(machine, 1024, 2).expect("playground renderer");
     bass_preset.publish(1.0).unwrap();
     bass_preset.publish(2.0).unwrap();
     bass_preset.publish(3.0).unwrap();
@@ -760,7 +762,8 @@ fn instrument_playground_hosts_independent_pulse_banks_and_all_six_roles_render(
     while bass_status.active() != 3 && std::time::Instant::now() < deadline {
         let mut left = vec![0.0; 1024];
         let mut right = vec![0.0; 1024];
-        renderer.process_stereo(&mut left, &mut right);
+        machine.process_stereo(&mut left, &mut right);
+        assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
         std::thread::yield_now();
     }
     assert_eq!(
@@ -770,6 +773,7 @@ fn instrument_playground_hosts_independent_pulse_banks_and_all_six_roles_render(
     );
     assert!(!bass_status.pending());
     assert_eq!(bass_status.failure(), None);
+    let mut renderer = OfflineRenderer::new(machine, 1024, 2).expect("playground renderer");
     let mut energies = Vec::new();
     for selected in 0..names.len() {
         for (index, mute) in mutes.iter().enumerate() {

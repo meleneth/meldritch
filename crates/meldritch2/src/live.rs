@@ -21,12 +21,14 @@ pub struct LiveRuntime {
 pub struct LiveControl {
     handoff: Arc<Mutex<Handoff>>,
     sample_rate: f64,
+    parallel_workers: usize,
 }
 
 impl LiveRuntime {
     pub fn new(initial: Machine) -> (Self, LiveControl) {
         let handoff = Arc::new(Mutex::new(Handoff::default()));
         let sample_rate = initial.sample_rate();
+        let parallel_workers = initial.live_parallel_workers();
         (
             Self {
                 current: initial,
@@ -35,6 +37,7 @@ impl LiveRuntime {
             LiveControl {
                 handoff,
                 sample_rate,
+                parallel_workers,
             },
         )
     }
@@ -80,7 +83,8 @@ impl LiveRuntime {
 
 impl LiveControl {
     pub fn submit(&self, graph: &Graph) -> Result<(), String> {
-        let candidate = compile_at_rate(graph, self.sample_rate)?;
+        let mut candidate = compile_at_rate(graph, self.sample_rate)?;
+        candidate.enable_live_parallelism(self.parallel_workers)?;
         let mut handoff = self.handoff.lock().map_err(|_| "graph handoff poisoned")?;
         if handoff.pending.is_some() {
             return Err("a graph revision is already pending".into());

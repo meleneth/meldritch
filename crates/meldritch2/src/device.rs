@@ -22,6 +22,7 @@ use crate::{
 // deadlines even when its DSP load is otherwise sustainable. Keep host calls
 // at the VST3 adapter's maximum block and request the same device period.
 const CHUNK_FRAMES: usize = crate::vst3::MAX_BLOCK_SIZE;
+const MAX_LIVE_DSP_WORKERS: usize = 10;
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn silence_if_stopping<T: Sample + FromSample<f64>>(
@@ -39,6 +40,19 @@ fn requested_buffer_frames(supported: &SupportedBufferSize) -> u32 {
     match supported {
         SupportedBufferSize::Range { min, max } => (CHUNK_FRAMES as u32).clamp(*min, *max),
         SupportedBufferSize::Unknown => CHUNK_FRAMES as u32,
+    }
+}
+
+fn live_dsp_workers() -> Result<usize, String> {
+    let available = std::thread::available_parallelism().map_or(1, usize::from);
+    match std::env::var("MELDRITCH_LIVE_WORKERS") {
+        Ok(value) => value
+            .parse::<usize>()
+            .ok()
+            .filter(|workers| (1..=64).contains(workers))
+            .ok_or_else(|| "MELDRITCH_LIVE_WORKERS must be an integer from 1 through 64".into()),
+        Err(std::env::VarError::NotPresent) => Ok(available.min(MAX_LIVE_DSP_WORKERS)),
+        Err(error) => Err(format!("invalid MELDRITCH_LIVE_WORKERS: {error}")),
     }
 }
 
@@ -189,6 +203,7 @@ pub struct DeviceOutput {
     pub sample_rate: u32,
     pub channels: u16,
     pub buffer_frames: u32,
+    pub dsp_workers: usize,
 }
 
 pub fn output_device_names() -> Result<Vec<String>, String> {
@@ -283,7 +298,9 @@ impl DeviceOutput {
         if config.channels == 0 {
             return Err("output device reported zero channels".into());
         }
-        let machine = compile_at_rate(graph, f64::from(config.sample_rate))?;
+        let mut machine = compile_at_rate(graph, f64::from(config.sample_rate))?;
+        let dsp_workers = live_dsp_workers()?;
+        machine.enable_live_parallelism(dsp_workers)?;
         let screens = machine.screens().to_vec();
         let navigation = graph.navigation.clone();
         let performance = graph.performance.clone();
@@ -443,6 +460,7 @@ impl DeviceOutput {
             sample_rate: config.sample_rate,
             channels: config.channels,
             buffer_frames,
+            dsp_workers,
         })
     }
 
