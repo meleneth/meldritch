@@ -91,6 +91,49 @@ main {
   display: grid;
   gap: 1.5rem;
 }
+.access-panel {
+  width: min(44rem, 100%);
+  margin: 5vh auto;
+  padding: clamp(1.25rem, 4vw, 2.5rem);
+  border: 1px solid #34323a;
+  border-top: 3px solid #f15b3d;
+  border-radius: 1rem;
+  background: #14161c;
+}
+.access-panel > p {
+  margin: 0;
+  color: #f15b3d;
+  font-size: 0.7rem;
+  letter-spacing: 0.22em;
+}
+.access-panel h2 {
+  margin: 0.35rem 0 1.25rem;
+}
+.access-links {
+  display: grid;
+  gap: 0.65rem;
+}
+.access-links a {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #484751;
+  border-radius: 0.55rem;
+  background: #1d2028;
+  color: #f5f0e8;
+  text-decoration: none;
+}
+.access-links a:hover,
+.access-links a:focus-visible {
+  border-color: #f15b3d;
+  background: #2b1e20;
+}
+.access-links span {
+  color: #aaa6b0;
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
 .plane {
   --station-accent: #f15b3d;
   border: 1px solid #34323a;

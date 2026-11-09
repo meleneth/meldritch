@@ -248,6 +248,18 @@ fn embedded_frontend_serves_phaser_without_an_external_chunk() {
     );
 }
 
+#[test]
+fn browser_config_lists_composition_access_links() {
+    let (mut program, _machine, address) = start();
+    let (status, config) = get_json(&mut program, format!("http://{address}/api/browser-config"));
+    assert_eq!(status, 200);
+    assert_eq!(config["websocket"], "/performance");
+    assert_eq!(
+        config["access_links"],
+        json!([{"credential":"viewer-secret-token","role":"viewer"}])
+    );
+}
+
 fn get_json(program: &mut lua::Program, url: String) -> (u16, Value) {
     let request = thread::spawn(move || {
         let mut response = ureq::get(&url).call().unwrap();

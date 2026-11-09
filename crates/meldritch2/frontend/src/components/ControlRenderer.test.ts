@@ -35,6 +35,29 @@ function render(
 }
 
 describe("control registry", () => {
+  it("lists the composition-issued musician links on the guest screen", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        json: async () => ({
+          websocket: null,
+          access_links: [{ role: "musician", credential: "serum-playground" }],
+        }),
+      })),
+    );
+    const view = render(App, {});
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await nextTick();
+    const link = view.root.querySelector(
+      ".access-links a",
+    ) as HTMLAnchorElement;
+    expect(link.textContent).toContain("musician");
+    expect(link.textContent).toContain("serum-playground");
+    expect(link.hash).toBe("#credential=serum-playground");
+    view.unmount();
+    vi.unstubAllGlobals();
+  });
+
   it("mounts only the selected instrument or master tab", async () => {
     vi.stubGlobal(
       "fetch",

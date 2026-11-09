@@ -111,8 +111,6 @@ const muteDrum = (
         :class="{ alarm: (store.audio?.buffer_underruns || 0) > 0 }"
         :title="store.audio?.first_stream_error || 'No audio backend errors'"
         >XRUNS {{ store.audio?.buffer_underruns || 0 }}</span
-      ><span v-if="!store.role" class="access-hint"
-        >Open your musician access link to join</span
       >
     </div>
   </header>
@@ -132,6 +130,25 @@ const muteDrum = (
     </button>
   </nav>
   <main>
+    <section
+      v-if="!store.role && store.accessLinks.length"
+      class="access-panel"
+      aria-labelledby="access-title"
+    >
+      <p>MELDRITCH / ACCESS</p>
+      <h2 id="access-title">Choose a musician</h2>
+      <div class="access-links">
+        <a
+          v-for="link in store.accessLinks"
+          :key="`${link.role}:${link.credential}`"
+          :href="`#credential=${encodeURIComponent(link.credential)}`"
+          @click="store.authenticate(link.credential)"
+        >
+          <strong>{{ link.role }}</strong>
+          <span>{{ link.credential }}</span>
+        </a>
+      </div>
+    </section>
     <PerformancePlane
       v-if="activePlane"
       :id="`panel-${activePlane.id}`"
@@ -170,7 +187,10 @@ const muteDrum = (
       "
       @drum-mute="(id, row, muted) => muteDrum(activePlaneId, id, row, muted)"
     />
-    <p v-if="!store.visiblePlanes.length" class="empty">
+    <p
+      v-if="!store.visiblePlanes.length && !store.accessLinks.length"
+      class="empty"
+    >
       Waiting for an authorized control plane…
     </p>
   </main>

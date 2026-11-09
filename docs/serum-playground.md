@@ -14,6 +14,8 @@ Open the musician access link:
 http://127.0.0.1:8080/#credential=serum-playground
 ```
 
+The bare `http://127.0.0.1:8080/` landing screen also lists this musician link.
+
 The fragment is read by the browser and is not sent in the HTTP request. Override the credential with `MELDRITCH_SERUM_TOKEN`, the catalog with `MELDRITCH_SERUM_CATALOG`, and the initial stable preset ID with `MELDRITCH_SERUM_PRESET`. Set `MICROLAB_MIDI` to an exact device name to enable a live keyboard; it is optional so an unplugged controller cannot prevent this diagnostic playground from launching.
 
 The starting pattern plays four separated single notes to make unwanted noise easier to isolate. A second sustained-note pattern is available for checking envelopes and tails. The piano roll initially fits all 16 steps across its available width. The preset browser uses every successfully converted catalog entry and receives authoritative load state from the host.

@@ -1,4 +1,4 @@
-import type { Command, Snapshot } from "../types/protocol";
+import type { AccessLink, Command, Snapshot } from "../types/protocol";
 export class PerformanceSocket {
   private socket?: WebSocket;
   private retry?: number;
@@ -8,10 +8,12 @@ export class PerformanceSocket {
     private onStatus: (s: string) => void,
     private onError: (e: string) => void,
     private onSession: (role: string | null) => void,
+    private onAccessLinks: (links: AccessLink[]) => void,
   ) {}
   async connect(token: string) {
     this.stopped = false;
     const config = await fetch("/api/browser-config").then((r) => r.json());
+    this.onAccessLinks(config.access_links || []);
     if (!config.websocket) {
       this.onError("WebSocket disabled");
       return;

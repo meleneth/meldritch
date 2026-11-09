@@ -132,6 +132,10 @@ export interface AudioTelemetry {
   buffer_frames: number;
   dsp_workers: number;
 }
+export interface AccessLink {
+  credential: string;
+  role: string;
+}
 export interface Snapshot {
   type: "state.snapshot" | "state.updated";
   epoch?: string;

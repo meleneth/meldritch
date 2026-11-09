@@ -4,6 +4,7 @@ import { PerformanceSocket } from "../transport/websocket";
 import { credentialFromLocation } from "../transport/credential";
 import type {
   AdsrControl,
+  AccessLink,
   AudioTelemetry,
   Command,
   NoteEvent,
@@ -12,7 +13,6 @@ import type {
 } from "../types/protocol";
 export const usePerformanceStore = defineStore("performance", () => {
   const linkedToken = credentialFromLocation(window.location);
-  if (linkedToken) sessionStorage.setItem("meldritch-token", linkedToken);
   const status = ref("connecting"),
     revision = ref(-1),
     schemaRevision = ref(-1),
@@ -23,7 +23,8 @@ export const usePerformanceStore = defineStore("performance", () => {
     audio = ref<AudioTelemetry | null>(null),
     pending = ref(new Map<string, unknown>()),
     errors = ref<string[]>([]),
-    token = ref(linkedToken || sessionStorage.getItem("meldritch-token") || "");
+    accessLinks = ref<AccessLink[]>([]),
+    token = ref(linkedToken);
   let socket: PerformanceSocket;
   function applyValues(values: Record<string, unknown> = {}) {
     planes.value = planes.value.map((plane) => ({
@@ -113,12 +114,12 @@ export const usePerformanceStore = defineStore("performance", () => {
         revision.value = -1;
         planes.value = [];
       },
+      (links) => (accessLinks.value = links),
     );
     socket.connect(token.value);
   }
   function authenticate(value: string) {
     token.value = value;
-    sessionStorage.setItem("meldritch-token", value);
     connect();
   }
   function send(command: Command, key?: string, value?: unknown) {
@@ -163,6 +164,7 @@ export const usePerformanceStore = defineStore("performance", () => {
     visiblePlanes,
     pending,
     errors,
+    accessLinks,
     connect,
     authenticate,
     send,

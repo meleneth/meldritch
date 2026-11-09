@@ -423,7 +423,9 @@ mutation boundary. The browser never schedules notes.
 
 For every demo credential below, the musician URL is
 `http://127.0.0.1:8080/#credential=TOKEN`; substitute the listed token. The
-browser authenticates that link directly, with no separate login form.
+browser authenticates that link directly, with no separate login form. Opening
+the bare playground URL lists every composition-issued musician link on the
+guest screen.
 
 Run `examples/74-geonkick-performance.lua` with `meldritch2 perform`, open
 `http://127.0.0.1:8080`, and use `drummer-demo-token`, `serum-demo-token`,
@@ -552,10 +554,10 @@ every mutation, so connected clients gain or lose authority immediately.
 Credentials must be at least 12 characters. HTTP uses an `Authorization:
 Bearer ...` header. Browser musicians open a role-specific link such as
 `http://127.0.0.1:8080/#credential=bass-performer-token`; the fragment is not
-sent in the HTTP request or server logs. The frontend retains it in session
-storage and sends it in a WebSocket `authenticate` message. A claimed role in
-arbitrary JSON has no effect. Credentials only map to roles declared by the
-composition.
+sent in the HTTP request or server logs. The frontend keeps the selected token
+only in memory and sends it in a WebSocket `authenticate` message; it does not
+track a musician in browser storage. A claimed role in arbitrary JSON has no
+effect. Credentials only map to roles declared by the composition.
 
 Loopback compositions may choose an `anonymous_role`. Non-loopback/LAN binds
 are rejected unless credentials exist, anonymous control is disabled, and at
@@ -576,9 +578,10 @@ system, not identity proof or a comprehensive account service.
 - Plain HTTP has no TLS. Use only a trusted LAN or place Meldritch behind a
   correctly configured TLS reverse proxy. The server does not implement custom
   cryptography.
-- Browser credentials live in link fragments and session storage. Treat the
-  musician links as capabilities: this is adequate for the initial
-  trusted-LAN workflow, not hostile shared devices.
+- Browser credentials live in link fragments and the running page's memory.
+  The guest configuration endpoint lists the composition-issued links so the
+  landing screen can present them. Treat those links as capabilities: this is
+  adequate for the initial trusted-LAN workflow, not hostile shared devices.
 
 ## Diagnostics and limits
 

@@ -1818,7 +1818,18 @@ async fn index() -> impl IntoResponse {
     )
 }
 async fn browser_config(State(shared): State<Shared>) -> impl IntoResponse {
-    axum::Json(json!({"websocket": shared.websocket_path}))
+    let access_links = shared
+        .credentials
+        .iter()
+        .map(|(credential, role)| json!({"credential": credential, "role": role}))
+        .collect::<Vec<_>>();
+    (
+        [("cache-control", "no-store")],
+        axum::Json(json!({
+            "websocket": shared.websocket_path,
+            "access_links": access_links,
+        })),
+    )
 }
 async fn css() -> impl IntoResponse {
     (
