@@ -1,0 +1,22 @@
+name: engine
+on: [push, pull_request]
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo check --workspace --all-targets
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Native VST3 lifecycle tests are feature-gated and cannot be selected by
+      # this command. They run only in an explicitly authorized physical gate.
+      - run: cargo test --workspace
+      - name: Reject Meldritch 1 source references
+        run: |
+          if git grep -n -E 'crates/meldritch-(app|audio|cli|core|control|dsl|render|tui)' -- ':!docs/architecture/FRACTURE_INVENTORY.md'; then
+            exit 1
+          fi
