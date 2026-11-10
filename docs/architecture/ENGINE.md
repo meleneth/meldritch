@@ -48,8 +48,11 @@ cargo test -p meldritch2 --lib --tests
 
 These commands need neither Node nor a Lua application checkout. The native
 VST3 lifecycle suite is deliberately barred from default test commands and
-requires the explicit `vst3-integration-tests` feature. Run it only when VST3
-host or fixture behavior changes and the physical/plugin gate is intended.
+requires the explicit `vst3-integration-tests` feature. The repository and CI
+run `tools/validate-test-policy.py` to prevent routine checks from enabling it
+or using `--all-features`. Run the suite only when Meldritch's VST3 adapter,
+fixture, packaging, or plugin lifecycle changes and the physical/plugin gate
+is intended; dependency-only tests belong to the upstream library.
 
 An application directory can be anywhere on disk:
 
