@@ -1177,6 +1177,7 @@ return instrument
 }
 
 #[test]
+#[ignore = "consumer application conformance runs from meldritch-lua in the cross-repository gate"]
 fn playground_successor_reproduces_browser_and_apc_logical_notes() {
     let root = std::env::temp_dir().join(format!(
         "meldritch-self-reproduction-{}-{:?}",

@@ -9,6 +9,7 @@ use std::{
 
 use mlua::{AnyUserData, Function, Lua, Table, UserData, UserDataMethods, Value};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use crate::contract;
 use crate::event_bridge::{
@@ -69,12 +70,147 @@ struct ApplicationManifest {
     requirements: serde_json::Value,
 }
 
-/// Resolve either a direct Lua entry file or a contract-defined application
-/// directory. Manifest compatibility is checked before the entry script is
-/// read or evaluated.
-pub fn resolve_application(path: &Path) -> Result<PathBuf, String> {
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LibraryCatalog {
+    catalog_version: u32,
+    libraries: Vec<LibraryDefinition>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LibraryDefinition {
+    id: String,
+    version: String,
+    entry: String,
+    lua_host_api: String,
+    sha256: String,
+}
+
+struct ResolvedLibrary {
+    id: String,
+    source_name: String,
+    source: String,
+}
+
+struct ResolvedApplication {
+    entry: PathBuf,
+    libraries: Vec<ResolvedLibrary>,
+}
+
+fn configured_catalog_path() -> Option<PathBuf> {
+    std::env::var_os("MELDRITCH_LUA_CATALOG").map(PathBuf::from)
+}
+
+fn resolve_libraries(
+    requested: &[String],
+    catalog_path: Option<&Path>,
+) -> Result<Vec<ResolvedLibrary>, String> {
+    if requested.is_empty() {
+        return Ok(Vec::new());
+    }
+    let catalog_path = catalog_path.ok_or_else(|| {
+        format!(
+            "application requires Lua libraries [{}], but MELDRITCH_LUA_CATALOG is not configured",
+            requested.join(", ")
+        )
+    })?;
+    let bytes = std::fs::read(catalog_path).map_err(|error| {
+        format!(
+            "read Lua library catalog {}: {error}",
+            catalog_path.display()
+        )
+    })?;
+    let catalog: LibraryCatalog = serde_json::from_slice(&bytes).map_err(|error| {
+        format!(
+            "parse Lua library catalog {}: {error}",
+            catalog_path.display()
+        )
+    })?;
+    if catalog.catalog_version != 1 {
+        return Err(format!(
+            "Lua library catalog {} has unsupported catalog_version {}; engine supports 1",
+            catalog_path.display(),
+            catalog.catalog_version
+        ));
+    }
+    let mut definitions = BTreeMap::new();
+    for definition in catalog.libraries {
+        let id = definition.id.clone();
+        if definitions.insert(id.clone(), definition).is_some() {
+            return Err(format!(
+                "Lua library catalog contains duplicate identifier '{id}'"
+            ));
+        }
+    }
+    let mut seen = BTreeSet::new();
+    let mut resolved = Vec::with_capacity(requested.len());
+    let root = catalog_path
+        .parent()
+        .ok_or_else(|| "Lua library catalog must have a parent directory".to_string())?;
+    for id in requested {
+        if !seen.insert(id.as_str()) {
+            return Err(format!(
+                "application declares Lua library '{id}' more than once"
+            ));
+        }
+        let definition = definitions.get(id).ok_or_else(|| {
+            format!(
+                "Lua library '{id}' is not present in {}",
+                catalog_path.display()
+            )
+        })?;
+        if definition.version.is_empty() {
+            return Err(format!("Lua library '{id}' has an empty version"));
+        }
+        if !supports_host_api(&definition.lua_host_api) {
+            return Err(format!(
+                "Lua library '{id}' requires host API {}, engine provides {}",
+                definition.lua_host_api, HOST_API_VERSION
+            ));
+        }
+        let relative = Path::new(&definition.entry);
+        if relative.is_absolute()
+            || relative.components().count() != 1
+            || !matches!(
+                relative.extension().and_then(|value| value.to_str()),
+                Some("lua")
+            )
+        {
+            return Err(format!(
+                "Lua library '{id}' has unsafe entry '{}'",
+                definition.entry
+            ));
+        }
+        let path = root.join(relative);
+        let source = std::fs::read_to_string(&path)
+            .map_err(|error| format!("read Lua library '{id}' at {}: {error}", path.display()))?;
+        let digest = format!("{:x}", Sha256::digest(source.as_bytes()));
+        if digest != definition.sha256 {
+            return Err(format!(
+                "Lua library '{id}' digest mismatch at {}: expected {}, found {digest}",
+                path.display(),
+                definition.sha256
+            ));
+        }
+        resolved.push(ResolvedLibrary {
+            id: id.clone(),
+            source_name: path.display().to_string(),
+            source,
+        });
+    }
+    Ok(resolved)
+}
+
+fn resolve_application_spec(
+    path: &Path,
+    catalog_path: Option<&Path>,
+) -> Result<ResolvedApplication, String> {
     if path.is_file() {
-        return Ok(path.to_path_buf());
+        return Ok(ResolvedApplication {
+            entry: path.to_path_buf(),
+            libraries: Vec::new(),
+        });
     }
     if !path.is_dir() {
         return Err(format!(
@@ -121,7 +257,6 @@ pub fn resolve_application(path: &Path) -> Result<PathBuf, String> {
     {
         return Err("application entry must stay within its application directory".into());
     }
-    let _ = (manifest.libraries, manifest.assets, manifest.requirements);
     let entry = path.join(relative);
     if !entry.is_file() {
         return Err(format!(
@@ -130,7 +265,38 @@ pub fn resolve_application(path: &Path) -> Result<PathBuf, String> {
             entry.display()
         ));
     }
-    Ok(entry)
+    let libraries = resolve_libraries(&manifest.libraries, catalog_path)?;
+    let _ = (manifest.assets, manifest.requirements);
+    Ok(ResolvedApplication { entry, libraries })
+}
+
+/// Resolve either a direct Lua entry file or a contract-defined application
+/// directory. Manifest compatibility is checked before the entry script is
+/// read or evaluated.
+pub fn resolve_application(path: &Path) -> Result<PathBuf, String> {
+    resolve_application_spec(path, configured_catalog_path().as_deref()).map(|item| item.entry)
+}
+
+pub fn read_application(path: &Path) -> Result<Graph, String> {
+    read_application_program(path).map(Program::into_graph)
+}
+
+pub fn read_application_program(path: &Path) -> Result<Program, String> {
+    read_application_program_with_catalog(path, configured_catalog_path().as_deref())
+}
+
+fn read_application_program_with_catalog(
+    path: &Path,
+    catalog_path: Option<&Path>,
+) -> Result<Program, String> {
+    let resolved = resolve_application_spec(path, catalog_path)?;
+    let script = std::fs::read_to_string(&resolved.entry)
+        .map_err(|error| format!("read {}: {error}", resolved.entry.display()))?;
+    read_program_with_root_and_libraries(
+        &script,
+        resolved.entry.parent().unwrap_or(Path::new(".")),
+        &resolved.libraries,
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -2829,6 +2995,14 @@ impl Program {
 }
 
 pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Program, String> {
+    read_program_with_root_and_libraries(script, project_root, &[])
+}
+
+fn read_program_with_root_and_libraries(
+    script: &str,
+    project_root: &Path,
+    libraries: &[ResolvedLibrary],
+) -> Result<Program, String> {
     let lua = Lua::new();
     let include_root = project_root.canonicalize().map_err(|e| e.to_string())?;
     let include = lua
@@ -3339,20 +3513,40 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
     meldritch
         .set("event_ui", event_ui)
         .map_err(|e| e.to_string())?;
-    let musical: Table = lua
-        .load(include_str!("../lua/musical.lua"))
-        .set_name("meldritch/musical.lua")
-        .eval()
-        .map_err(|e| e.to_string())?;
-    meldritch
-        .set("musical", musical)
-        .map_err(|e| e.to_string())?;
-    let arp: Table = lua
-        .load(include_str!("../lua/arp.lua"))
-        .set_name("meldritch/arp.lua")
-        .eval()
-        .map_err(|e| e.to_string())?;
-    meldritch.set("arp", arp).map_err(|e| e.to_string())?;
+    for library in libraries {
+        let value: Table = lua
+            .load(&library.source)
+            .set_name(&library.source_name)
+            .eval()
+            .map_err(|error| format!("load Lua library '{}': {error}", library.id))?;
+        let parts = library.id.split('.').collect::<Vec<_>>();
+        let Some((first, rest)) = parts.split_first() else {
+            return Err("Lua library identifier must not be empty".into());
+        };
+        let mut namespace: Table = lua
+            .globals()
+            .get(*first)
+            .map_err(|error| format!("Lua library '{}' namespace: {error}", library.id))?;
+        for part in &rest[..rest.len().saturating_sub(1)] {
+            let child = namespace
+                .get::<Option<Table>>(*part)
+                .map_err(|error| format!("Lua library '{}' namespace: {error}", library.id))?
+                .unwrap_or(lua.create_table().map_err(|error| error.to_string())?);
+            namespace
+                .set(*part, child.clone())
+                .map_err(|error| error.to_string())?;
+            namespace = child;
+        }
+        let leaf = rest.last().ok_or_else(|| {
+            format!(
+                "Lua library identifier '{}' has no namespace member",
+                library.id
+            )
+        })?;
+        namespace
+            .set(*leaf, value)
+            .map_err(|error| error.to_string())?;
+    }
     let mut table: Table = lua.load(script).eval().map_err(|e| e.to_string())?;
     if let Some(finalize) = table
         .get::<Option<Function>>("_finalize")
@@ -4364,7 +4558,10 @@ fn endpoint(table: Table) -> Result<Endpoint, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{HOST_API_VERSION, parse_midi_pitch, read, read_with_root, resolve_application};
+    use super::{
+        HOST_API_VERSION, parse_midi_pitch, read, read_application_program_with_catalog,
+        read_with_root, resolve_application,
+    };
     use crate::compiler::{RenderDiagnostics, compile_at_rate};
     use crate::model::{MidiButtonEdge, MidiButtonMessage};
     use std::{fs, io::Cursor};
@@ -4428,6 +4625,79 @@ mod tests {
         .unwrap();
         let error = resolve_application(&root).unwrap_err();
         assert!(error.contains("future.feature"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn application_libraries_are_explicit_validated_and_loaded_before_entry() {
+        use sha2::{Digest, Sha256};
+
+        let root = std::env::temp_dir().join(format!(
+            "meldritch-library-catalog-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let application = root.join("application");
+        let libraries = root.join("libraries");
+        fs::create_dir_all(&application).unwrap();
+        fs::create_dir_all(&libraries).unwrap();
+        let library = "return { answer = 42 }";
+        fs::write(libraries.join("example.lua"), library).unwrap();
+        let digest = format!("{:x}", Sha256::digest(library.as_bytes()));
+        fs::write(
+            libraries.join("catalog.json"),
+            format!(
+                r#"{{"catalog_version":1,"libraries":[{{"id":"meldritch.example","version":"1.0.0","entry":"example.lua","lua_host_api":"1.0.0","sha256":"{digest}"}}]}}"#
+            ),
+        )
+        .unwrap();
+        fs::write(
+            application.join("main.lua"),
+            "assert(meldritch.example.answer == 42); return meldritch.graph()",
+        )
+        .unwrap();
+        fs::write(
+            application.join("application.json"),
+            r#"{"name":"fixture","version":"1.0.0","entry":"main.lua","lua_host_api":"1.0.0","capabilities":["graph.core"],"libraries":["meldritch.example"]}"#,
+        )
+        .unwrap();
+        let program = read_application_program_with_catalog(
+            &application,
+            Some(&libraries.join("catalog.json")),
+        )
+        .unwrap();
+        assert!(program.graph().modules.is_empty());
+
+        fs::write(
+            application.join("application.json"),
+            r#"{"name":"fixture","version":"1.0.0","entry":"main.lua","lua_host_api":"1.0.0","capabilities":["graph.core"],"libraries":["meldritch.missing"]}"#,
+        )
+        .unwrap();
+        let error = match read_application_program_with_catalog(
+            &application,
+            Some(&libraries.join("catalog.json")),
+        ) {
+            Ok(_) => panic!("missing library unexpectedly loaded"),
+            Err(error) => error,
+        };
+        assert!(error.contains("meldritch.missing"));
+        assert!(error.contains("not present"));
+
+        fs::write(
+            application.join("main.lua"),
+            "assert(meldritch.example == nil); return meldritch.graph()",
+        )
+        .unwrap();
+        fs::write(
+            application.join("application.json"),
+            r#"{"name":"fixture","version":"1.0.0","entry":"main.lua","lua_host_api":"1.0.0","capabilities":["graph.core"]}"#,
+        )
+        .unwrap();
+        let program = read_application_program_with_catalog(&application, None).unwrap();
+        assert!(program.graph().modules.is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 

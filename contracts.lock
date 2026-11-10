@@ -1,10 +1,10 @@
 {
   "repository": "meldritch-contracts",
-  "revision": "982abf14c3c05fac157dda7a30849a99d3ef42bd",
+  "revision": "a3d9323d30eb2847b5487d8c97e34531e1ccba03",
   "lua_host_api": "1.0.0",
   "web_protocol": "1.0.0",
   "artifacts": {
-    "meldritch-lua-contract-1.0.0.tar.gz": "36a50427fafc8e119d01d5b383b650759b2e1e81ce0bbf18594f42ceaf84e769",
+    "meldritch-lua-contract-1.0.0.tar.gz": "5e510ff81b5cb7500bdcdedbb63c1634e4bd8a4d0703457b81519d5cecdb73d2",
     "meldritch-web-contract-1.0.0.tar.gz": "05febf5f3ffe37c97c9641416652f7d83809fc68ac7a6d75ba3aa76c8cc7cb5b"
   }
 }

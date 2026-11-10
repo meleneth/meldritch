@@ -61,5 +61,10 @@ target/debug/meldritch2 /unrelated/path/to/application
 ```
 
 The directory's `application.json` is validated before its entry script runs.
+Applications declaring author libraries require
+`MELDRITCH_LUA_CATALOG=/absolute/path/to/libraries/catalog.json`. The engine
+validates requested library compatibility and digests before evaluating any
+application code; standalone files and library-free applications require no
+catalog. The engine contains no author-library fallback.
 `MELDRITCH_UI_DIST=/unrelated/path/to/meldritch-ui/dist` configures an
 independently built static bundle.
