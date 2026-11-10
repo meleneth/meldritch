@@ -11,7 +11,7 @@ use meldritch2::{
     model::Graph,
 };
 
-const CORE: &str = include_str!("../../../examples/overdrive/overdrive_core.lua");
+const CORE: &str = include_str!("fixtures/lua/authoring/overdrive/overdrive_core.lua");
 const RATE: f64 = 8_000.0;
 static FIXTURE_ID: AtomicUsize = AtomicUsize::new(0);
 

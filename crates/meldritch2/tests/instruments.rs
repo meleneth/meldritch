@@ -8,8 +8,8 @@ use meldritch2::{
     poly::{PolyNoteEvent, PolyNotePlan},
 };
 
-const SUBTRACTIVE: &str = include_str!("../../../examples/instruments/subtractive.lua");
-const DRONE: &str = include_str!("../../../examples/instruments/drone.lua");
+const SUBTRACTIVE: &str = include_str!("fixtures/lua/authoring/instruments/subtractive.lua");
+const DRONE: &str = include_str!("fixtures/lua/authoring/instruments/drone.lua");
 
 fn note_events(off_frame: u64) -> Vec<PolyNoteEvent> {
     let mut events = [60, 64, 67, 72]

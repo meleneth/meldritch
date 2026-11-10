@@ -6,7 +6,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-const CORE: &str = include_str!("../../../examples/groovebox/groovebox_core.lua");
+const CORE: &str = include_str!("fixtures/lua/authoring/groovebox/groovebox_core.lua");
 const SAMPLE_RATE: f64 = 8_000.0;
 // Foundation's kick is the intentionally longer 32-step polymetric row.
 const PATTERN_FRAMES: usize = 30_000;
@@ -47,7 +47,7 @@ fn fixture_source() -> (std::path::PathBuf, String) {
     fs::write(root.join("kit.json"),r#"{"Fixture_bd":"sample.wav","Fixture_sd":"sample.wav","Fixture_hh":"sample.wav","Fixture_oh":"sample.wav","Fixture_cp":"sample.wav","Fixture_lt":"sample.wav"}"#).unwrap();
     fs::write(
         root.join("patterns.lua"),
-        include_str!("../../../examples/groovebox/patterns.lua"),
+        include_str!("fixtures/lua/authoring/groovebox/patterns.lua"),
     )
     .unwrap();
     let source = CORE.replace(

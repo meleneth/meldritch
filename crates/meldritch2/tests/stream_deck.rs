@@ -12,7 +12,7 @@ use meldritch2::{
 
 fn example(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
+        .join("tests/fixtures/lua/authoring")
         .join(relative)
 }
 
@@ -62,7 +62,7 @@ fn runtime(
 
 #[test]
 fn playground_loads_pages_and_simulates_press_release_and_external_state() {
-    let graph = load("examples/experiments/01_stream_deck.lua");
+    let graph = load("experiments/01_stream_deck.lua");
     assert_eq!(graph.control_surfaces.len(), 1);
     assert_eq!(graph.control_surfaces[0].pages.len(), 2);
     let (machine, mut runtime) = runtime(&graph, 8_000.0);
@@ -127,7 +127,7 @@ fn playground_loads_pages_and_simulates_press_release_and_external_state() {
 
 #[test]
 fn delay_lab_surface_drives_real_controls_and_audio_without_hardware() {
-    let graph = load("examples/experiments/02_delay_feedback.lua");
+    let graph = load("experiments/02_delay_feedback.lua");
     assert!(matches!(
         graph.screens[0].widgets.last(),
         Some(meldritch2::model::Widget::ControlFocus)
@@ -286,7 +286,7 @@ fn delay_lab_surface_drives_real_controls_and_audio_without_hardware() {
 
 #[test]
 fn invalid_surface_targets_fail_at_the_normal_compile_boundary() {
-    let source = fs::read_to_string(example("examples/experiments/01_stream_deck.lua")).unwrap();
+    let source = fs::read_to_string(example("experiments/01_stream_deck.lua")).unwrap();
     let graph = lua::read(&source.replace("control=\"tone\"", "control=\"missing\"")).unwrap();
     assert!(
         compile_at_rate(&graph, 8_000.0)

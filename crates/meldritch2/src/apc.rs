@@ -1340,7 +1340,7 @@ mod tests {
     #[test]
     fn production_delay_lab_apc_grid_edits_its_authored_pattern() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/experiments/02_delay_feedback.lua");
+            .join("tests/fixtures/lua/authoring/experiments/02_delay_feedback.lua");
         let script = std::fs::read_to_string(&path).unwrap();
         let graph = crate::lua::read_with_root(&script, path.parent().unwrap()).unwrap();
         let performance = graph.performance.as_ref().unwrap();

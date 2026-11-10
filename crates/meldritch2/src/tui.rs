@@ -1672,7 +1672,8 @@ mod tests {
 
     #[test]
     fn focused_control_bank_has_aligned_borders_at_supported_widths() {
-        let graph = lua::read(include_str!("../examples/09-controls.lua")).unwrap();
+        let graph =
+            lua::read(include_str!("../tests/fixtures/lua/engine/09-controls.lua")).unwrap();
         let machine = compile(&graph).unwrap();
         let controls = machine
             .control_ids()
@@ -1701,7 +1702,7 @@ mod tests {
     #[test]
     fn focused_controls_show_their_active_apc_fader_number_inline() {
         let graph = lua::read(include_str!(
-            "../../../examples/experiments/02_delay_feedback.lua"
+            "../tests/fixtures/lua/authoring/experiments/02_delay_feedback.lua"
         ))
         .unwrap();
         let machine = compile(&graph).unwrap();
@@ -1764,7 +1765,8 @@ mod tests {
 
     #[test]
     fn tui_keys_select_pitch_and_space_releases_the_gate() {
-        let graph = lua::read(include_str!("../examples/53-tui-keys.lua")).unwrap();
+        let graph =
+            lua::read(include_str!("../tests/fixtures/lua/engine/53-tui-keys.lua")).unwrap();
         let mut machine = compile(&graph).unwrap();
         let (producer, mut consumer) = live_note_queue(&machine, 0);
         let router = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
@@ -1827,7 +1829,8 @@ mod tests {
 
     #[test]
     fn closing_tui_keyboard_releases_its_active_note() {
-        let graph = lua::read(include_str!("../examples/53-tui-keys.lua")).unwrap();
+        let graph =
+            lua::read(include_str!("../tests/fixtures/lua/engine/53-tui-keys.lua")).unwrap();
         let mut machine = compile(&graph).unwrap();
         let (producer, mut consumer) = live_note_queue(&machine, 0);
         let router = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();

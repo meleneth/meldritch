@@ -210,7 +210,10 @@ mod tests {
 
     #[test]
     fn steal_oldest_refreshes_repeated_key_and_ignores_stale_release() {
-        let graph = lua::read(include_str!("../examples/65-four-voice-steal-oldest.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/65-four-voice-steal-oldest.lua"
+        ))
+        .unwrap();
         let machine = compile_at_rate(&graph, 48_000.0).unwrap();
         let mut events = Vec::new();
         for (frame, key) in [(3, 60), (4, 64), (5, 67), (6, 72), (7, 60), (8, 76)] {

@@ -698,8 +698,8 @@ fn two_websockets_share_ordered_authoritative_state_and_change_audio_control() {
 
 #[test]
 fn lua_planes_project_by_role_and_edit_the_real_sequencer() {
-    let source =
-        include_str!("../examples/71-control-planes.lua").replace("port = 8080", "port = 0");
+    let source = include_str!("fixtures/lua/engine/71-control-planes.lua")
+        .replace("port = 8080", "port = 0");
     let mut program =
         lua::read_program_with_root(&source, std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
             .unwrap();
@@ -856,7 +856,8 @@ fn lua_planes_project_by_role_and_edit_the_real_sequencer() {
 
 #[test]
 fn note_planes_authorize_edits_project_envelopes_and_schedule_patterns() {
-    let source = include_str!("../examples/72-note-performance.lua").replace("port=8080", "port=0");
+    let source =
+        include_str!("fixtures/lua/engine/72-note-performance.lua").replace("port=8080", "port=0");
     let mut program =
         lua::read_program_with_root(&source, std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
             .unwrap();
@@ -1185,7 +1186,7 @@ fn playground_successor_reproduces_browser_and_apc_logical_notes() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let source_path = root.join("81-self-reproducing-playground.lua");
-    let original = include_str!("../examples/81-self-reproducing-playground.lua");
+    let original = include_str!("fixtures/lua/engine/81-self-reproducing-playground.lua");
     let source = original
         .replace(
             "crates/meldritch2/examples/81-self-reproducing-playground.lua",
@@ -1344,7 +1345,7 @@ fn playground_successor_reproduces_browser_and_apc_logical_notes() {
 
 #[test]
 fn drop_demo_is_browser_discovered_and_changes_the_real_audio_graph() {
-    let source = include_str!("../examples/70-network-performance.lua")
+    let source = include_str!("fixtures/lua/engine/70-network-performance.lua")
         .replace("port = 8080", "port = 0, ui_dist = \"tests/fixtures/ui\"");
     let mut program =
         lua::read_program_with_root(&source, std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
@@ -1422,14 +1423,14 @@ fn pressure_system_roles_resolve_to_public_controls_and_server_starts() {
         eprintln!("Pressure System plugins unavailable; skipping conditional server test");
         return;
     }
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let source = std::fs::read_to_string(root.join("examples/80-pressure-system-live.lua"))
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lua/engine");
+    let source = std::fs::read_to_string(root.join("80-pressure-system-live.lua"))
         .expect("read Pressure System")
         .replace(
             "host=os.getenv(\"PRESSURE_HOST\") or \"127.0.0.1\",port=tonumber(os.getenv(\"PRESSURE_PORT\") or \"8080\")",
             "host=\"127.0.0.1\",port=0",
         );
-    let mut program = lua::read_program_with_root(&source, root).expect("load Pressure System");
+    let mut program = lua::read_program_with_root(&source, &root).expect("load Pressure System");
     let machine = compile(program.graph()).expect("compile Pressure System");
     let controls = machine
         .control_ids()
@@ -1530,7 +1531,7 @@ fn pressure_system_roles_resolve_to_public_controls_and_server_starts() {
 
 #[test]
 fn instrument_playground_declares_its_websocket_and_credential() {
-    let source = include_str!("../examples/82-instrument-playground.lua");
+    let source = include_str!("fixtures/lua/engine/82-instrument-playground.lua");
     assert!(source.contains("server:websocket(\"/performance\",{})"));
     assert!(
         source.contains("os.getenv(\"MELDRITCH_PLAYGROUND_TOKEN\") or \"instrument-playground\"")
@@ -1539,7 +1540,7 @@ fn instrument_playground_declares_its_websocket_and_credential() {
 
 #[test]
 fn serum_playground_is_single_instance_direct_output() {
-    let source = include_str!("../examples/83-serum-playground.lua");
+    let source = include_str!("fixtures/lua/engine/83-serum-playground.lua");
     assert_eq!(source.matches("instrument:vst3 {").count(), 1);
     assert!(source.contains("instrument:connect(serum.out.left,instrument.output.left)"));
     assert!(source.contains("instrument:connect(serum.out.right,instrument.output.right)"));

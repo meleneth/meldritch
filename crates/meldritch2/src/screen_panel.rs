@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn lua_screens_switch_and_adjust_only_visible_control() {
-        let graph = lua::read(include_str!("../examples/66-screens.lua")).unwrap();
+        let graph = lua::read(include_str!("../tests/fixtures/lua/engine/66-screens.lua")).unwrap();
         let mut machine = compile(&graph).unwrap();
         let controls = machine
             .control_ids()
@@ -331,7 +331,10 @@ mod tests {
 
     #[test]
     fn lua_buttons_mute_and_restore_output() {
-        let graph = lua::read(include_str!("../examples/67-screen-buttons.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/67-screen-buttons.lua"
+        ))
+        .unwrap();
         let mut machine = compile(&graph).unwrap();
         let controls = machine
             .control_ids()

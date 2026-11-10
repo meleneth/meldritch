@@ -214,7 +214,7 @@ built from source and never committed as a binary:
 ```sh
 tools/build-vst3-fixture.sh
 cargo run -p meldritch2 -- render \
-  crates/meldritch2/examples/69-vst3-test-instrument.lua \
+  /path/to/meldritch-lua/examples/engine/69-vst3-test-instrument.lua \
   /tmp/meldritch-vst3-demo.wav 4 --workers=2
 cargo test -p meldritch2 --features vst3-integration-tests --test vst3_host
 ```
@@ -240,9 +240,9 @@ that bundle is present and otherwise leaves portable CI on the source-built
 fixture. The complete performance example is:
 
 ```sh
-cargo run -p meldritch2 -- perform crates/meldritch2/examples/73-serum-performance.lua
+cargo run -p meldritch2 -- perform /path/to/meldritch-lua/applications/serum-performance
 cargo run -p meldritch2 -- render \
-  crates/meldritch2/examples/73-serum-performance.lua \
+  /path/to/meldritch-lua/applications/serum-performance \
   /tmp/meldritch-serum-performance.wav 8
 ```
 
@@ -275,7 +275,7 @@ cargo run -p meldritch2 --bin meldritch-vst3-state -- subset \
 ```
 
 Repeat `subset` for lead and drone IDs listed in
-`examples/pressure-system-serum-capture.json`. The automation targets only the
+`/path/to/meldritch-lua/applications/pressure-system-live/pressure-system-serum-capture.json`. The automation targets only the
 active Serum XEmbed window, opens a fresh process per capture, and refuses
 Init/duplicate processor state. State files remain in user data and out of Git.
 The supplied coordinates target Serum 2.1.5 at its default editor scale; use
@@ -420,7 +420,7 @@ lose. Browser clients never submit filesystem paths.
 Run the performance and conditional real-plugin test with:
 
 ```sh
-cargo run -p meldritch2 -- perform crates/meldritch2/examples/75-pulse-performance.lua
+cargo run -p meldritch2 -- perform /path/to/meldritch-lua/applications/pulse-performance
 MELDRITCH_TEST_PULSE=1 cargo test -p meldritch2 --features vst3-integration-tests --test vst3_host installed_pulse
 ```
 

@@ -1,6 +1,6 @@
 # Pressure System Live
 
-`crates/meldritch2/examples/80-pressure-system-live.lua` is an eight-minute,
+`/path/to/meldritch-lua/applications/pressure-system-live` is an eight-minute,
 four-performer industrial electronic composition and an indefinitely playable
 instrument. The same Lua graph drives live playback, browser control, and the
 offline reference render.
@@ -35,7 +35,7 @@ this repository.
 
 ```sh
 PRESSURE_PORT=8080 cargo run -p meldritch2 -- perform \
-  crates/meldritch2/examples/80-pressure-system-live.lua
+  /path/to/meldritch-lua/applications/pressure-system-live
 ```
 
 Open `http://127.0.0.1:8080/`. The server binds only to loopback by default.
@@ -166,7 +166,7 @@ Render the complete arrangement plus a ten-second release tail:
 
 ```sh
 cargo run -p meldritch2 -- render \
-  crates/meldritch2/examples/80-pressure-system-live.lua \
+  /path/to/meldritch-lua/applications/pressure-system-live \
   /tmp/pressure-system-live.wav 490 --workers=4
 ```
 

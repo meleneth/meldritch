@@ -44,70 +44,97 @@ mod tests {
         },
     };
 
-    const BASIC: &str = include_str!("../examples/01-basic.lua");
-    const TWO: &str = include_str!("../examples/02-two-gains.lua");
-    const REORDERED: &str = include_str!("../examples/03-reordered.lua");
-    const CYCLE: &str = include_str!("../examples/04-cycle.lua");
-    const MIX: &str = include_str!("../examples/05-mix.lua");
-    const MIX_MISSING: &str = include_str!("../examples/06-mix-missing.lua");
-    const MIX_REORDERED: &str = include_str!("../examples/07-mix-reordered.lua");
-    const SINE: &str = include_str!("../examples/08-sine.lua");
-    const CONTROLS: &str = include_str!("../examples/09-controls.lua");
-    const MIDI: &str = include_str!("../examples/10-midi-control.lua");
-    const MULTIPLY: &str = include_str!("../examples/11-audio-multiply.lua");
-    const MULTIPLY_MISSING: &str = include_str!("../examples/12-audio-multiply-missing.lua");
-    const TWO_SINES_MULTIPLY: &str = include_str!("../examples/13-two-sines-multiply.lua");
-    const GAIN_FAN_IN: &str = include_str!("../examples/14-gain-fan-in.lua");
-    const OUTPUT_FAN_IN_INVALID: &str = include_str!("../examples/15-output-fan-in-invalid.lua");
-    const AFFINE: &str = include_str!("../examples/16-affine.lua");
-    const MODULATED_GAIN: &str = include_str!("../examples/17-gain-modulated.lua");
-    const MODULATED_GAIN_MISSING: &str = include_str!("../examples/18-gain-mod-missing-input.lua");
-    const AFFINE_CONTROLS: &str = include_str!("../examples/19-affine-controls.lua");
-    const SINE_FM: &str = include_str!("../examples/20-sine-fm.lua");
-    const SINE_FM_CYCLE: &str = include_str!("../examples/21-sine-fm-cycle.lua");
-    const SHARED_MODULATOR: &str = include_str!("../examples/22-shared-modulator.lua");
-    const LAG: &str = include_str!("../examples/23-lag.lua");
-    const LAG_INVALID: &str = include_str!("../examples/24-lag-invalid.lua");
-    const LAG_CONTROL_INVALID: &str = include_str!("../examples/25-lag-control-invalid.lua");
-    const SMOOTHED_CONTROL: &str = include_str!("../examples/26-smoothed-control.lua");
-    const SWITCH: &str = include_str!("../examples/27-switch.lua");
-    const SWITCH_MISSING: &str = include_str!("../examples/28-switch-missing.lua");
-    const SWITCH_CONTROL: &str = include_str!("../examples/29-switch-control.lua");
-    const MIRROR_OUTPUTS: &str = include_str!("../examples/30-mirror-outputs.lua");
-    const SAMPLE_HOLD: &str = include_str!("../examples/31-sample-hold.lua");
-    const SAMPLE_HOLD_MISSING: &str = include_str!("../examples/32-sample-hold-missing.lua");
-    const HELD_PEAK_SELECTOR: &str = include_str!("../examples/33-held-peak-selector.lua");
-    const GATED_ENVELOPE: &str = include_str!("../examples/34-gated-envelope.lua");
-    const ENVELOPE_MISSING_GATE: &str = include_str!("../examples/35-envelope-missing-gate.lua");
+    const BASIC: &str = include_str!("../tests/fixtures/lua/engine/01-basic.lua");
+    const TWO: &str = include_str!("../tests/fixtures/lua/engine/02-two-gains.lua");
+    const REORDERED: &str = include_str!("../tests/fixtures/lua/engine/03-reordered.lua");
+    const CYCLE: &str = include_str!("../tests/fixtures/lua/engine/04-cycle.lua");
+    const MIX: &str = include_str!("../tests/fixtures/lua/engine/05-mix.lua");
+    const MIX_MISSING: &str = include_str!("../tests/fixtures/lua/engine/06-mix-missing.lua");
+    const MIX_REORDERED: &str = include_str!("../tests/fixtures/lua/engine/07-mix-reordered.lua");
+    const SINE: &str = include_str!("../tests/fixtures/lua/engine/08-sine.lua");
+    const CONTROLS: &str = include_str!("../tests/fixtures/lua/engine/09-controls.lua");
+    const MIDI: &str = include_str!("../tests/fixtures/lua/engine/10-midi-control.lua");
+    const MULTIPLY: &str = include_str!("../tests/fixtures/lua/engine/11-audio-multiply.lua");
+    const MULTIPLY_MISSING: &str =
+        include_str!("../tests/fixtures/lua/engine/12-audio-multiply-missing.lua");
+    const TWO_SINES_MULTIPLY: &str =
+        include_str!("../tests/fixtures/lua/engine/13-two-sines-multiply.lua");
+    const GAIN_FAN_IN: &str = include_str!("../tests/fixtures/lua/engine/14-gain-fan-in.lua");
+    const OUTPUT_FAN_IN_INVALID: &str =
+        include_str!("../tests/fixtures/lua/engine/15-output-fan-in-invalid.lua");
+    const AFFINE: &str = include_str!("../tests/fixtures/lua/engine/16-affine.lua");
+    const MODULATED_GAIN: &str = include_str!("../tests/fixtures/lua/engine/17-gain-modulated.lua");
+    const MODULATED_GAIN_MISSING: &str =
+        include_str!("../tests/fixtures/lua/engine/18-gain-mod-missing-input.lua");
+    const AFFINE_CONTROLS: &str =
+        include_str!("../tests/fixtures/lua/engine/19-affine-controls.lua");
+    const SINE_FM: &str = include_str!("../tests/fixtures/lua/engine/20-sine-fm.lua");
+    const SINE_FM_CYCLE: &str = include_str!("../tests/fixtures/lua/engine/21-sine-fm-cycle.lua");
+    const SHARED_MODULATOR: &str =
+        include_str!("../tests/fixtures/lua/engine/22-shared-modulator.lua");
+    const LAG: &str = include_str!("../tests/fixtures/lua/engine/23-lag.lua");
+    const LAG_INVALID: &str = include_str!("../tests/fixtures/lua/engine/24-lag-invalid.lua");
+    const LAG_CONTROL_INVALID: &str =
+        include_str!("../tests/fixtures/lua/engine/25-lag-control-invalid.lua");
+    const SMOOTHED_CONTROL: &str =
+        include_str!("../tests/fixtures/lua/engine/26-smoothed-control.lua");
+    const SWITCH: &str = include_str!("../tests/fixtures/lua/engine/27-switch.lua");
+    const SWITCH_MISSING: &str = include_str!("../tests/fixtures/lua/engine/28-switch-missing.lua");
+    const SWITCH_CONTROL: &str = include_str!("../tests/fixtures/lua/engine/29-switch-control.lua");
+    const MIRROR_OUTPUTS: &str = include_str!("../tests/fixtures/lua/engine/30-mirror-outputs.lua");
+    const SAMPLE_HOLD: &str = include_str!("../tests/fixtures/lua/engine/31-sample-hold.lua");
+    const SAMPLE_HOLD_MISSING: &str =
+        include_str!("../tests/fixtures/lua/engine/32-sample-hold-missing.lua");
+    const HELD_PEAK_SELECTOR: &str =
+        include_str!("../tests/fixtures/lua/engine/33-held-peak-selector.lua");
+    const GATED_ENVELOPE: &str = include_str!("../tests/fixtures/lua/engine/34-gated-envelope.lua");
+    const ENVELOPE_MISSING_GATE: &str =
+        include_str!("../tests/fixtures/lua/engine/35-envelope-missing-gate.lua");
     const ENVELOPE_INVALID_ATTACK: &str =
-        include_str!("../examples/36-envelope-invalid-attack.lua");
-    const GATED_SINE_VOICE: &str = include_str!("../examples/37-gated-sine-voice.lua");
-    const MIDI_NOTE_VOICE: &str = include_str!("../examples/38-midi-note-voice.lua");
+        include_str!("../tests/fixtures/lua/engine/36-envelope-invalid-attack.lua");
+    const GATED_SINE_VOICE: &str =
+        include_str!("../tests/fixtures/lua/engine/37-gated-sine-voice.lua");
+    const MIDI_NOTE_VOICE: &str =
+        include_str!("../tests/fixtures/lua/engine/38-midi-note-voice.lua");
     const MIDI_NOTE_MISSING_CONTROL: &str =
-        include_str!("../examples/39-midi-note-missing-control.lua");
-    const MIDI_NOTE_NARROW_PITCH: &str = include_str!("../examples/40-midi-note-narrow-pitch.lua");
-    const CABLED_MIDI_NOTE_PAIR: &str = include_str!("../examples/41-cabled-midi-note-pair.lua");
+        include_str!("../tests/fixtures/lua/engine/39-midi-note-missing-control.lua");
+    const MIDI_NOTE_NARROW_PITCH: &str =
+        include_str!("../tests/fixtures/lua/engine/40-midi-note-narrow-pitch.lua");
+    const CABLED_MIDI_NOTE_PAIR: &str =
+        include_str!("../tests/fixtures/lua/engine/41-cabled-midi-note-pair.lua");
     const MIDI_NOTE_SHARED_TARGET: &str =
-        include_str!("../examples/42-midi-note-shared-target.lua");
-    const TIMED_NOTE_VOICE: &str = include_str!("../examples/43-timed-note-voice.lua");
-    const TIMED_NOTE_NO_BINDING: &str = include_str!("../examples/44-timed-note-no-binding.lua");
-    const MIDI_TIME_ANCHOR: &str = include_str!("../examples/45-midi-time-anchor.lua");
-    const LIVE_NOTE_QUEUE: &str = include_str!("../examples/46-live-note-queue.lua");
-    const NORMALIZED_MODULATION: &str = include_str!("../examples/54-normalized-modulation.lua");
-    const TWO_SUBPATCH_VOICES: &str = include_str!("../examples/55-two-subpatch-voices.lua");
+        include_str!("../tests/fixtures/lua/engine/42-midi-note-shared-target.lua");
+    const TIMED_NOTE_VOICE: &str =
+        include_str!("../tests/fixtures/lua/engine/43-timed-note-voice.lua");
+    const TIMED_NOTE_NO_BINDING: &str =
+        include_str!("../tests/fixtures/lua/engine/44-timed-note-no-binding.lua");
+    const MIDI_TIME_ANCHOR: &str =
+        include_str!("../tests/fixtures/lua/engine/45-midi-time-anchor.lua");
+    const LIVE_NOTE_QUEUE: &str =
+        include_str!("../tests/fixtures/lua/engine/46-live-note-queue.lua");
+    const NORMALIZED_MODULATION: &str =
+        include_str!("../tests/fixtures/lua/engine/54-normalized-modulation.lua");
+    const TWO_SUBPATCH_VOICES: &str =
+        include_str!("../tests/fixtures/lua/engine/55-two-subpatch-voices.lua");
     const SUBPATCH_INVALID_ENDPOINT: &str =
-        include_str!("../examples/56-subpatch-invalid-endpoint.lua");
-    const NESTED_SUBPATCH: &str = include_str!("../examples/57-nested-subpatch.lua");
-    const SUBPATCH_PARAMETERS: &str = include_str!("../examples/58-subpatch-parameters.lua");
+        include_str!("../tests/fixtures/lua/engine/56-subpatch-invalid-endpoint.lua");
+    const NESTED_SUBPATCH: &str =
+        include_str!("../tests/fixtures/lua/engine/57-nested-subpatch.lua");
+    const SUBPATCH_PARAMETERS: &str =
+        include_str!("../tests/fixtures/lua/engine/58-subpatch-parameters.lua");
     const SUBPATCH_INSTANCE_VALUES: &str =
-        include_str!("../examples/59-subpatch-instance-values.lua");
+        include_str!("../tests/fixtures/lua/engine/59-subpatch-instance-values.lua");
     const TWO_MIDI_SUBPATCH_VOICES: &str =
-        include_str!("../examples/60-two-midi-subpatch-voices.lua");
-    const PREPARED_VELOCITY: &str = include_str!("../examples/61-prepared-velocity.lua");
-    const SUBPATCH_INPUT_FANOUT: &str = include_str!("../examples/62-subpatch-input-fanout.lua");
-    const TWO_VOICE_POLY: &str = include_str!("../examples/63-two-voice-poly.lua");
-    const FOUR_VOICE_POLY: &str = include_str!("../examples/64-four-voice-poly.lua");
-    const FOUR_VOICE_STEAL: &str = include_str!("../examples/65-four-voice-steal-oldest.lua");
+        include_str!("../tests/fixtures/lua/engine/60-two-midi-subpatch-voices.lua");
+    const PREPARED_VELOCITY: &str =
+        include_str!("../tests/fixtures/lua/engine/61-prepared-velocity.lua");
+    const SUBPATCH_INPUT_FANOUT: &str =
+        include_str!("../tests/fixtures/lua/engine/62-subpatch-input-fanout.lua");
+    const TWO_VOICE_POLY: &str = include_str!("../tests/fixtures/lua/engine/63-two-voice-poly.lua");
+    const FOUR_VOICE_POLY: &str =
+        include_str!("../tests/fixtures/lua/engine/64-four-voice-poly.lua");
+    const FOUR_VOICE_STEAL: &str =
+        include_str!("../tests/fixtures/lua/engine/65-four-voice-steal-oldest.lua");
 
     fn render(script: &str) -> (Vec<String>, [f64; 8]) {
         let graph = lua::read(script).unwrap();
@@ -1361,7 +1388,7 @@ return graph
     fn invalid_screens_preserve_accepted_machine() {
         use crate::model::Widget;
 
-        let graph = lua::read(include_str!("../examples/66-screens.lua")).unwrap();
+        let graph = lua::read(include_str!("../tests/fixtures/lua/engine/66-screens.lua")).unwrap();
         let mut host = Host::default();
         host.submit(&graph).unwrap();
         let mut unknown_control = graph.clone();
@@ -1396,7 +1423,10 @@ return graph
     fn invalid_screen_button_preserves_accepted_machine() {
         use crate::model::Widget;
 
-        let graph = lua::read(include_str!("../examples/67-screen-buttons.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/67-screen-buttons.lua"
+        ))
+        .unwrap();
         let mut host = Host::default();
         host.submit(&graph).unwrap();
         for (control_id, value, expected) in [
@@ -2843,7 +2873,10 @@ return graph
 
     #[test]
     fn immediate_midi_velocity_shares_note_snapshot_and_held_fallback() {
-        let graph = lua::read(include_str!("../examples/50-midi-velocity.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/50-midi-velocity.lua"
+        ))
+        .unwrap();
         let mut machine = compile(&graph).unwrap();
         let router = MidiRouter::from_machine(&machine);
         let state = machine.midi_note_state(1).unwrap();
@@ -3452,7 +3485,10 @@ return graph
 
     #[test]
     fn timed_midi_overflow_keeps_held_priority_and_clock_retryable() {
-        let graph = lua::read(include_str!("../examples/47-device-timed-midi.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/47-device-timed-midi.lua"
+        ))
+        .unwrap();
         let mut machine = compile(&graph).unwrap();
         let (producer, mut consumer) = live_note_queue(&machine, 0);
         let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
@@ -3493,7 +3529,10 @@ return graph
 
     #[test]
     fn device_midi_overflow_releases_gate_and_allows_fresh_note() {
-        let graph = lua::read(include_str!("../examples/52-midi-overflow-release.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/52-midi-overflow-release.lua"
+        ))
+        .unwrap();
         let mut machine = compile(&graph).unwrap();
         let (producer, mut consumer) = live_note_queue(&machine, 0);
         let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
@@ -3534,7 +3573,10 @@ return graph
 
     #[test]
     fn device_overflow_recovery_keeps_other_channels_pending_notes() {
-        let graph = lua::read(include_str!("../examples/49-channel-reset.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/49-channel-reset.lua"
+        ))
+        .unwrap();
         let mut machine = compile(&graph).unwrap();
         let (producer, mut consumer) = live_note_queue(&machine, 0);
         let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
@@ -3589,8 +3631,14 @@ return graph
 
     #[test]
     fn invalid_velocity_bindings_and_values_preserve_accepted_voice() {
-        let valid = lua::read(include_str!("../examples/50-midi-velocity.lua")).unwrap();
-        let invalid = lua::read(include_str!("../examples/51-midi-velocity-invalid.lua")).unwrap();
+        let valid = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/50-midi-velocity.lua"
+        ))
+        .unwrap();
+        let invalid = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/51-midi-velocity-invalid.lua"
+        ))
+        .unwrap();
         let mut host = Host::default();
         host.submit(&valid).unwrap();
         assert!(
@@ -3641,7 +3689,10 @@ return graph
 
     #[test]
     fn all_notes_off_releases_active_gate_and_discards_full_future_queue() {
-        let graph = lua::read(include_str!("../examples/48-midi-reset.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/48-midi-reset.lua"
+        ))
+        .unwrap();
         let mut machine = compile(&graph).unwrap();
         let (producer, mut consumer) = live_note_queue(&machine, 0);
         let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
@@ -3695,7 +3746,10 @@ return graph
 
     #[test]
     fn channel_reset_preserves_other_voice_and_its_future_event() {
-        let graph = lua::read(include_str!("../examples/49-channel-reset.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/49-channel-reset.lua"
+        ))
+        .unwrap();
         let mut machine = compile(&graph).unwrap();
         let (producer, mut consumer) = live_note_queue(&machine, 0);
         let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
@@ -3752,7 +3806,10 @@ return graph
 
     #[test]
     fn channel_reset_can_schedule_before_another_channels_deferred_event() {
-        let graph = lua::read(include_str!("../examples/49-channel-reset.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/49-channel-reset.lua"
+        ))
+        .unwrap();
         let mut machine = compile(&graph).unwrap();
         let (mut producer, mut consumer) = live_note_queue(&machine, 0);
         let state = |frame, channel, pitch_hz, gate| TimedNoteState {
@@ -3803,7 +3860,10 @@ return graph
 
     #[test]
     fn deferred_future_events_still_use_queue_capacity() {
-        let graph = lua::read(include_str!("../examples/49-channel-reset.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/49-channel-reset.lua"
+        ))
+        .unwrap();
         let mut machine = compile(&graph).unwrap();
         let (mut producer, mut consumer) = live_note_queue(&machine, 0);
         let state = TimedNoteState {
@@ -3836,7 +3896,10 @@ return graph
 
     #[test]
     fn reset_discards_a_deferred_event_after_many_other_channel_events() {
-        let graph = lua::read(include_str!("../examples/49-channel-reset.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/49-channel-reset.lua"
+        ))
+        .unwrap();
         let mut machine = compile(&graph).unwrap();
         let (mut producer, mut consumer) = live_note_queue(&machine, 0);
         producer
@@ -4142,7 +4205,10 @@ return graph
 
     #[test]
     fn lua_midi_button_hooks_invoke_authored_actions_and_consume_edges() {
-        let graph = lua::read(include_str!("../examples/68-midi-buttons.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/68-midi-buttons.lua"
+        ))
+        .unwrap();
         let sequence = graph.actions[0].sequencer.clone();
         let mut machine = compile(&graph).unwrap();
         let router = MidiRouter::from_machine(&machine);

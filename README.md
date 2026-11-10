@@ -158,7 +158,7 @@ Its terminal interface starts on the Lua-authored Performance screen. Press
 F2 for the live 909 pattern grid and F1 to return; playback and pattern state
 continue unchanged while either screen is visible. Screen registration,
 wildcard transitions, and key bindings live beside the instrument in
-`examples/instruments/tr909.lua`. A third screen is added with
+`/path/to/meldritch-lua/examples/authoring/instruments/tr909.lua`. A third screen is added with
 `drums:screen(...)`, another navigation event targeting its ID, and a key bound
 to that event; Rust does not need a new screen variant or navigation branch.
 
@@ -226,7 +226,7 @@ instrument:on_midi_button({
 end)
 ```
 
-See `crates/meldritch2/examples/68-midi-buttons.lua` for all three supported
+See `/path/to/meldritch-lua/examples/engine/68-midi-buttons.lua` for all three supported
 message forms. A matching Note binding is consumed before note allocation, so
 a pad used as an action does not also play a voice. This covers every control
 on a MicroLab or MPK mini that actually emits one of those MIDI messages,

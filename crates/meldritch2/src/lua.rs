@@ -4500,7 +4500,7 @@ mod tests {
 
     #[test]
     fn instrument_finalization_keeps_device_preferences() {
-        let source = include_str!("../../../examples/instruments/subtractive.lua");
+        let source = include_str!("../tests/fixtures/lua/authoring/instruments/subtractive.lua");
         let graph = read(source).unwrap();
         assert_eq!(graph.devices.audio_output, None);
         assert_eq!(
@@ -4511,7 +4511,10 @@ mod tests {
 
     #[test]
     fn instrument_authors_note_cc_and_program_button_hooks() {
-        let graph = read(include_str!("../examples/68-midi-buttons.lua")).unwrap();
+        let graph = read(include_str!(
+            "../tests/fixtures/lua/engine/68-midi-buttons.lua"
+        ))
+        .unwrap();
         assert_eq!(graph.actions.len(), 4);
         assert_eq!(graph.midi_buttons.len(), 3);
         assert_eq!(graph.midi_packets.len(), 1);
@@ -4565,7 +4568,7 @@ mod tests {
         }"#,
         )
         .unwrap();
-        let source = include_str!("../../../examples/instruments/tr909.lua").replace(
+        let source = include_str!("../tests/fixtures/lua/authoring/instruments/tr909.lua").replace(
             "source = \"strudel\",",
             "source = \"local\", manifest = \"strudel.json\",",
         );
@@ -4645,11 +4648,13 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let source = include_str!("../../../examples/experiments/03_ghosts_in_the_machinery.lua")
-            .replace(
-                "source=\"strudel\",bank=\"RolandTR909\",cache=true",
-                "source=\"local\",manifest=\"strudel.json\",bank=\"RolandTR909\",cache=true",
-            );
+        let source = include_str!(
+            "../tests/fixtures/lua/authoring/experiments/03_ghosts_in_the_machinery.lua"
+        )
+        .replace(
+            "source=\"strudel\",bank=\"RolandTR909\",cache=true",
+            "source=\"local\",manifest=\"strudel.json\",bank=\"RolandTR909\",cache=true",
+        );
         let graph = read_with_root(&source, &root).unwrap();
         assert_eq!(graph.automations.len(), 4);
         let apc = graph.performance.as_ref().unwrap().apc.as_ref().unwrap();
@@ -4743,7 +4748,7 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let source = include_str!("../../../examples/experiments/04_pressure_system.lua")
+        let source = include_str!("../tests/fixtures/lua/authoring/experiments/04_pressure_system.lua")
             .replace(
                 r#"local avl=meldritch.samples {source="remote",bank="AVL",cache=true,
   manifest="samples/pressure-system-avl.json",
@@ -4872,7 +4877,7 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let source = include_str!("../../../examples/experiments/05_the_weight_of_moving.lua")
+        let source = include_str!("../tests/fixtures/lua/authoring/experiments/05_the_weight_of_moving.lua")
             .replace(
                 r#"local avl=meldritch.samples {source="remote",bank="Weight",cache=true,
   manifest="samples/weight-avl.json",
@@ -4975,13 +4980,14 @@ mod tests {
 
     #[test]
     fn shape_of_standing_still_evolves_continuously_and_finishes_cleanly() {
-        let source =
-            include_str!("../../../examples/experiments/06_the_shape_of_standing_still.lua")
-                // The physical percussion models require a normal audio rate; low-rate
-                // composition verification substitutes engines covered independently.
-                .replace(r#"model="bass_drum""#, r#"model="fm""#)
-                .replace(r#"model="hihat""#, r#"model="waveshaping""#)
-                .replace("frequency=1174.66", "frequency=174.66");
+        let source = include_str!(
+            "../tests/fixtures/lua/authoring/experiments/06_the_shape_of_standing_still.lua"
+        )
+        // The physical percussion models require a normal audio rate; low-rate
+        // composition verification substitutes engines covered independently.
+        .replace(r#"model="bass_drum""#, r#"model="fm""#)
+        .replace(r#"model="hihat""#, r#"model="waveshaping""#)
+        .replace("frequency=1174.66", "frequency=174.66");
         let graph = read(&source).unwrap();
         assert_eq!(graph.automations.len(), 12);
         let apc = graph.performance.as_ref().unwrap().apc.as_ref().unwrap();

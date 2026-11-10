@@ -112,8 +112,8 @@ mod tests {
 
     #[test]
     fn busy_handoff_skips_without_waiting_or_losing_candidate() {
-        let basic = lua::read(include_str!("../examples/01-basic.lua")).unwrap();
-        let mix = lua::read(include_str!("../examples/05-mix.lua")).unwrap();
+        let basic = lua::read(include_str!("../tests/fixtures/lua/engine/01-basic.lua")).unwrap();
+        let mix = lua::read(include_str!("../tests/fixtures/lua/engine/05-mix.lua")).unwrap();
         let (mut runtime, control) = LiveRuntime::new(compile(&basic).unwrap());
         control.submit(&mix).unwrap();
         let held = control.handoff.lock().unwrap();
@@ -127,8 +127,8 @@ mod tests {
 
     #[test]
     fn chunked_callback_keeps_one_revision_and_parameter_snapshot() {
-        let basic = lua::read(include_str!("../examples/01-basic.lua")).unwrap();
-        let mix = lua::read(include_str!("../examples/05-mix.lua")).unwrap();
+        let basic = lua::read(include_str!("../tests/fixtures/lua/engine/01-basic.lua")).unwrap();
+        let mix = lua::read(include_str!("../tests/fixtures/lua/engine/05-mix.lua")).unwrap();
         let (mut runtime, control) = LiveRuntime::new(compile(&basic).unwrap());
         let gain = runtime
             .current()

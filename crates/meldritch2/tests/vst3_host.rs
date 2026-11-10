@@ -542,8 +542,8 @@ fn pressure_system_hosts_isolated_instruments_and_lsp_master_chain() {
         eprintln!("Pressure System plugins are unavailable; skipping conditional integration test");
         return;
     }
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let script = std::fs::read_to_string(root.join("examples/80-pressure-system-live.lua"))
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lua/engine");
+    let script = std::fs::read_to_string(root.join("80-pressure-system-live.lua"))
         .expect("read Pressure System composition")
         .replace(
             "local lead = instrument:vst3",
@@ -702,9 +702,9 @@ fn instrument_playground_hosts_independent_pulse_banks_and_all_six_roles_render(
         eprintln!("Instrument Playground plugins/catalog unavailable; skipping conditional test");
         return;
     }
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lua/engine");
     let graph = lua::read_with_root(
-        &std::fs::read_to_string(root.join("examples/82-instrument-playground.lua")).unwrap(),
+        &std::fs::read_to_string(root.join("82-instrument-playground.lua")).unwrap(),
         &root,
     )
     .expect("load Instrument Playground");

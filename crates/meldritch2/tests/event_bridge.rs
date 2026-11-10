@@ -2,11 +2,12 @@ use std::{fs, path::Path};
 
 use meldritch2::{compiler::compile_at_rate, event_bridge::EventDiagnostics, lua, model::Widget};
 
-const EXAMPLE: &str = include_str!("../../../examples/instruments/event_plaits.lua");
+const EXAMPLE: &str = include_str!("fixtures/lua/authoring/instruments/event_plaits.lua");
 
 #[test]
 fn independent_plaits_example_uses_the_same_mounted_and_persistent_event_bridge() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/instruments");
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lua/authoring/instruments");
     let mut program = lua::read_program_with_root(EXAMPLE, &root).unwrap();
     let mut machine = compile_at_rate(program.graph(), 16.0).unwrap();
     let source = machine.sequencer_controls()[0].event_source().clone();
@@ -64,7 +65,8 @@ fn invalid_event_registration_fails_during_real_lua_authoring() {
 
 #[test]
 fn ordinary_graph_loading_drops_authored_observers_and_restores_zero_interest() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/instruments");
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lua/authoring/instruments");
     let graph = lua::read_with_root(EXAMPLE, &root).unwrap();
     let mut unsubscribed = compile_at_rate(&graph, 16.0).unwrap();
     let source = unsubscribed.sequencer_controls()[0].event_source().clone();

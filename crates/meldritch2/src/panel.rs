@@ -231,7 +231,8 @@ mod tests {
 
     #[test]
     fn gestures_follow_instrument_control_bindings() {
-        let graph = lua::read(include_str!("../examples/09-controls.lua")).unwrap();
+        let graph =
+            lua::read(include_str!("../tests/fixtures/lua/engine/09-controls.lua")).unwrap();
         let mut machine = compile(&graph).unwrap();
         let controls = machine
             .control_ids()
@@ -268,7 +269,10 @@ mod tests {
 
     #[test]
     fn external_publication_updates_display_and_next_gesture() {
-        let graph = lua::read(include_str!("../examples/10-midi-control.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/10-midi-control.lua"
+        ))
+        .unwrap();
         let machine = compile(&graph).unwrap();
         let handle = machine.control_handle("level").unwrap();
         let authored = machine.effective_value(handle.target()).unwrap();
@@ -283,7 +287,10 @@ mod tests {
 
     #[test]
     fn physical_control_must_pick_up_current_value_before_publishing() {
-        let graph = lua::read(include_str!("../examples/10-midi-control.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/10-midi-control.lua"
+        ))
+        .unwrap();
         let machine = compile(&graph).unwrap();
         let handle = machine.control_handle("level").unwrap();
         let authored = machine.effective_value(handle.target()).unwrap();

@@ -5,13 +5,14 @@ use meldritch2::{
 };
 use std::{fs, io::Cursor};
 
-const OSCILLATOR_LAB: &str = include_str!("../../../examples/instruments/oscillator_lab.lua");
-const FILTERED_NOISE: &str = include_str!("../../../examples/instruments/filtered_noise.lua");
-const DIRTY: &str = include_str!("../../../examples/instruments/dirty_subtractive.lua");
-const DELAYED: &str = include_str!("../../../examples/instruments/delayed_sequence.lua");
-const PLAITS_HARMONIC: &str = include_str!("../../../examples/instruments/plaits_harmonic.lua");
-const PLAITS_MODAL: &str = include_str!("../../../examples/instruments/plaits_modal.lua");
-const SIDECHAIN: &str = include_str!("../../../examples/instruments/rhythmic_sidechain.lua");
+const OSCILLATOR_LAB: &str = include_str!("fixtures/lua/authoring/instruments/oscillator_lab.lua");
+const FILTERED_NOISE: &str = include_str!("fixtures/lua/authoring/instruments/filtered_noise.lua");
+const DIRTY: &str = include_str!("fixtures/lua/authoring/instruments/dirty_subtractive.lua");
+const DELAYED: &str = include_str!("fixtures/lua/authoring/instruments/delayed_sequence.lua");
+const PLAITS_HARMONIC: &str =
+    include_str!("fixtures/lua/authoring/instruments/plaits_harmonic.lua");
+const PLAITS_MODAL: &str = include_str!("fixtures/lua/authoring/instruments/plaits_modal.lua");
+const SIDECHAIN: &str = include_str!("fixtures/lua/authoring/instruments/rhythmic_sidechain.lua");
 
 fn energy(samples: &[f64]) -> f64 {
     samples.iter().map(|x| x * x).sum::<f64>() / samples.len() as f64

@@ -716,7 +716,7 @@ mod tests {
 
     #[test]
     fn mono_values_fill_all_channels_across_chunks() {
-        let graph = lua::read(include_str!("../examples/01-basic.lua")).unwrap();
+        let graph = lua::read(include_str!("../tests/fixtures/lua/engine/01-basic.lua")).unwrap();
         let (mut runtime, _) = LiveRuntime::new(compile(&graph).unwrap());
         let mut scratch = [0.0; CHUNK_FRAMES];
         let mut right = [0.0; CHUNK_FRAMES];
@@ -727,7 +727,7 @@ mod tests {
 
     #[test]
     fn integer_conversion_and_sine_phase_cross_chunk_boundary() {
-        let graph = lua::read(include_str!("../examples/08-sine.lua")).unwrap();
+        let graph = lua::read(include_str!("../tests/fixtures/lua/engine/08-sine.lua")).unwrap();
         let (mut runtime, _) = LiveRuntime::new(compile(&graph).unwrap());
         let mut scratch = [0.0; CHUNK_FRAMES];
         let mut right = [0.0; CHUNK_FRAMES];
@@ -741,7 +741,10 @@ mod tests {
 
     #[test]
     fn timestamped_midi_renders_through_real_chunked_output_boundary() {
-        let graph = lua::read(include_str!("../examples/47-device-timed-midi.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/47-device-timed-midi.lua"
+        ))
+        .unwrap();
         let machine = compile(&graph).unwrap();
         let (producer, mut consumer) = live_note_queue(&machine, 0);
         let mut midi = TimedMidiRouter::new(&machine, producer, 48_000, 3).unwrap();
@@ -839,11 +842,15 @@ mod tests {
 
     #[test]
     fn graph_replacement_disables_old_timed_queue_without_callback_drop() {
-        let graph = lua::read(include_str!("../examples/47-device-timed-midi.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/47-device-timed-midi.lua"
+        ))
+        .unwrap();
         let machine = compile(&graph).unwrap();
         let (_, mut consumer) = live_note_queue(&machine, 0);
         let (mut runtime, control) = LiveRuntime::new(machine);
-        let replacement = lua::read(include_str!("../examples/01-basic.lua")).unwrap();
+        let replacement =
+            lua::read(include_str!("../tests/fixtures/lua/engine/01-basic.lua")).unwrap();
         control.submit(&replacement).unwrap();
         let mut active = true;
         let mut scratch = [0.0; CHUNK_FRAMES];
@@ -866,7 +873,10 @@ mod tests {
 
     #[test]
     fn timed_midi_velocity_routes_through_explicit_graph_modulation() {
-        let graph = lua::read(include_str!("../examples/50-midi-velocity.lua")).unwrap();
+        let graph = lua::read(include_str!(
+            "../tests/fixtures/lua/engine/50-midi-velocity.lua"
+        ))
+        .unwrap();
         let messages = [
             (0, [0x90, 69, 64]),
             (42, [0x90, 69, 32]),
@@ -950,8 +960,8 @@ mod tests {
     #[test]
     fn playable_note_edges_do_not_jump_at_gate_changes() {
         for script in [
-            include_str!("../examples/50-midi-velocity.lua"),
-            include_str!("../examples/53-tui-keys.lua"),
+            include_str!("../tests/fixtures/lua/engine/50-midi-velocity.lua"),
+            include_str!("../tests/fixtures/lua/engine/53-tui-keys.lua"),
         ] {
             let graph = lua::read(script).unwrap();
             let mut machine = compile(&graph).unwrap();

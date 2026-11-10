@@ -11,7 +11,7 @@ use meldritch2::{
 
 fn example(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
+        .join("tests/fixtures/lua/authoring")
         .join(relative)
 }
 
@@ -45,7 +45,7 @@ fn render_offline(graph: &Graph, rate: f64, seconds: f64, workers: usize) -> (Ve
 
 #[test]
 fn arpeggiator_playground_is_polymetric_and_reproducible() {
-    let first = load("examples/arpeggiator/arpeggiator.lua");
+    let first = load("arpeggiator/arpeggiator.lua");
     let sequence = &first.performance.as_ref().unwrap().sequencer;
     assert_eq!(sequence.track_names(), ["Crystal", "Undertow", "Firefly"]);
     assert_eq!(
@@ -58,13 +58,13 @@ fn arpeggiator_playground_is_polymetric_and_reproducible() {
             [15, 20, 28]
         );
     }
-    let second = load("examples/arpeggiator/arpeggiator.lua");
+    let second = load("arpeggiator/arpeggiator.lua");
     assert_eq!(render(&first, 2_000.0, 8.0), render(&second, 2_000.0, 8.0));
 }
 
 #[test]
 fn delay_laboratory_uses_stereo_tempo_routing_and_produces_distinct_channels() {
-    let graph = load("examples/delay_lab/delay_lab.lua");
+    let graph = load("delay_lab/delay_lab.lua");
     let sequence = &graph.performance.as_ref().unwrap().sequencer;
     assert_eq!(sequence.track_names(), ["Pulse", "Chime"]);
     for index in 0..4 {
@@ -95,9 +95,9 @@ fn delay_laboratory_uses_stereo_tempo_routing_and_produces_distinct_channels() {
 
 #[test]
 fn block_serial_and_parallel_preserve_stateful_delay_output() {
-    let scalar_graph = load("examples/delay_lab/delay_lab.lua");
-    let serial_graph = load("examples/delay_lab/delay_lab.lua");
-    let parallel_graph = load("examples/delay_lab/delay_lab.lua");
+    let scalar_graph = load("delay_lab/delay_lab.lua");
+    let serial_graph = load("delay_lab/delay_lab.lua");
+    let parallel_graph = load("delay_lab/delay_lab.lua");
     let scalar = render(&scalar_graph, 4_000.0, 8.0);
     let serial = render_offline(&serial_graph, 4_000.0, 8.0, 1);
     let parallel = render_offline(&parallel_graph, 4_000.0, 8.0, 4);
@@ -137,6 +137,6 @@ fn write_acceptance_wav(relative: &str, name: &str) {
 
 #[test]
 fn both_compositions_render_finite_stereo_wavs_longer_than_two_minutes() {
-    write_acceptance_wav("examples/arpeggiator/arpeggiator.lua", "arp");
-    write_acceptance_wav("examples/delay_lab/delay_lab.lua", "delay-lab");
+    write_acceptance_wav("arpeggiator/arpeggiator.lua", "arp");
+    write_acceptance_wav("delay_lab/delay_lab.lua", "delay-lab");
 }

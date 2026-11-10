@@ -71,7 +71,7 @@ Run the included demo and open the printed URL in two browsers:
 
 ```sh
 cargo run -p meldritch2 -- perform \
-  crates/meldritch2/examples/70-network-performance.lua
+  /path/to/meldritch-lua/applications/network-performance
 ```
 
 Both browsers discover the composition controls. Pressing **DROP** toggles the
@@ -427,7 +427,7 @@ browser authenticates that link directly, with no separate login form. Opening
 the bare playground URL lists every composition-issued musician link on the
 guest screen.
 
-Run `examples/74-geonkick-performance.lua` with `meldritch2 perform`, open
+Run `/path/to/meldritch-lua/applications/geonkick-performance` with `meldritch2 perform`, open
 `http://127.0.0.1:8080`, and use `drummer-demo-token`, `serum-demo-token`,
 `leader-demo-token`, or `observer-demo-token`. `GEONKICK_VST3` and
 `GEONKICK_KIT` override the user-local installation paths. Drummer and Serum
@@ -442,7 +442,7 @@ and `observer` receives read-only projections. Serum 2 is used when available,
 with an explicit native Plaits fallback when it is absent:
 
 ```sh
-cargo run -p meldritch2 -- perform crates/meldritch2/examples/75-pulse-performance.lua
+cargo run -p meldritch2 -- perform /path/to/meldritch-lua/applications/pulse-performance
 ```
 
 Open `http://127.0.0.1:8080` and use `drummer-demo-token`,
@@ -459,18 +459,20 @@ instance.
 
 ## Vue and Pinia workflow
 
-The frontend source is isolated in `crates/meldritch2/frontend`. For local UI
-development, start the composition on port 8080 and run:
+The frontend is independently maintained in `meldritch-ui`. For local UI
+development, start the composition on port 8080 and run from that checkout:
 
 ```sh
-cd crates/meldritch2/frontend
-npm install
+cd /path/to/meldritch-ui
+npm ci
 npm run dev
 ```
 
-Vite proxies `/api` and `/performance`. Production does not require Node: run
-`npm run build` to generate `crates/meldritch2/web/dist`, which Rust embeds with
-`include_str!`. Run `npm test` for the lightweight native-Vue Vitest suite and
+Vite proxies `/api` and `/performance`; `VITE_MELDRITCH_ENGINE_URL` configures
+an unrelated engine checkout. Production does not require Node in the engine:
+run `npm run build` in the UI repository and configure its `dist/` path through
+`MELDRITCH_UI_DIST` or the Lua server's `ui_dist` field. Run `npm test` for the
+lightweight native-Vue Vitest suite and
 `npm run typecheck` for Vue/TypeScript validation. The control registry selects
 components solely from the versioned server schema, so adding
 another composition plane requires Lua changes only.
@@ -487,7 +489,7 @@ The complete native-DSP demonstration needs no plugins or MIDI hardware:
 
 ```sh
 cargo run -p meldritch2 -- perform \
-  crates/meldritch2/examples/71-control-planes.lua
+  /path/to/meldritch-lua/applications/control-planes
 ```
 
 Open the printed address in separate tabs/devices and join with
@@ -503,7 +505,7 @@ and lead piano rolls, amplitude/filter ADSRs, and quantized selection:
 
 ```sh
 cargo run -p meldritch2 -- perform \
-  crates/meldritch2/examples/72-note-performance.lua
+  /path/to/meldritch-lua/applications/note-performance
 ```
 
 Use the same four demo credentials. `drummer-demo-token` receives the kick,
@@ -513,14 +515,14 @@ both envelopes and filter controls; `leader-demo-token` receives both planes;
 
 ```sh
 cargo run -p meldritch2 -- render \
-  crates/meldritch2/examples/72-note-performance.lua \
+  /path/to/meldritch-lua/applications/note-performance \
   /tmp/meldritch-72-note-performance.wav 8
 ```
 
 With native Serum 2 installed, the multi-user plugin demonstration is:
 
 ```sh
-cargo run -p meldritch2 -- perform crates/meldritch2/examples/73-serum-performance.lua
+cargo run -p meldritch2 -- perform /path/to/meldritch-lua/applications/serum-performance
 ```
 
 Open a direct musician link with `drummer-demo-token`, `serum-demo-token`,
@@ -604,5 +606,5 @@ Run the actual transport and retained-Lua integration tests with:
 
 ```sh
 cargo test -p meldritch2 --test web_server
-cd crates/meldritch2/frontend && npm test && npm run typecheck && npm run build
+cd /path/to/meldritch-ui && npm run check
 ```

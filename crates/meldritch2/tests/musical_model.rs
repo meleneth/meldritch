@@ -3,7 +3,7 @@ use std::fs;
 
 fn example(path: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
+        .join("tests/fixtures/lua/authoring")
         .join(path)
 }
 
@@ -13,7 +13,7 @@ fn load(path: &std::path::Path) -> meldritch2::model::Graph {
 
 #[test]
 fn seeded_program_uses_shared_patterns_and_renders_real_audio() {
-    let graph = load(&example("examples/generative/generative.lua"));
+    let graph = load(&example("generative/generative.lua"));
     let sequence = &graph.performance.as_ref().unwrap().sequencer;
     assert_eq!(sequence.track_names(), ["Orbit", "Dust", "Pulse"]);
     assert_eq!(sequence.pattern_names(), ["Generated", "Sparse"]);
@@ -29,7 +29,7 @@ fn seeded_program_uses_shared_patterns_and_renders_real_audio() {
 
 #[test]
 fn procedural_base_rebuilds_then_applies_lua_edits_without_rewriting_generator() {
-    let source_path = example("examples/generative/generative.lua");
+    let source_path = example("generative/generative.lua");
     let source_before = fs::read(&source_path).unwrap();
     let first = load(&source_path);
     let sequence = &first.performance.as_ref().unwrap().sequencer;
