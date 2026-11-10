@@ -53,7 +53,7 @@ programs. `source:on(kind, callback)` creates a persistent subscription, while
 callbacks run on the UI owner thread, never in the audio callback; queues are
 bounded and observational, so audio behavior never depends on Lua delivery.
 
-The built-in `meldritch.musical` Lua library composes stable projects, tracks,
+The versioned `meldritch-lua` `musical` library composes stable projects, tracks,
 patterns, arrangements, editing operations, and persistence over that prepared
 runtime. Track loops may independently use 1–64 steps, viewed material is
 separate from playing material, and queued changes commit at loop boundaries.
@@ -93,26 +93,24 @@ keep multiple browsers on one monotonically revisioned state.
 See [docs/server.md](docs/server.md) for the Lua API, thread model, roles,
 security limits, protocol behavior, and the executable **DROP** demonstration.
 
-The executable Lua corpus lives in `crates/meldritch2/examples/`. Its focused
-acceptance guide is in [examples/ACCEPTANCE.md](examples/ACCEPTANCE.md).
+Executable applications and author libraries live in the independent
+`meldritch-lua` repository. The Vue/Phaser client lives in `meldritch-ui`, and
+both consume the immutable revision recorded in `contracts.lock`.
 
 ## Try the current system
 
 ```sh
-cargo run -p meldritch2 -- crates/meldritch2/examples/01-basic.lua
-cargo run -p meldritch2 -- perform crates/meldritch2/examples/66-screens.lua
+cargo run -p meldritch2 -- /path/to/meldritch-lua/examples/engine/01-basic.lua
+cargo run -p meldritch2 -- perform /path/to/meldritch-lua/applications/groovebox
 cargo test -p meldritch2
 ```
 
 The complete authored instruments can be performed directly:
 
 ```sh
-cargo run -p meldritch2 -- perform examples/instruments/subtractive.lua
-cargo run -p meldritch2 -- perform examples/instruments/drone.lua
-cargo run -p meldritch2 -- perform examples/instruments/event_plaits.lua
-cargo run -p meldritch2 -- perform examples/instruments/tr909.lua
-cargo run -p meldritch2 -- perform examples/groovebox/groovebox.lua
-cargo run -p meldritch2 -- perform examples/generative/generative.lua
+cargo run -p meldritch2 -- perform /path/to/meldritch-lua/applications/groovebox
+cargo run -p meldritch2 -- perform /path/to/meldritch-lua/applications/generative
+cargo run -p meldritch2 -- perform /path/to/meldritch-lua/applications/instrument-playground
 ```
 
 The subtractive instrument uses MIDI channel 1 when a MIDI input is selected;

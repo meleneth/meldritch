@@ -216,7 +216,7 @@ tools/build-vst3-fixture.sh
 cargo run -p meldritch2 -- render \
   crates/meldritch2/examples/69-vst3-test-instrument.lua \
   /tmp/meldritch-vst3-demo.wav 4 --workers=2
-cargo test -p meldritch2 --test vst3_host
+cargo test -p meldritch2 --features vst3-integration-tests --test vst3_host
 ```
 
 The integration test uses the actual VST3 ABI and verifies discovery, metadata,
@@ -421,7 +421,7 @@ Run the performance and conditional real-plugin test with:
 
 ```sh
 cargo run -p meldritch2 -- perform crates/meldritch2/examples/75-pulse-performance.lua
-MELDRITCH_TEST_PULSE=1 cargo test -p meldritch2 --test vst3_host installed_pulse
+MELDRITCH_TEST_PULSE=1 cargo test -p meldritch2 --features vst3-integration-tests --test vst3_host installed_pulse
 ```
 
 ## Current boundaries

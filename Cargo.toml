@@ -1,49 +1,13 @@
 [workspace]
 members = [
-    "crates/meldritch-app",
-    "crates/meldritch-audio",
-    "crates/meldritch-cli",
-    "crates/meldritch-core",
-    "crates/meldritch-control",
-    "crates/meldritch-dsl",
     "crates/meldritch-interface",
     "crates/meldritch-arp",
     "crates/meldritch-midi-utils",
-    "crates/meldritch-render",
-    "crates/meldritch-tui",
     "crates/meldritch2",
     "crates/meldritch-vst3-fixture",
 ]
 default-members = ["crates/meldritch2"]
 resolver = "2"
-
-[package]
-name = "meldritch"
-version = "0.1.0"
-edition.workspace = true
-license.workspace = true
-rust-version.workspace = true
-
-[[bin]]
-name = "meldritch"
-path = "crates/meldritch-cli/src/main.rs"
-
-[dependencies]
-clap.workspace = true
-meldritch-app = { path = "crates/meldritch-app" }
-meldritch-audio = { path = "crates/meldritch-audio" }
-meldritch-core = { path = "crates/meldritch-core" }
-meldritch-control = { path = "crates/meldritch-control" }
-meldritch-dsl = { path = "crates/meldritch-dsl" }
-meldritch-render = { path = "crates/meldritch-render" }
-meldritch-tui = { path = "crates/meldritch-tui" }
-midir.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-toml.workspace = true
-
-[dev-dependencies]
-crossterm.workspace = true
 
 [workspace.package]
 edition = "2024"

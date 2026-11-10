@@ -6,6 +6,11 @@ license.workspace = true
 rust-version.workspace = true
 default-run = "meldritch2"
 
+[features]
+# Native plugin lifecycle tests are intentionally excluded from every default
+# test command. Enable only when VST3 host or fixture behavior changes.
+vst3-integration-tests = []
+
 [dependencies]
 cpal.workspace = true
 crossterm.workspace = true
@@ -40,6 +45,11 @@ path = "src/main.rs"
 [[bin]]
 name = "meldritch-vst3-state"
 path = "src/vst3_state_main.rs"
+
+[[test]]
+name = "vst3_host"
+path = "tests/vst3_host.rs"
+required-features = ["vst3-integration-tests"]
 
 [dev-dependencies]
 meldritch-vst3-fixture = { path = "../meldritch-vst3-fixture" }

@@ -1,3 +1,0 @@
-# A sustain cable without a declared Gate input must reject.
-[[case]]
-kind = "undeclared_sustain_source"

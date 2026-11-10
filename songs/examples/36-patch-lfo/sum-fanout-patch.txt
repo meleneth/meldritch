@@ -1,5 +1,0 @@
-# Apply after sum-clamp, vibrato and filter drafts.
-clear
-disconnect slow.control vibrato.control
-connect bound.control vibrato.control
-commit

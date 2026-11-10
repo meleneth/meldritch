@@ -1,6 +1,0 @@
-# Appended to main.mlperformance by the validation acceptance test.
-[[actions]]
-id = "invalid-lane"
-label = "Unknown lane"
-action = "toggle_lane_mute"
-lane = "missing-lane"
