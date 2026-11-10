@@ -4,6 +4,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet},
     net::{IpAddr, SocketAddr},
+    path::{Path as FsPath, PathBuf},
     rc::Rc,
     sync::{
         Arc, RwLock,
@@ -39,6 +40,7 @@ pub const DEFAULT_BODY_LIMIT: usize = 64 * 1024;
 pub const DEFAULT_MESSAGE_LIMIT: usize = 64 * 1024;
 pub const DEFAULT_MAX_CONNECTIONS: usize = 64;
 pub const DEFAULT_TIMEOUT_MS: u64 = 2_000;
+const UI_MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
@@ -50,6 +52,9 @@ pub struct ServerConfig {
     pub max_connections: usize,
     pub timeout: Duration,
     pub allowed_origins: BTreeSet<String>,
+    /// Independently built `meldritch-ui` distribution. Files are loaded on
+    /// the control side before the network thread starts, never by audio.
+    pub ui_dist: Option<PathBuf>,
 }
 
 impl Default for ServerConfig {
@@ -63,7 +68,40 @@ impl Default for ServerConfig {
             max_connections: DEFAULT_MAX_CONNECTIONS,
             timeout: Duration::from_millis(DEFAULT_TIMEOUT_MS),
             allowed_origins: BTreeSet::new(),
+            ui_dist: std::env::var_os("MELDRITCH_UI_DIST").map(PathBuf::from),
         }
+    }
+}
+
+#[derive(Clone)]
+struct UiAssets {
+    index: Arc<str>,
+    css: Arc<str>,
+    javascript: Arc<str>,
+}
+
+impl UiAssets {
+    fn load(directory: &FsPath) -> Result<Self, String> {
+        let load = |relative: &str| {
+            let path = directory.join(relative);
+            let metadata = std::fs::metadata(&path)
+                .map_err(|error| format!("UI asset {}: {error}", path.display()))?;
+            if !metadata.is_file() || metadata.len() > UI_MAX_FILE_BYTES {
+                return Err(format!(
+                    "UI asset {} must be a file no larger than {} MiB",
+                    path.display(),
+                    UI_MAX_FILE_BYTES / 1024 / 1024
+                ));
+            }
+            std::fs::read_to_string(&path)
+                .map(Arc::<str>::from)
+                .map_err(|error| format!("UI asset {}: {error}", path.display()))
+        };
+        Ok(Self {
+            index: load("index.html")?,
+            css: load("assets/app.css")?,
+            javascript: load("assets/app.js")?,
+        })
     }
 }
 
@@ -1279,6 +1317,7 @@ struct Shared {
     websocket_path: Option<String>,
     connection_shutdown: broadcast::Sender<()>,
     epoch: Arc<str>,
+    ui: Option<UiAssets>,
 }
 
 #[derive(Clone)]
@@ -1652,6 +1691,12 @@ pub fn start(application: Application) -> Result<(ServerSession, ControlExecutor
     .into();
     let schema_fingerprint = application.schema_fingerprint();
     let initial = Arc::new(application.snapshot(0, &epoch, 1, true));
+    let ui = application
+        .config
+        .ui_dist
+        .as_deref()
+        .map(UiAssets::load)
+        .transpose()?;
     let shared = Shared {
         queue: sender,
         snapshot: Arc::new(RwLock::new(initial)),
@@ -1668,6 +1713,7 @@ pub fn start(application: Application) -> Result<(ServerSession, ControlExecutor
             .map(|websocket| normalize_path(&websocket.path)),
         connection_shutdown: connection_shutdown.clone(),
         epoch,
+        ui,
     };
     let network = shared.clone();
     let network_spec = NetworkSpec::from_application(&application);
@@ -1805,14 +1851,23 @@ async fn run_server(
     .map_err(|error| error.to_string())
 }
 
-async fn index() -> impl IntoResponse {
+async fn index(State(shared): State<Shared>) -> Response {
+    let Some(ui) = &shared.ui else {
+        return (
+            StatusCode::NOT_FOUND,
+            [("content-type", "text/plain; charset=utf-8")],
+            "Meldritch UI is not configured; set MELDRITCH_UI_DIST or server.ui_dist",
+        )
+            .into_response();
+    };
     (
         [
             ("content-type", "text/html; charset=utf-8"),
             ("cache-control", "no-store"),
         ],
-        include_str!("../web/dist/index.html"),
+        ui.index.to_string(),
     )
+        .into_response()
 }
 async fn browser_config(State(shared): State<Shared>) -> impl IntoResponse {
     let access_links = shared
@@ -1824,27 +1879,38 @@ async fn browser_config(State(shared): State<Shared>) -> impl IntoResponse {
         [("cache-control", "no-store")],
         axum::Json(json!({
             "websocket": shared.websocket_path,
+            "protocol": crate::web_protocol::SUPPORTED_PROTOCOLS,
+            "protocol_current": crate::web_protocol::PROTOCOL_VERSION,
+            "schema_version": crate::web_protocol::WIRE_SCHEMA_VERSION,
             "access_links": access_links,
         })),
     )
 }
-async fn css() -> impl IntoResponse {
+async fn css(State(shared): State<Shared>) -> Response {
+    let Some(ui) = &shared.ui else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
     (
         [
             ("content-type", "text/css; charset=utf-8"),
             ("cache-control", "no-store"),
         ],
-        include_str!("../web/dist/assets/app.css"),
+        ui.css.to_string(),
     )
+        .into_response()
 }
-async fn javascript() -> impl IntoResponse {
+async fn javascript(State(shared): State<Shared>) -> Response {
+    let Some(ui) = &shared.ui else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
     (
         [
             ("content-type", "text/javascript; charset=utf-8"),
             ("cache-control", "no-store"),
         ],
-        include_str!("../web/dist/assets/app.js"),
+        ui.javascript.to_string(),
     )
+        .into_response()
 }
 
 async fn http(
@@ -1922,7 +1988,11 @@ async fn dispatch_http(
     {
         return error_response(503, "Lua request queue is full");
     }
+    let started = tokio::time::Instant::now();
     match tokio::time::timeout(shared.config.timeout, rx).await {
+        Ok(Ok(_response)) if started.elapsed() >= shared.config.timeout => {
+            error_response(504, "Lua request handler timed out")
+        }
         Ok(Ok(response)) => response.into_response(),
         Ok(Err(_)) => error_response(503, "Lua control executor stopped"),
         Err(_) => error_response(504, "Lua request handler timed out"),
@@ -1959,6 +2029,73 @@ async fn websocket_loop(socket: WebSocket, shared: Shared, remote: SocketAddr) {
         role: shared.anonymous_role.clone(),
         performer: None,
     };
+    let (mut sink, mut stream) = socket.split();
+    let hello = tokio::time::timeout(Duration::from_secs(5), stream.next()).await;
+    let requested = match hello {
+        Ok(Some(Ok(Message::Text(text)))) => {
+            serde_json::from_str::<crate::web_protocol::ClientMessage>(&text)
+                .ok()
+                .and_then(|message| match message {
+                    crate::web_protocol::ClientMessage::Hello { protocol, .. } => Some(protocol),
+                    _ => None,
+                })
+        }
+        _ => None,
+    };
+    let Some(requested) = requested else {
+        let _ = sink
+            .send(Message::Text(
+                json!({"type":"error","code":"hello_required","error":"hello must be the first WebSocket message"})
+                    .to_string()
+                    .into(),
+            ))
+            .await;
+        let _ = sink.send(Message::Close(None)).await;
+        shared
+            .diagnostics
+            .active_websockets
+            .fetch_sub(1, Ordering::Relaxed);
+        return;
+    };
+    let Some(selected) = crate::web_protocol::negotiate(&requested) else {
+        let _ = sink
+            .send(Message::Text(
+                json!({
+                    "type":"protocol.incompatible",
+                    "supported":crate::web_protocol::SUPPORTED_PROTOCOLS,
+                    "requested":requested,
+                    "error":"no compatible Meldritch Web protocol version"
+                })
+                .to_string()
+                .into(),
+            ))
+            .await;
+        let _ = sink.send(Message::Close(None)).await;
+        shared
+            .diagnostics
+            .active_websockets
+            .fetch_sub(1, Ordering::Relaxed);
+        return;
+    };
+    if sink
+        .send(Message::Text(
+            json!({
+                "type":"hello.accepted",
+                "protocol":selected,
+                "schema_version":crate::web_protocol::WIRE_SCHEMA_VERSION
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .is_err()
+    {
+        shared
+            .diagnostics
+            .active_websockets
+            .fetch_sub(1, Ordering::Relaxed);
+        return;
+    }
     let _ = enqueue(
         &shared,
         Dispatch::Connected {
@@ -1974,7 +2111,6 @@ async fn websocket_loop(socket: WebSocket, shared: Shared, remote: SocketAddr) {
         &initial_full,
     ));
     let mut revision = initial.get("revision").and_then(Value::as_u64).unwrap_or(0);
-    let (mut sink, mut stream) = socket.split();
     if sink
         .send(Message::Text(initial.to_string().into()))
         .await
@@ -2017,10 +2153,22 @@ async fn websocket_loop(socket: WebSocket, shared: Shared, remote: SocketAddr) {
             },
             incoming = stream.next() => match incoming {
                 Some(Ok(Message::Text(text))) => {
-                    let Ok(message) = serde_json::from_str::<Value>(&text) else {
+                    let Ok(mut message) = serde_json::from_str::<Value>(&text) else {
                         let _ = sink.send(Message::Text(json!({"type":"error","error":"invalid JSON message"}).to_string().into())).await;
                         continue;
                     };
+                    let kind = message.get("type").and_then(Value::as_str).unwrap_or_default();
+                    if kind == "hello" {
+                        let _ = sink.send(Message::Text(json!({"type":"error","code":"hello_already_completed","error":"protocol negotiation is already complete"}).to_string().into())).await;
+                        continue;
+                    }
+                    if crate::web_protocol::known_client_type(kind) {
+                        let Ok(typed) = serde_json::from_value::<crate::web_protocol::ClientMessage>(message) else {
+                            let _ = sink.send(Message::Text(json!({"type":"error","code":"invalid_message","error":"message does not conform to the negotiated protocol"}).to_string().into())).await;
+                            continue;
+                        };
+                        message = typed.into_value();
+                    }
                     if message.get("type").and_then(Value::as_str) == Some("authenticate") {
                         client.role = message.get("token").and_then(Value::as_str).and_then(|token| shared.credentials.get(token).cloned());
                         let _ = sink.send(Message::Text(json!({"type":"session","role":client.role}).to_string().into())).await;

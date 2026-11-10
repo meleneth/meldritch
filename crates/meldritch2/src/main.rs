@@ -128,8 +128,8 @@ fn render_wav(graph: &Graph, path: &str, seconds: f64, mode: RenderMode) -> Resu
 }
 
 fn load_graph(path: &str) -> Result<Graph, String> {
-    let path = std::path::Path::new(path);
-    fs::read_to_string(path)
+    let path = lua::resolve_application(std::path::Path::new(path))?;
+    fs::read_to_string(&path)
         .map_err(|error| error.to_string())
         .and_then(|script| {
             lua::read_with_root(&script, path.parent().unwrap_or(std::path::Path::new(".")))
@@ -137,8 +137,8 @@ fn load_graph(path: &str) -> Result<Graph, String> {
 }
 
 fn load_program(path: &str) -> Result<lua::Program, String> {
-    let path = std::path::Path::new(path);
-    fs::read_to_string(path)
+    let path = lua::resolve_application(std::path::Path::new(path))?;
+    fs::read_to_string(&path)
         .map_err(|error| error.to_string())
         .and_then(|script| {
             lua::read_program_with_root(&script, path.parent().unwrap_or(std::path::Path::new(".")))

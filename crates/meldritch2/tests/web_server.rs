@@ -7,7 +7,41 @@ use std::{
 use futures_util::{SinkExt, StreamExt};
 use meldritch2::{compiler::compile, lua};
 use serde_json::{Value, json};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio::net::TcpStream;
+use tokio_tungstenite::{
+    MaybeTlsStream, WebSocketStream,
+    tungstenite::{
+        Error as WebSocketError, Message, client::IntoClientRequest,
+        handshake::client::Response as WebSocketResponse,
+    },
+};
+
+async fn connect_async<R>(
+    request: R,
+) -> Result<
+    (
+        WebSocketStream<MaybeTlsStream<TcpStream>>,
+        WebSocketResponse,
+    ),
+    WebSocketError,
+>
+where
+    R: IntoClientRequest + Unpin,
+{
+    let (mut socket, response) = tokio_tungstenite::connect_async(request).await?;
+    socket
+        .send(Message::Text(
+            json!({"type":"hello","protocol":">=1.0.0 <2.0.0","client":"engine-tests"})
+                .to_string()
+                .into(),
+        ))
+        .await?;
+    let accepted = socket.next().await.transpose()?.expect("hello response");
+    let accepted: Value = serde_json::from_str(accepted.to_text()?).expect("hello JSON");
+    assert_eq!(accepted["type"], "hello.accepted");
+    assert_eq!(accepted["protocol"], "1.0.0");
+    Ok((socket, response))
+}
 
 const APP: &str = r#"
 local graph = meldritch.graph()
@@ -21,7 +55,7 @@ graph:control("level", gain, "gain", { min = 0.0, max = 1.0 })
 local server = meldritch.server {
   host = "127.0.0.1", port = 0, anonymous_role = "performer",
   queue_capacity = 8, body_limit = 128, message_limit = 256,
-  timeout_ms = 500,
+  timeout_ms = 500, ui_dist = "tests/fixtures/ui",
 }
 server:get("/hello/:name", function(request)
   return { hello = request.params.name, query = request.query.q, method = request.method }
@@ -64,8 +98,8 @@ server:post("/lua-set", function(request)
   return { value = performance:value("level") }
 end)
 server:post("/slow-set", function(request)
-  local deadline = os.clock() + 1.5
-  while os.clock() < deadline do end
+  local deadline = os.time() + 2
+  while os.time() < deadline do end
   performance:set("level", request.json.value)
   return { value = performance:value("level") }
 end)
@@ -222,7 +256,7 @@ fn audio_underruns_are_published_as_authoritative_state() {
 }
 
 #[test]
-fn embedded_frontend_serves_phaser_without_an_external_chunk() {
+fn configured_independent_ui_bundle_is_served() {
     let (mut program, _machine, address) = start();
     let request = thread::spawn(move || {
         let mut response = agent()
@@ -241,11 +275,7 @@ fn embedded_frontend_serves_phaser_without_an_external_chunk() {
     let (status, cache, body) = poll_thread(&mut program, request);
     assert_eq!(status, 200);
     assert_eq!(cache.as_deref(), Some("no-store"));
-    assert!(body.len() > 1_000_000, "embedded Phaser payload is absent");
-    assert!(
-        !body.contains("import("),
-        "embedded app must not request an unserved dynamic chunk"
-    );
+    assert_eq!(body, "window.MELDRITCH_UI_FIXTURE = true;\n");
 }
 
 #[test]
@@ -1314,8 +1344,8 @@ fn playground_successor_reproduces_browser_and_apc_logical_notes() {
 
 #[test]
 fn drop_demo_is_browser_discovered_and_changes_the_real_audio_graph() {
-    let source =
-        include_str!("../examples/70-network-performance.lua").replace("port = 8080", "port = 0");
+    let source = include_str!("../examples/70-network-performance.lua")
+        .replace("port = 8080", "port = 0, ui_dist = \"tests/fixtures/ui\"");
     let mut program =
         lua::read_program_with_root(&source, std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
             .unwrap();

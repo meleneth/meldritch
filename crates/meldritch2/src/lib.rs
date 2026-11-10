@@ -24,6 +24,7 @@ pub mod tui;
 mod units;
 pub mod vst3;
 pub mod web;
+pub mod web_protocol;
 
 #[cfg(test)]
 mod tests {

@@ -8,6 +8,7 @@ use std::{
 };
 
 use mlua::{AnyUserData, Function, Lua, Table, UserData, UserDataMethods, Value};
+use serde::Deserialize;
 
 use crate::contract;
 use crate::event_bridge::{
@@ -26,6 +27,111 @@ use crate::model::{
 };
 use crate::sample::{PreparedSample, SampleBank};
 use crate::sequencer::{NoteEvent, SequencerControl};
+
+pub const HOST_API_VERSION: &str = "1.0.0";
+pub const HOST_CAPABILITIES: &[(&str, &str)] = &[
+    ("graph.core", "1.0.0"),
+    ("instrument.core", "1.0.0"),
+    ("audio.modules", "1.0.0"),
+    ("midi.routing", "1.0.0"),
+    ("sequencer.core", "1.0.0"),
+    ("sequencer.persistence.v2", "1.0.0"),
+    ("events.subscription", "1.0.0"),
+    ("samples.bank", "1.0.0"),
+    ("vst3.host", "1.0.0"),
+    ("web.performance", "1.0.0"),
+    ("ui.control-surfaces", "1.0.0"),
+    ("hardware.apc", "1.0.0"),
+    ("hardware.stream-deck", "1.0.0"),
+];
+
+fn supports_host_api(requested: &str) -> bool {
+    let compact = requested.replace(' ', "");
+    requested == HOST_API_VERSION
+        || requested == "1"
+        || requested == "^1"
+        || compact == ">=1.0.0<2.0.0"
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApplicationManifest {
+    name: String,
+    version: String,
+    entry: String,
+    lua_host_api: String,
+    capabilities: Vec<String>,
+    #[serde(default)]
+    libraries: Vec<String>,
+    #[serde(default)]
+    assets: Vec<String>,
+    #[serde(default)]
+    requirements: serde_json::Value,
+}
+
+/// Resolve either a direct Lua entry file or a contract-defined application
+/// directory. Manifest compatibility is checked before the entry script is
+/// read or evaluated.
+pub fn resolve_application(path: &Path) -> Result<PathBuf, String> {
+    if path.is_file() {
+        return Ok(path.to_path_buf());
+    }
+    if !path.is_dir() {
+        return Err(format!(
+            "application path does not exist: {}",
+            path.display()
+        ));
+    }
+    let manifest_path = path.join("application.json");
+    let bytes = std::fs::read(&manifest_path)
+        .map_err(|error| format!("read {}: {error}", manifest_path.display()))?;
+    let manifest: ApplicationManifest = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("parse {}: {error}", manifest_path.display()))?;
+    if manifest.name.is_empty() || manifest.version.is_empty() {
+        return Err("application manifest requires nonempty name and version".into());
+    }
+    if !supports_host_api(&manifest.lua_host_api) {
+        return Err(format!(
+            "application '{}' requires Lua host API {}, engine provides {}",
+            manifest.name, manifest.lua_host_api, HOST_API_VERSION
+        ));
+    }
+    let available = HOST_CAPABILITIES
+        .iter()
+        .map(|(id, _)| *id)
+        .collect::<BTreeSet<_>>();
+    let missing = manifest
+        .capabilities
+        .iter()
+        .filter(|capability| !available.contains(capability.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(format!(
+            "application '{}' requires unavailable capabilities: {}",
+            manifest.name,
+            missing.join(", ")
+        ));
+    }
+    let relative = Path::new(&manifest.entry);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err("application entry must stay within its application directory".into());
+    }
+    let _ = (manifest.libraries, manifest.assets, manifest.requirements);
+    let entry = path.join(relative);
+    if !entry.is_file() {
+        return Err(format!(
+            "application '{}' entry does not exist: {}",
+            manifest.name,
+            entry.display()
+        ));
+    }
+    Ok(entry)
+}
 
 #[derive(Clone, Debug)]
 struct LuaSampleBank(SampleBank);
@@ -2776,6 +2882,27 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
         .map_err(|e| e.to_string())?;
     lua.load(API).exec().map_err(|e| e.to_string())?;
     let meldritch: Table = lua.globals().get("meldritch").map_err(|e| e.to_string())?;
+    let host_api_version = lua
+        .create_function(|_, ()| Ok(HOST_API_VERSION))
+        .map_err(|error| error.to_string())?;
+    meldritch
+        .set("host_api_version", host_api_version)
+        .map_err(|error| error.to_string())?;
+    let host_capabilities = lua
+        .create_function(|lua, ()| {
+            let result = lua.create_table()?;
+            for (index, (id, version)) in HOST_CAPABILITIES.iter().enumerate() {
+                let capability = lua.create_table()?;
+                capability.set("id", *id)?;
+                capability.set("version", *version)?;
+                result.set(index + 1, capability)?;
+            }
+            Ok(result)
+        })
+        .map_err(|error| error.to_string())?;
+    meldritch
+        .set("host_capabilities", host_capabilities)
+        .map_err(|error| error.to_string())?;
     meldritch
         .set("_contract", discover)
         .map_err(|e| e.to_string())?;
@@ -2787,6 +2914,7 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
     ));
     let editor_controls = Rc::new(RefCell::new(Vec::new()));
     let registered_web_applications = Rc::clone(&web_applications);
+    let server_root = project_root.to_path_buf();
     let server = lua
         .create_function(move |lua, spec: Table| {
             if !registered_web_applications.borrow().is_empty() {
@@ -2817,6 +2945,14 @@ pub fn read_program_with_root(script: &str, project_root: &Path) -> Result<Progr
                 config.allowed_origins = origins
                     .sequence_values::<String>()
                     .collect::<mlua::Result<_>>()?;
+            }
+            if let Some(directory) = spec.get::<Option<String>>("ui_dist")? {
+                let directory = PathBuf::from(directory);
+                config.ui_dist = Some(if directory.is_absolute() {
+                    directory
+                } else {
+                    server_root.join(directory)
+                });
             }
             let mut application = crate::web::Application::new(config);
             application.anonymous_role = spec.get("anonymous_role")?;
@@ -4228,10 +4364,72 @@ fn endpoint(table: Table) -> Result<Endpoint, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_midi_pitch, read, read_with_root};
+    use super::{HOST_API_VERSION, parse_midi_pitch, read, read_with_root, resolve_application};
     use crate::compiler::{RenderDiagnostics, compile_at_rate};
     use crate::model::{MidiButtonEdge, MidiButtonMessage};
     use std::{fs, io::Cursor};
+
+    #[test]
+    fn public_host_api_reports_version_and_capabilities() {
+        let graph = read(
+            r#"
+            assert(meldritch.host_api_version() == "1.0.0")
+            local capabilities = {}
+            for _, capability in ipairs(meldritch.host_capabilities()) do
+              capabilities[capability.id] = capability.version
+            end
+            assert(capabilities["graph.core"] == "1.0.0")
+            assert(capabilities["sequencer.persistence.v2"] == "1.0.0")
+            assert(capabilities["ui.control-surfaces"] == "1.0.0")
+            return meldritch.graph()
+            "#,
+        )
+        .unwrap();
+        assert!(graph.modules.is_empty());
+    }
+
+    #[test]
+    fn application_manifest_is_checked_before_execution() {
+        let root = std::env::temp_dir().join(format!(
+            "meldritch-application-manifest-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("main.lua"),
+            "error('must not execute during resolution')",
+        )
+        .unwrap();
+        fs::write(
+            root.join("application.json"),
+            format!(
+                r#"{{"name":"fixture","version":"1.0.0","entry":"main.lua","lua_host_api":"{HOST_API_VERSION}","capabilities":["graph.core"]}}"#
+            ),
+        )
+        .unwrap();
+        assert_eq!(resolve_application(&root).unwrap(), root.join("main.lua"));
+
+        fs::write(
+            root.join("application.json"),
+            r#"{"name":"fixture","version":"1.0.0","entry":"main.lua","lua_host_api":"2.0.0","capabilities":[]}"#,
+        )
+        .unwrap();
+        let error = resolve_application(&root).unwrap_err();
+        assert!(error.contains("requires Lua host API 2.0.0"));
+
+        fs::write(
+            root.join("application.json"),
+            r#"{"name":"fixture","version":"1.0.0","entry":"main.lua","lua_host_api":"1.0.0","capabilities":["future.feature"]}"#,
+        )
+        .unwrap();
+        let error = resolve_application(&root).unwrap_err();
+        assert!(error.contains("future.feature"));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn note_names_and_numeric_midi_pitches_are_validated_at_the_lua_boundary() {
