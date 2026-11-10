@@ -69,12 +69,14 @@ describe("performance store", () => {
     });
   });
 
-  it("detects a revision gap instead of applying it", () => {
+  it("converges on the newest complete update across a revision gap", () => {
     const store = usePerformanceStore();
     store.applySnapshot(snapshot(4));
-    store.applySnapshot(snapshot(6, "state.updated"));
-    expect(store.revision).toBe(4);
-    expect(store.errors.at(-1)).toContain("Revision gap");
+    const latest = snapshot(6, "state.updated");
+    latest.state.values = { "synth/cutoff": 1760 };
+    store.applySnapshot(latest);
+    expect(store.revision).toBe(6);
+    expect(store.planes[0].controls[0]).toMatchObject({ value: 1760 });
   });
 
   it("resets stale state when the server epoch changes", () => {

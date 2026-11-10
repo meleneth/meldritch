@@ -81,16 +81,9 @@ export const usePerformanceStore = defineStore("performance", () => {
       pending.value.clear();
     }
     if (message.revision <= revision.value) return;
-    if (
-      revision.value >= 0 &&
-      message.type === "state.updated" &&
-      message.revision !== revision.value + 1
-    ) {
-      errors.value.push("Revision gap; resynchronizing");
-      socket?.close();
-      connect();
-      return;
-    }
+    // Updates are complete authoritative value projections, not patches. A busy
+    // composition may publish again while an authenticated schema snapshot is
+    // in flight, so skipped revisions are safe and the newest projection wins.
     epoch.value = incomingEpoch;
     revision.value = message.revision;
     schemaRevision.value = message.schema_revision ?? schemaRevision.value;

@@ -305,6 +305,7 @@ fn preset_selector_is_typed_authoritative_and_server_validated() {
             .unwrap();
             assert_eq!(updated["type"], "state.updated");
             assert!(updated["state"]["planes"].is_null());
+            assert_eq!(updated["state"]["controls"]["level"], json!({"value":1.0}));
             assert_eq!(updated["state"]["values"]["main/patch"]["active"], 1);
             socket
                 .send(Message::Text(

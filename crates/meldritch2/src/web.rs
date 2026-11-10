@@ -519,11 +519,6 @@ impl Application {
             .controls
             .iter()
             .map(|(name, definition)| {
-                let choices = if include_schema {
-                    definition.choices.as_slice()
-                } else {
-                    &[]
-                };
                 let raw = runtime
                     .handles
                     .get(&definition.target)
@@ -545,8 +540,7 @@ impl Application {
                     }
                     _ => json!(raw),
                 };
-                (
-                    name.clone(),
+                let projected = if include_schema {
                     json!({
                         "name": name,
                         "label": definition.label,
@@ -554,10 +548,13 @@ impl Application {
                         "type": definition.kind,
                         "min": definition.min,
                         "max": definition.max,
-                        "choices": choices,
+                        "choices": definition.choices,
                         "value": value,
-                    }),
-                )
+                    })
+                } else {
+                    json!({"value": value})
+                };
+                (name.clone(), projected)
             })
             .collect::<serde_json::Map<_, _>>();
         let definitions = if include_schema {
