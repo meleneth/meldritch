@@ -12,7 +12,7 @@ pub const CONTRACT: Contract = Contract {
     inputs: &[
         InputPort {
             name: "pitch",
-            domain: Domain::MonoAudio,
+            domain: Domain::FrequencyHz,
             fan_in: FanIn::One,
             unconnected: Some(440.0),
         },
@@ -36,7 +36,7 @@ pub const CONTRACT: Contract = Contract {
         },
         InputPort {
             name: "pitch_2",
-            domain: Domain::MonoAudio,
+            domain: Domain::FrequencyHz,
             fan_in: FanIn::One,
             unconnected: Some(440.0),
         },
@@ -54,7 +54,7 @@ pub const CONTRACT: Contract = Contract {
         },
         InputPort {
             name: "pitch_3",
-            domain: Domain::MonoAudio,
+            domain: Domain::FrequencyHz,
             fan_in: FanIn::One,
             unconnected: Some(440.0),
         },
@@ -72,7 +72,7 @@ pub const CONTRACT: Contract = Contract {
         },
         InputPort {
             name: "pitch_4",
-            domain: Domain::MonoAudio,
+            domain: Domain::FrequencyHz,
             fan_in: FanIn::One,
             unconnected: Some(440.0),
         },
@@ -90,7 +90,7 @@ pub const CONTRACT: Contract = Contract {
         },
         InputPort {
             name: "pitch_5",
-            domain: Domain::MonoAudio,
+            domain: Domain::FrequencyHz,
             fan_in: FanIn::One,
             unconnected: Some(440.0),
         },
@@ -108,7 +108,7 @@ pub const CONTRACT: Contract = Contract {
         },
         InputPort {
             name: "pitch_6",
-            domain: Domain::MonoAudio,
+            domain: Domain::FrequencyHz,
             fan_in: FanIn::One,
             unconnected: Some(440.0),
         },
@@ -126,7 +126,7 @@ pub const CONTRACT: Contract = Contract {
         },
         InputPort {
             name: "pitch_7",
-            domain: Domain::MonoAudio,
+            domain: Domain::FrequencyHz,
             fan_in: FanIn::One,
             unconnected: Some(440.0),
         },
@@ -144,7 +144,7 @@ pub const CONTRACT: Contract = Contract {
         },
         InputPort {
             name: "pitch_8",
-            domain: Domain::MonoAudio,
+            domain: Domain::FrequencyHz,
             fan_in: FanIn::One,
             unconnected: Some(440.0),
         },

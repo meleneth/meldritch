@@ -9,7 +9,8 @@ local steps = graph:value_sequencer {
 local clock = graph:module("clock", "square", {frequency = 2.0})
 graph:connect(clock.out, steps.advance)
 
-local hz = graph:note128_to_hz("pitch_to_hz", steps.value)
+local typed_note = graph:as_note128("note128", steps.value)
+local hz = graph:note128_to_hz("pitch_to_hz", typed_note)
 -- When wiring an actual VST3 instance, use:
 -- graph:connect(hz, synth.pitch)
 

@@ -2,9 +2,27 @@
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Domain {
+    /// Untyped numeric audio/control sample. Use an explicit marker to assign
+    /// a musical unit before connecting to a semantically typed input.
     MonoAudio,
     Midi,
     Tempo,
+    /// A discrete MIDI note encoded exactly as (note_number / 128.0).
+    Note128,
+    /// A MIDI note number 0..=127 carried in numeric DSP storage.
+    MidiNote,
+    /// A pitch measured in cycles per second.
+    FrequencyHz,
+}
+
+impl Domain {
+    /// All of these compile to the same f64 storage; a generic numeric sink
+    /// may observe typed values, but generic sources may not enter typed inputs.
+    pub const fn accepts(self, source: Self) -> bool {
+        self == source || matches!(self, Self::MonoAudio) && matches!(
+            source, Self::Note128 | Self::MidiNote | Self::FrequencyHz
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

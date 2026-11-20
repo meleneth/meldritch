@@ -27,7 +27,8 @@ instance:
 local notes = graph:value_sequencer {
   id = "notes", values = {60/128, 64/128, 67/128, 72/128}
 }
-local pitch_hz = graph:note128_to_hz("to_hz", notes.value)
+local typed_note = graph:as_note128("as_note", notes.value)
+local pitch_hz = graph:note128_to_hz("to_hz", typed_note)
 graph:connect(pitch_hz, synth.pitch)
 ```
 
@@ -36,13 +37,15 @@ No ValueSequencer implementation is aware of MIDI note numbers, Hz, or VST3.
 ## Type safety boundary
 
 The existing graph compiler validates **port domains**, fan-in, module kinds,
-parameter names/ranges, and connection endpoints at preparation time. It does
-**not** currently distinguish note/128 values, MIDI note numbers, and Hz at
-the Rust type level: these ports remain `Domain::MonoAudio`. The adapter
-names express the contract, but a direct wire from a generic value to a VST3
-pitch port is not yet rejected by the type checker. Musical unit types are
-a separate future contract extension; don't mistake graph structural checks
-for dimensional analysis.
+parameter names/ranges, and connection endpoints at preparation time. It also distinguishes the `Note128`, `MidiNote`, and `FrequencyHz`
+port domains and rejects mismatched connections. Use `as_note128` to
+explicitly interpret a generic numeric source, then a conversion adapter.
+A VST3 pitch input is `FrequencyHz`, so it rejects generic or note/128
+values until explicitly adapted. A legacy generic Hz source can be
+declared with `as_frequency_hz`. A generic `MonoAudio` sink can observe
+a typed numeric signal, but a generic source cannot enter a typed input.
+The compiler erases these semantic types when it constructs the f64
+execution plan.
 
 The VST3 host's existing `pitch` port expects Hz, while `gate` and
 `velocity` use their existing numeric semantics. The adapters do not emit

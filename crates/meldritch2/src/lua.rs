@@ -1599,6 +1599,7 @@ function meldritch.graph()
   -- Adapter helpers are composition sugar for ordinary contract-declared modules.
   -- Neither the source component nor its consumer needs to know how a pitch is represented.
   for _, kind in ipairs({
+    "as_note128", "as_frequency_hz",
     "note128_to_midi", "midi_to_note128", "note128_to_hz", "hz_to_note128"
   }) do
     graph[kind] = function(self, id, source)

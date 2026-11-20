@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 44);
+        assert_eq!(contract::all().len(), 46);
         let vst3_effect = contract::find("vst3_effect").unwrap();
         assert_eq!(vst3_effect.inputs[0].name, "input_left");
         assert_eq!(vst3_effect.inputs[1].name, "input_right");
@@ -4418,7 +4418,8 @@ local graph = meldritch.graph()
 local seq = graph:value_sequencer {
     id = "notes", values = {69 / 128, 60 / 128, 72 / 128}
 }
-local hz = graph:note128_to_hz("pitch", seq.value)
+local note128 = graph:as_note128("typed", seq.value)
+local hz = graph:note128_to_hz("pitch", note128)
 local output = graph:module("output", "output")
 graph:connect(hz, output.input)
 return graph
@@ -4435,7 +4436,7 @@ return graph
             Some(60.0 / 128.0)
         );
         assert!(machine.effective_connections().iter().any(|edge| {
-            edge.from.module == "notes/select_3"
+            edge.from.module == "typed"
                 && edge.to.module == "pitch"
                 && edge.to.port == "input"
         }));
@@ -4446,7 +4447,8 @@ return graph
         let script = r#"
 local graph = meldritch.graph()
 local source = graph:module("note", "constant", {value = 64 / 128})
-local midi = graph:note128_to_midi("midi", source.out)
+local typed = graph:as_note128("typed", source.out)
+local midi = graph:note128_to_midi("midi", typed)
 local restored = graph:midi_to_note128("restored", midi)
 local hz = graph:note128_to_hz("hz", restored)
 local back = graph:hz_to_note128("back", hz)

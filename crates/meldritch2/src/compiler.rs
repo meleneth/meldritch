@@ -2420,10 +2420,10 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             .iter()
             .find(|p| p.name == edge.to.port)
             .ok_or_else(|| format!("invalid input port '{}.{}'", edge.to.module, edge.to.port))?;
-        if sp.1.domain != dp.domain {
+        if !dp.domain.accepts(sp.1.domain) {
             return Err(format!(
-                "incompatible ports '{}.{}' and '{}.{}'",
-                edge.from.module, edge.from.port, edge.to.module, edge.to.port
+                "incompatible ports '{}.{}' ({:?}) and '{}.{}' ({:?}); insert an explicit adapter",
+                edge.from.module, edge.from.port, sp.1.domain, edge.to.module, edge.to.port, dp.domain
             ));
         }
         Ok((src, dst, slot_bases[src] + sp.0, dp.fan_in))

@@ -6,17 +6,38 @@
 //! is performed in any audio process callback.
 use crate::contract::{Contract, Domain, FanIn, InputPort, OutputPort, Role};
 
-const INPUT: &[InputPort] = &[InputPort {
-    name: "input",
-    domain: Domain::MonoAudio,
-    fan_in: FanIn::One,
-    unconnected: None,
-}];
+const fn input(domain: Domain) -> InputPort {
+    InputPort {
+        name: "input",
+        domain,
+        fan_in: FanIn::One,
+        unconnected: None,
+    }
+}
+const fn output(domain: Domain) -> OutputPort {
+    OutputPort { name: "out", domain }
+}
 
-const OUTPUT: &[OutputPort] = &[OutputPort {
-    name: "out",
-    domain: Domain::MonoAudio,
-}];
+const GENERIC_INPUT: &[InputPort] = &[input(Domain::MonoAudio)];
+const NOTE128_INPUT: &[InputPort] = &[input(Domain::Note128)];
+const MIDI_INPUT: &[InputPort] = &[input(Domain::MidiNote)];
+const HZ_INPUT: &[InputPort] = &[input(Domain::FrequencyHz)];
+
+const NOTE128_OUTPUT: &[OutputPort] = &[output(Domain::Note128)];
+const MIDI_OUTPUT: &[OutputPort] = &[output(Domain::MidiNote)];
+const HZ_OUTPUT: &[OutputPort] = &[output(Domain::FrequencyHz)];
+
+/// Explicit interpretation of a generic [0,1] numeric source as note/128.
+fn as_note128(_: &mut [f64], input: &[f64], _: &[f64], _: f64, out: &mut [f64]) {
+    out[0] = note128_number(input[0]) / 128.0;
+}
+
+/// Explicit interpretation of an existing frequency-bearing numeric source.
+/// Useful at legacy instrument boundaries without implicit graph casts.
+fn as_frequency_hz(_: &mut [f64], input: &[f64], _: &[f64], _: f64, out: &mut [f64]) {
+    out[0] = input[0];
+}
+
 
 #[inline]
 fn midi_number(value: f64) -> f64 {
@@ -58,13 +79,32 @@ fn hz_to_note128(_: &mut [f64], input: &[f64], _: &[f64], _: f64, out: &mut [f64
     out[0] = midi_number(note) / 128.0;
 }
 
+pub const AS_NOTE128: Contract = Contract {
+    name: "as_note128",
+    role: Role::Processor,
+    process: as_note128,
+    state_len: 0,
+    inputs: GENERIC_INPUT,
+    outputs: NOTE128_OUTPUT,
+    params: &[],
+};
+pub const AS_FREQUENCY_HZ: Contract = Contract {
+    name: "as_frequency_hz",
+    role: Role::Processor,
+    process: as_frequency_hz,
+    state_len: 0,
+    inputs: GENERIC_INPUT,
+    outputs: HZ_OUTPUT,
+    params: &[],
+};
+
 pub const NOTE128_TO_MIDI: Contract = Contract {
     name: "note128_to_midi",
     role: Role::Processor,
     process: note128_to_midi,
     state_len: 0,
-    inputs: INPUT,
-    outputs: OUTPUT,
+    inputs: NOTE128_INPUT,
+    outputs: MIDI_OUTPUT,
     params: &[],
 };
 pub const MIDI_TO_NOTE128: Contract = Contract {
@@ -72,8 +112,8 @@ pub const MIDI_TO_NOTE128: Contract = Contract {
     role: Role::Processor,
     process: midi_to_note128,
     state_len: 0,
-    inputs: INPUT,
-    outputs: OUTPUT,
+    inputs: MIDI_INPUT,
+    outputs: NOTE128_OUTPUT,
     params: &[],
 };
 pub const NOTE128_TO_HZ: Contract = Contract {
@@ -81,8 +121,8 @@ pub const NOTE128_TO_HZ: Contract = Contract {
     role: Role::Processor,
     process: note128_to_hz,
     state_len: 0,
-    inputs: INPUT,
-    outputs: OUTPUT,
+    inputs: NOTE128_INPUT,
+    outputs: HZ_OUTPUT,
     params: &[],
 };
 pub const HZ_TO_NOTE128: Contract = Contract {
@@ -90,8 +130,8 @@ pub const HZ_TO_NOTE128: Contract = Contract {
     role: Role::Processor,
     process: hz_to_note128,
     state_len: 0,
-    inputs: INPUT,
-    outputs: OUTPUT,
+    inputs: HZ_INPUT,
+    outputs: NOTE128_OUTPUT,
     params: &[],
 };
 
