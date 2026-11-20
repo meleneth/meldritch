@@ -2,6 +2,12 @@
 
 Path: `crates/meldritch2/tests/fixtures/lua/engine/84-value-sequencer-apc.lua`
 
+From the repository root, build and run the example with one command:
+
+```bash
+cargo run --release -p meldritch2 -- perform crates/meldritch2/tests/fixtures/lua/engine/84-value-sequencer-apc.lua
+```
+
 The numbered Lua graph composes an eight-step ValueSequencer from
 Counter, Constant, and Switch components, with explicit note/128-to-Hz
 adapters, a clock, oscillator, envelope and VCA.
