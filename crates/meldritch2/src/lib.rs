@@ -4549,3 +4549,67 @@ return graph
         );
     }
 }
+
+
+#[cfg(test)]
+mod value_sequencer_apc_example_tests {
+    use crate::{compiler::compile, lua, model::ParameterId};
+
+    const PATCH: &str = include_str!("../tests/fixtures/lua/engine/84-value-sequencer-apc.lua");
+
+    #[test]
+    fn numbered_example_compiles_with_eight_faders_eight_gates_and_tui() {
+        let graph = lua::read(PATCH).unwrap();
+        let mapping = graph.apc_value_board.as_ref().unwrap();
+        assert_eq!(mapping.values[0], "notes_step_1");
+        assert_eq!(mapping.values[7], "notes_step_8");
+        assert_eq!(mapping.enabled[0], "notes_enabled_1");
+        assert_eq!(mapping.enabled[7], "notes_enabled_8");
+        assert_eq!(graph.devices.apc_mini.as_deref(), Some("APC mini"));
+        let mut machine = compile(&graph).unwrap();
+        assert_eq!(machine.screens().len(), 1);
+        for step in 1..=8 {
+            assert!(machine.control_handle(&format!("notes_step_{step}")).is_some());
+            assert!(machine.control_handle(&format!("notes_enabled_{step}")).is_some());
+            assert_eq!(
+                machine.authored_value(&ParameterId::new(
+                    format!("notes/enabled_{step}"),
+                    "value"
+                )),
+                Some(1.0)
+            );
+        }
+        assert_eq!(
+            machine.output_slot("notes", "enabled"),
+            machine.output_slot("notes/enabled_select_8", "out")
+        );
+        let mut audio = [0.0; 64];
+        machine.process(&mut audio);
+        assert!(audio.iter().all(|sample| sample.is_finite()));
+    }
+
+    #[test]
+    fn board_enable_and_numeric_pitch_are_independent() {
+        let graph = lua::read(PATCH).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let step = machine.control_handle("notes_step_1").unwrap();
+        let enabled = machine.control_handle("notes_enabled_1").unwrap();
+        step.publish(72.0 / 128.0).unwrap();
+        enabled.publish(0.0).unwrap();
+        let mut audio = [0.0; 4];
+        machine.process(&mut audio);
+        assert_eq!(
+            machine.read_output(machine.output_slot("notes", "enabled").unwrap()),
+            0.0
+        );
+        let hz = machine.read_output(machine.output_slot("pitch", "out").unwrap());
+        assert!((hz - 523.2511306011972).abs() < 1e-9, "frequency: {hz}");
+    }
+
+    #[test]
+    fn invalid_apc_binding_fails_before_audio_runtime() {
+        let mut graph = lua::read(PATCH).unwrap();
+        graph.apc_value_board.as_mut().unwrap().values[3] = "unknown".into();
+        assert!(compile(&graph).unwrap_err().contains("unknown control"));
+    }
+}

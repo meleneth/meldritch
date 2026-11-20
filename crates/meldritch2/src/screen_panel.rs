@@ -473,3 +473,43 @@ mod tests {
         assert!(!sequence.playing());
     }
 }
+
+
+#[cfg(test)]
+mod value_board_widget_tests {
+    use super::{ScreenPanel, WidgetView};
+    use crate::{compiler::compile, lua};
+    use crossterm::event::KeyCode;
+
+    const PATCH: &str = include_str!("../tests/fixtures/lua/engine/84-value-sequencer-apc.lua");
+
+    #[test]
+    fn bespoke_tui_edits_the_same_prepared_controls_as_apc() {
+        let graph = lua::read(PATCH).unwrap();
+        let machine = compile(&graph).unwrap();
+        let controls = machine
+            .control_ids()
+            .map(|id| {
+                let handle = machine.control_handle(id).unwrap();
+                let value = machine.effective_value(handle.target()).unwrap();
+                (handle, value)
+            })
+            .collect();
+        let mut panel = ScreenPanel::new(machine.screens(), controls).unwrap();
+        assert!(panel.has_value_sequencer());
+        let WidgetView::ValueSequencer { values, enabled } = &panel.current().widgets[1] else {
+            panic!("expected bespoke sequencer widget");
+        };
+        assert_eq!(enabled[0].value(), 1.0);
+        assert_eq!(values[0].value(), 60.0 / 128.0);
+        panel.value_sequence_key(KeyCode::Char('1')).unwrap();
+        panel.value_sequence_key(KeyCode::Up).unwrap();
+        let WidgetView::ValueSequencer { values, enabled } = &panel.current().widgets[1] else {
+            panic!("expected bespoke sequencer widget");
+        };
+        assert_eq!(enabled[0].value(), 0.0);
+        assert!(values[0].value() > 60.0 / 128.0);
+        panel.value_sequence_key(KeyCode::Char('1')).unwrap();
+        assert_eq!(enabled[0].value(), 1.0);
+    }
+}

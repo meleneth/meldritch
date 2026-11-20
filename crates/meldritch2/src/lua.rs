@@ -1530,6 +1530,8 @@ function meldritch.graph()
     assert(self.apc_value_board == nil, "only one APC ValueSequencer binding is supported")
     assert(type(sequence) == "table" and sequence.slot_count == 8,
       "APC ValueSequencer requires an eight-slot sequence")
+    assert(sequence._control_prefix,
+      "call sequence:controls() before binding the APC ValueSequencer")
     local values, enabled = {}, {}
     for i = 1, 8 do
       values[i] = sequence._control_prefix .. "_step_" .. i

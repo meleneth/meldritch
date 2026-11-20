@@ -1689,3 +1689,41 @@ mod tests {
         assert!(shutdown_color(63, 19).iter().any(|channel| *channel > 0));
     }
 }
+
+
+#[cfg(test)]
+mod value_board_apc_tests {
+    use super::*;
+    use crate::{compiler::compile, lua};
+
+    const PATCH: &str = include_str!("../tests/fixtures/lua/engine/84-value-sequencer-apc.lua");
+
+    #[test]
+    fn apc_faders_and_grid_edit_actual_value_board_components() {
+        let graph = lua::read(PATCH).unwrap();
+        let machine = compile(&graph).unwrap();
+        let controls = machine
+            .control_ids()
+            .map(|id| {
+                let handle = machine.control_handle(id).unwrap();
+                (handle.clone(), handle.effective_value())
+            })
+            .collect::<Vec<_>>();
+        let (values, enabled) = value_board_handles(graph.apc_value_board.as_ref().unwrap(), &controls)
+            .unwrap();
+        let mut pickups = [FaderPickup::default(); 8];
+        assert_eq!(enabled[3].effective_value(), 1.0);
+        apply_value_board(Input::Grid(27, true), &values, &enabled, &mut pickups).unwrap();
+        assert_eq!(enabled[3].effective_value(), 0.0);
+        assert_eq!(value_board_leds(&enabled)[3], [8, 8, 8]);
+        apply_value_board(Input::Grid(3, false), &values, &enabled, &mut pickups).unwrap();
+        assert_eq!(enabled[3].effective_value(), 0.0);
+        apply_value_board(Input::Grid(3, true), &values, &enabled, &mut pickups).unwrap();
+        assert_eq!(enabled[3].effective_value(), 1.0);
+        let initial = values[0].effective_value();
+        apply_value_board(Input::Fader(0, 0), &values, &enabled, &mut pickups).unwrap();
+        apply_value_board(Input::Fader(0, 127), &values, &enabled, &mut pickups).unwrap();
+        assert_ne!(values[0].effective_value(), initial);
+        assert_eq!(values[0].effective_value(), 1.0);
+    }
+}
