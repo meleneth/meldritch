@@ -477,7 +477,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod value_board_widget_tests {
     use super::{ScreenPanel, WidgetView};
