@@ -1785,6 +1785,13 @@ fn process_machine_block(machine: &mut Machine, scratch: &mut BlockScratch, fram
             }
         }
     }
+    // Keep direct output handles meaningful after block processing too.
+    // One bounded copy per prepared slot per block, never per output read.
+    if frames != 0 {
+        for (slot, buffer) in machine.slots.iter_mut().zip(&scratch.slot_buffers) {
+            *slot = buffer[frames - 1];
+        }
+    }
 }
 
 /// Block-oriented executor for file rendering. The live callback continues to
