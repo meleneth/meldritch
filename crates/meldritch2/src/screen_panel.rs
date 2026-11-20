@@ -309,7 +309,7 @@ impl ScreenPanel {
                     }
                     KeyCode::Char('l') => {
                         looped.publish(if looped.value() >= 0.5 { 0.0 } else { 1.0 })?
-                    },
+                    }
                     _ => return Ok(false),
                 }
                 return Ok(true);
@@ -529,7 +529,10 @@ mod value_board_widget_tests {
             .collect();
         let mut panel = ScreenPanel::new(machine.screens(), controls).unwrap();
         assert!(panel.has_value_sequencer());
-        let WidgetView::ValueSequencer { values, enabled, .. } = &panel.current().widgets[1] else {
+        let WidgetView::ValueSequencer {
+            values, enabled, ..
+        } = &panel.current().widgets[1]
+        else {
             panic!("expected bespoke sequencer widget");
         };
         assert_eq!(enabled[0].value(), 1.0);
@@ -537,7 +540,10 @@ mod value_board_widget_tests {
         panel.value_sequence_key(KeyCode::Char('1')).unwrap();
         panel.value_sequence_key(KeyCode::Up).unwrap();
         {
-            let WidgetView::ValueSequencer { values, enabled, .. } = &panel.current().widgets[1] else {
+            let WidgetView::ValueSequencer {
+                values, enabled, ..
+            } = &panel.current().widgets[1]
+            else {
                 panic!("expected bespoke sequencer widget");
             };
             assert_eq!(enabled[0].value(), 0.0);
@@ -546,7 +552,8 @@ mod value_board_widget_tests {
         panel.value_sequence_key(KeyCode::Char('[')).unwrap();
         panel.value_sequence_key(KeyCode::Char('l')).unwrap();
         {
-            let WidgetView::ValueSequencer { length, looped, .. } = &panel.current().widgets[1] else {
+            let WidgetView::ValueSequencer { length, looped, .. } = &panel.current().widgets[1]
+            else {
                 panic!("expected bespoke sequencer widget");
             };
             assert_eq!(length.value(), 7.0);
