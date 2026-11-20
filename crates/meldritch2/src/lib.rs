@@ -4443,6 +4443,78 @@ return graph
     }
 
     #[test]
+    fn compiler_rejects_incompatible_note_units_before_execution() {
+        let invalid = [
+            ("note128_to_hz", "FrequencyHz", "note128_to_midi"),
+            ("note128_to_midi", "MidiNote", "note128_to_hz"),
+            ("midi_to_note128", "Note128", "note128_to_hz"),
+        ];
+        for (source_kind, source_unit, target_kind) in invalid {
+            let script = format!(r#"
+local graph = meldritch.graph()
+local source = graph:module("source", "constant", {{value = 60 / 128}})
+local adapter = graph:module("adapter", "{source_kind}")
+local target = graph:module("target", "{target_kind}")
+local sink = graph:module("sink", "output")
+graph:connect(source.out, adapter.input)
+graph:connect(adapter.out, target.input)
+graph:connect(target.out, sink.input)
+return graph
+"#);
+            let graph = lua::read(&script).unwrap();
+            let error = compile(&graph).unwrap_err();
+            assert!(
+                error.contains("incompatible ports") && error.contains(source_unit),
+                "{source_kind} -> {target_kind}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn typed_note_and_frequency_cannot_enter_vst_pitch_without_adapter() {
+        // VST pitch inputs are physically frequency values (Hz), regardless
+        // of how the producing composition is authored.
+        let pitch_contract = crate::contract::find("vst3").unwrap();
+        let pitch = pitch_contract.inputs.iter().find(|p| p.name == "pitch").unwrap();
+        assert_eq!(pitch.domain, crate::contract::Domain::FrequencyHz);
+        assert!(!pitch.domain.accepts(crate::contract::Domain::Note128));
+        assert!(!pitch.domain.accepts(crate::contract::Domain::MidiNote));
+        assert!(!pitch.domain.accepts(crate::contract::Domain::MonoAudio));
+        assert!(pitch.domain.accepts(crate::contract::Domain::FrequencyHz));
+
+        let script = r#"
+local graph = meldritch.graph()
+local source = graph:module("source", "constant", {value = 69 / 128})
+local notes = graph:as_note128("notes", source.out)
+local hz = graph:note128_to_hz("hz", notes)
+local sink = graph:module("sink", "output")
+graph:connect(hz, sink.input)
+return graph
+"#;
+        let mut machine = compile(&lua::read(script).unwrap()).unwrap();
+        let mut buffer = [f64::NAN; 2];
+        machine.process(&mut buffer);
+        assert_eq!(buffer, [440.0; 2]);
+    }
+
+    #[test]
+    fn bare_numeric_values_must_be_explicitly_interpreted() {
+        for target in ["note128_to_midi", "note128_to_hz", "hz_to_note128", "midi_to_note128"] {
+            let script = format!(r#"
+local graph = meldritch.graph()
+local source = graph:module("source", "constant", {{value = 0.5}})
+local adapter = graph:module("adapter", "{target}")
+local sink = graph:module("sink", "output")
+graph:connect(source.out, adapter.input)
+graph:connect(adapter.out, sink.input)
+return graph
+"#);
+            let error = compile(&lua::read(&script).unwrap()).unwrap_err();
+            assert!(error.contains("incompatible ports"), "{target}: {error}");
+        }
+    }
+
+    #[test]
     fn adapters_compose_back_to_note128_without_a_special_pitch_sequencer() {
         let script = r#"
 local graph = meldritch.graph()
