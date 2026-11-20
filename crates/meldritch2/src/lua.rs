@@ -1777,12 +1777,16 @@ function meldritch.value_sequencer(scope, spec)
   board:output("position", counter.position)
 
   local selected
+  local selected_enabled
   for index = 1, slots do
     local value = board:module("slot_" .. index, "constant",
       {value = values and values[index] or 0.0})
     board:parameter("slot_" .. index, value, "value")
+    local enabled = board:module("enabled_" .. index, "constant", {value = 1.0})
+    board:parameter("enabled_" .. index, enabled, "value")
     if selected == nil then
       selected = value.out
+      selected_enabled = enabled.out
     else
       local selector = board:module("select_" .. index, "switch",
         {threshold = index - 1.5})
@@ -1790,9 +1794,16 @@ function meldritch.value_sequencer(scope, spec)
       board:connect(value.out, selector.right)
       board:connect(counter.index, selector.select)
       selected = selector.out
+      local gate_selector = board:module("enabled_select_" .. index, "switch",
+        {threshold = index - 1.5})
+      board:connect(selected_enabled, gate_selector.left)
+      board:connect(enabled.out, gate_selector.right)
+      board:connect(counter.index, gate_selector.select)
+      selected_enabled = gate_selector.out
     end
   end
   board:output("value", selected)
+  board:output("enabled", selected_enabled)
   local instance = scope:instance(spec.id, board)
   instance.slot_count = slots
 
@@ -1805,6 +1816,8 @@ function meldritch.value_sequencer(scope, spec)
     for i = 1, slots do
       scope:control(prefix .. "_step_" .. i, self, "slot_" .. i,
         {min = 0, max = 1, label = "Step " .. i})
+      scope:control(prefix .. "_enabled_" .. i, self, "enabled_" .. i,
+        {min = 0, max = 1, label = "Enable " .. i})
     end
     if slots > 1 then
       scope:control(prefix .. "_length", self, "length",
