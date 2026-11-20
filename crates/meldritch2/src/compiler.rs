@@ -926,11 +926,7 @@ fn validate_screens(
                     length,
                     looped,
                 } => {
-                    for id in values
-                        .iter()
-                        .chain(enabled.iter())
-                        .chain([length, looped])
-                    {
+                    for id in values.iter().chain(enabled.iter()).chain([length, looped]) {
                         if !controls.contains_key(id) {
                             return Err(format!(
                                 "screen '{}' ValueSequencer references unknown control '{id}'",
