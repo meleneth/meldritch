@@ -838,7 +838,9 @@ impl ApcSession {
                 let mut pickups = [FaderPickup::default(); 8];
                 while !worker_stop.load(Ordering::Acquire) {
                     while let Ok(event) = rx.try_recv() {
-                        if let Err(error) = apply_value_board(event, &values, &enabled, &mut pickups) {
+                        if let Err(error) =
+                            apply_value_board(event, &values, &enabled, &mut pickups)
+                        {
                             eprintln!("APC ValueSequencer control error: {error}");
                         }
                     }
