@@ -110,10 +110,7 @@ mod semantic_types_tests {
             let normalized = Note128::from(note);
             assert_eq!(normalized.value(), f64::from(number) / 128.0);
             assert_eq!(MidiNote::try_from(normalized), Ok(note));
-            assert_eq!(
-                Note128::new(f64::from(number) / 128.0),
-                Ok(normalized)
-            );
+            assert_eq!(Note128::new(f64::from(number) / 128.0), Ok(normalized));
         }
     }
 
