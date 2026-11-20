@@ -1794,8 +1794,10 @@ function meldritch.value_sequencer(scope, spec)
       scope:control(prefix .. "_step_" .. i, self, "slot_" .. i,
         {min = 0, max = 1, label = "Step " .. i})
     end
-    scope:control(prefix .. "_length", self, "length",
-      {min = 1, max = slots, label = "Active slots"})
+    if slots > 1 then
+      scope:control(prefix .. "_length", self, "length",
+        {min = 1, max = slots, label = "Active slots"})
+    end
     scope:control(prefix .. "_looped", self, "looped",
       {min = 0, max = 1, label = "Loop"})
     return self
