@@ -1593,6 +1593,9 @@ function meldritch.graph()
     table.insert(self.instances, { id = id, definition = definition.name, values = values or {} })
     return handle
   end
+  function graph:value_sequencer(spec)
+    return meldritch.value_sequencer(self, spec)
+  end
   function graph:control(id, module, parameter, range)
     assert(type(id) == "string", "control ID must be a string")
     assert(type(module) == "table" and type(module.id) == "string", "control target must be a module")
@@ -1710,6 +1713,94 @@ function meldritch.subpatch(name)
   graph.is_subpatch = true
   meldritch._subpatches[name] = graph
   return graph
+end
+
+-- ValueSequencer is an ordinary subpatch composition. No specialized Rust
+-- sequencer processor or UI widget is involved. Slots remain independent
+-- constant components and can be exposed as generic controls if desired.
+local value_sequencer_serial = 0
+function meldritch.value_sequencer(scope, spec)
+  assert(type(scope) == "table" and type(scope.instance) == "function",
+    "value_sequencer requires a graph or Board")
+  assert(type(spec) == "table", "value_sequencer requires a specification")
+  assert(type(spec.id) == "string" and spec.id ~= "", "value_sequencer requires a nonempty id")
+  for key in pairs(spec) do
+    assert(key == "id" or key == "slots" or key == "looped" or key == "values",
+      "unknown value_sequencer option: " .. tostring(key))
+  end
+  local values = spec.values
+  assert(values == nil or type(values) == "table", "values must be a sequence")
+  if values ~= nil then
+    for key in pairs(values) do
+      assert(type(key) == "number" and key % 1 == 0 and key >= 1 and key <= #values,
+        "values must be a dense sequence")
+    end
+  end
+  local slots = spec.slots or (values and #values) or 8
+  assert(type(slots) == "number" and slots % 1 == 0 and slots >= 1 and slots <= 256,
+    "slots must be an integer in 1..256")
+  assert(values == nil or #values == slots, "values length must match slots")
+  assert(spec.looped == nil or type(spec.looped) == "boolean", "looped must be boolean")
+  local looped = spec.looped ~= false
+  for index = 1, slots do
+    local value = values and values[index] or 0.0
+    assert(type(value) == "number" and value == value and value >= 0.0 and value <= 1.0,
+      "slot " .. index .. " must be a finite normalized value in 0..1")
+  end
+
+  value_sequencer_serial = value_sequencer_serial + 1
+  local board = meldritch.subpatch("__value_sequencer_" .. value_sequencer_serial)
+  local counter = board:module("counter", "counter")
+  local length = board:module("length", "constant", {value = slots})
+  local loop = board:module("looped", "constant", {value = looped and 1 or 0})
+  board:normalize(length.out, counter.length)
+  board:normalize(loop.out, counter.looped)
+  board:input("advance", counter.advance)
+  board:input("reset", counter.reset)
+  board:input("length", counter.length)
+  board:input("looped", counter.looped)
+  board:parameter("length", length, "value")
+  board:parameter("looped", loop, "value")
+  board:output("index", counter.index)
+  board:output("position", counter.position)
+
+  local selected
+  for index = 1, slots do
+    local value = board:module("slot_" .. index, "constant",
+      {value = values and values[index] or 0.0})
+    board:parameter("slot_" .. index, value, "value")
+    if selected == nil then
+      selected = value.out
+    else
+      local selector = board:module("select_" .. index, "switch",
+        {threshold = index - 1.5})
+      board:connect(selected, selector.left)
+      board:connect(value.out, selector.right)
+      board:connect(counter.index, selector.select)
+      selected = selector.out
+    end
+  end
+  board:output("value", selected)
+  local instance = scope:instance(spec.id, board)
+  instance.slot_count = slots
+
+  -- UI affordances are optional. They bind to the independent value sources;
+  -- the Board itself neither owns nor implements a fader.
+  function instance:controls(prefix)
+    assert(not scope.is_subpatch, "controls belong to the parent graph")
+    prefix = prefix or self.id
+    assert(type(prefix) == "string" and prefix ~= "", "control prefix must be nonempty")
+    for i = 1, slots do
+      scope:control(prefix .. "_step_" .. i, self, "slot_" .. i,
+        {min = 0, max = 1, label = "Step " .. i})
+    end
+    scope:control(prefix .. "_length", self, "length",
+      {min = 1, max = slots, label = "Active slots"})
+    scope:control(prefix .. "_looped", self, "looped",
+      {min = 0, max = 1, label = "Loop"})
+    return self
+  end
+  return instance
 end
 
 local instrument_serial = 0
