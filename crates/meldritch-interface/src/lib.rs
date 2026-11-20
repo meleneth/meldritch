@@ -18,10 +18,10 @@ pub enum Domain {
 impl Domain {
     /// All of these compile to the same f64 storage; a generic numeric sink
     /// may observe typed values, but generic sources may not enter typed inputs.
-    pub const fn accepts(self, source: Self) -> bool {
-        self == source || matches!(self, Self::MonoAudio) && matches!(
-            source, Self::Note128 | Self::MidiNote | Self::FrequencyHz
-        )
+    pub fn accepts(self, source: Self) -> bool {
+        self == source
+            || matches!(self, Self::MonoAudio)
+                && matches!(source, Self::Note128 | Self::MidiNote | Self::FrequencyHz)
     }
 }
 
