@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 39);
+        assert_eq!(contract::all().len(), 46);
         let vst3_effect = contract::find("vst3_effect").unwrap();
         assert_eq!(vst3_effect.inputs[0].name, "input_left");
         assert_eq!(vst3_effect.inputs[1].name, "input_right");
@@ -4236,3 +4236,385 @@ return graph
     }
 }
 pub mod apc;
+
+#[cfg(test)]
+mod value_sequencer_board_tests {
+    use crate::{compiler::compile_at_rate, lua, model::ParameterId};
+
+    const PATCH: &str = include_str!("../examples/value-sequencer-board.lua");
+
+    #[test]
+    fn ordinary_components_form_eight_slot_board_with_direct_readable_output() {
+        let graph = lua::read(PATCH).unwrap();
+        let mut machine = compile_at_rate(&graph, 48.0).unwrap();
+        let value = machine.output_slot("sequence", "value").unwrap();
+        let internal = machine.output_slot("sequence/select_8", "out").unwrap();
+        assert_eq!(value, internal);
+        let position = machine.output_slot("sequence", "position").unwrap();
+        assert_eq!(
+            position,
+            machine.output_slot("sequence/counter", "position").unwrap()
+        );
+
+        let mut samples = [0.0; 48];
+        machine.process(&mut samples);
+        assert!(samples.iter().all(|sample| (0.0..=1.0).contains(sample)));
+        assert!(machine.read_output(value).is_finite());
+
+        // All eight slots are independent constant components, exposed
+        // through one-time-resolved instance parameter handles.
+        let id = ParameterId::new("sequence/slot_3", "value");
+        assert_eq!(machine.authored_value(&id), Some(0.5));
+    }
+
+    #[test]
+    fn lua_wrapper_defaults_to_eight_normalized_zero_slots_and_looping() {
+        let patch = r#"
+local graph = meldritch.graph()
+local seq = graph:value_sequencer { id = "seq" }
+seq:controls()
+local output = graph:module("output", "output")
+graph:connect(seq.value, output.input)
+return graph
+"#;
+        let graph = lua::read(patch).unwrap();
+        let mut machine = compile_at_rate(&graph, 48.0).unwrap();
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("seq/length", "value")),
+            Some(8.0)
+        );
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("seq/looped", "value")),
+            Some(1.0)
+        );
+        for slot in 1..=8 {
+            assert_eq!(
+                machine.authored_value(&ParameterId::new(format!("seq/slot_{slot}"), "value")),
+                Some(0.0)
+            );
+            assert!(
+                machine
+                    .control_handle(&format!("seq_step_{slot}"))
+                    .is_some()
+            );
+        }
+        assert!(machine.control_handle("seq_length").is_some());
+        assert!(machine.control_handle("seq_looped").is_some());
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.0; 4]);
+        assert_eq!(
+            machine.output_slot("seq", "value"),
+            machine.output_slot("seq/select_8", "out")
+        );
+    }
+
+    #[test]
+    fn lua_wrapper_supports_distinct_lengths_values_instances_and_one_shot() {
+        let patch = r#"
+local graph = meldritch.graph()
+local left = graph:value_sequencer {
+  id = "left", values = {0.25, 0.5, 0.75}, looped = false
+}
+local right = graph:value_sequencer {
+  id = "right", slots = 1, values = {1.0}
+}
+right:controls("right")
+local sink = graph:module("output", "output")
+graph:connect(left.value, sink.input)
+return graph
+"#;
+        let graph = lua::read(patch).unwrap();
+        let mut machine = compile_at_rate(&graph, 48.0).unwrap();
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("left/looped", "value")),
+            Some(0.0)
+        );
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("left/length", "value")),
+            Some(3.0)
+        );
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("left/slot_3", "value")),
+            Some(0.75)
+        );
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("right/slot_1", "value")),
+            Some(1.0)
+        );
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("right/length", "value")),
+            Some(1.0)
+        );
+        assert_eq!(
+            machine.output_slot("right", "value"),
+            machine.output_slot("right/slot_1", "out")
+        );
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.25; 4]);
+        assert!(machine.control_handle("right_step_1").is_some());
+        assert!(machine.control_handle("right_length").is_none());
+    }
+
+    #[test]
+    fn lua_wrapper_rejects_invalid_configurations_at_authoring_boundary() {
+        let invalid = [
+            ("slots = 0", "slots must be an integer"),
+            ("slots = 1.5", "slots must be an integer"),
+            (
+                "values = {0.1, 0.2}, slots = 3",
+                "values length must match slots",
+            ),
+            ("values = {-0.1}", "must be a finite normalized value"),
+            ("values = {1.01}", "must be a finite normalized value"),
+            ("looped = 1", "looped must be boolean"),
+            ("unknown = true", "unknown value_sequencer option"),
+        ];
+        for (fields, message) in invalid {
+            let patch = format!(
+                r#"local graph = meldritch.graph()
+graph:value_sequencer {{ id = "invalid", {fields} }}
+return graph"#
+            );
+            let error = lua::read(&patch).unwrap_err();
+            assert!(error.contains(message), "{fields}: {error}");
+        }
+    }
+
+    #[test]
+    fn board_controls_are_normal_components_with_normalled_connections() {
+        let graph = lua::read(PATCH).unwrap();
+        let machine = compile_at_rate(&graph, 48.0).unwrap();
+        let normalizations = machine.effective_connections();
+        assert!(
+            normalizations
+                .iter()
+                .any(|edge| edge.from.module == "sequence/length"
+                    && edge.to.module == "sequence/counter"
+                    && edge.to.port == "length")
+        );
+        assert!(
+            normalizations
+                .iter()
+                .any(|edge| edge.from.module == "sequence/looped"
+                    && edge.to.module == "sequence/counter"
+                    && edge.to.port == "looped")
+        );
+        assert!(machine.control_handle("sequence_step_1").is_some());
+        assert!(machine.control_handle("sequence_step_8").is_some());
+    }
+}
+
+#[cfg(test)]
+mod note128_adapter_graph_tests {
+    use crate::{compiler::compile, lua, model::ParameterId};
+
+    #[test]
+    fn sequenced_note128_goes_to_hz_without_sequencer_special_cases() {
+        let script = r#"
+local graph = meldritch.graph()
+local seq = graph:value_sequencer {
+    id = "notes", values = {69 / 128, 60 / 128, 72 / 128}
+}
+local note128 = graph:as_note128("typed", seq.value)
+local hz = graph:note128_to_hz("pitch", note128)
+local output = graph:module("output", "output")
+graph:connect(hz, output.input)
+return graph
+"#;
+        let graph = lua::read(script).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let slot = machine.output_slot("pitch", "out").unwrap();
+        let mut buffer = [0.0; 4];
+        machine.process(&mut buffer);
+        assert_eq!(buffer, [440.0; 4]);
+        assert_eq!(machine.read_output(slot), 440.0);
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("notes/slot_2", "value")),
+            Some(60.0 / 128.0)
+        );
+        assert!(machine.effective_connections().iter().any(|edge| {
+            edge.from.module == "typed" && edge.to.module == "pitch" && edge.to.port == "input"
+        }));
+    }
+
+    #[test]
+    fn compiler_rejects_incompatible_note_units_before_execution() {
+        let invalid = [
+            ("as_note128", "Note128", "hz_to_note128"),
+            ("note128_to_midi", "MidiNote", "note128_to_hz"),
+            ("note128_to_hz", "FrequencyHz", "note128_to_midi"),
+        ];
+        for (source_kind, source_unit, target_kind) in invalid {
+            let script = format!(
+                r#"
+local graph = meldritch.graph()
+local source = graph:module("source", "constant", {{value = 60 / 128}})
+local tagged = graph:as_note128("tagged", source.out)
+local adapter = graph:module("adapter", "{source_kind}")
+local target = graph:module("target", "{target_kind}")
+local sink = graph:module("sink", "output")
+graph:connect({{ module = "tagged", port = "out", direction = "output" }}, adapter.input)
+graph:connect(adapter.out, target.input)
+graph:connect(target.out, sink.input)
+return graph
+"#
+            );
+            let graph = lua::read(&script).unwrap();
+            let error = compile(&graph).unwrap_err();
+            assert!(
+                error.contains("incompatible ports") && error.contains(source_unit),
+                "{source_kind} -> {target_kind}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn typed_note_and_frequency_cannot_enter_vst_pitch_without_adapter() {
+        // VST pitch inputs are physically frequency values (Hz), regardless
+        // of how the producing composition is authored.
+        let pitch_contract = crate::contract::find("vst3").unwrap();
+        let pitch = pitch_contract
+            .inputs
+            .iter()
+            .find(|p| p.name == "pitch")
+            .unwrap();
+        assert_eq!(pitch.domain, crate::contract::Domain::FrequencyHz);
+        assert!(!pitch.domain.accepts(crate::contract::Domain::Note128));
+        assert!(!pitch.domain.accepts(crate::contract::Domain::MidiNote));
+        assert!(!pitch.domain.accepts(crate::contract::Domain::MonoAudio));
+        assert!(pitch.domain.accepts(crate::contract::Domain::FrequencyHz));
+
+        let script = r#"
+local graph = meldritch.graph()
+local source = graph:module("source", "constant", {value = 69 / 128})
+local notes = graph:as_note128("notes", source.out)
+local hz = graph:note128_to_hz("hz", notes)
+local sink = graph:module("sink", "output")
+graph:connect(hz, sink.input)
+return graph
+"#;
+        let mut machine = compile(&lua::read(script).unwrap()).unwrap();
+        let mut buffer = [f64::NAN; 2];
+        machine.process(&mut buffer);
+        assert_eq!(buffer, [440.0; 2]);
+    }
+
+    #[test]
+    fn bare_numeric_values_must_be_explicitly_interpreted() {
+        for target in [
+            "note128_to_midi",
+            "note128_to_hz",
+            "hz_to_note128",
+            "midi_to_note128",
+        ] {
+            let script = format!(
+                r#"
+local graph = meldritch.graph()
+local source = graph:module("source", "constant", {{value = 0.5}})
+local adapter = graph:module("adapter", "{target}")
+local sink = graph:module("sink", "output")
+graph:connect(source.out, adapter.input)
+graph:connect(adapter.out, sink.input)
+return graph
+"#
+            );
+            let error = compile(&lua::read(&script).unwrap()).unwrap_err();
+            assert!(error.contains("incompatible ports"), "{target}: {error}");
+        }
+    }
+
+    #[test]
+    fn adapters_compose_back_to_note128_without_a_special_pitch_sequencer() {
+        let script = r#"
+local graph = meldritch.graph()
+local source = graph:module("note", "constant", {value = 64 / 128})
+local typed = graph:as_note128("typed", source.out)
+local midi = graph:note128_to_midi("midi", typed)
+local restored = graph:midi_to_note128("restored", midi)
+local hz = graph:note128_to_hz("hz", restored)
+local back = graph:hz_to_note128("back", hz)
+local output = graph:module("output", "output")
+graph:connect(back, output.input)
+return graph
+"#;
+        let mut machine = compile(&lua::read(script).unwrap()).unwrap();
+        let mut buffer = [0.0; 3];
+        machine.process(&mut buffer);
+        assert_eq!(buffer, [64.0 / 128.0; 3]);
+        assert_eq!(
+            machine.read_output(machine.output_slot("midi", "out").unwrap()),
+            64.0
+        );
+    }
+}
+
+#[cfg(test)]
+mod value_sequencer_apc_example_tests {
+    use crate::{compiler::compile, lua, model::ParameterId};
+
+    const PATCH: &str = include_str!("../tests/fixtures/lua/engine/84-value-sequencer-apc.lua");
+
+    #[test]
+    fn numbered_example_compiles_with_eight_faders_eight_gates_and_tui() {
+        let graph = lua::read(PATCH).unwrap();
+        let mapping = graph.apc_value_board.as_ref().unwrap();
+        assert_eq!(mapping.values[0], "notes_step_1");
+        assert_eq!(mapping.values[7], "notes_step_8");
+        assert_eq!(mapping.enabled[0], "notes_enabled_1");
+        assert_eq!(mapping.enabled[7], "notes_enabled_8");
+        assert_eq!(graph.devices.apc_mini.as_deref(), Some("APC mini"));
+        let mut machine = compile(&graph).unwrap();
+        assert_eq!(machine.screens().len(), 1);
+        for step in 1..=8 {
+            assert!(
+                machine
+                    .control_handle(&format!("notes_step_{step}"))
+                    .is_some()
+            );
+            assert!(
+                machine
+                    .control_handle(&format!("notes_enabled_{step}"))
+                    .is_some()
+            );
+            assert_eq!(
+                machine.authored_value(&ParameterId::new(format!("notes/enabled_{step}"), "value")),
+                Some(1.0)
+            );
+        }
+        assert_eq!(
+            machine.output_slot("notes", "enabled"),
+            machine.output_slot("notes/enabled_select_8", "out")
+        );
+        let mut audio = [0.0; 64];
+        machine.process(&mut audio);
+        assert!(audio.iter().all(|sample| sample.is_finite()));
+    }
+
+    #[test]
+    fn board_enable_and_numeric_pitch_are_independent() {
+        let graph = lua::read(PATCH).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        // The first high clock sample advances the counter to step two.
+        let step = machine.control_handle("notes_step_2").unwrap();
+        let enabled = machine.control_handle("notes_enabled_2").unwrap();
+        step.publish(72.0 / 128.0).unwrap();
+        enabled.publish(0.0).unwrap();
+        let mut audio = [0.0; 4];
+        machine.process(&mut audio);
+        assert_eq!(
+            machine.read_output(machine.output_slot("notes", "enabled").unwrap()),
+            0.0
+        );
+        let hz = machine.read_output(machine.output_slot("pitch", "out").unwrap());
+        assert!((hz - 523.2511306011972).abs() < 1e-9, "frequency: {hz}");
+    }
+
+    #[test]
+    fn invalid_apc_binding_fails_before_audio_runtime() {
+        let mut graph = lua::read(PATCH).unwrap();
+        graph.apc_value_board.as_mut().unwrap().values[3] = "unknown".into();
+        assert!(compile(&graph).unwrap_err().contains("unknown control"));
+    }
+}

@@ -17,7 +17,7 @@ use crate::{
     live::{LiveControl, LiveRuntime},
     live_notes::{LiveNoteConsumer, live_note_queue},
     midi::{MidiRouter, TimedMidiRouter},
-    model::{Action, ControlSurface, Graph, Navigation, Performance, Screen},
+    model::{Action, ApcValueBoard, ControlSurface, Graph, Navigation, Performance, Screen},
 };
 
 // Serum's per-process-call overhead makes 256-frame chunks miss real-time
@@ -212,6 +212,7 @@ pub struct DeviceOutput {
     performance: Option<Performance>,
     actions: Vec<Action>,
     apc_mini: Option<String>,
+    apc_value_board: Option<ApcValueBoard>,
     control_surfaces: Vec<ControlSurface>,
     focus_controls: Vec<(ControlHandle, f64)>,
     focus_selection: Arc<std::sync::atomic::AtomicUsize>,
@@ -329,6 +330,7 @@ impl DeviceOutput {
         let performance = graph.performance.clone();
         let actions = graph.actions.clone();
         let apc_mini = graph.devices.apc_mini.clone();
+        let apc_value_board = graph.apc_value_board.clone();
         let control_surfaces = graph.control_surfaces.clone();
         let controls: Vec<(ControlHandle, f64)> = machine
             .control_ids()
@@ -472,6 +474,7 @@ impl DeviceOutput {
             performance,
             actions,
             apc_mini,
+            apc_value_board,
             control_surfaces,
             focus_controls,
             focus_selection,
@@ -576,6 +579,9 @@ impl DeviceOutput {
     }
     pub fn apc_mini(&self) -> Option<&str> {
         self.apc_mini.as_deref()
+    }
+    pub fn apc_value_board(&self) -> Option<&ApcValueBoard> {
+        self.apc_value_board.as_ref()
     }
     pub fn control_surfaces(&self) -> &[ControlSurface] {
         &self.control_surfaces

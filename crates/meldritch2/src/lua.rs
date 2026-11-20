@@ -1497,7 +1497,8 @@ function meldritch.graph()
     controls = {}, midi_ccs = {}, note_bindings = {}, poly_bindings = {}, external_inputs = {}, external_outputs = {},
     external_parameters = {}, screens = {}, actions = {}, midi_buttons = {}, midi_packets = {},
     live_midi_inputs = {}, live_midi_modules = {}, live_midi_connections = {}, live_midi_note_source = nil,
-    performance = nil, _navigation = nil, _devices = {}, _event_handles = {}, _control_surfaces = {}, automations = {} }
+    performance = nil, _navigation = nil, _devices = {}, _event_handles = {}, _control_surfaces = {}, automations = {},
+    apc_value_board = nil }
   function graph:devices(devices)
     assert(type(devices) == "table", "devices must be a table")
     assert(devices.audio_output == nil or
@@ -1524,6 +1525,19 @@ function meldritch.graph()
       midi_controls = devices.midi_controls or {},
       apc_mini = devices.apc_mini,
     }
+  end
+  function graph:apc_value_sequencer(sequence)
+    assert(self.apc_value_board == nil, "only one APC ValueSequencer binding is supported")
+    assert(type(sequence) == "table" and sequence.slot_count == 8,
+      "APC ValueSequencer requires an eight-slot sequence")
+    assert(sequence._control_prefix,
+      "call sequence:controls() before binding the APC ValueSequencer")
+    local values, enabled = {}, {}
+    for i = 1, 8 do
+      values[i] = sequence._control_prefix .. "_step_" .. i
+      enabled[i] = sequence._control_prefix .. "_enabled_" .. i
+    end
+    self.apc_value_board = { values = values, enabled = enabled }
   end
   function graph:control_surface(surface)
     assert(type(surface) == "table", "control surface must be a table")
@@ -1593,6 +1607,21 @@ function meldritch.graph()
     table.insert(self.instances, { id = id, definition = definition.name, values = values or {} })
     return handle
   end
+  function graph:value_sequencer(spec)
+    return meldritch.value_sequencer(self, spec)
+  end
+  -- Adapter helpers are composition sugar for ordinary contract-declared modules.
+  -- Neither the source component nor its consumer needs to know how a pitch is represented.
+  for _, kind in ipairs({
+    "as_note128", "as_frequency_hz",
+    "note128_to_midi", "midi_to_note128", "note128_to_hz", "hz_to_note128"
+  }) do
+    graph[kind] = function(self, id, source)
+      local adapter = self:module(id, kind)
+      self:connect(source, adapter.input)
+      return adapter.out
+    end
+  end
   function graph:control(id, module, parameter, range)
     assert(type(id) == "string", "control ID must be a string")
     assert(type(module) == "table" and type(module.id) == "string", "control target must be a module")
@@ -1638,6 +1667,22 @@ function meldritch.graph()
       assert(type(label) == "string" and type(control_id) == "string" and type(value) == "number",
         "button widget needs a label, control ID, and numeric value")
       table.insert(self.widgets, { kind = "button", label = label, control_id = control_id, value = value })
+    end
+    function screen:value_sequencer(sequence)
+      assert(type(sequence) == "table" and sequence.slot_count == 8,
+        "ValueSequencer TUI requires an eight-slot sequence")
+      assert(sequence._control_prefix,
+        "call sequence:controls() before constructing the ValueSequencer TUI")
+      local values, enabled = {}, {}
+      for i = 1, 8 do
+        values[i] = sequence._control_prefix .. "_step_" .. i
+        enabled[i] = sequence._control_prefix .. "_enabled_" .. i
+      end
+      table.insert(self.widgets, {
+        kind = "value_sequencer", values = values, enabled = enabled,
+        length = sequence._control_prefix .. "_length",
+        looped = sequence._control_prefix .. "_looped",
+      })
     end
     function screen:performance_controls()
       table.insert(self.widgets, { kind = "performance_controls" })
@@ -1710,6 +1755,111 @@ function meldritch.subpatch(name)
   graph.is_subpatch = true
   meldritch._subpatches[name] = graph
   return graph
+end
+
+-- ValueSequencer is an ordinary subpatch composition. No specialized Rust
+-- sequencer processor or UI widget is involved. Slots remain independent
+-- constant components and can be exposed as generic controls if desired.
+local value_sequencer_serial = 0
+function meldritch.value_sequencer(scope, spec)
+  assert(type(scope) == "table" and type(scope.instance) == "function",
+    "value_sequencer requires a graph or Board")
+  assert(type(spec) == "table", "value_sequencer requires a specification")
+  assert(type(spec.id) == "string" and spec.id ~= "", "value_sequencer requires a nonempty id")
+  for key in pairs(spec) do
+    assert(key == "id" or key == "slots" or key == "looped" or key == "values",
+      "unknown value_sequencer option: " .. tostring(key))
+  end
+  local values = spec.values
+  assert(values == nil or type(values) == "table", "values must be a sequence")
+  if values ~= nil then
+    for key in pairs(values) do
+      assert(type(key) == "number" and key % 1 == 0 and key >= 1 and key <= #values,
+        "values must be a dense sequence")
+    end
+  end
+  local slots = spec.slots or (values and #values) or 8
+  assert(type(slots) == "number" and slots % 1 == 0 and slots >= 1 and slots <= 256,
+    "slots must be an integer in 1..256")
+  assert(values == nil or #values == slots, "values length must match slots")
+  assert(spec.looped == nil or type(spec.looped) == "boolean", "looped must be boolean")
+  local looped = spec.looped ~= false
+  for index = 1, slots do
+    local value = values and values[index] or 0.0
+    assert(type(value) == "number" and value == value and value >= 0.0 and value <= 1.0,
+      "slot " .. index .. " must be a finite normalized value in 0..1")
+  end
+
+  value_sequencer_serial = value_sequencer_serial + 1
+  local board = meldritch.subpatch("__value_sequencer_" .. value_sequencer_serial)
+  local counter = board:module("counter", "counter")
+  local length = board:module("length", "constant", {value = slots})
+  local loop = board:module("looped", "constant", {value = looped and 1 or 0})
+  board:normalize(length.out, counter.length)
+  board:normalize(loop.out, counter.looped)
+  board:input("advance", counter.advance)
+  board:input("reset", counter.reset)
+  board:input("length", counter.length)
+  board:input("looped", counter.looped)
+  board:parameter("length", length, "value")
+  board:parameter("looped", loop, "value")
+  board:output("index", counter.index)
+  board:output("position", counter.position)
+
+  local selected
+  local selected_enabled
+  for index = 1, slots do
+    local value = board:module("slot_" .. index, "constant",
+      {value = values and values[index] or 0.0})
+    board:parameter("slot_" .. index, value, "value")
+    local enabled = board:module("enabled_" .. index, "constant", {value = 1.0})
+    board:parameter("enabled_" .. index, enabled, "value")
+    if selected == nil then
+      selected = value.out
+      selected_enabled = enabled.out
+    else
+      local selector = board:module("select_" .. index, "switch",
+        {threshold = index - 1.5})
+      board:connect(selected, selector.left)
+      board:connect(value.out, selector.right)
+      board:connect(counter.index, selector.select)
+      selected = selector.out
+      local gate_selector = board:module("enabled_select_" .. index, "switch",
+        {threshold = index - 1.5})
+      board:connect(selected_enabled, gate_selector.left)
+      board:connect(enabled.out, gate_selector.right)
+      board:connect(counter.index, gate_selector.select)
+      selected_enabled = gate_selector.out
+    end
+  end
+  board:output("value", selected)
+  board:output("enabled", selected_enabled)
+  local instance = scope:instance(spec.id, board)
+  instance.slot_count = slots
+
+  -- UI affordances are optional. They bind to the independent value sources;
+  -- the Board itself neither owns nor implements a fader.
+  function instance:controls(prefix)
+    assert(not scope.is_subpatch, "controls belong to the parent graph")
+    prefix = prefix or self.id
+    assert(type(prefix) == "string" and prefix ~= "", "control prefix must be nonempty")
+    assert(self._control_prefix == nil, "ValueSequencer controls already registered")
+    self._control_prefix = prefix
+    for i = 1, slots do
+      scope:control(prefix .. "_step_" .. i, self, "slot_" .. i,
+        {min = 0, max = 1, label = "Step " .. i})
+      scope:control(prefix .. "_enabled_" .. i, self, "enabled_" .. i,
+        {min = 0, max = 1, label = "Enable " .. i})
+    end
+    if slots > 1 then
+      scope:control(prefix .. "_length", self, "length",
+        {min = 1, max = slots, label = "Active slots"})
+    end
+    scope:control(prefix .. "_looped", self, "looped",
+      {min = 0, max = 1, label = "Loop"})
+    return self
+  end
+  return instance
 end
 
 local instrument_serial = 0
@@ -2636,7 +2786,17 @@ function meldritch.instrument(name)
         local module = definition:module("note_" .. source.signal, "constant", { value = 0.0 })
         self[field] = module
       end
-      definition:connect(self[field].out, destination)
+      if source.signal == "pitch" then
+        -- The legacy instrument note source is already a frequency in Hz,
+        -- not an untyped fader. Declare that semantic boundary explicitly.
+        if not self._note_pitch_hz then
+          self._note_pitch_hz = definition:module("note_pitch_hz", "as_frequency_hz")
+          definition:connect(self[field].out, self._note_pitch_hz.input)
+        end
+        definition:connect(self._note_pitch_hz.out, destination)
+      else
+        definition:connect(self[field].out, destination)
+      end
       return
     end
     ordinary_connect(self, source, destination)
@@ -3819,6 +3979,26 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
     graph.devices.apc_mini = devices
         .get::<Option<String>>("apc_mini")
         .map_err(|e| format!("apc_mini device: {e}"))?;
+    if let Some(board) = table
+        .get::<Option<Table>>("apc_value_board")
+        .map_err(|e| e.to_string())?
+    {
+        let ids = |field: &str| -> Result<[String; 8], String> {
+            let values = board
+                .get::<Table>(field)
+                .map_err(|e| e.to_string())?
+                .sequence_values::<String>()
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            values
+                .try_into()
+                .map_err(|_| format!("APC ValueSequencer {field} requires eight control IDs"))
+        };
+        graph.apc_value_board = Some(crate::model::ApcValueBoard {
+            values: ids("values")?,
+            enabled: ids("enabled")?,
+        });
+    }
     let automations: Table = table.get("automations").map_err(|e| e.to_string())?;
     for automation in automations.sequence_values::<Table>() {
         let automation = automation.map_err(|e| e.to_string())?;
@@ -4125,6 +4305,25 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                     control_id: widget.get("control_id").map_err(|e| e.to_string())?,
                     value: widget.get("value").map_err(|e| e.to_string())?,
                 },
+                "value_sequencer" => {
+                    let ids = |field: &str| -> Result<[String; 8], String> {
+                        let values = widget
+                            .get::<Table>(field)
+                            .map_err(|e| e.to_string())?
+                            .sequence_values::<String>()
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(|e| e.to_string())?;
+                        values.try_into().map_err(|_| {
+                            format!("ValueSequencer TUI {field} requires eight controls")
+                        })
+                    };
+                    Widget::ValueSequencer {
+                        values: ids("values")?,
+                        enabled: ids("enabled")?,
+                        length: widget.get("length").map_err(|e| e.to_string())?,
+                        looped: widget.get("looped").map_err(|e| e.to_string())?,
+                    }
+                }
                 "performance_controls" => Widget::PerformanceControls,
                 "control_focus" => Widget::ControlFocus,
                 "performance_status" => Widget::PerformanceStatus,
