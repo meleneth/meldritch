@@ -16,8 +16,7 @@ graph:apc_value_sequencer(notes)
 local tui = graph:screen("value_sequence", "VALUE SEQUENCER / BOARD")
 tui:label("Eight independent values and eight independent enable switches")
 tui:value_sequencer(notes)
-tui:control("Sequence length", "notes_length")
-tui:control("Loop", "notes_looped")
+-- The dedicated TUI widget owns the rendering of the normal length/loop controls.
 
 -- Musical meaning is established outside the generic ValueSequencer.
 local note128 = graph:as_note128("note128", notes.value)

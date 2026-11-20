@@ -1678,7 +1678,11 @@ function meldritch.graph()
         values[i] = sequence._control_prefix .. "_step_" .. i
         enabled[i] = sequence._control_prefix .. "_enabled_" .. i
       end
-      table.insert(self.widgets, { kind = "value_sequencer", values = values, enabled = enabled })
+      table.insert(self.widgets, {
+        kind = "value_sequencer", values = values, enabled = enabled,
+        length = sequence._control_prefix .. "_length",
+        looped = sequence._control_prefix .. "_looped",
+      })
     end
     function screen:performance_controls()
       table.insert(self.widgets, { kind = "performance_controls" })
@@ -4316,6 +4320,8 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                     Widget::ValueSequencer {
                         values: ids("values")?,
                         enabled: ids("enabled")?,
+                        length: widget.get("length").map_err(|e| e.to_string())?,
+                        looped: widget.get("looped").map_err(|e| e.to_string())?,
                     }
                 }
                 "performance_controls" => Widget::PerformanceControls,

@@ -25,6 +25,8 @@ pub(crate) enum WidgetView {
     ValueSequencer {
         values: [ControlRow; 8],
         enabled: [ControlRow; 8],
+        length: ControlRow,
+        looped: ControlRow,
     },
     PerformanceControls,
     ControlFocus,
@@ -111,7 +113,12 @@ impl ScreenPanel {
                             value: *value,
                         }
                     }
-                    Widget::ValueSequencer { values, enabled } => {
+                    Widget::ValueSequencer {
+                        values,
+                        enabled,
+                        length,
+                        looped,
+                    } => {
                         let controls_for = |ids: &[String; 8]| -> Result<[ControlRow; 8], String> {
                             ids.iter()
                                 .map(|id| {
@@ -124,9 +131,17 @@ impl ScreenPanel {
                                 .try_into()
                                 .map_err(|_| "ValueSequencer requires eight controls".to_owned())
                         };
+                        let row_for = |id: &str| -> Result<ControlRow, String> {
+                            let (handle, authored) = controls
+                                .get(id)
+                                .ok_or_else(|| format!("unknown control '{id}'"))?;
+                            Ok(ControlRow::new(handle.clone(), *authored))
+                        };
                         WidgetView::ValueSequencer {
                             values: controls_for(values)?,
                             enabled: controls_for(enabled)?,
+                            length: row_for(length)?,
+                            looped: row_for(looped)?,
                         }
                     }
                     Widget::PerformanceControls => WidgetView::PerformanceControls,
@@ -268,7 +283,13 @@ impl ScreenPanel {
             return Ok(true);
         }
         for widget in &mut screen.widgets {
-            if let WidgetView::ValueSequencer { values, enabled } = widget {
+            if let WidgetView::ValueSequencer {
+                values,
+                enabled,
+                length,
+                looped,
+            } = widget
+            {
                 match key {
                     KeyCode::Char(c @ '1'..='8') => {
                         let step = c as usize - '1' as usize;
@@ -280,6 +301,15 @@ impl ScreenPanel {
                     KeyCode::Down => values[screen.value_step].adjust(Gesture::Decrease)?,
                     KeyCode::Home => values[screen.value_step].adjust(Gesture::Minimum)?,
                     KeyCode::End => values[screen.value_step].adjust(Gesture::Maximum)?,
+                    KeyCode::Char('[') => {
+                        length.publish((length.value().round() - 1.0).clamp(1.0, 8.0))?
+                    }
+                    KeyCode::Char(']') => {
+                        length.publish((length.value().round() + 1.0).clamp(1.0, 8.0))?
+                    }
+                    KeyCode::Char('l') => {
+                        looped.publish(if looped.value() >= 0.5 { 0.0 } else { 1.0 })?
+                    },
                     _ => return Ok(false),
                 }
                 return Ok(true);
@@ -499,7 +529,7 @@ mod value_board_widget_tests {
             .collect();
         let mut panel = ScreenPanel::new(machine.screens(), controls).unwrap();
         assert!(panel.has_value_sequencer());
-        let WidgetView::ValueSequencer { values, enabled } = &panel.current().widgets[1] else {
+        let WidgetView::ValueSequencer { values, enabled, .. } = &panel.current().widgets[1] else {
             panic!("expected bespoke sequencer widget");
         };
         assert_eq!(enabled[0].value(), 1.0);
@@ -507,11 +537,20 @@ mod value_board_widget_tests {
         panel.value_sequence_key(KeyCode::Char('1')).unwrap();
         panel.value_sequence_key(KeyCode::Up).unwrap();
         {
-            let WidgetView::ValueSequencer { values, enabled } = &panel.current().widgets[1] else {
+            let WidgetView::ValueSequencer { values, enabled, .. } = &panel.current().widgets[1] else {
                 panic!("expected bespoke sequencer widget");
             };
             assert_eq!(enabled[0].value(), 0.0);
             assert!(values[0].value() > 60.0 / 128.0);
+        }
+        panel.value_sequence_key(KeyCode::Char('[')).unwrap();
+        panel.value_sequence_key(KeyCode::Char('l')).unwrap();
+        {
+            let WidgetView::ValueSequencer { length, looped, .. } = &panel.current().widgets[1] else {
+                panic!("expected bespoke sequencer widget");
+            };
+            assert_eq!(length.value(), 7.0);
+            assert_eq!(looped.value(), 0.0);
         }
         panel.value_sequence_key(KeyCode::Char('1')).unwrap();
         let WidgetView::ValueSequencer { enabled, .. } = &panel.current().widgets[1] else {

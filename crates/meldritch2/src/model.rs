@@ -203,6 +203,8 @@ pub enum Widget {
     ValueSequencer {
         values: [String; 8],
         enabled: [String; 8],
+        length: String,
+        looped: String,
     },
     PerformanceControls,
     ControlFocus,

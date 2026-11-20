@@ -949,7 +949,12 @@ fn draw(
                     print_palette(&mut out, mode, 28, true, format!("{marker} [{label}]"))?;
                     queue!(out, Print("\r\n")).map_err(|error| error.to_string())
                 }
-                WidgetView::ValueSequencer { values, enabled } => {
+                WidgetView::ValueSequencer {
+                    values,
+                    enabled,
+                    length,
+                    looped,
+                } => {
                     print_palette(&mut out, mode, 36, true, "  VALUE SEQUENCER / 8 STEPS")?;
                     queue!(out, Print("\r\n  Step:   ")).map_err(|error| error.to_string())?;
                     for step in 0..8 {
@@ -987,7 +992,11 @@ fn draw(
                     }
                     queue!(
                         out,
-                        Print("\r\n  1-8 toggle  ←/→ select  ↑/↓ value  Home/End bounds\r\n")
+                        Print(format!(
+                            "\r\n  Length: {:.0}    Loop: {}\r\n  1-8 toggle  ←/→ select  ↑/↓ value  Home/End bounds\r\n  [ / ] length  l toggle loop\r\n",
+                            length.value(),
+                            if looped.value() >= 0.5 { "ON" } else { "OFF" }
+                        ))
                     )
                     .map_err(|error| error.to_string())
                 }

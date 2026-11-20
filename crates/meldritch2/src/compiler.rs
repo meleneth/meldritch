@@ -920,8 +920,17 @@ fn validate_screens(
                         ));
                     }
                 }
-                Widget::ValueSequencer { values, enabled } => {
-                    for id in values.iter().chain(enabled.iter()) {
+                Widget::ValueSequencer {
+                    values,
+                    enabled,
+                    length,
+                    looped,
+                } => {
+                    for id in values
+                        .iter()
+                        .chain(enabled.iter())
+                        .chain([length, looped])
+                    {
                         if !controls.contains_key(id) {
                             return Err(format!(
                                 "screen '{}' ValueSequencer references unknown control '{id}'",
