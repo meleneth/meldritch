@@ -506,12 +506,17 @@ mod value_board_widget_tests {
         assert_eq!(values[0].value(), 60.0 / 128.0);
         panel.value_sequence_key(KeyCode::Char('1')).unwrap();
         panel.value_sequence_key(KeyCode::Up).unwrap();
-        let WidgetView::ValueSequencer { values, enabled } = &panel.current().widgets[1] else {
+        {
+            let WidgetView::ValueSequencer { values, enabled } = &panel.current().widgets[1] else {
+                panic!("expected bespoke sequencer widget");
+            };
+            assert_eq!(enabled[0].value(), 0.0);
+            assert!(values[0].value() > 60.0 / 128.0);
+        }
+        panel.value_sequence_key(KeyCode::Char('1')).unwrap();
+        let WidgetView::ValueSequencer { enabled, .. } = &panel.current().widgets[1] else {
             panic!("expected bespoke sequencer widget");
         };
-        assert_eq!(enabled[0].value(), 0.0);
-        assert!(values[0].value() > 60.0 / 128.0);
-        panel.value_sequence_key(KeyCode::Char('1')).unwrap();
         assert_eq!(enabled[0].value(), 1.0);
     }
 }
