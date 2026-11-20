@@ -2017,6 +2017,13 @@ impl OfflineRenderer {
                 }
             }
         }
+        if frames != 0 {
+            // Preserve the same revision-local direct-read contract as the live
+            // executor without adding any per-read lookup or alias traversal.
+            for (slot, buffer) in self.machine.slots.iter_mut().zip(&self.slot_buffers) {
+                *slot = buffer[frames - 1];
+            }
+        }
         left.copy_from_slice(&self.slot_buffers[self.machine.output_slots[0]][..frames]);
         right.copy_from_slice(&self.slot_buffers[self.machine.output_slots[1]][..frames]);
         self.profile.graph_execution += graph_started.elapsed();
