@@ -4236,3 +4236,46 @@ return graph
     }
 }
 pub mod apc;
+
+#[cfg(test)]
+mod value_sequencer_board_tests {
+    use crate::{compiler::compile_at_rate, lua, model::ParameterId};
+
+    const PATCH: &str = include_str!("../examples/value-sequencer-board.lua");
+
+    #[test]
+    fn ordinary_components_form_eight_slot_board_with_direct_readable_output() {
+        let graph = lua::read(PATCH).unwrap();
+        let mut machine = compile_at_rate(&graph, 48.0).unwrap();
+        let value = machine.output_slot("sequence", "value").unwrap();
+        let internal = machine.output_slot("sequence/select_8", "out").unwrap();
+        assert_eq!(value, internal);
+        let position = machine.output_slot("sequence", "position").unwrap();
+        assert_eq!(position, machine.output_slot("sequence/counter", "position").unwrap());
+
+        let mut samples = [0.0; 48];
+        machine.process(&mut samples);
+        assert!(samples.iter().all(|sample| (0.0..=1.0).contains(sample)));
+        assert!(machine.read_output(value).is_finite());
+
+        // All eight slots are independent constant components, exposed
+        // through one-time-resolved instance parameter handles.
+        let id = ParameterId::new("sequence/slot_3", "value");
+        assert_eq!(machine.authored_value(&id), Some(0.5));
+    }
+
+    #[test]
+    fn board_controls_are_normal_components_with_normalled_connections() {
+        let graph = lua::read(PATCH).unwrap();
+        let machine = compile_at_rate(&graph, 48.0).unwrap();
+        let normalizations = machine.effective_connections();
+        assert!(normalizations.iter().any(|edge|
+            edge.from.module == "sequence/length" &&
+            edge.to.module == "sequence/counter" && edge.to.port == "length"));
+        assert!(normalizations.iter().any(|edge|
+            edge.from.module == "sequence/looped" &&
+            edge.to.module == "sequence/counter" && edge.to.port == "looped"));
+        assert!(machine.control_handle("step_1").is_some());
+        assert!(machine.control_handle("step_8").is_some());
+    }
+}

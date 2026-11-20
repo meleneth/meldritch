@@ -2,6 +2,7 @@ pub mod adsr;
 pub mod affine;
 pub mod compressor;
 pub mod constant;
+pub mod counter;
 pub mod delay;
 pub mod drive;
 pub mod ducker;

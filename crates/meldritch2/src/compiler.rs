@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
 use crate::model::{
-    Action, AutomationInterpolation, Connection, ControlScale, Graph, LiveMidiConnection,
+    Action, AutomationInterpolation, Connection, ControlScale, Endpoint, Graph, LiveMidiConnection,
     LiveMidiInput, LiveMidiModule, LiveMidiModuleKind, LiveMidiNoteSource, MidiButton, MidiCc,
     MidiNotes, MidiPacket, ModuleRuntime, Navigation, ParameterId, Screen, Widget,
 };
@@ -546,12 +546,19 @@ impl ControlHandle {
     }
 }
 
+/// A direct output slot in one prepared Machine revision. Resolve it once, then
+/// read without names, graph traversal, or dynamic dispatch. Handles are NOT
+/// portable between graph revisions; re-resolve after publishing a new machine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OutputSlot(usize);
+
 /// An accepted, executable graph. Its processing buffers are allocated at compile time.
 #[derive(Debug)]
 pub struct Machine {
     revision: Arc<()>,
     ops: Vec<Op>,
     slots: Vec<f64>,
+    output_lookup: BTreeMap<Endpoint, OutputSlot>,
     input_scratch: Vec<f64>,
     param_scratch: Vec<f64>,
     params: Vec<f64>,
@@ -1378,6 +1385,22 @@ impl Machine {
             }
         }
         diagnostics.frames += 1;
+    }
+
+    /// Resolve a primitive or exported Board output once, outside the audio
+    /// callback. All nested exports resolve to the same physical source slot.
+    pub fn output_slot(&self, module: &str, port: &str) -> Option<OutputSlot> {
+        self.output_lookup.get(&Endpoint {
+            module: module.to_owned(),
+            port: port.to_owned(),
+        }).copied()
+    }
+
+    /// Single indexed read of prepared storage. The caller must use a slot
+    /// resolved against THIS Machine revision, not a replaced one.
+    #[inline]
+    pub fn read_output(&self, slot: OutputSlot) -> f64 {
+        self.slots[slot.0]
     }
 
     pub fn order(&self) -> &[String] {
@@ -2324,6 +2347,27 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         };
     }
 
+    // Resolve exposed ports to the SAME primitive storage slots as their
+    // internal sources. Aliases are metadata only: no extra execution ops.
+    let mut output_lookup = BTreeMap::<Endpoint, OutputSlot>::new();
+    for (index, module) in graph.modules.iter().enumerate() {
+        let contract = contract::find(&module.kind).expect("module checked");
+        for (port, _) in contract.outputs.iter().enumerate() {
+            output_lookup.insert(
+                Endpoint { module: module.id.clone(), port: contract.outputs[port].name.into() },
+                OutputSlot(slot_bases[index] + port),
+            );
+        }
+    }
+    for (alias, target) in &graph.output_aliases {
+        let slot = *output_lookup.get(target).ok_or_else(|| {
+            format!("unresolved exported output '{}.{}'", alias.module, alias.port)
+        })?;
+        if output_lookup.insert(alias.clone(), slot).is_some() {
+            return Err(format!("duplicate exported output '{}.{}'", alias.module, alias.port));
+        }
+    }
+
     // Validate both authored edge sets before selecting effective edges. An
     // overridden normalization is still an authored connection and must be valid.
     let resolve = |edge: &Connection| -> Result<(usize, usize, usize, FanIn), String> {
@@ -3140,6 +3184,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         revision: Arc::new(()),
         ops,
         slots: vec![0.0; slot_count],
+        output_lookup,
         input_scratch: vec![
             0.0;
             graph

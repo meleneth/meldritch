@@ -259,6 +259,8 @@ pub struct Graph {
     pub subpatches: BTreeMap<String, Subpatch>,
     pub connections: Vec<Connection>,
     pub normalizations: Vec<Connection>,
+    /// Compile-time aliases for exported subpatch outputs. Never traversed at runtime.
+    pub output_aliases: BTreeMap<Endpoint, Endpoint>,
     pub controls: Vec<Control>,
     pub midi_ccs: Vec<MidiCc>,
     pub midi_notes: Vec<MidiNotes>,

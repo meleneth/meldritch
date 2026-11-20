@@ -361,6 +361,18 @@ fn expand_scope(
             validate_authored_value(module, &target.name, *value)?;
             module.values.insert(target.name.clone(), *value);
         }
+        // Every exported output is resolved to its primitive source at expansion time.
+        // Keep the authored board endpoint as an alias, without adding intermediate
+        // DSP operations or per-sample hierarchy traversal.
+        for (name, source) in &ports.outputs {
+            expanded.output_aliases.insert(
+                Endpoint {
+                    module: format!("{prefix}{}", instance.id),
+                    port: name.clone(),
+                },
+                source.clone(),
+            );
+        }
         local.insert(instance.id.clone(), ports);
     }
     for edge in &scope.connections {
