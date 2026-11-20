@@ -4596,8 +4596,9 @@ mod value_sequencer_apc_example_tests {
     fn board_enable_and_numeric_pitch_are_independent() {
         let graph = lua::read(PATCH).unwrap();
         let mut machine = compile(&graph).unwrap();
-        let step = machine.control_handle("notes_step_1").unwrap();
-        let enabled = machine.control_handle("notes_enabled_1").unwrap();
+        // The first high clock sample advances the counter to step two.
+        let step = machine.control_handle("notes_step_2").unwrap();
+        let enabled = machine.control_handle("notes_enabled_2").unwrap();
         step.publish(72.0 / 128.0).unwrap();
         enabled.publish(0.0).unwrap();
         let mut audio = [0.0; 4];
