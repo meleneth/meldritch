@@ -9,6 +9,8 @@ jobs:
         with:
           toolchain: 1.97.0
           components: rustfmt, clippy
+      - name: Install native audio and USB development libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
       - name: Enforce routine-test policy
         run: python3 tools/validate-test-policy.py
       - run: cargo fmt --all -- --check
