@@ -1497,7 +1497,8 @@ function meldritch.graph()
     controls = {}, midi_ccs = {}, note_bindings = {}, poly_bindings = {}, external_inputs = {}, external_outputs = {},
     external_parameters = {}, screens = {}, actions = {}, midi_buttons = {}, midi_packets = {},
     live_midi_inputs = {}, live_midi_modules = {}, live_midi_connections = {}, live_midi_note_source = nil,
-    performance = nil, _navigation = nil, _devices = {}, _event_handles = {}, _control_surfaces = {}, automations = {} }
+    performance = nil, _navigation = nil, _devices = {}, _event_handles = {}, _control_surfaces = {}, automations = {},
+    apc_value_board = nil }
   function graph:devices(devices)
     assert(type(devices) == "table", "devices must be a table")
     assert(devices.audio_output == nil or
@@ -1524,6 +1525,17 @@ function meldritch.graph()
       midi_controls = devices.midi_controls or {},
       apc_mini = devices.apc_mini,
     }
+  end
+  function graph:apc_value_sequencer(sequence)
+    assert(self.apc_value_board == nil, "only one APC ValueSequencer binding is supported")
+    assert(type(sequence) == "table" and sequence.slot_count == 8,
+      "APC ValueSequencer requires an eight-slot sequence")
+    local values, enabled = {}, {}
+    for i = 1, 8 do
+      values[i] = sequence._control_prefix .. "_step_" .. i
+      enabled[i] = sequence._control_prefix .. "_enabled_" .. i
+    end
+    self.apc_value_board = { values = values, enabled = enabled }
   end
   function graph:control_surface(surface)
     assert(type(surface) == "table", "control surface must be a table")
@@ -1653,6 +1665,18 @@ function meldritch.graph()
       assert(type(label) == "string" and type(control_id) == "string" and type(value) == "number",
         "button widget needs a label, control ID, and numeric value")
       table.insert(self.widgets, { kind = "button", label = label, control_id = control_id, value = value })
+    end
+    function screen:value_sequencer(sequence)
+      assert(type(sequence) == "table" and sequence.slot_count == 8,
+        "ValueSequencer TUI requires an eight-slot sequence")
+      assert(sequence._control_prefix,
+        "call sequence:controls() before constructing the ValueSequencer TUI")
+      local values, enabled = {}, {}
+      for i = 1, 8 do
+        values[i] = sequence._control_prefix .. "_step_" .. i
+        enabled[i] = sequence._control_prefix .. "_enabled_" .. i
+      end
+      table.insert(self.widgets, { kind = "value_sequencer", values = values, enabled = enabled })
     end
     function screen:performance_controls()
       table.insert(self.widgets, { kind = "performance_controls" })
@@ -1813,6 +1837,8 @@ function meldritch.value_sequencer(scope, spec)
     assert(not scope.is_subpatch, "controls belong to the parent graph")
     prefix = prefix or self.id
     assert(type(prefix) == "string" and prefix ~= "", "control prefix must be nonempty")
+    assert(self._control_prefix == nil, "ValueSequencer controls already registered")
+    self._control_prefix = prefix
     for i = 1, slots do
       scope:control(prefix .. "_step_" .. i, self, "slot_" .. i,
         {min = 0, max = 1, label = "Step " .. i})
@@ -3947,6 +3973,26 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
     graph.devices.apc_mini = devices
         .get::<Option<String>>("apc_mini")
         .map_err(|e| format!("apc_mini device: {e}"))?;
+    if let Some(board) = table
+        .get::<Option<Table>>("apc_value_board")
+        .map_err(|e| e.to_string())?
+    {
+        let ids = |field: &str| -> Result<[String; 8], String> {
+            let values = board
+                .get::<Table>(field)
+                .map_err(|e| e.to_string())?
+                .sequence_values::<String>()
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            values
+                .try_into()
+                .map_err(|_| format!("APC ValueSequencer {field} requires eight control IDs"))
+        };
+        graph.apc_value_board = Some(crate::model::ApcValueBoard {
+            values: ids("values")?,
+            enabled: ids("enabled")?,
+        });
+    }
     let automations: Table = table.get("automations").map_err(|e| e.to_string())?;
     for automation in automations.sequence_values::<Table>() {
         let automation = automation.map_err(|e| e.to_string())?;
@@ -4253,6 +4299,23 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                     control_id: widget.get("control_id").map_err(|e| e.to_string())?,
                     value: widget.get("value").map_err(|e| e.to_string())?,
                 },
+                "value_sequencer" => {
+                    let ids = |field: &str| -> Result<[String; 8], String> {
+                        let values = widget
+                            .get::<Table>(field)
+                            .map_err(|e| e.to_string())?
+                            .sequence_values::<String>()
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(|e| e.to_string())?;
+                        values.try_into().map_err(|_| {
+                            format!("ValueSequencer TUI {field} requires eight controls")
+                        })
+                    };
+                    Widget::ValueSequencer {
+                        values: ids("values")?,
+                        enabled: ids("enabled")?,
+                    }
+                }
                 "performance_controls" => Widget::PerformanceControls,
                 "control_focus" => Widget::ControlFocus,
                 "performance_status" => Widget::PerformanceStatus,

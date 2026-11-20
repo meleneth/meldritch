@@ -22,6 +22,10 @@ pub(crate) enum WidgetView {
         row: ControlRow,
         value: f64,
     },
+    ValueSequencer {
+        values: [ControlRow; 8],
+        enabled: [ControlRow; 8],
+    },
     PerformanceControls,
     ControlFocus,
     PerformanceStatus,
@@ -39,7 +43,7 @@ impl WidgetView {
     fn selectable(&self) -> bool {
         matches!(
             self,
-            Self::Control { .. } | Self::Link { .. } | Self::Button { .. }
+            Self::Control { .. } | Self::Link { .. } | Self::Button { .. } | Self::ValueSequencer { .. }
         )
     }
 }
@@ -49,6 +53,7 @@ pub(crate) struct ScreenView {
     pub title: String,
     pub widgets: Vec<WidgetView>,
     pub selected: Option<usize>,
+    pub value_step: usize,
 }
 
 pub(crate) struct ScreenPanel {
@@ -103,6 +108,24 @@ impl ScreenPanel {
                             value: *value,
                         }
                     }
+                    Widget::ValueSequencer { values, enabled } => {
+                        let controls_for = |ids: &[String; 8]| -> Result<[ControlRow; 8], String> {
+                            ids.iter()
+                                .map(|id| {
+                                    let (handle, authored) = controls
+                                        .get(id)
+                                        .ok_or_else(|| format!("unknown control '{id}'"))?;
+                                    Ok(ControlRow::new(handle.clone(), *authored))
+                                })
+                                .collect::<Result<Vec<_>, String>>()?
+                                .try_into()
+                                .map_err(|_| "ValueSequencer requires eight controls".to_owned())
+                        };
+                        WidgetView::ValueSequencer {
+                            values: controls_for(values)?,
+                            enabled: controls_for(enabled)?,
+                        }
+                    }
                     Widget::PerformanceControls => WidgetView::PerformanceControls,
                     Widget::ControlFocus => WidgetView::ControlFocus,
                     Widget::PerformanceStatus => WidgetView::PerformanceStatus,
@@ -154,6 +177,7 @@ impl ScreenPanel {
                 title: screen.title.clone(),
                 widgets,
                 selected,
+                value_step: 0,
             });
         }
         if views.is_empty() {
@@ -214,6 +238,51 @@ impl ScreenPanel {
         } else {
             (self.active + 1) % len
         };
+    }
+
+    pub fn has_value_sequencer(&self) -> bool {
+        self.current()
+            .widgets
+            .iter()
+            .any(|widget| matches!(widget, WidgetView::ValueSequencer { .. }))
+    }
+
+    /// Keys manipulate the same prepared controls used by physical faders
+    /// and APC pads. There is no separate TUI-owned sequence state.
+    pub fn value_sequence_key(&mut self, key: crossterm::event::KeyCode) -> Result<bool, String> {
+        use crossterm::event::KeyCode;
+        if !self.has_value_sequencer() {
+            return Ok(false);
+        }
+        let screen = &mut self.screens[self.active];
+        let next = match key {
+            KeyCode::Left => Some((screen.value_step + 7) % 8),
+            KeyCode::Right => Some((screen.value_step + 1) % 8),
+            _ => None,
+        };
+        if let Some(next) = next {
+            screen.value_step = next;
+            return Ok(true);
+        }
+        for widget in &mut screen.widgets {
+            if let WidgetView::ValueSequencer { values, enabled } = widget {
+                match key {
+                    KeyCode::Char(c @ '1'..='8') => {
+                        let step = c as usize - '1' as usize;
+                        let current = enabled[step].value();
+                        enabled[step].publish(if current >= 0.5 { 0.0 } else { 1.0 })?;
+                        screen.value_step = step;
+                    }
+                    KeyCode::Up => values[screen.value_step].adjust(Gesture::Increase)?,
+                    KeyCode::Down => values[screen.value_step].adjust(Gesture::Decrease)?,
+                    KeyCode::Home => values[screen.value_step].adjust(Gesture::Minimum)?,
+                    KeyCode::End => values[screen.value_step].adjust(Gesture::Maximum)?,
+                    _ => return Ok(false),
+                }
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub fn activate(&mut self) -> Result<(), String> {

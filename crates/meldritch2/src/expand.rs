@@ -59,6 +59,7 @@ pub fn expand(graph: &Graph) -> Result<Graph, String> {
         performance: graph.performance.clone(),
         actions: graph.actions.clone(),
         control_surfaces: graph.control_surfaces.clone(),
+        apc_value_board: graph.apc_value_board.clone(),
         automations: graph.automations.clone(),
         ..Graph::default()
     };

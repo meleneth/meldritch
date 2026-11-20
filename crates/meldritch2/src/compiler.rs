@@ -2627,6 +2627,21 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             return Err(format!("duplicate control ID '{}'", control.id));
         }
     }
+    if let Some(board) = &graph.apc_value_board {
+        if graph.devices.apc_mini.is_none() {
+            return Err("APC ValueSequencer requires an apc_mini device".into());
+        }
+        for id in board.values.iter().chain(board.enabled.iter()) {
+            let control = controls
+                .get(id)
+                .ok_or_else(|| format!("APC ValueSequencer references unknown control '{id}'"))?;
+            if control.min != 0.0 || control.max != 1.0 {
+                return Err(format!(
+                    "APC ValueSequencer control '{id}' must have range 0..1"
+                ));
+            }
+        }
+    }
     let mut mapped_ccs = BTreeSet::new();
     for binding in &graph.midi_ccs {
         if !(1..=16).contains(&binding.channel) || binding.number > 127 {
