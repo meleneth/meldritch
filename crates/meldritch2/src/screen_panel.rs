@@ -43,7 +43,10 @@ impl WidgetView {
     fn selectable(&self) -> bool {
         matches!(
             self,
-            Self::Control { .. } | Self::Link { .. } | Self::Button { .. } | Self::ValueSequencer { .. }
+            Self::Control { .. }
+                | Self::Link { .. }
+                | Self::Button { .. }
+                | Self::ValueSequencer { .. }
         )
     }
 }
