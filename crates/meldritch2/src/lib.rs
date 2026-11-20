@@ -4445,18 +4445,19 @@ return graph
     #[test]
     fn compiler_rejects_incompatible_note_units_before_execution() {
         let invalid = [
-            ("note128_to_hz", "FrequencyHz", "note128_to_midi"),
+            ("as_note128", "Note128", "hz_to_note128"),
             ("note128_to_midi", "MidiNote", "note128_to_hz"),
-            ("midi_to_note128", "Note128", "note128_to_hz"),
+            ("note128_to_hz", "FrequencyHz", "note128_to_midi"),
         ];
         for (source_kind, source_unit, target_kind) in invalid {
             let script = format!(r#"
 local graph = meldritch.graph()
 local source = graph:module("source", "constant", {{value = 60 / 128}})
+local tagged = graph:as_note128("tagged", source.out)
 local adapter = graph:module("adapter", "{source_kind}")
 local target = graph:module("target", "{target_kind}")
 local sink = graph:module("sink", "output")
-graph:connect(source.out, adapter.input)
+graph:connect({{ module = "tagged", port = "out", direction = "output" }}, adapter.input)
 graph:connect(adapter.out, target.input)
 graph:connect(target.out, sink.input)
 return graph
