@@ -17,6 +17,7 @@ pub mod mixer2;
 pub mod multiply;
 pub mod mute;
 pub mod noise;
+pub mod note_adapters;
 pub mod oscillator_sine;
 pub mod output;
 pub mod plaits;

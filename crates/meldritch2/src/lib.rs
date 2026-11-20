@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 40);
+        assert_eq!(contract::all().len(), 44);
         let vst3_effect = contract::find("vst3_effect").unwrap();
         assert_eq!(vst3_effect.inputs[0].name, "input_left");
         assert_eq!(vst3_effect.inputs[1].name, "input_right");
@@ -4403,5 +4403,61 @@ return graph"#
         );
         assert!(machine.control_handle("sequence_step_1").is_some());
         assert!(machine.control_handle("sequence_step_8").is_some());
+    }
+}
+
+
+#[cfg(test)]
+mod note128_adapter_graph_tests {
+    use crate::{compiler::compile, lua, model::ParameterId};
+
+    #[test]
+    fn sequenced_note128_goes_to_hz_without_sequencer_special_cases() {
+        let script = r#"
+local graph = meldritch.graph()
+local seq = graph:value_sequencer {
+    id = "notes", values = {69 / 128, 60 / 128, 72 / 128}
+}
+local hz = graph:note128_to_hz("pitch", seq.value)
+local output = graph:module("output", "output")
+graph:connect(hz, output.input)
+return graph
+"#;
+        let graph = lua::read(script).unwrap();
+        let mut machine = compile(&graph).unwrap();
+        let slot = machine.output_slot("pitch", "out").unwrap();
+        let mut buffer = [0.0; 4];
+        machine.process(&mut buffer);
+        assert_eq!(buffer, [440.0; 4]);
+        assert_eq!(machine.read_output(slot), 440.0);
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("notes/slot_2", "value")),
+            Some(60.0 / 128.0)
+        );
+        assert!(machine.effective_connections().iter().any(|edge| {
+            edge.from.module == "notes/select_3"
+                && edge.to.module == "pitch"
+                && edge.to.port == "input"
+        }));
+    }
+
+    #[test]
+    fn adapters_compose_back_to_note128_without_a_special_pitch_sequencer() {
+        let script = r#"
+local graph = meldritch.graph()
+local source = graph:module("note", "constant", {value = 64 / 128})
+local midi = graph:note128_to_midi("midi", source.out)
+local restored = graph:midi_to_note128("restored", midi)
+local hz = graph:note128_to_hz("hz", restored)
+local back = graph:hz_to_note128("back", hz)
+local output = graph:module("output", "output")
+graph:connect(back, output.input)
+return graph
+"#;
+        let mut machine = compile(&lua::read(script).unwrap()).unwrap();
+        let mut buffer = [0.0; 3];
+        machine.process(&mut buffer);
+        assert_eq!(buffer, [64.0 / 128.0; 3]);
+        assert_eq!(machine.read_output(machine.output_slot("midi", "out").unwrap()), 64.0);
     }
 }

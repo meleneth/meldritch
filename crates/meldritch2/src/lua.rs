@@ -1596,6 +1596,17 @@ function meldritch.graph()
   function graph:value_sequencer(spec)
     return meldritch.value_sequencer(self, spec)
   end
+  -- Adapter helpers are composition sugar for ordinary contract-declared modules.
+  -- Neither the source component nor its consumer needs to know how a pitch is represented.
+  for _, kind in ipairs({
+    "note128_to_midi", "midi_to_note128", "note128_to_hz", "hz_to_note128"
+  }) do
+    graph[kind] = function(self, id, source)
+      local adapter = self:module(id, kind)
+      self:connect(source, adapter.input)
+      return adapter.out
+    end
+  end
   function graph:control(id, module, parameter, range)
     assert(type(id) == "string", "control ID must be a string")
     assert(type(module) == "table" and type(module.id) == "string", "control target must be a module")
