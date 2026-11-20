@@ -4447,7 +4447,8 @@ return graph
             ("note128_to_hz", "FrequencyHz", "note128_to_midi"),
         ];
         for (source_kind, source_unit, target_kind) in invalid {
-            let script = format!(r#"
+            let script = format!(
+                r#"
 local graph = meldritch.graph()
 local source = graph:module("source", "constant", {{value = 60 / 128}})
 local tagged = graph:as_note128("tagged", source.out)
@@ -4458,7 +4459,8 @@ graph:connect({{ module = "tagged", port = "out", direction = "output" }}, adapt
 graph:connect(adapter.out, target.input)
 graph:connect(target.out, sink.input)
 return graph
-"#);
+"#
+            );
             let graph = lua::read(&script).unwrap();
             let error = compile(&graph).unwrap_err();
             assert!(
@@ -4473,7 +4475,11 @@ return graph
         // VST pitch inputs are physically frequency values (Hz), regardless
         // of how the producing composition is authored.
         let pitch_contract = crate::contract::find("vst3").unwrap();
-        let pitch = pitch_contract.inputs.iter().find(|p| p.name == "pitch").unwrap();
+        let pitch = pitch_contract
+            .inputs
+            .iter()
+            .find(|p| p.name == "pitch")
+            .unwrap();
         assert_eq!(pitch.domain, crate::contract::Domain::FrequencyHz);
         assert!(!pitch.domain.accepts(crate::contract::Domain::Note128));
         assert!(!pitch.domain.accepts(crate::contract::Domain::MidiNote));
@@ -4497,8 +4503,14 @@ return graph
 
     #[test]
     fn bare_numeric_values_must_be_explicitly_interpreted() {
-        for target in ["note128_to_midi", "note128_to_hz", "hz_to_note128", "midi_to_note128"] {
-            let script = format!(r#"
+        for target in [
+            "note128_to_midi",
+            "note128_to_hz",
+            "hz_to_note128",
+            "midi_to_note128",
+        ] {
+            let script = format!(
+                r#"
 local graph = meldritch.graph()
 local source = graph:module("source", "constant", {{value = 0.5}})
 local adapter = graph:module("adapter", "{target}")
@@ -4506,7 +4518,8 @@ local sink = graph:module("sink", "output")
 graph:connect(source.out, adapter.input)
 graph:connect(adapter.out, sink.input)
 return graph
-"#);
+"#
+            );
             let error = compile(&lua::read(&script).unwrap()).unwrap_err();
             assert!(error.contains("incompatible ports"), "{target}: {error}");
         }
