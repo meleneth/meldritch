@@ -1390,10 +1390,12 @@ impl Machine {
     /// Resolve a primitive or exported Board output once, outside the audio
     /// callback. All nested exports resolve to the same physical source slot.
     pub fn output_slot(&self, module: &str, port: &str) -> Option<OutputSlot> {
-        self.output_lookup.get(&Endpoint {
-            module: module.to_owned(),
-            port: port.to_owned(),
-        }).copied()
+        self.output_lookup
+            .get(&Endpoint {
+                module: module.to_owned(),
+                port: port.to_owned(),
+            })
+            .copied()
     }
 
     /// Single indexed read of prepared storage. The caller must use a slot
@@ -2354,17 +2356,26 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         let contract = contract::find(&module.kind).expect("module checked");
         for (port, _) in contract.outputs.iter().enumerate() {
             output_lookup.insert(
-                Endpoint { module: module.id.clone(), port: contract.outputs[port].name.into() },
+                Endpoint {
+                    module: module.id.clone(),
+                    port: contract.outputs[port].name.into(),
+                },
                 OutputSlot(slot_bases[index] + port),
             );
         }
     }
     for (alias, target) in &graph.output_aliases {
         let slot = *output_lookup.get(target).ok_or_else(|| {
-            format!("unresolved exported output '{}.{}'", alias.module, alias.port)
+            format!(
+                "unresolved exported output '{}.{}'",
+                alias.module, alias.port
+            )
         })?;
         if output_lookup.insert(alias.clone(), slot).is_some() {
-            return Err(format!("duplicate exported output '{}.{}'", alias.module, alias.port));
+            return Err(format!(
+                "duplicate exported output '{}.{}'",
+                alias.module, alias.port
+            ));
         }
     }
 
