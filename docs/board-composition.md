@@ -37,3 +37,41 @@ expansion selects explicit wiring over authored normalizations.
 The next necessary mechanisms for the complete ValueSequencer are an indexed,
 runtime-length value table backed by prepared immutable storage, and proper
 timestamped trigger routing. Neither should be hard-coded into a sequencer.
+
+
+## Reusable Lua ValueSequencer wrapper
+
+The built-in Lua authoring API can construct a ValueSequencer Board without
+manually declaring each primitive:
+
+```lua
+local graph = meldritch.graph()
+local sequence = graph:value_sequencer {
+  id = "melody",
+  values = {0.1, 0.4, 0.7, 1.0},
+  looped = false,
+}
+sequence:controls("melody")
+graph:connect(clock.out, sequence.advance)
+```
+
+The default is eight slots, all initialized to 0.0, with looping enabled.
+When a `values` list is given without `slots`, its length determines the
+slot count. All values must be normalized to 0..1, and `slots` can be 1..256.
+
+The returned handle exports `advance`, `reset`, `length`, and `looped`
+inputs, and `value`, `index`, and `position` outputs. Each slot is
+implemented by its own `constant` component, exposed as an instance
+parameter named `slot_N`. The optional `sequence:controls(prefix)` creates
+generic control bindings for every slot, the active length, and loop toggle.
+No UI is required to use the Board, and no custom processor is generated.
+
+The wrapper is `meldritch.value_sequencer(scope, spec)` under the hood;
+`graph:value_sequencer(spec)` is shorthand. It works in graph and nested
+subpatch scopes; UI controls belong to the parent graph. Normalled inputs are
+explicit connections from separate constant components, and explicit external
+cables supersede them.
+
+The first version uses a chain of two-input `switch` primitives as its
+selector. This intentionally prioritizes composability over an optimized
+indexed lookup. There is no allocation during audio processing.
