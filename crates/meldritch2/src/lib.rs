@@ -4406,7 +4406,6 @@ return graph"#
     }
 }
 
-
 #[cfg(test)]
 mod note128_adapter_graph_tests {
     use crate::{compiler::compile, lua, model::ParameterId};
@@ -4436,9 +4435,7 @@ return graph
             Some(60.0 / 128.0)
         );
         assert!(machine.effective_connections().iter().any(|edge| {
-            edge.from.module == "typed"
-                && edge.to.module == "pitch"
-                && edge.to.port == "input"
+            edge.from.module == "typed" && edge.to.module == "pitch" && edge.to.port == "input"
         }));
     }
 
@@ -4533,6 +4530,9 @@ return graph
         let mut buffer = [0.0; 3];
         machine.process(&mut buffer);
         assert_eq!(buffer, [64.0 / 128.0; 3]);
-        assert_eq!(machine.read_output(machine.output_slot("midi", "out").unwrap()), 64.0);
+        assert_eq!(
+            machine.read_output(machine.output_slot("midi", "out").unwrap()),
+            64.0
+        );
     }
 }
