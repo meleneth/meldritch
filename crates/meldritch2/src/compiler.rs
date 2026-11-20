@@ -920,6 +920,16 @@ fn validate_screens(
                         ));
                     }
                 }
+                Widget::ValueSequencer { values, enabled } => {
+                    for id in values.iter().chain(enabled.iter()) {
+                        if !controls.contains_key(id) {
+                            return Err(format!(
+                                "screen '{}' ValueSequencer references unknown control '{id}'",
+                                screen.id
+                            ));
+                        }
+                    }
+                }
                 Widget::PerformanceControls | Widget::ControlFocus => {}
                 Widget::PerformanceStatus
                 | Widget::ArrangementStatus
