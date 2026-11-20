@@ -1692,7 +1692,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod value_board_apc_tests {
     use super::*;
@@ -1711,8 +1710,8 @@ mod value_board_apc_tests {
                 (handle.clone(), handle.effective_value())
             })
             .collect::<Vec<_>>();
-        let (values, enabled) = value_board_handles(graph.apc_value_board.as_ref().unwrap(), &controls)
-            .unwrap();
+        let (values, enabled) =
+            value_board_handles(graph.apc_value_board.as_ref().unwrap(), &controls).unwrap();
         let mut pickups = [FaderPickup::default(); 8];
         assert_eq!(enabled[3].effective_value(), 1.0);
         apply_value_board(Input::Grid(27, true), &values, &enabled, &mut pickups).unwrap();
