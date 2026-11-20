@@ -978,11 +978,18 @@ fn draw(
                             mode,
                             if enabled.value() >= 0.5 { 20 } else { 4 },
                             step == screen.value_step,
-                            if enabled.value() >= 0.5 { "  ON  " } else { "  --  " },
+                            if enabled.value() >= 0.5 {
+                                "  ON  "
+                            } else {
+                                "  --  "
+                            },
                         )?;
                     }
-                    queue!(out, Print("\r\n  1-8 toggle  ←/→ select  ↑/↓ value  Home/End bounds\r\n"))
-                        .map_err(|error| error.to_string())
+                    queue!(
+                        out,
+                        Print("\r\n  1-8 toggle  ←/→ select  ↑/↓ value  Home/End bounds\r\n")
+                    )
+                    .map_err(|error| error.to_string())
                 }
                 WidgetView::PerformanceControls => {
                     print_palette(&mut out, mode, 36, true, "  LIVE CONTROLS")?;
@@ -1292,7 +1299,11 @@ pub fn perform(
             eprintln!("Meldritch performance server listening on http://{address}");
         }
     }
-    let mut apc = match (output.apc_mini(), output.performance(), output.apc_value_board()) {
+    let mut apc = match (
+        output.apc_mini(),
+        output.performance(),
+        output.apc_value_board(),
+    ) {
         (Some(name), _, Some(board)) => Some(crate::apc::ApcSession::start_value_board(
             name.to_owned(),
             board.clone(),
