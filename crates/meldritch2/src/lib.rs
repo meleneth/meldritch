@@ -4251,7 +4251,10 @@ mod value_sequencer_board_tests {
         let internal = machine.output_slot("sequence/select_8", "out").unwrap();
         assert_eq!(value, internal);
         let position = machine.output_slot("sequence", "position").unwrap();
-        assert_eq!(position, machine.output_slot("sequence/counter", "position").unwrap());
+        assert_eq!(
+            position,
+            machine.output_slot("sequence/counter", "position").unwrap()
+        );
 
         let mut samples = [0.0; 48];
         machine.process(&mut samples);
@@ -4269,12 +4272,20 @@ mod value_sequencer_board_tests {
         let graph = lua::read(PATCH).unwrap();
         let machine = compile_at_rate(&graph, 48.0).unwrap();
         let normalizations = machine.effective_connections();
-        assert!(normalizations.iter().any(|edge|
-            edge.from.module == "sequence/length" &&
-            edge.to.module == "sequence/counter" && edge.to.port == "length"));
-        assert!(normalizations.iter().any(|edge|
-            edge.from.module == "sequence/looped" &&
-            edge.to.module == "sequence/counter" && edge.to.port == "looped"));
+        assert!(
+            normalizations
+                .iter()
+                .any(|edge| edge.from.module == "sequence/length"
+                    && edge.to.module == "sequence/counter"
+                    && edge.to.port == "length")
+        );
+        assert!(
+            normalizations
+                .iter()
+                .any(|edge| edge.from.module == "sequence/looped"
+                    && edge.to.module == "sequence/counter"
+                    && edge.to.port == "looped")
+        );
         assert!(machine.control_handle("step_1").is_some());
         assert!(machine.control_handle("step_8").is_some());
     }
