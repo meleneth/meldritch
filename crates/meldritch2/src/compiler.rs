@@ -2423,7 +2423,12 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         if !dp.domain.accepts(sp.1.domain) {
             return Err(format!(
                 "incompatible ports '{}.{}' ({:?}) and '{}.{}' ({:?}); insert an explicit adapter",
-                edge.from.module, edge.from.port, sp.1.domain, edge.to.module, edge.to.port, dp.domain
+                edge.from.module,
+                edge.from.port,
+                sp.1.domain,
+                edge.to.module,
+                edge.to.port,
+                dp.domain
             ));
         }
         Ok((src, dst, slot_bases[src] + sp.0, dp.fan_in))
