@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn contract_discovery_and_port_resolution() {
-        assert_eq!(contract::all().len(), 39);
+        assert_eq!(contract::all().len(), 40);
         let vst3_effect = contract::find("vst3_effect").unwrap();
         assert_eq!(vst3_effect.inputs[0].name, "input_left");
         assert_eq!(vst3_effect.inputs[1].name, "input_right");
@@ -4267,6 +4267,91 @@ mod value_sequencer_board_tests {
         assert_eq!(machine.authored_value(&id), Some(0.5));
     }
 
+
+    #[test]
+    fn lua_wrapper_defaults_to_eight_normalized_zero_slots_and_looping() {
+        let patch = r#"
+local graph = meldritch.graph()
+local seq = graph:value_sequencer { id = "seq" }
+seq:controls()
+local output = graph:module("output", "output")
+graph:connect(seq.value, output.input)
+return graph
+"#;
+        let graph = lua::read(patch).unwrap();
+        let mut machine = compile_at_rate(&graph, 48.0).unwrap();
+        assert_eq!(machine.authored_value(&ParameterId::new("seq/length", "value")), Some(8.0));
+        assert_eq!(machine.authored_value(&ParameterId::new("seq/looped", "value")), Some(1.0));
+        for slot in 1..=8 {
+            assert_eq!(
+                machine.authored_value(&ParameterId::new(format!("seq/slot_{slot}"), "value")),
+                Some(0.0)
+            );
+            assert!(machine.control_handle(&format!("seq_step_{slot}")).is_some());
+        }
+        assert!(machine.control_handle("seq_length").is_some());
+        assert!(machine.control_handle("seq_looped").is_some());
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.0; 4]);
+        assert_eq!(
+            machine.output_slot("seq", "value"),
+            machine.output_slot("seq/select_8", "out")
+        );
+    }
+
+    #[test]
+    fn lua_wrapper_supports_distinct_lengths_values_instances_and_one_shot() {
+        let patch = r#"
+local graph = meldritch.graph()
+local left = graph:value_sequencer {
+  id = "left", values = {0.25, 0.5, 0.75}, looped = false
+}
+local right = graph:value_sequencer {
+  id = "right", slots = 1, values = {1.0}
+}
+local sink = graph:module("output", "output")
+graph:connect(left.value, sink.input)
+return graph
+"#;
+        let graph = lua::read(patch).unwrap();
+        let mut machine = compile_at_rate(&graph, 48.0).unwrap();
+        assert_eq!(machine.authored_value(&ParameterId::new("left/looped", "value")), Some(0.0));
+        assert_eq!(machine.authored_value(&ParameterId::new("left/length", "value")), Some(3.0));
+        assert_eq!(machine.authored_value(&ParameterId::new("left/slot_3", "value")), Some(0.75));
+        assert_eq!(machine.authored_value(&ParameterId::new("right/slot_1", "value")), Some(1.0));
+        assert_eq!(machine.authored_value(&ParameterId::new("right/length", "value")), Some(1.0));
+        assert_eq!(
+            machine.output_slot("right", "value"),
+            machine.output_slot("right/slot_1", "out")
+        );
+        let mut samples = [f64::NAN; 4];
+        machine.process(&mut samples);
+        assert_eq!(samples, [0.25; 4]);
+    }
+
+    #[test]
+    fn lua_wrapper_rejects_invalid_configurations_at_authoring_boundary() {
+        let invalid = [
+            ("slots = 0", "slots must be an integer"),
+            ("slots = 1.5", "slots must be an integer"),
+            ("values = {0.1, 0.2}, slots = 3", "values length must match slots"),
+            ("values = {-0.1}", "must be a finite normalized value"),
+            ("values = {1.01}", "must be a finite normalized value"),
+            ("looped = 1", "looped must be boolean"),
+            ("unknown = true", "unknown value_sequencer option"),
+        ];
+        for (fields, message) in invalid {
+            let patch = format!(
+                r#"local graph = meldritch.graph()
+graph:value_sequencer {{ id = "invalid", {fields} }}
+return graph"#
+            );
+            let error = lua::read(&patch).unwrap_err();
+            assert!(error.contains(message), "{fields}: {error}");
+        }
+    }
+
     #[test]
     fn board_controls_are_normal_components_with_normalled_connections() {
         let graph = lua::read(PATCH).unwrap();
@@ -4286,7 +4371,7 @@ mod value_sequencer_board_tests {
                     && edge.to.module == "sequence/counter"
                     && edge.to.port == "looped")
         );
-        assert!(machine.control_handle("step_1").is_some());
-        assert!(machine.control_handle("step_8").is_some());
+        assert!(machine.control_handle("sequence_step_1").is_some());
+        assert!(machine.control_handle("sequence_step_8").is_some());
     }
 }
