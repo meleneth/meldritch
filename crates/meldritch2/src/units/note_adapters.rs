@@ -136,7 +136,12 @@ mod tests {
     #[test]
     fn bad_inputs_never_poison_the_output() {
         for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            for process in [note128_to_midi, midi_to_note128, note128_to_hz, hz_to_note128] {
+            for process in [
+                note128_to_midi as crate::contract::ProcessFn,
+                midi_to_note128,
+                note128_to_hz,
+                hz_to_note128,
+            ] {
                 assert!(run(process, value).is_finite());
             }
         }
