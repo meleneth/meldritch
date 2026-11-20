@@ -24,7 +24,11 @@ fn process(state: &mut [f64], input: &[f64], _: &[f64], _: f64, output: &mut [f6
     state[1] = f64::from(advance);
     state[2] = f64::from(reset);
     output[0] = index as f64;
-    output[1] = if length == 1 { 0.0 } else { index as f64 / (length - 1) as f64 };
+    output[1] = if length == 1 {
+        0.0
+    } else {
+        index as f64 / (length - 1) as f64
+    };
 }
 
 pub const CONTRACT: Contract = Contract {
@@ -33,14 +37,40 @@ pub const CONTRACT: Contract = Contract {
     process,
     state_len: 3,
     inputs: &[
-        InputPort { name: "advance", domain: Domain::MonoAudio, fan_in: FanIn::One, unconnected: Some(0.0) },
-        InputPort { name: "reset", domain: Domain::MonoAudio, fan_in: FanIn::One, unconnected: Some(0.0) },
-        InputPort { name: "length", domain: Domain::MonoAudio, fan_in: FanIn::One, unconnected: Some(8.0) },
-        InputPort { name: "looped", domain: Domain::MonoAudio, fan_in: FanIn::One, unconnected: Some(1.0) },
+        InputPort {
+            name: "advance",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(0.0),
+        },
+        InputPort {
+            name: "reset",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(0.0),
+        },
+        InputPort {
+            name: "length",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(8.0),
+        },
+        InputPort {
+            name: "looped",
+            domain: Domain::MonoAudio,
+            fan_in: FanIn::One,
+            unconnected: Some(1.0),
+        },
     ],
     outputs: &[
-        OutputPort { name: "index", domain: Domain::MonoAudio },
-        OutputPort { name: "position", domain: Domain::MonoAudio },
+        OutputPort {
+            name: "index",
+            domain: Domain::MonoAudio,
+        },
+        OutputPort {
+            name: "position",
+            domain: Domain::MonoAudio,
+        },
     ],
     params: &[],
 };
@@ -51,7 +81,13 @@ mod tests {
 
     fn tick(state: &mut [f64; 3], advance: f64, reset: f64, length: f64, looped: f64) -> [f64; 2] {
         let mut output = [0.0; 2];
-        process(state, &[advance, reset, length, looped], &[], 48_000.0, &mut output);
+        process(
+            state,
+            &[advance, reset, length, looped],
+            &[],
+            48_000.0,
+            &mut output,
+        );
         output
     }
 
