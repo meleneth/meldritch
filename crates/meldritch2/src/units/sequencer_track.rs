@@ -15,7 +15,7 @@ pub const CONTRACT: Contract = Contract {
         },
         OutputPort {
             name: "pitch",
-            domain: Domain::MonoAudio,
+            domain: Domain::FrequencyHz,
         },
         OutputPort {
             name: "gate",
