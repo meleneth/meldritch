@@ -4550,7 +4550,6 @@ return graph
     }
 }
 
-
 #[cfg(test)]
 mod value_sequencer_apc_example_tests {
     use crate::{compiler::compile, lua, model::ParameterId};
@@ -4569,13 +4568,18 @@ mod value_sequencer_apc_example_tests {
         let mut machine = compile(&graph).unwrap();
         assert_eq!(machine.screens().len(), 1);
         for step in 1..=8 {
-            assert!(machine.control_handle(&format!("notes_step_{step}")).is_some());
-            assert!(machine.control_handle(&format!("notes_enabled_{step}")).is_some());
+            assert!(
+                machine
+                    .control_handle(&format!("notes_step_{step}"))
+                    .is_some()
+            );
+            assert!(
+                machine
+                    .control_handle(&format!("notes_enabled_{step}"))
+                    .is_some()
+            );
             assert_eq!(
-                machine.authored_value(&ParameterId::new(
-                    format!("notes/enabled_{step}"),
-                    "value"
-                )),
+                machine.authored_value(&ParameterId::new(format!("notes/enabled_{step}"), "value")),
                 Some(1.0)
             );
         }
