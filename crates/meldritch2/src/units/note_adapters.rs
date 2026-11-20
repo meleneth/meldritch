@@ -15,7 +15,10 @@ const fn input(domain: Domain) -> InputPort {
     }
 }
 const fn output(domain: Domain) -> OutputPort {
-    OutputPort { name: "out", domain }
+    OutputPort {
+        name: "out",
+        domain,
+    }
 }
 
 const GENERIC_INPUT: &[InputPort] = &[input(Domain::MonoAudio)];
@@ -37,7 +40,6 @@ fn as_note128(_: &mut [f64], input: &[f64], _: &[f64], _: f64, out: &mut [f64]) 
 fn as_frequency_hz(_: &mut [f64], input: &[f64], _: &[f64], _: f64, out: &mut [f64]) {
     out[0] = input[0];
 }
-
 
 #[inline]
 fn midi_number(value: f64) -> f64 {
@@ -151,7 +153,10 @@ mod tests {
             let normalized = run(midi_to_note128, note as f64);
             assert_eq!(normalized, note as f64 / 128.0);
             assert_eq!(run(note128_to_midi, normalized), note as f64);
-            assert_eq!(run(hz_to_note128, run(note128_to_hz, normalized)), normalized);
+            assert_eq!(
+                run(hz_to_note128, run(note128_to_hz, normalized)),
+                normalized
+            );
         }
     }
 
