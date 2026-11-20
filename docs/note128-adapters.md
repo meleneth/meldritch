@@ -51,3 +51,16 @@ The VST3 host's existing `pitch` port expects Hz, while `gate` and
 `velocity` use their existing numeric semantics. The adapters do not emit
 MIDI NoteOn/NoteOff events: they transform sample values. The VST3 host
 continues to translate Hz/gate to its own MIDI events.
+
+## Rust values are not interchangeable
+
+The shared interface crate now has dedicated `Note128`, `MidiNote`
+and `FrequencyHz` newtypes. They validate their payloads on construction;
+`MidiNote::new(69)` and `Note128::new(69.0 / 128.0)` represent the
+same pitch without being assignment-compatible Rust types.
+
+`From<MidiNote> for Note128` and `TryFrom<Note128> for MidiNote`
+provide explicit conversion operations. Rust does not invoke these traits
+implicitly during assignment or function argument passing. The normal
+DSP signal storage remains `f64` and the graph's port metadata is
+validated before the executable machine is prepared.
