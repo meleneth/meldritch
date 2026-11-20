@@ -2741,7 +2741,15 @@ function meldritch.instrument(name)
         local module = definition:module("note_" .. source.signal, "constant", { value = 0.0 })
         self[field] = module
       end
-      definition:connect(self[field].out, destination)
+      if source.signal == "pitch" then
+        -- The legacy instrument note source is already a frequency in Hz,
+        -- not an untyped fader. Declare that semantic boundary explicitly.
+        local hz = definition:module("note_pitch_hz", "as_frequency_hz")
+        definition:connect(self[field].out, hz.input)
+        definition:connect(hz.out, destination)
+      else
+        definition:connect(self[field].out, destination)
+      end
       return
     end
     ordinary_connect(self, source, destination)
