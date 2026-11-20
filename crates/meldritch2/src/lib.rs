@@ -4319,6 +4319,7 @@ local left = graph:value_sequencer {
 local right = graph:value_sequencer {
   id = "right", slots = 1, values = {1.0}
 }
+right:controls("right")
 local sink = graph:module("output", "output")
 graph:connect(left.value, sink.input)
 return graph
@@ -4352,6 +4353,8 @@ return graph
         let mut samples = [f64::NAN; 4];
         machine.process(&mut samples);
         assert_eq!(samples, [0.25; 4]);
+        assert!(machine.control_handle("right_step_1").is_some());
+        assert!(machine.control_handle("right_length").is_none());
     }
 
     #[test]
