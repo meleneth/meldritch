@@ -4267,7 +4267,6 @@ mod value_sequencer_board_tests {
         assert_eq!(machine.authored_value(&id), Some(0.5));
     }
 
-
     #[test]
     fn lua_wrapper_defaults_to_eight_normalized_zero_slots_and_looping() {
         let patch = r#"
@@ -4280,14 +4279,24 @@ return graph
 "#;
         let graph = lua::read(patch).unwrap();
         let mut machine = compile_at_rate(&graph, 48.0).unwrap();
-        assert_eq!(machine.authored_value(&ParameterId::new("seq/length", "value")), Some(8.0));
-        assert_eq!(machine.authored_value(&ParameterId::new("seq/looped", "value")), Some(1.0));
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("seq/length", "value")),
+            Some(8.0)
+        );
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("seq/looped", "value")),
+            Some(1.0)
+        );
         for slot in 1..=8 {
             assert_eq!(
                 machine.authored_value(&ParameterId::new(format!("seq/slot_{slot}"), "value")),
                 Some(0.0)
             );
-            assert!(machine.control_handle(&format!("seq_step_{slot}")).is_some());
+            assert!(
+                machine
+                    .control_handle(&format!("seq_step_{slot}"))
+                    .is_some()
+            );
         }
         assert!(machine.control_handle("seq_length").is_some());
         assert!(machine.control_handle("seq_looped").is_some());
@@ -4316,11 +4325,26 @@ return graph
 "#;
         let graph = lua::read(patch).unwrap();
         let mut machine = compile_at_rate(&graph, 48.0).unwrap();
-        assert_eq!(machine.authored_value(&ParameterId::new("left/looped", "value")), Some(0.0));
-        assert_eq!(machine.authored_value(&ParameterId::new("left/length", "value")), Some(3.0));
-        assert_eq!(machine.authored_value(&ParameterId::new("left/slot_3", "value")), Some(0.75));
-        assert_eq!(machine.authored_value(&ParameterId::new("right/slot_1", "value")), Some(1.0));
-        assert_eq!(machine.authored_value(&ParameterId::new("right/length", "value")), Some(1.0));
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("left/looped", "value")),
+            Some(0.0)
+        );
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("left/length", "value")),
+            Some(3.0)
+        );
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("left/slot_3", "value")),
+            Some(0.75)
+        );
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("right/slot_1", "value")),
+            Some(1.0)
+        );
+        assert_eq!(
+            machine.authored_value(&ParameterId::new("right/length", "value")),
+            Some(1.0)
+        );
         assert_eq!(
             machine.output_slot("right", "value"),
             machine.output_slot("right/slot_1", "out")
@@ -4335,7 +4359,10 @@ return graph
         let invalid = [
             ("slots = 0", "slots must be an integer"),
             ("slots = 1.5", "slots must be an integer"),
-            ("values = {0.1, 0.2}, slots = 3", "values length must match slots"),
+            (
+                "values = {0.1, 0.2}, slots = 3",
+                "values length must match slots",
+            ),
             ("values = {-0.1}", "must be a finite normalized value"),
             ("values = {1.01}", "must be a finite normalized value"),
             ("looped = 1", "looped must be boolean"),
