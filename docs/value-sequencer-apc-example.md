@@ -46,3 +46,31 @@ The TUI lists the authored adapter chain and exposes the arm and shift
 controls. The captured root is internal DSP state; live root/note-name
 readout is not yet provided. The fader values shown are normalized values,
 not degree names.
+
+
+## Example 85: Serum harmony and drums
+
+Run the real-plugin performance from the engine root:
+
+```sh
+cargo run --release -p meldritch2 -- perform crates/meldritch2/examples/85-serum-harmony-drums.lua
+```
+
+Requires native Serum 2 and PULSE Drum Synth plus the captured Serum factory
+catalog. The default lead and bass are Classic Techno Lead and Gnarly Reese.
+Set MELDRITCH_SERUM_CATALOG to override the catalog directory,
+MELDRITCH_SERUM_LEAD and MELDRITCH_SERUM_BASS to select captured names or IDs,
+and PULSE_STATE to restore an optional trusted PULSE kit state. Without
+PULSE_STATE the installed plugin's default kit is used.
+
+The lead and bass share root capture and diatonic transposition but use
+independent Boards. Bass is two octaves below its resolved melody.
+Four 16-step velocity Boards drive PULSE's GM notes 36, 38, 42, 46 on
+channel 10. A common 8 Hz clock supplies sixteenth notes at 120 BPM.
+
+Stream Deck rows 2 and 3 provide instrument and individual drum lane mutes.
+Stereo levels and master headroom are exposed in the TUI. The APC faders
+and track buttons still edit the lead, and its RGB grid is unassigned.
+Drum patterns are authored in Lua for now; live pad editing and preset
+browsing are not implemented in this example. Real-plugin startup, sound
+quality and realtime throughput require local validation.
