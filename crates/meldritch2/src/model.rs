@@ -182,6 +182,9 @@ pub enum PolyOverflow {
 pub struct ApcValueBoard {
     pub values: [String; 8],
     pub enabled: [String; 8],
+    pub alternate: Option<([String; 8], [String; 8])>,
+    pub bank: Option<String>,
+    pub grid: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
