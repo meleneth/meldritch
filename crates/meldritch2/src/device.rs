@@ -274,10 +274,11 @@ pub(crate) fn unique_name_match(
     match matches.as_slice() {
         [index] => Ok(*index),
         [] => Err(format!(
-            "configured {device_kind} device '{requested}' was not found"
+            "configured {device_kind} device '{requested}' was not found; available ports: {}", names.join(", ")
         )),
         _ => Err(format!(
-            "configured {device_kind} device name '{requested}' is ambiguous; use a more specific name"
+            "configured {device_kind} device name '{requested}' is ambiguous; use a more specific name; matches: {}",
+            matches.iter().map(|&index| names[index].as_str()).collect::<Vec<_>>().join(", ")
         )),
     }
 }
@@ -673,11 +674,10 @@ mod tests {
             unique_name_match(&names, "Analog Stereo", "audio output"),
             Ok(1)
         );
-        assert!(
-            unique_name_match(&names, "Output Alpha", "audio output")
-                .unwrap_err()
-                .contains("ambiguous")
-        );
+        let error = unique_name_match(&names, "Output Alpha", "audio output").unwrap_err();
+        assert!(error.contains("ambiguous"));
+        assert!(error.contains("Output Alpha Analog Stereo"));
+        assert!(error.contains("Output Alpha Pro Audio"));
         assert!(
             unique_name_match(&names, "missing", "audio output")
                 .unwrap_err()
