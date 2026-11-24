@@ -801,6 +801,14 @@ fn refresh_value_board(
     Ok(())
 }
 
+// Master is deliberately immediate, not subject to bank soft pickup.
+fn publish_value_board_master(master: Option<&ControlHandle>, value: u8) -> Result<(), String> {
+    if let Some(master) = master {
+        master.publish(f64::from(value) / 127.0)?;
+    }
+    Ok(())
+}
+
 fn apply_value_board(
     input: Input,
     values: &[ControlHandle; 8],
@@ -840,6 +848,7 @@ impl ApcSession {
                 .map(|(handle, _)| handle.clone()).ok_or_else(|| format!("Unknown APC control '{id}'"));
             let grid = board.grid.iter().map(|id| resolve(id)).collect::<Result<Vec<_>, _>>()?;
             let bank = board.bank.as_deref().map(resolve).transpose()?;
+            let master = board.master.as_deref().map(resolve).transpose()?;
             let alternate = board.alternate.as_ref().map(|(values, enabled)| {
                 let mut alternate = board.clone();
                 alternate.values = values.clone();
@@ -869,7 +878,9 @@ impl ApcSession {
                         alternate.as_ref().map(|(v, e)| (v, e)).unwrap_or((&values, &enabled))
                     } else { (&values, &enabled) };
                     while let Ok(event) = rx.try_recv() {
-                        let result = if let Input::Grid(cell, true) = event {
+                        let result = if let Input::Fader(8, value) = event {
+                            publish_value_board_master(master.as_ref(), value)
+                        } else if let Input::Grid(cell, true) = event {
                             let index = (7 - usize::from(cell) / 8) * 8 + usize::from(cell) % 8;
                             if let Some(handle) = grid.get(index) {
                                 handle.publish(if handle.effective_value() > 0.0 { 0.0 } else { 0.85 })
