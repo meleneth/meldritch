@@ -178,7 +178,7 @@ for index, lane in ipairs(lanes) do
   graph:connect(velocity, pulse["velocity" .. suffix])
 end
 
-graph:apc_value_sequencer(notes, {alternate = bass_steps, bank = "apc_bank", grid = grid})
+graph:apc_value_sequencer(notes, {alternate = bass_steps, bank = "apc_bank", grid = grid, master = "master"})
 
 -- Stereo mixer: separate post-instrument levels and master headroom.
 local mix = graph:module("mix", "stereo_mixer8", {headroom = 0.35})
@@ -194,9 +194,8 @@ for index, entry in ipairs({
     graph:connect(signal, mix[side .. "_" .. index])
   end
 end
-graph:control("master", mix, "headroom", {min = 0.01, max = 1})
-tui:control("Master", "master")
+local master = control("master", 0.8, 0, 1)
 local output = graph:module("output", "stereo_output")
-graph:connect(mix.left, output.left)
-graph:connect(mix.right, output.right)
+graph:connect(product("master_left", mix.left, master), output.left)
+graph:connect(product("master_right", mix.right, master), output.right)
 return graph
