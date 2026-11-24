@@ -1538,7 +1538,7 @@ function meldritch.graph()
       enabled[i] = sequence._control_prefix .. "_enabled_" .. i
     end
     options = options or {}
-    local binding = { values = values, enabled = enabled, grid = options.grid or {} }
+    local binding = { values = values, enabled = enabled, grid = options.grid or {}, master = options.master }
     if options.alternate then
       local alt = options.alternate
       assert(alt.slot_count == 8 and alt._control_prefix, "alternate must be an exposed eight-slot sequence")
@@ -4014,6 +4014,7 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                 Some((ids("alternate_values")?, ids("alternate_enabled")?))
             } else { None },
             bank: board.get("bank").map_err(|e| e.to_string())?,
+            master: board.get("master").map_err(|e| e.to_string())?,
             grid: board.get::<Option<Table>>("grid").map_err(|e| e.to_string())?
                 .map(|grid| grid.sequence_values::<String>().collect::<Result<Vec<_>, _>>())
                 .transpose().map_err(|e| e.to_string())?.unwrap_or_default(),
