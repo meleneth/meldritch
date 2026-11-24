@@ -13,8 +13,9 @@ Counter, Constant, and Switch components, with explicit note/128-to-Hz
 adapters, a clock, oscillator, envelope and VCA.
 
 - APC Mini mk2 faders 1–8 edit the eight normalized values, with soft pickup.
-- APC grid columns 1–8 toggle each step's independent enable component.
-  Green pads are on; dim pads are off. Every row addresses the same eight steps.
+- APC track buttons 1–8 (Volume, Pan, Send, Device, Up, Down, Left, Right)
+  toggle each step's independent enable component. Lit buttons are enabled;
+  unlit buttons are muted. The RGB grid and scene buttons are unassigned.
 - Bespoke TUI shows eight numbered values and their enable states.
   Press 1–8 to toggle, left/right to select, up/down to adjust, Home/End
   for bounds, [ / ] to change active length, and l to toggle looping.
