@@ -787,6 +787,30 @@ impl Drop for Terminal {
     }
 }
 
+// Every ordinary control presentation uses the same authoritative handle.
+fn draw_control_widget(
+    out: &mut impl Write,
+    mode: ColorMode,
+    label: &str,
+    row: &crate::panel::ControlRow,
+    selected: bool,
+) -> Result<(), String> {
+    let (min, max) = row.range();
+    let width = 20usize;
+    let filled = (row.normalized().clamp(0.0, 1.0) * width as f64).round() as usize;
+    print_palette(out, mode, if selected { 8 } else { 33 }, selected,
+        format!("{} {:<22} ", if selected { "▶" } else { " " }, label.chars().take(22).collect::<String>()))?;
+    print_palette(out, mode, 20, true, "━".repeat(filled))?;
+    print_palette(out, mode, 31, false, "─".repeat(width - filled))?;
+    let value = if min == 0.0 && max == 1.0 {
+        format!("{:3.0}%", row.value() * 100.0)
+    } else {
+        format!("{:.2}", row.value())
+    };
+    print_palette(out, mode, 32, false, format!("  {value}"))?;
+    queue!(out, Print("\r\n")).map_err(|error| error.to_string())
+}
+
 fn draw(
     panel: &Panel,
     screens: Option<&ScreenPanel>,
@@ -928,18 +952,7 @@ fn draw(
                     queue!(out, Print("\r\n")).map_err(|error| error.to_string())
                 }
                 WidgetView::Control { label, row } => {
-                    let (min, max) = row.range();
-                    print_palette(
-                        &mut out,
-                        mode,
-                        if marker == ">" { 8 } else { 33 },
-                        marker == ">",
-                        format!(
-                            "{marker} {label} = {:.4}  [{min:.4}, {max:.4}]",
-                            row.value()
-                        ),
-                    )?;
-                    queue!(out, Print("\r\n")).map_err(|error| error.to_string())
+                    draw_control_widget(&mut out, mode, label, row, marker == ">")
                 }
                 WidgetView::Link { label, .. } => {
                     print_palette(&mut out, mode, 36, true, format!("{marker} {label}  →"))?;
@@ -1009,20 +1022,7 @@ fn draw(
                         } else {
                             " "
                         };
-                        let (min, max) = row.range();
-                        let active = selected == ">";
-                        print_palette(
-                            &mut out,
-                            mode,
-                            if active { 8 } else { 33 },
-                            active,
-                            format!(
-                                "{selected} {} = {:.4}  [{min:.4}, {max:.4}]",
-                                row.label(),
-                                row.value()
-                            ),
-                        )?;
-                        queue!(out, Print("\r\n")).map_err(|error| error.to_string())?;
+                        draw_control_widget(&mut out, mode, row.label(), row, selected == ">")?;
                     }
                     Ok(())
                 }
@@ -1243,25 +1243,7 @@ fn draw(
                 .map_err(|error| error.to_string())?;
         }
         for (index, row) in panel.rows().iter().enumerate() {
-            let marker = if panel.selected() == Some(index) {
-                ">"
-            } else {
-                " "
-            };
-            let (min, max) = row.range();
-            queue!(
-                out,
-                Print(format!(
-                    "{marker} {} = {:.4}  [{:.4}, {:.4}]  {}.{}\r\n",
-                    row.id(),
-                    row.value(),
-                    min,
-                    max,
-                    row.target().module,
-                    row.target().name
-                ))
-            )
-            .map_err(|error| error.to_string())?;
+            draw_control_widget(&mut out, mode, row.label(), row, panel.selected() == Some(index))?;
         }
     }
     let stream_errors = output.stream_errors();
