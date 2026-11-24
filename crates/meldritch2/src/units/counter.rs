@@ -1,7 +1,7 @@
 //! Sampled-trigger counter: a reusable state primitive, not a sequencer.
 //! The advance and reset inputs recognize rising edges; length and looped
 //! are ordinary patchable numeric inputs with normalled defaults.
-use crate::contract::{Contract, Domain, FanIn, InputPort, OutputPort, Role};
+use crate::contract::{Contract, Domain, FanIn, InputPort, OutputPort, Param, Role};
 
 fn process(state: &mut [f64], input: &[f64], _: &[f64], _: f64, output: &mut [f64]) {
     let advance = input[0] >= 0.5;
@@ -121,5 +121,55 @@ mod tests {
             tick(&mut state, 0.0, 0.0, 8.0, 1.0);
         }
         assert_eq!(tick(&mut state, 0.0, 0.0, 3.0, 1.0), [2.0, 1.0]);
+    }
+}
+
+/// Pass every Nth input pulse, preserving its high time. Divide-by-one is
+/// transparent. A reset rising edge clears the phase and suppresses that pulse.
+fn divide_clock(state: &mut [f64], input: &[f64], params: &[f64], _: f64, out: &mut [f64]) {
+    let high = input[0] >= 0.5;
+    let reset = input[1] >= 0.5;
+    let divisor = if params[0].is_finite() { params[0].round().clamp(1.0, 256.0) } else { 1.0 };
+    if reset && state[2] == 0.0 {
+        state[0] = 0.0;
+        state[3] = 0.0;
+    } else if high && state[1] == 0.0 {
+        state[3] = f64::from(state[0] == 0.0);
+        state[0] = (state[0] + 1.0) % divisor;
+    }
+    state[1] = f64::from(high);
+    state[2] = f64::from(reset);
+    out[0] = if high { state[3] } else { 0.0 };
+}
+
+pub const CLOCK_DIVIDER: Contract = Contract {
+    name: "clock_divider",
+    role: Role::Processor,
+    process: divide_clock,
+    state_len: 4,
+    inputs: &[
+        InputPort { name: "input", domain: Domain::MonoAudio, fan_in: FanIn::One, unconnected: Some(0.0) },
+        InputPort { name: "reset", domain: Domain::MonoAudio, fan_in: FanIn::One, unconnected: Some(0.0) },
+    ],
+    outputs: &[OutputPort { name: "out", domain: Domain::MonoAudio }],
+    params: &[Param { name: "divisor", default: 1.0, range: Some((1.0, 256.0)) }],
+};
+
+#[cfg(test)]
+mod divider_tests {
+    use super::divide_clock;
+    #[test]
+    fn divides_edges_without_shortening_passed_pulses() {
+        let mut state = [0.0; 4];
+        let mut out = [0.0];
+        for i in 0..8 {
+            for high in [1.0, 1.0, 0.0, 0.0] {
+                divide_clock(&mut state, &[high, 0.0], &[3.0], 48000.0, &mut out);
+                assert_eq!(out[0], if i % 3 == 0 { high } else { 0.0 });
+            }
+        }
+        divide_clock(&mut state, &[0.0, 1.0], &[3.0], 48000.0, &mut out);
+        divide_clock(&mut state, &[1.0, 0.0], &[3.0], 48000.0, &mut out);
+        assert_eq!(out[0], 1.0);
     }
 }
