@@ -22,5 +22,6 @@ adapters, a clock, oscillator, envelope and VCA.
 - The APC worker launches even without the legacy SequencerControl object,
   and uses the existing APC shutdown animation that clears all device LEDs.
 
-The device lookup matches `APC mini` case-insensitively against the available
-MIDI device names. Audio uses the host's default output.
+The device lookup matches `APC mini mk2 Control` case-insensitively against the available
+MIDI device names. The separate Notes port must not be selected. Audio uses the host's default output.
+Connection and LED errors are reported on stderr; the controller retries automatically.
