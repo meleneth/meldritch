@@ -2646,7 +2646,12 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         if graph.devices.apc_mini.is_none() {
             return Err("APC ValueSequencer requires an apc_mini device".into());
         }
-        for id in board.values.iter().chain(board.enabled.iter()) {
+        if board.grid.len() > 64 || board.alternate.is_some() != board.bank.is_some() {
+            return Err("invalid APC grid or alternate bank binding".into());
+        }
+        for id in board.values.iter().chain(board.enabled.iter())
+            .chain(board.alternate.iter().flat_map(|(values, enabled)| values.iter().chain(enabled.iter())))
+            .chain(board.bank.iter()).chain(board.grid.iter()) {
             let control = controls
                 .get(id)
                 .ok_or_else(|| format!("APC ValueSequencer references unknown control '{id}'"))?;
