@@ -424,7 +424,22 @@ impl UserData for LuaVst3 {
         });
     }
 }
-impl UserData for LuaPresetCatalog {}
+impl UserData for LuaPresetCatalog {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("entries", |lua, this, ()| {
+            let entries = lua.create_table()?;
+            for (index, patch) in this.0.patches.iter().enumerate() {
+                let entry = lua.create_table()?;
+                entry.set("index", index)?;
+                entry.set("id", patch.id.clone())?;
+                entry.set("name", patch.name.clone())?;
+                entry.set("category", patch.category.clone())?;
+                entries.set(index + 1, entry)?;
+            }
+            Ok(entries)
+        });
+    }
+}
 
 impl UserData for LuaWebServer {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
@@ -1579,6 +1594,46 @@ function meldritch.graph()
     self:control(spec.id, gate, "fraction", {min = 0.01, max = 0.99, label = "Gate length"})
     if spec.screen then spec.screen:control("Gate length", spec.id) end
     return gate.out
+  end
+  -- A preset browser is a surface affordance over the same selector control.
+  -- 29 sounds per XL page, with previous/next/back navigation.
+  function meldritch.preset_pages(spec)
+    local entries = assert(spec.entries, "preset pages require catalog entries")
+    local selected = {}
+    for _, entry in ipairs(entries) do
+      if not spec.accept or spec.accept(entry) then selected[#selected+1] = entry end
+    end
+    assert(#selected > 0, "preset page selection is empty")
+    local pages = {}
+    local count = math.ceil(#selected / 29)
+    local function page_id(n) return spec.id .. "_" .. n end
+    for page = 1, count do
+      local buttons = {}
+      for index = 1, 29 do
+        local entry = selected[(page-1)*29+index]
+        if not entry then break end
+        local name = entry.name:gsub("^%u%u%s*%-%s*", "")
+        local lines, line = {}, ""
+        for word in name:gmatch("%S+") do
+          if #line > 0 and #line + #word + 1 > 10 then
+            lines[#lines+1], line = line, ""
+          end
+          if #line > 0 then line = line .. " " end
+          line = line .. word
+        end
+        if #line > 0 then lines[#lines+1] = line end
+        buttons[#buttons+1] = {
+          id=page_id(page) .. "_preset_" .. entry.index, index=index-1,
+          label=table.concat(lines, "\n"), color=spec.color or {25,45,85},
+          active_color={0,125,60}, press={control=spec.control, value=entry.index},
+        }
+      end
+      if page > 1 then buttons[#buttons+1] = {id=page_id(page).."_prev",index=29,label="<",press={page=page_id(page-1)}} end
+      if page < count then buttons[#buttons+1] = {id=page_id(page).."_next",index=30,label=">",press={page=page_id(page+1)}} end
+      buttons[#buttons+1] = {id=page_id(page).."_back",index=31,label="BACK",icon="back",press={page=spec.back}}
+      pages[#pages+1] = {id=page_id(page),buttons=buttons}
+    end
+    return pages
   end
   function graph:vst3_parameter_screen(screen, module, runtime, predicate)
     local count = 0
