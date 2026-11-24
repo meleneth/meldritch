@@ -1526,7 +1526,7 @@ function meldritch.graph()
       apc_mini = devices.apc_mini,
     }
   end
-  function graph:apc_value_sequencer(sequence)
+  function graph:apc_value_sequencer(sequence, options)
     assert(self.apc_value_board == nil, "only one APC ValueSequencer binding is supported")
     assert(type(sequence) == "table" and sequence.slot_count == 8,
       "APC ValueSequencer requires an eight-slot sequence")
@@ -1537,7 +1537,20 @@ function meldritch.graph()
       values[i] = sequence._control_prefix .. "_step_" .. i
       enabled[i] = sequence._control_prefix .. "_enabled_" .. i
     end
-    self.apc_value_board = { values = values, enabled = enabled }
+    options = options or {}
+    local binding = { values = values, enabled = enabled, grid = options.grid or {} }
+    if options.alternate then
+      local alt = options.alternate
+      assert(alt.slot_count == 8 and alt._control_prefix, "alternate must be an exposed eight-slot sequence")
+      assert(type(options.bank) == "string", "alternate requires a bank control")
+      binding.bank = options.bank
+      binding.alternate_values, binding.alternate_enabled = {}, {}
+      for i = 1, 8 do
+        binding.alternate_values[i] = alt._control_prefix .. "_step_" .. i
+        binding.alternate_enabled[i] = alt._control_prefix .. "_enabled_" .. i
+      end
+    end
+    self.apc_value_board = binding
   end
   function graph:control_surface(surface)
     assert(type(surface) == "table", "control surface must be a table")
@@ -3997,6 +4010,13 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
         graph.apc_value_board = Some(crate::model::ApcValueBoard {
             values: ids("values")?,
             enabled: ids("enabled")?,
+            alternate: if board.get::<Option<Table>>("alternate_values").map_err(|e| e.to_string())?.is_some() {
+                Some((ids("alternate_values")?, ids("alternate_enabled")?))
+            } else { None },
+            bank: board.get("bank").map_err(|e| e.to_string())?,
+            grid: board.get::<Option<Table>>("grid").map_err(|e| e.to_string())?
+                .map(|grid| grid.sequence_values::<String>().collect::<Result<Vec<_>, _>>())
+                .transpose().map_err(|e| e.to_string())?.unwrap_or_default(),
         });
     }
     let automations: Table = table.get("automations").map_err(|e| e.to_string())?;
