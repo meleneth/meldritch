@@ -827,12 +827,19 @@ impl ApcSession {
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
         let thread = thread::spawn(move || {
-            let (values, enabled) = value_board_handles(&board, &controls)?;
+            let (values, enabled) = value_board_handles(&board, &controls).map_err(|error| {
+                eprintln!("APC ValueSequencer setup failed: {error}");
+                error
+            })?;
             while !worker_stop.load(Ordering::Acquire) {
                 let (tx, rx): (SyncSender<Input>, Receiver<Input>) = mpsc::sync_channel(128);
-                let Ok((_input, mut output)) = connect(&name, tx) else {
-                    thread::sleep(Duration::from_secs(1));
-                    continue;
+                let (_input, mut output) = match connect(&name, tx) {
+                    Ok(connection) => connection,
+                    Err(error) => {
+                        eprintln!("APC connection failed for '{name}': {error}");
+                        thread::sleep(Duration::from_secs(1));
+                        continue;
+                    }
                 };
                 let mut last = None;
                 let mut pickups = [FaderPickup::default(); 8];
@@ -844,7 +851,9 @@ impl ApcSession {
                             eprintln!("APC ValueSequencer control error: {error}");
                         }
                     }
-                    if refresh_value_board(&mut output, &enabled, &mut last).is_err() {
+                    if let Err(error) = refresh_value_board(&mut output, &enabled, &mut last) {
+                        eprintln!("APC ValueSequencer LED refresh failed: {error}");
+                        thread::sleep(Duration::from_secs(1));
                         break;
                     }
                     thread::sleep(Duration::from_millis(25));
@@ -877,12 +886,18 @@ impl ApcSession {
                 .collect::<BTreeMap<_, _>>();
             while !worker_stop.load(Ordering::Acquire) {
                 let (tx, rx): (SyncSender<Input>, Receiver<Input>) = mpsc::sync_channel(128);
-                let Ok((_input, mut output)) = connect(&name, tx) else {
-                    thread::sleep(Duration::from_secs(1));
-                    continue;
+                let (_input, mut output) = match connect(&name, tx) {
+                    Ok(connection) => connection,
+                    Err(error) => {
+                        eprintln!("APC connection failed for '{name}': {error}");
+                        thread::sleep(Duration::from_secs(1));
+                        continue;
+                    }
                 };
                 state.sent = None;
-                if refresh(&mut output, &sequence, &mut state, performance.apc.as_ref()).is_err() {
+                if let Err(error) = refresh(&mut output, &sequence, &mut state, performance.apc.as_ref()) {
+                    eprintln!("APC initial LED refresh failed: {error}");
+                    thread::sleep(Duration::from_secs(1));
                     continue;
                 }
                 while !worker_stop.load(Ordering::Acquire) {
@@ -902,9 +917,11 @@ impl ApcSession {
                     {
                         state.clear_armed = None;
                     }
-                    if refresh(&mut output, &sequence, &mut state, performance.apc.as_ref())
-                        .is_err()
+                    if let Err(error) =
+                        refresh(&mut output, &sequence, &mut state, performance.apc.as_ref())
                     {
+                        eprintln!("APC LED refresh failed: {error}");
+                        thread::sleep(Duration::from_secs(1));
                         break;
                     }
                     thread::sleep(Duration::from_millis(25));
