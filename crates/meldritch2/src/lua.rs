@@ -1697,6 +1697,27 @@ function meldritch.graph()
         looped = sequence._control_prefix .. "_looped",
       })
     end
+    function screen:drum_grid(lanes)
+      local rows = {}
+      for _, lane in ipairs(lanes) do
+        local seq = lane.sequence
+        assert(seq._control_prefix, "drum grid requires exposed sequence controls")
+        local ids = {}
+        for i = 1, seq.slot_count do ids[i] = seq._control_prefix .. "_step_" .. i end
+        rows[#rows+1] = {label = lane.label, controls = ids}
+      end
+      table.insert(self.widgets, {kind = "drum_grid", lanes = rows})
+    end
+    function screen:choice(label, control_id, choices)
+      table.insert(self.widgets, {kind = "choice", label = label, control_id = control_id, choices = choices})
+    end
+    function screen:clock_divider(label, control_id)
+      local choices = {}
+      for _, divisor in ipairs({1,2,3,4,6,8,12,16}) do
+        choices[#choices+1] = {label = "/" .. divisor, value = divisor}
+      end
+      self:choice(label, control_id, choices)
+    end
     function screen:performance_controls()
       table.insert(self.widgets, { kind = "performance_controls" })
     end
@@ -4343,6 +4364,30 @@ fn graph_from_table(table: Table) -> Result<Graph, String> {
                         enabled: ids("enabled")?,
                         length: widget.get("length").map_err(|e| e.to_string())?,
                         looped: widget.get("looped").map_err(|e| e.to_string())?,
+                    }
+                }
+                "drum_grid" => {
+                    let lanes: Table = widget.get("lanes").map_err(|e| e.to_string())?;
+                    let lanes = lanes.sequence_values::<Table>().map(|lane| {
+                        let lane = lane.map_err(|e| e.to_string())?;
+                        let label = lane.get::<String>("label").map_err(|e| e.to_string())?;
+                        let ids: Table = lane.get("controls").map_err(|e| e.to_string())?;
+                        let ids = ids.sequence_values::<String>().collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+                        Ok((label, ids))
+                    }).collect::<Result<Vec<_>, String>>()?;
+                    Widget::DrumGrid { lanes }
+                }
+                "choice" => {
+                    let choices: Table = widget.get("choices").map_err(|e| e.to_string())?;
+                    let choices = choices.sequence_values::<Table>().map(|choice| {
+                        let choice = choice.map_err(|e| e.to_string())?;
+                        Ok((choice.get::<String>("label").map_err(|e| e.to_string())?,
+                            choice.get::<f64>("value").map_err(|e| e.to_string())?))
+                    }).collect::<Result<Vec<_>, String>>()?;
+                    Widget::Choice {
+                        label: widget.get("label").map_err(|e| e.to_string())?,
+                        control_id: widget.get("control_id").map_err(|e| e.to_string())?,
+                        choices,
                     }
                 }
                 "performance_controls" => Widget::PerformanceControls,
