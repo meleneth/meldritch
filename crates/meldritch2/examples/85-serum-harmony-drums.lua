@@ -14,6 +14,8 @@ local notes = graph:value_sequencer {
 notes:controls("notes")
 
 local tui = graph:screen("value_sequence", "SERUM + PULSE / HARMONIC PERFORMANCE")
+local settings = graph:screen("settings", "CLOCK / MIX / PRESETS")
+settings:label("Up/down selects a control; left/right changes it; Tab returns to sequence.")
 tui:label("Seven scale degrees per fader; Stream Deck selects lead/bass")
 tui:label("APC grid: kick, snare, hat, perc; two rows / 16 steps each")
 tui:label("Clock -> independent clock_divider -> melody advance and gate")
@@ -47,28 +49,47 @@ local pitch = graph:note128_to_hz("pitch", degree.out)
 graph:control_surface {
   id = "harmony", device = "stream_deck_xl", initial_page = "harmony",
   pages = {{id = "harmony", buttons = {
-    {id = "capture", index = 0, label = "HOLD ROOT",
+    {id = "capture", index = 0, label = "ROOT", icon = "note",
       press = {control = "root_arm", value = 1},
       release = {control = "root_arm", value = 0}},
-    {id = "tonic", index = 1, label = "I / ROOT",
+    {id = "tonic", index = 1, label = "I",
       press = {control = "degree_shift", value = 0}},
-    {id = "fourth", index = 2, label = "IV / 4TH",
+    {id = "fourth", index = 2, label = "IV",
       press = {control = "degree_shift", value = 3}},
-    {id = "fifth", index = 3, label = "V / 5TH",
+    {id = "fifth", index = 3, label = "V",
       press = {control = "degree_shift", value = 4}},
-    {id = "edit_lead", index = 4, label = "EDIT LEAD", press = {control = "apc_bank", value = 0}},
-    {id = "edit_bass", index = 5, label = "EDIT BASS", press = {control = "apc_bank", value = 1}},
-    {id = "lead_mute", index = 8, label = "MUTE LEAD", mode = "toggle", press = {control = "lead_on", value = 0}, release = {control = "lead_on", value = 1}},
-    {id = "bass_mute", index = 9, label = "MUTE BASS", mode = "toggle", press = {control = "bass_on", value = 0}, release = {control = "bass_on", value = 1}},
-    {id = "drum_mute", index = 10, label = "MUTE DRUM", mode = "toggle", press = {control = "drums_on", value = 0}, release = {control = "drums_on", value = 1}},
-    {id = "kick_mute", index = 16, label = "MUTE KICK", mode = "toggle", press = {control = "kick_on", value = 0}, release = {control = "kick_on", value = 1}},
-    {id = "snare_mute", index = 17, label = "MUTE SNARE", mode = "toggle", press = {control = "snare_on", value = 0}, release = {control = "snare_on", value = 1}},
-    {id = "hat_mute", index = 18, label = "MUTE HAT", mode = "toggle", press = {control = "hat_on", value = 0}, release = {control = "hat_on", value = 1}},
-    {id = "perc_mute", index = 19, label = "MUTE PERC", mode = "toggle", press = {control = "perc_on", value = 0}, release = {control = "perc_on", value = 1}},
-  }}}
+    {id = "edit_lead", index = 4, label = "LEAD", icon = "wave", press = {control = "apc_bank", value = 0}},
+    {id = "edit_bass", index = 5, label = "BASS", icon = "bars", press = {control = "apc_bank", value = 1}},
+    {id = "clock_page", index = 6, label = "CLOCK", icon = "clock", press = {page = "clock"}},
+    {id = "lead_mute", index = 8, label = "LEAD", icon = "wave", mode = "toggle", press = {control = "lead_on", value = 0}, release = {control = "lead_on", value = 1}},
+    {id = "bass_mute", index = 9, label = "BASS", icon = "bars", mode = "toggle", press = {control = "bass_on", value = 0}, release = {control = "bass_on", value = 1}},
+    {id = "drum_mute", index = 10, label = "DRUMS", icon = "drum", mode = "toggle", press = {control = "drums_on", value = 0}, release = {control = "drums_on", value = 1}},
+    {id = "kick_mute", index = 16, label = "KICK", icon = "drum", mode = "toggle", press = {control = "kick_on", value = 0}, release = {control = "kick_on", value = 1}},
+    {id = "snare_mute", index = 17, label = "SNARE", icon = "drum", mode = "toggle", press = {control = "snare_on", value = 0}, release = {control = "snare_on", value = 1}},
+    {id = "hat_mute", index = 18, label = "HAT", icon = "drum", mode = "toggle", press = {control = "hat_on", value = 0}, release = {control = "hat_on", value = 1}},
+    {id = "perc_mute", index = 19, label = "PERC", icon = "drum", mode = "toggle", press = {control = "perc_on", value = 0}, release = {control = "perc_on", value = 1}},
+  }}, {id = "clock", buttons = (function()
+    local buttons = {
+      {id = "clock_back", index = 24, label = "BACK", icon = "back", press = {page = "harmony"}},
+    }
+    for _, voice in ipairs({"lead", "bass"}) do
+      for index, divisor in ipairs({1,2,3,4,6,8,12,16}) do
+        local base = voice == "lead" and 0 or 8
+        buttons[#buttons+1] = {
+          id = voice .. "_divide_" .. divisor,
+          index = base + index - 1,
+          label = string.upper(voice) .. "\n/" .. divisor,
+          color = voice == "lead" and {22,50,100} or {70,35,100},
+          active_color = {0,125,60},
+          press = {control = voice .. "_clock_divider", value = divisor},
+        }
+      end
+    end
+    return buttons
+  end)()}}
 }
-tui:control("Diatonic shift (0=I, 3=IV, 4=V)", "degree_shift")
-tui:control("Root capture armed", "root_arm")
+settings:control("Diatonic shift (0=I, 3=IV, 4=V)", "degree_shift")
+settings:control("Root capture armed", "root_arm")
 
 -- Restore actual captured Serum states, never silently substitute Init.
 local serum_id = "56534558667350736572756D20320000"
@@ -84,7 +105,7 @@ local function serum(id, desired)
       graph:connect(selector.out, synth.patch_selector)
       if runtime:preset_count() > 1 then
         graph:control(id .. "_preset", selector, "value", {min = 0, max = runtime:preset_count() - 1})
-        tui:control(id .. " preset index", id .. "_preset")
+        settings:control(id .. " preset index", id .. "_preset")
       end
       tui:label(id .. " initial: " .. patch.name)
       return synth
@@ -112,7 +133,7 @@ end
 local function control(id, value, min, max)
   local m = graph:module(id, "constant", {value = value})
   graph:control(id, m, "value", {min = min, max = max})
-  tui:control(id, id)
+  settings:control(id, id)
   return m.out
 end
 
@@ -122,7 +143,7 @@ local function divide(id, initial)
   local divider = graph:module(id, "clock_divider", {divisor = initial})
   graph:connect(clock.out, divider.input)
   graph:control(id, divider, "divisor", {min = 1, max = 16})
-  tui:control(id .. " (integer division)", id)
+  settings:control(id .. " (integer division)", id)
   return divider.out
 end
 local lead_clock = divide("lead_clock_divider", 1)
