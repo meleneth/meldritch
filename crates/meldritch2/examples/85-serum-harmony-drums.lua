@@ -14,6 +14,8 @@ local notes = graph:value_sequencer {
 notes:controls("notes")
 
 local tui = graph:screen("value_sequence", "SERUM + PULSE / HARMONIC PERFORMANCE")
+local bass_ui = graph:screen("bass", "BASS SEQUENCE")
+local drums_ui = graph:screen("drums", "DRUM SEQUENCER")
 local settings = graph:screen("settings", "CLOCK / MIX / PRESETS")
 settings:label("Up/down selects a control; left/right changes it; Tab returns to sequence.")
 tui:label("Seven scale degrees per fader; Stream Deck selects lead/bass")
@@ -88,7 +90,7 @@ graph:control_surface {
     return buttons
   end)()}}
 }
-settings:control("Diatonic shift (0=I, 3=IV, 4=V)", "degree_shift")
+settings:choice("Harmony", "degree_shift", {{label="I",value=0},{label="IV",value=3},{label="V",value=4}})
 settings:control("Root capture armed", "root_arm")
 
 -- Restore actual captured Serum states, never silently substitute Init.
@@ -105,7 +107,11 @@ local function serum(id, desired)
       graph:connect(selector.out, synth.patch_selector)
       if runtime:preset_count() > 1 then
         graph:control(id .. "_preset", selector, "value", {min = 0, max = runtime:preset_count() - 1})
-        settings:control(id .. " preset index", id .. "_preset")
+        local choices = {}
+        for index, entry in ipairs(patches) do
+          choices[index] = {label=entry.name, value=index-1}
+        end
+        settings:choice(id .. " preset request", id .. "_preset", choices)
       end
       tui:label(id .. " initial: " .. patch.name)
       return synth
@@ -143,7 +149,7 @@ local function divide(id, initial)
   local divider = graph:module(id, "clock_divider", {divisor = initial})
   graph:connect(clock.out, divider.input)
   graph:control(id, divider, "divisor", {min = 1, max = 16})
-  settings:control(id .. " (integer division)", id)
+  settings:clock_divider(id, id)
   return divider.out
 end
 local lead_clock = divide("lead_clock_divider", 1)
@@ -163,6 +169,7 @@ graph:connect(tempo, lead.tempo)
 local bass_steps = graph:value_sequencer {id = "bass_steps",
   values = {0.5/7,0,4.5/7,2.5/7,0.5/7,0,4.5/7,3.5/7}}
 bass_steps:controls("bass_steps")
+bass_ui:value_sequencer(bass_steps)
 graph:connect(bass_clock, bass_steps.advance)
 local bass_degree = graph:module("bass_scale", "scale_degree_to_note128")
 graph:connect(bass_steps.value, bass_degree.input)
@@ -183,10 +190,11 @@ local lanes = {
   {id="hat", note=42, steps={0,0.5,0.85,0.4,0,0.5,0.8,0.4,0,0.5,0.85,0.4,0,0.5,0.8,0.4}},
   {id="perc", note=46, steps={0,0,0,0.6,0,0,0,0,0,0,0,0.5,0,0,0.7,0}},
 }
-local grid = {}
+local grid, drum_rows = {}, {}
 for index, lane in ipairs(lanes) do
   local seq = graph:value_sequencer {id = lane.id .. "_steps", values = lane.steps}
   seq:controls(lane.id .. "_steps")
+  drum_rows[#drum_rows+1] = {label=lane.id, sequence=seq}
   for step = 1, 16 do grid[#grid + 1] = lane.id .. "_steps_step_" .. step end
   graph:connect(clock.out, seq.advance)
   local lane_on = control(lane.id .. "_on", 1, 0, 1)
@@ -198,6 +206,8 @@ for index, lane in ipairs(lanes) do
   graph:connect(gate, pulse["gate" .. suffix])
   graph:connect(velocity, pulse["velocity" .. suffix])
 end
+
+drums_ui:drum_grid(drum_rows)
 
 graph:apc_value_sequencer(notes, {alternate = bass_steps, bank = "apc_bank", grid = grid, master = "master"})
 
