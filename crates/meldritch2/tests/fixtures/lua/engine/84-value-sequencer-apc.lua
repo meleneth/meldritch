@@ -1,7 +1,7 @@
 -- 84: ValueSequencer / APC mini mk2 / bespoke TUI
 --
 -- Hardware: APC mini mk2 faders 1-8 set step values (soft takeover).
--- Every APC pad column toggles the corresponding enable component.
+-- Track buttons (Volume, Pan, Send, Device, Up, Down, Left, Right) toggle steps 1-8.
 -- TUI: 1-8 toggle, left/right select, up/down adjust, Home/End min/max.
 local graph = meldritch.graph()
 graph:devices { apc_mini = "APC mini mk2 Control" }
