@@ -3038,7 +3038,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 if button
                     .icon
                     .as_deref()
-                    .is_some_and(|icon| !matches!(icon, "circle" | "square" | "triangle" | "bars"))
+                    .is_some_and(|icon| !matches!(icon, "circle" | "square" | "triangle" | "bars" | "note" | "clock" | "wave" | "drum" | "back"))
                 {
                     return Err(format!(
                         "surface button '{}' has an unknown generated icon",
