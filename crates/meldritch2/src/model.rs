@@ -210,6 +210,8 @@ pub enum Widget {
         length: String,
         looped: String,
     },
+    DrumGrid { lanes: Vec<(String, Vec<String>)> },
+    Choice { label: String, control_id: String, choices: Vec<(String, f64)> },
     PerformanceControls,
     ControlFocus,
     PerformanceStatus,
