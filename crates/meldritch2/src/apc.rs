@@ -768,32 +768,36 @@ fn value_board_leds(enabled: &[ControlHandle; 8]) -> [bool; 8] {
 fn refresh_value_board(
     output: &mut MidiOutputConnection,
     enabled: &[ControlHandle; 8],
-    last: &mut Option<[bool; 8]>,
+    grid: &[ControlHandle],
+    last: &mut Option<([bool; 8], [[u8; 3]; 64])>,
 ) -> Result<(), String> {
     let leds = value_board_leds(enabled);
-    if last.is_none() {
-        // The RGB grid and scene buttons are not assigned by this surface.
-        let black = [[0u8; 3]; 16];
-        for chunk in 0..4 {
-            output
-                .send(&apc_rgb_chunk(chunk * 16, &black)?)
+    let pads = std::array::from_fn(|cell| {
+        let index = (7 - cell / 8) * 8 + cell % 8;
+        if let Some(control) = grid.get(index) {
+            if control.effective_value() > 0.0 { [0, 110, 40] } else { [5, 5, 5] }
+        } else { [0, 0, 0] }
+    });
+    let dirty = dirty_rgb_chunks(last.as_ref().map(|previous| &previous.1), &pads);
+    for (chunk, colors) in pads.chunks(16).enumerate() {
+        if dirty[chunk] {
+            output.send(&apc_rgb_chunk((chunk * 16) as u8, colors)?)
                 .map_err(|error| error.to_string())?;
             thread::sleep(Duration::from_millis(5));
         }
+    }
+    if last.is_none() {
         for note in 112..=119 {
-            output
-                .send(&[0x90, note, 0])
-                .map_err(|error| error.to_string())?;
+            output.send(&[0x90, note, 0]).map_err(|error| error.to_string())?;
         }
     }
     for (step, &lit) in leds.iter().enumerate() {
-        if last.as_ref().is_none_or(|previous| previous[step] != lit) {
-            output
-                .send(&[0x90, 100 + step as u8, if lit { 127 } else { 0 }])
+        if last.as_ref().is_none_or(|previous| previous.0[step] != lit) {
+            output.send(&[0x90, 100 + step as u8, if lit { 127 } else { 0 }])
                 .map_err(|error| error.to_string())?;
         }
     }
-    *last = Some(leds);
+    *last = Some((leds, pads));
     Ok(())
 }
 
@@ -832,6 +836,16 @@ impl ApcSession {
                 eprintln!("APC ValueSequencer setup failed: {error}");
                 error
             })?;
+            let resolve = |id: &str| controls.iter().find(|(handle, _)| handle.id() == id)
+                .map(|(handle, _)| handle.clone()).ok_or_else(|| format!("Unknown APC control '{id}'"));
+            let grid = board.grid.iter().map(|id| resolve(id)).collect::<Result<Vec<_>, _>>()?;
+            let bank = board.bank.as_deref().map(resolve).transpose()?;
+            let alternate = board.alternate.as_ref().map(|(values, enabled)| {
+                let mut alternate = board.clone();
+                alternate.values = values.clone();
+                alternate.enabled = enabled.clone();
+                value_board_handles(&alternate, &controls)
+            }).transpose()?;
             while !worker_stop.load(Ordering::Acquire) {
                 let (tx, rx): (SyncSender<Input>, Receiver<Input>) = mpsc::sync_channel(128);
                 let (_input, mut output) = match connect(&name, tx) {
@@ -844,15 +858,30 @@ impl ApcSession {
                 };
                 let mut last = None;
                 let mut pickups = [FaderPickup::default(); 8];
+                let mut previous_bank = false;
                 while !worker_stop.load(Ordering::Acquire) {
+                    let alternate_selected = bank.as_ref().is_some_and(|handle| handle.effective_value() >= 0.5);
+                    if previous_bank != alternate_selected {
+                        pickups = [FaderPickup::default(); 8];
+                        previous_bank = alternate_selected;
+                    }
+                    let (active_values, active_enabled) = if alternate_selected {
+                        alternate.as_ref().map(|(v, e)| (v, e)).unwrap_or((&values, &enabled))
+                    } else { (&values, &enabled) };
                     while let Ok(event) = rx.try_recv() {
-                        if let Err(error) =
-                            apply_value_board(event, &values, &enabled, &mut pickups)
-                        {
+                        let result = if let Input::Grid(cell, true) = event {
+                            let index = (7 - usize::from(cell) / 8) * 8 + usize::from(cell) % 8;
+                            if let Some(handle) = grid.get(index) {
+                                handle.publish(if handle.effective_value() > 0.0 { 0.0 } else { 0.85 })
+                            } else { Ok(()) }
+                        } else {
+                            apply_value_board(event, active_values, active_enabled, &mut pickups)
+                        };
+                        if let Err(error) = result {
                             eprintln!("APC ValueSequencer control error: {error}");
                         }
                     }
-                    if let Err(error) = refresh_value_board(&mut output, &enabled, &mut last) {
+                    if let Err(error) = refresh_value_board(&mut output, active_enabled, &grid, &mut last) {
                         eprintln!("APC ValueSequencer LED refresh failed: {error}");
                         thread::sleep(Duration::from_secs(1));
                         break;
