@@ -2651,7 +2651,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         }
         for id in board.values.iter().chain(board.enabled.iter())
             .chain(board.alternate.iter().flat_map(|(values, enabled)| values.iter().chain(enabled.iter())))
-            .chain(board.bank.iter()).chain(board.grid.iter()) {
+            .chain(board.bank.iter()).chain(board.master.iter()).chain(board.grid.iter()) {
             let control = controls
                 .get(id)
                 .ok_or_else(|| format!("APC ValueSequencer references unknown control '{id}'"))?;
