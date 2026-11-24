@@ -1758,6 +1758,27 @@ mod value_board_apc_tests {
     const PATCH: &str = include_str!("../tests/fixtures/lua/engine/84-value-sequencer-apc.lua");
 
     #[test]
+    fn master_fader_reaches_silence_and_unity_without_pickup() {
+        let graph = lua::read(r#"
+            local g = meldritch.graph()
+            local c = g:module("level", "constant", {value = 0.8})
+            g:control("master", c, "value", {min = 0, max = 1})
+            local o = g:module("out", "output")
+            g:connect(c.out, o.input)
+            return g
+        "#).unwrap();
+        let machine = compile(&graph).unwrap();
+        let master = machine.control_handle("master").unwrap();
+        assert_eq!(decode(&[0xb0, 56, 0]), Some(Input::Fader(8, 0)));
+        publish_value_board_master(Some(&master), 0).unwrap();
+        assert_eq!(master.effective_value(), 0.0);
+        publish_value_board_master(Some(&master), 127).unwrap();
+        assert_eq!(master.effective_value(), 1.0);
+        publish_value_board_master(Some(&master), 64).unwrap();
+        assert_eq!(master.effective_value(), 64.0 / 127.0);
+    }
+
+    #[test]
     fn apc_faders_and_grid_edit_actual_value_board_components() {
         let graph = lua::read(PATCH).unwrap();
         let machine = compile(&graph).unwrap();
