@@ -2,7 +2,9 @@ pub use meldritch_interface::{
     Contract, Domain, FanIn, InputPort, OutputPort, Param, ProcessFn, Role,
 };
 
-const CONTRACTS: [Contract; 46] = [
+const CONTRACTS: [Contract; 48] = [
+    crate::units::note_adapters::CAPTURE_ROOT,
+    crate::units::note_adapters::SCALE_DEGREE_TO_NOTE128,
     crate::units::note_adapters::AS_NOTE128,
     crate::units::note_adapters::AS_FREQUENCY_HZ,
     crate::units::note_adapters::NOTE128_TO_MIDI,
