@@ -979,15 +979,13 @@ fn draw(
                             format!(" {:2}   ", step + 1),
                         )?;
                     }
-                    queue!(out, Print("\r\n  Value:  ")).map_err(|error| error.to_string())?;
-                    for value in values {
-                        print_palette(
-                            &mut out,
-                            mode,
-                            32,
-                            false,
-                            format!("{:5.3} ", value.value()),
-                        )?;
+                    for level in (1..=8).rev() {
+                        queue!(out, Print("\r\n         ")).map_err(|e| e.to_string())?;
+                        for (step, value) in values.iter().enumerate() {
+                            let filled = (value.normalized() * 8.0).round() as usize >= level;
+                            print_palette(&mut out, mode, if enabled[step].value() < 0.5 { 31 } else if step == screen.value_step { 8 } else { 20 }, step == screen.value_step,
+                                if filled { " ███  " } else { "  ·   " })?;
+                        }
                     }
                     queue!(out, Print("\r\n  Enable: ")).map_err(|error| error.to_string())?;
                     for (step, enabled) in enabled.iter().enumerate() {
@@ -1012,6 +1010,37 @@ fn draw(
                         ))
                     )
                     .map_err(|error| error.to_string())
+                }
+                WidgetView::DrumGrid { lanes } => {
+                    print_palette(&mut out, mode, 36, true, "  DRUM PATTERN")?;
+                    queue!(out, Print("\r\n            ")).map_err(|e| e.to_string())?;
+                    for step in 0..lanes[0].1.len() {
+                        queue!(out, Print(format!("{:02} ", step + 1))).map_err(|e| e.to_string())?;
+                    }
+                    queue!(out, Print("\r\n")).map_err(|e| e.to_string())?;
+                    for (lane, (label, rows)) in lanes.iter().enumerate() {
+                        queue!(out, Print(format!("  {:<10}", label.chars().take(10).collect::<String>()))).map_err(|e| e.to_string())?;
+                        for (step, row) in rows.iter().enumerate() {
+                            let selected = lane == screen.drum_lane && step == screen.drum_step;
+                            let value = row.value();
+                            let glyph = if value <= 0.0 { "·" } else if value < 0.34 { "░" } else if value < 0.67 { "▒" } else { "█" };
+                            print_palette(&mut out, mode, if selected { 8 } else if value > 0.0 { [20, 36, 28, 14][lane % 4] } else { 31 }, selected,
+                                if selected { format!("[{glyph}]") } else { format!(" {glyph} ") })?;
+                        }
+                        queue!(out, Print("\r\n")).map_err(|e| e.to_string())?;
+                    }
+                    queue!(out, Print("  Arrows: select  Space: toggle  +/-: velocity\r\n")).map_err(|e| e.to_string())
+                }
+                WidgetView::Choice { label, row, choices } => {
+                    print_palette(&mut out, mode, 36, marker == ">", format!("{marker} {label}  "))?;
+                    let current = choices.iter().enumerate().min_by(|(_, a), (_, b)| (a.1-row.value()).abs().total_cmp(&(b.1-row.value()).abs())).map_or(0, |(i,_)| i);
+                    let first = if choices.len() > 8 { current.saturating_sub(1) } else { 0 };
+                    let count = if choices.len() > 8 { 3 } else { choices.len() };
+                    for (i, (name, _)) in choices.iter().enumerate().skip(first).take(count) {
+                        print_palette(&mut out, mode, if current == i { 20 } else { 31 }, current == i,
+                            if current == i { format!(" [{name}] ") } else { format!(" {name} ") })?;
+                    }
+                    queue!(out, Print("\r\n")).map_err(|e| e.to_string())
                 }
                 WidgetView::PerformanceControls => {
                     print_palette(&mut out, mode, 36, true, "  LIVE CONTROLS")?;
@@ -1428,7 +1457,7 @@ pub fn perform(
             continue;
         }
         if let Some(screens) = &mut screens
-            && screens.value_sequence_key(key.code)?
+            && (screens.drum_grid_key(key.code)? || screens.value_sequence_key(key.code)?)
         {
             draw(
                 &panel,
