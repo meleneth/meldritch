@@ -4,7 +4,7 @@
 //! A MIDI note is an integer in 0..=127. Pitch in VST3 ports is Hz.
 //! All outputs are prepared f64 signal slots; no heap allocation or lookup
 //! is performed in any audio process callback.
-use crate::contract::{Contract, Domain, FanIn, InputPort, OutputPort, Role};
+use crate::contract::{Contract, Domain, FanIn, InputPort, OutputPort, Param, Role};
 
 const fn input(domain: Domain) -> InputPort {
     InputPort {
@@ -137,9 +137,107 @@ pub const HZ_TO_NOTE128: Contract = Contract {
     params: &[],
 };
 
+// A root capture is an ordinary signal processor. The arm signal belongs to
+// any control surface; pitch and gate belong to the keyboard, not the sequencer.
+fn capture_root(state: &mut [f64], input: &[f64], params: &[f64], _: f64, out: &mut [f64]) {
+    let pitch = input[0];
+    let gate = input[1] >= 0.5;
+    if state[0] == 0.0 {
+        state[1] = midi_number(params[0]) / 128.0;
+        state[0] = 1.0;
+    }
+    if input[2] >= 0.5 && gate && (state[2] == 0.0 || state[3] != pitch)
+        && pitch.is_finite() && pitch > 0.0
+    {
+        state[1] = midi_number(69.0 + 12.0 * (pitch / 440.0).log2()) / 128.0;
+    }
+    state[2] = if gate { 1.0 } else { 0.0 };
+    state[3] = pitch;
+    out[0] = state[1];
+}
+
+const fn named_input(name: &'static str, domain: Domain) -> InputPort {
+    InputPort { name, domain, fan_in: FanIn::One, unconnected: None }
+}
+
+pub const CAPTURE_ROOT: Contract = Contract {
+    name: "capture_root",
+    role: Role::Processor,
+    process: capture_root,
+    state_len: 4,
+    inputs: &[
+        named_input("pitch", Domain::FrequencyHz),
+        named_input("gate", Domain::MonoAudio),
+        named_input("arm", Domain::MonoAudio),
+    ],
+    outputs: NOTE128_OUTPUT,
+    params: &[Param { name: "initial_midi", default: 60.0, range: None }],
+};
+
+// Seven equal fader regions, followed by a diatonic degree offset.
+// This adapter preserves the selected key even when shifted to IV or V.
+fn scale_degree_to_note128(_: &mut [f64], input: &[f64], params: &[f64], _: f64, out: &mut [f64]) {
+    const MAJOR: [i32; 7] = [0, 2, 4, 5, 7, 9, 11];
+    const MINOR: [i32; 7] = [0, 2, 3, 5, 7, 8, 10];
+    let scale = if params[0] >= 0.5 { MINOR } else { MAJOR };
+    let value = if input[0].is_finite() { input[0].clamp(0.0, 1.0) } else { 0.0 };
+    let degree = ((value * 7.0).floor() as i32).min(6);
+    let shift = if input[2].is_finite() { input[2].round().clamp(-7.0, 7.0) as i32 } else { 0 };
+    let shifted = degree + shift;
+    let offset = shifted.div_euclid(7) * 12 + scale[shifted.rem_euclid(7) as usize];
+    out[0] = midi_number(note128_number(input[1]) + f64::from(offset)) / 128.0;
+}
+
+pub const SCALE_DEGREE_TO_NOTE128: Contract = Contract {
+    name: "scale_degree_to_note128",
+    role: Role::Processor,
+    process: scale_degree_to_note128,
+    state_len: 0,
+    inputs: &[
+        named_input("input", Domain::MonoAudio),
+        named_input("root", Domain::Note128),
+        named_input("transpose", Domain::MonoAudio),
+    ],
+    outputs: NOTE128_OUTPUT,
+    params: &[Param { name: "minor", default: 0.0, range: None }],
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seven_scale_regions_and_diatonic_transposition() {
+        let mut out = [0.0];
+        for (degree, offset) in [0, 2, 4, 5, 7, 9, 11].into_iter().enumerate() {
+            scale_degree_to_note128(&mut [], &[(degree as f64 + 0.5) / 7.0, 60.0 / 128.0, 0.0], &[0.0], 48000.0, &mut out);
+            assert_eq!(out[0], f64::from(60 + offset) / 128.0);
+        }
+        for (shift, expected) in [(0.0, 60.0), (3.0, 65.0), (4.0, 67.0)] {
+            scale_degree_to_note128(&mut [], &[0.0, 60.0 / 128.0, shift], &[0.0], 48000.0, &mut out);
+            assert_eq!(out[0], expected / 128.0);
+        }
+        scale_degree_to_note128(&mut [], &[1.0, 60.0 / 128.0, 4.0], &[0.0], 48000.0, &mut out);
+        assert_eq!(out[0], 77.0 / 128.0);
+    }
+
+    #[test]
+    fn root_capture_requires_armed_keyboard_edge() {
+        let mut state = [0.0; 4];
+        let mut out = [0.0];
+        for (input, expected) in [
+            ([440.0, 0.0, 0.0], 60.0),
+            ([440.0, 1.0, 0.0], 60.0),
+            ([440.0, 1.0, 1.0], 60.0),
+            ([440.0, 0.0, 1.0], 60.0),
+            ([440.0, 1.0, 1.0], 69.0),
+            ([440.0, 0.0, 0.0], 69.0),
+            ([261.625565, 1.0, 0.0], 69.0),
+        ] {
+            capture_root(&mut state, &input, &[60.0], 48000.0, &mut out);
+            assert_eq!(out[0], expected / 128.0);
+        }
+    }
 
     fn run(process: crate::contract::ProcessFn, value: f64) -> f64 {
         let mut output = [f64::NAN];
