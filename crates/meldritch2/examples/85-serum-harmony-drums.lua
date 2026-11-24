@@ -12,10 +12,11 @@ local notes = graph:value_sequencer {
   values = {0.5/7, 2.5/7, 4.5/7, 6.5/7, 4.5/7, 2.5/7, 1.5/7, 3.5/7},
 }
 notes:controls("notes")
-graph:apc_value_sequencer(notes)
 
 local tui = graph:screen("value_sequence", "SERUM + PULSE / HARMONIC PERFORMANCE")
-tui:label("Seven scale degrees per fader; track buttons enable steps")
+tui:label("Seven scale degrees per fader; Stream Deck selects lead/bass")
+tui:label("APC grid: kick, snare, hat, perc; two rows / 16 steps each")
+tui:label("Clock -> independent clock_divider -> melody advance and gate")
 tui:label("Adapters: keyboard Hz -> capture_root (Note128)")
 tui:label("Value -> scale_degree_to_note128 (major, I/IV/V) -> note128_to_hz")
 tui:value_sequencer(notes)
@@ -55,6 +56,8 @@ graph:control_surface {
       press = {control = "degree_shift", value = 3}},
     {id = "fifth", index = 3, label = "V / 5TH",
       press = {control = "degree_shift", value = 4}},
+    {id = "edit_lead", index = 4, label = "EDIT LEAD", press = {control = "apc_bank", value = 0}},
+    {id = "edit_bass", index = 5, label = "EDIT BASS", press = {control = "apc_bank", value = 1}},
     {id = "lead_mute", index = 8, label = "MUTE LEAD", mode = "toggle", press = {control = "lead_on", value = 0}, release = {control = "lead_on", value = 1}},
     {id = "bass_mute", index = 9, label = "MUTE BASS", mode = "toggle", press = {control = "bass_on", value = 0}, release = {control = "bass_on", value = 1}},
     {id = "drum_mute", index = 10, label = "MUTE DRUM", mode = "toggle", press = {control = "drums_on", value = 0}, release = {control = "drums_on", value = 1}},
@@ -75,9 +78,16 @@ local patches = meldritch._vst3_patch_bank {plugin = serum_id, patch_bank = cata
 local function serum(id, desired)
   for _, patch in ipairs(patches) do
     if patch.id == desired or patch.name == desired then
-      local runtime = meldritch._vst3 {plugin = serum_id, state_file = patch.file}
-      tui:label(id .. ": " .. patch.name)
-      return graph:module(id, "vst3", {}, runtime)
+      local runtime = meldritch._vst3 {plugin = serum_id, preset_catalog = catalog, initial_preset = patch.id}
+      local synth = graph:module(id, "vst3", {}, runtime)
+      local selector = graph:module(id .. "_selector", "constant", {value = runtime:preset_initial()})
+      graph:connect(selector.out, synth.patch_selector)
+      if runtime:preset_count() > 1 then
+        graph:control(id .. "_preset", selector, "value", {min = 0, max = runtime:preset_count() - 1})
+        tui:control(id .. " preset index", id .. "_preset")
+      end
+      tui:label(id .. " initial: " .. patch.name)
+      return synth
     end
   end
   error("Missing captured Serum patch '" .. desired .. "' in " .. catalog)
@@ -108,20 +118,31 @@ end
 
 -- A single clock drives every independent Board. At 120 BPM it emits sixteenths.
 local clock = graph:module("clock", "square", {frequency = 8})
-graph:connect(clock.out, notes.advance)
+local function divide(id, initial)
+  local divider = graph:module(id, "clock_divider", {divisor = initial})
+  graph:connect(clock.out, divider.input)
+  graph:control(id, divider, "divisor", {min = 1, max = 16})
+  tui:control(id .. " (integer division)", id)
+  return divider.out
+end
+local lead_clock = divide("lead_clock_divider", 1)
+local bass_clock = divide("bass_clock_divider", 2)
+control("apc_bank", 0, 0, 1)
+graph:connect(lead_clock, notes.advance)
 local tempo = constant("tempo", 120)
 local lead_on = control("lead_on", 1, 0, 1)
 local bass_on = control("bass_on", 1, 0, 1)
 local drums_on = control("drums_on", 1, 0, 1)
 graph:connect(pitch, lead.pitch)
-graph:connect(product("lead_gate", product("lead_step", clock.out, notes.enabled), lead_on), lead.gate)
+graph:connect(product("lead_gate", product("lead_step", lead_clock, notes.enabled), lead_on), lead.gate)
 graph:connect(constant("lead_velocity", 0.72), lead.velocity)
 graph:connect(tempo, lead.tempo)
 
 -- Independent bass pattern, sharing the harmonic root and diatonic shift.
 local bass_steps = graph:value_sequencer {id = "bass_steps",
-  values = {0.5/7,0,0,4.5/7,0.5/7,0,0,2.5/7,0.5/7,0,0,4.5/7,0.5/7,0,0,3.5/7}}
-graph:connect(clock.out, bass_steps.advance)
+  values = {0.5/7,0,4.5/7,2.5/7,0.5/7,0,4.5/7,3.5/7}}
+bass_steps:controls("bass_steps")
+graph:connect(bass_clock, bass_steps.advance)
 local bass_degree = graph:module("bass_scale", "scale_degree_to_note128")
 graph:connect(bass_steps.value, bass_degree.input)
 graph:connect(root.out, bass_degree.root)
@@ -129,10 +150,7 @@ graph:connect(shift.out, bass_degree.transpose)
 local bass_octave = graph:module("bass_octave", "affine", {scale = 1, offset = -24/128})
 graph:connect(bass_degree.out, bass_octave.input)
 graph:connect(graph:note128_to_hz("bass_hz", graph:as_note128("bass_note", bass_octave.out)), bass.pitch)
-local bass_rhythm = graph:value_sequencer {id = "bass_rhythm",
-  values = {1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1}}
-graph:connect(clock.out, bass_rhythm.advance)
-graph:connect(product("bass_gate", product("bass_step_gate", clock.out, bass_rhythm.value), bass_on), bass.gate)
+graph:connect(product("bass_gate", product("bass_step_gate", bass_clock, bass_steps.enabled), bass_on), bass.gate)
 graph:connect(constant("bass_velocity", 0.8), bass.velocity)
 graph:connect(tempo, bass.tempo)
 graph:connect(tempo, pulse.tempo)
@@ -144,8 +162,11 @@ local lanes = {
   {id="hat", note=42, steps={0,0.5,0.85,0.4,0,0.5,0.8,0.4,0,0.5,0.85,0.4,0,0.5,0.8,0.4}},
   {id="perc", note=46, steps={0,0,0,0.6,0,0,0,0,0,0,0,0.5,0,0,0.7,0}},
 }
+local grid = {}
 for index, lane in ipairs(lanes) do
   local seq = graph:value_sequencer {id = lane.id .. "_steps", values = lane.steps}
+  seq:controls(lane.id .. "_steps")
+  for step = 1, 16 do grid[#grid + 1] = lane.id .. "_steps_step_" .. step end
   graph:connect(clock.out, seq.advance)
   local lane_on = control(lane.id .. "_on", 1, 0, 1)
   local velocity = product(lane.id .. "_velocity", seq.value, lane_on)
@@ -156,6 +177,8 @@ for index, lane in ipairs(lanes) do
   graph:connect(gate, pulse["gate" .. suffix])
   graph:connect(velocity, pulse["velocity" .. suffix])
 end
+
+graph:apc_value_sequencer(notes, {alternate = bass_steps, bank = "apc_bank", grid = grid})
 
 -- Stereo mixer: separate post-instrument levels and master headroom.
 local mix = graph:module("mix", "stereo_mixer8", {headroom = 0.35})
