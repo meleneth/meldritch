@@ -1571,6 +1571,29 @@ function meldritch.graph()
     table.insert(self.modules, { id = id, kind = kind, values = values or {}, runtime = runtime })
     return handle
   end
+  -- Shared instrument affordances: the script declares targets, not widget mechanics.
+  function graph:step_articulation(spec)
+    local gate = self:module(spec.id, "step_gate", {fraction = spec.fraction or 0.8})
+    self:connect(spec.clock.out, gate.trigger)
+    self:connect(spec.clock.period, gate.period)
+    self:control(spec.id, gate, "fraction", {min = 0.01, max = 0.99, label = "Gate length"})
+    if spec.screen then spec.screen:control("Gate length", spec.id) end
+    return gate.out
+  end
+  function graph:vst3_parameter_screen(screen, module, runtime, predicate)
+    local count = 0
+    for _, info in ipairs(runtime:parameters()) do
+      if info.automatable and not info.read_only and predicate(info) then
+        local id = module.id .. "_param_" .. info.id
+        self:control(id, module, info.key, {min=0, max=1, label=info.name})
+        screen:control(info.name, id)
+        count = count + 1
+        if count == 48 then break end
+      end
+    end
+    if count == 0 then screen:label("No matching writable plugin parameters reported") end
+    return count
+  end
   function graph:connect(source, destination)
     assert(type(source) == "table" and source.direction == "output", "source must be an output port")
     assert(type(destination) == "table" and destination.direction == "input", "destination must be an input port")
