@@ -935,6 +935,40 @@ fn validate_screens(
                         }
                     }
                 }
+                Widget::DrumGrid { lanes } => {
+                    if lanes.is_empty() || lanes.len() > 8 {
+                        return Err("drum grid requires 1..8 lanes".into());
+                    }
+                    let steps = lanes[0].1.len();
+                    if !(1..=32).contains(&steps) {
+                        return Err("drum grid requires 1..32 steps".into());
+                    }
+                    for (label, ids) in lanes {
+                        text(label, "drum lane label")?;
+                        if ids.len() != steps {
+                            return Err("drum grid lanes must have equal length".into());
+                        }
+                        for id in ids {
+                            let control = controls.get(id).ok_or_else(|| format!("unknown drum grid control '{id}'"))?;
+                            if control.min != 0.0 || control.max != 1.0 {
+                                return Err(format!("drum grid control '{id}' must have range 0..1"));
+                            }
+                        }
+                    }
+                }
+                Widget::Choice { label, control_id, choices } => {
+                    text(label, "choice label")?;
+                    let control = controls.get(control_id).ok_or_else(|| format!("unknown choice control '{control_id}'"))?;
+                    if choices.is_empty() || choices.len() > 512 {
+                        return Err("choice requires 1..512 options".into());
+                    }
+                    for (label, value) in choices {
+                        text(label, "choice option")?;
+                        if !value.is_finite() || *value < control.min || *value > control.max {
+                            return Err(format!("choice value outside control '{control_id}' range"));
+                        }
+                    }
+                }
                 Widget::PerformanceControls | Widget::ControlFocus => {}
                 Widget::PerformanceStatus
                 | Widget::ArrangementStatus
