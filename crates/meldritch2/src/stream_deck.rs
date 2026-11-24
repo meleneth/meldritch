@@ -269,67 +269,77 @@ impl SurfaceRuntime {
 
 fn button_image(visual: &ButtonVisual, size: (usize, usize)) -> DynamicImage {
     let mut image = RgbImage::from_pixel(size.0 as u32, size.1 as u32, Rgb(visual.color));
-    if let Some(icon) = visual.icon.as_deref() {
-        let center = (size.0 / 2, size.1 / 3);
-        for y in 0..18usize {
-            for x in 0..18usize {
-                let lit = match icon {
-                    "square" => (3..15).contains(&x) && (3..15).contains(&y),
-                    "circle" => {
-                        let dx = x as isize - 9;
-                        let dy = y as isize - 9;
-                        dx * dx + dy * dy <= 55
-                    }
-                    "triangle" => (3..16).contains(&y) && x >= 9 - y / 2 && x <= 9 + y / 2,
-                    "bars" => matches!(x, 3..=5 | 8..=10 | 13..=15) && y >= 3,
-                    _ => false,
-                };
-                if lit {
-                    image.put_pixel(
-                        (center.0 - 9 + x) as u32,
-                        (center.1 - 9 + y) as u32,
-                        Rgb([255, 255, 255]),
-                    );
-                }
-            }
-        }
-    }
-    // XL keys are 96 pixels wide on the devices we support.  Pick a scale
-    // which fits the authored label instead of letting a long label index
-    // beyond the image (and kill the HID worker).
-    let label = visual.label.chars().take(10).collect::<Vec<_>>();
-    let scale = if label.len().saturating_mul(16) <= size.0 {
-        2usize
-    } else {
-        1usize
-    };
-    let chars = label
-        .into_iter()
-        .take(size.0 / (8 * scale).max(1))
-        .collect::<Vec<_>>();
-    let width = chars.len() * 8 * scale;
-    let start_x = size.0.saturating_sub(width) / 2;
-    let start_y = size.1.saturating_sub(8 * scale) / 2;
-    for (char_index, glyph) in chars
-        .into_iter()
-        .filter_map(|character| font8x8::BASIC_FONTS.get(character))
-        .enumerate()
-    {
-        for (row, bits) in glyph.iter().enumerate() {
-            for column in 0..8 {
-                if bits & (1 << column) != 0 {
-                    for y in 0..scale {
-                        for x in 0..scale {
-                            image.put_pixel(
-                                (start_x + char_index * 8 * scale + column * scale + x) as u32,
-                                (start_y + row * scale + y) as u32,
-                                Rgb([255, 255, 255]),
-                            );
+    let white = Rgb([255, 255, 255]);
+    let draw_text = |image: &mut RgbImage, label: &str, top: usize, height: usize| {
+        let lines: Vec<&str> = label.split('\n').filter(|line| !line.is_empty()).collect();
+        if lines.is_empty() { return; }
+        let max_chars = lines.iter().map(|line| line.chars().count()).max().unwrap_or(1);
+        let scale = ((size.0.saturating_sub(8) / (8 * max_chars.max(1)))
+            .min(height / (9 * lines.len()))).max(1);
+        let total_height = (9 * lines.len() - 1) * scale;
+        let start_y = top + height.saturating_sub(total_height) / 2;
+        for (line_index, line) in lines.iter().enumerate() {
+            let width = line.chars().count() * 8 * scale;
+            let start_x = size.0.saturating_sub(width) / 2;
+            for (char_index, character) in line.chars().enumerate() {
+                let Some(glyph) = font8x8::BASIC_FONTS.get(character) else { continue; };
+                for (row, bits) in glyph.iter().enumerate() {
+                    for column in 0..8 {
+                        if bits & (1 << column) == 0 { continue; }
+                        for y in 0..scale {
+                            for x in 0..scale {
+                                let px = start_x + char_index * 8 * scale + column * scale + x;
+                                let py = start_y + line_index * 9 * scale + row * scale + y;
+                                if px < size.0 && py < size.1 {
+                                    image.put_pixel(px as u32, py as u32, white);
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+    };
+    if let Some(icon) = visual.icon.as_deref() {
+        // Scale the symbol to the key instead of drawing an 18-pixel thumbnail.
+        let side = size.0.saturating_sub(12).min(size.1 * 3 / 5);
+        let start_x = (size.0 - side) / 2;
+        let start_y = 4;
+        for y in 0..side {
+            for x in 0..side {
+                let u = (x * 24 / side) as i32;
+                let v = (y * 24 / side) as i32;
+                let dx = u - 12;
+                let dy = v - 12;
+                let lit = match icon {
+                    "square" => (3..21).contains(&u) && (3..21).contains(&v),
+                    "circle" => dx * dx + dy * dy <= 100,
+                    "triangle" => (3..22).contains(&v) && dx.abs() <= v / 2,
+                    "bars" => matches!(u, 3..=6 | 10..=13 | 17..=20) && v >= 3,
+                    "note" => ((u - 7).pow(2) + (v - 18).pow(2) <= 22)
+                        || ((10..=12).contains(&u) && (3..=18).contains(&v))
+                        || ((12..=19).contains(&u) && (3..=6).contains(&v)),
+                    "clock" => (80..=125).contains(&(dx * dx + dy * dy))
+                        || (dx.abs() <= 1 && (-7..=0).contains(&dy))
+                        || (dy.abs() <= 1 && (0..=6).contains(&dx)),
+                    "wave" => (v - (12 + (7.0 * (f64::from(u) * std::f64::consts::TAU / 24.0).sin()) as i32)).abs() <= 1,
+                    "drum" => ((3..=20).contains(&u) && (7..=18).contains(&v)
+                        && (v == 7 || v == 18 || u == 3 || u == 20))
+                        || ((4..=19).contains(&u) && (v - (7 + (u - 4) % 6)).abs() <= 1),
+                    "back" => (dx.abs() <= 9 && dy.abs() <= 1)
+                        || ((-9..=0).contains(&dx) && (dy.abs() - (dx + 9)).abs() <= 1),
+                    _ => false,
+                };
+                if lit && start_y + y < size.1 {
+                    image.put_pixel((start_x + x) as u32, (start_y + y) as u32, white);
+                }
+            }
+        }
+        let top = (start_y + side + 2).min(size.1);
+        draw_text(&mut image, &visual.label, top, size.1 - top);
+    } else {
+        // Short labels and Roman numerals occupy the entire key face.
+        draw_text(&mut image, &visual.label, 0, size.1);
     }
     DynamicImage::ImageRgb8(image)
 }

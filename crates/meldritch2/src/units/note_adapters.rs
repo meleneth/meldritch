@@ -1,0 +1,292 @@
+//! Explicit numerical adapters at the MIDI / normalized-control boundary.
+//!
+//! note128 is NOTE_NUMBER / 128.0, with legal discrete notes 0..=127.
+//! A MIDI note is an integer in 0..=127. Pitch in VST3 ports is Hz.
+//! All outputs are prepared f64 signal slots; no heap allocation or lookup
+//! is performed in any audio process callback.
+use crate::contract::{Contract, Domain, FanIn, InputPort, OutputPort, Param, Role};
+
+const fn input(domain: Domain) -> InputPort {
+    InputPort {
+        name: "input",
+        domain,
+        fan_in: FanIn::One,
+        unconnected: None,
+    }
+}
+const fn output(domain: Domain) -> OutputPort {
+    OutputPort {
+        name: "out",
+        domain,
+    }
+}
+
+const GENERIC_INPUT: &[InputPort] = &[input(Domain::MonoAudio)];
+const NOTE128_INPUT: &[InputPort] = &[input(Domain::Note128)];
+const MIDI_INPUT: &[InputPort] = &[input(Domain::MidiNote)];
+const HZ_INPUT: &[InputPort] = &[input(Domain::FrequencyHz)];
+
+const NOTE128_OUTPUT: &[OutputPort] = &[output(Domain::Note128)];
+const MIDI_OUTPUT: &[OutputPort] = &[output(Domain::MidiNote)];
+const HZ_OUTPUT: &[OutputPort] = &[output(Domain::FrequencyHz)];
+
+/// Explicit interpretation of a generic [0,1] numeric source as note/128.
+fn as_note128(_: &mut [f64], input: &[f64], _: &[f64], _: f64, out: &mut [f64]) {
+    out[0] = note128_number(input[0]) / 128.0;
+}
+
+/// Explicit interpretation of an existing frequency-bearing numeric source.
+/// Useful at legacy instrument boundaries without implicit graph casts.
+fn as_frequency_hz(_: &mut [f64], input: &[f64], _: &[f64], _: f64, out: &mut [f64]) {
+    out[0] = input[0];
+}
+
+#[inline]
+fn midi_number(value: f64) -> f64 {
+    if value.is_nan() {
+        return 0.0;
+    }
+    value.round().clamp(0.0, 127.0)
+}
+
+#[inline]
+fn note128_number(value: f64) -> f64 {
+    midi_number(value * 128.0)
+}
+
+#[inline]
+fn midi_hz(note: f64) -> f64 {
+    440.0 * 2.0_f64.powf((note - 69.0) / 12.0)
+}
+
+fn note128_to_midi(_: &mut [f64], input: &[f64], _: &[f64], _: f64, out: &mut [f64]) {
+    out[0] = note128_number(input[0]);
+}
+
+fn midi_to_note128(_: &mut [f64], input: &[f64], _: &[f64], _: f64, out: &mut [f64]) {
+    out[0] = midi_number(input[0]) / 128.0;
+}
+
+fn note128_to_hz(_: &mut [f64], input: &[f64], _: &[f64], _: f64, out: &mut [f64]) {
+    out[0] = midi_hz(note128_number(input[0]));
+}
+
+fn hz_to_note128(_: &mut [f64], input: &[f64], _: &[f64], _: f64, out: &mut [f64]) {
+    let frequency = input[0];
+    let note = if frequency.is_finite() && frequency > 0.0 {
+        69.0 + 12.0 * (frequency / 440.0).log2()
+    } else {
+        0.0
+    };
+    out[0] = midi_number(note) / 128.0;
+}
+
+pub const AS_NOTE128: Contract = Contract {
+    name: "as_note128",
+    role: Role::Processor,
+    process: as_note128,
+    state_len: 0,
+    inputs: GENERIC_INPUT,
+    outputs: NOTE128_OUTPUT,
+    params: &[],
+};
+pub const AS_FREQUENCY_HZ: Contract = Contract {
+    name: "as_frequency_hz",
+    role: Role::Processor,
+    process: as_frequency_hz,
+    state_len: 0,
+    inputs: GENERIC_INPUT,
+    outputs: HZ_OUTPUT,
+    params: &[],
+};
+
+pub const NOTE128_TO_MIDI: Contract = Contract {
+    name: "note128_to_midi",
+    role: Role::Processor,
+    process: note128_to_midi,
+    state_len: 0,
+    inputs: NOTE128_INPUT,
+    outputs: MIDI_OUTPUT,
+    params: &[],
+};
+pub const MIDI_TO_NOTE128: Contract = Contract {
+    name: "midi_to_note128",
+    role: Role::Processor,
+    process: midi_to_note128,
+    state_len: 0,
+    inputs: MIDI_INPUT,
+    outputs: NOTE128_OUTPUT,
+    params: &[],
+};
+pub const NOTE128_TO_HZ: Contract = Contract {
+    name: "note128_to_hz",
+    role: Role::Processor,
+    process: note128_to_hz,
+    state_len: 0,
+    inputs: NOTE128_INPUT,
+    outputs: HZ_OUTPUT,
+    params: &[],
+};
+pub const HZ_TO_NOTE128: Contract = Contract {
+    name: "hz_to_note128",
+    role: Role::Processor,
+    process: hz_to_note128,
+    state_len: 0,
+    inputs: HZ_INPUT,
+    outputs: NOTE128_OUTPUT,
+    params: &[],
+};
+
+// A root capture is an ordinary signal processor. The arm signal belongs to
+// any control surface; pitch and gate belong to the keyboard, not the sequencer.
+fn capture_root(state: &mut [f64], input: &[f64], params: &[f64], _: f64, out: &mut [f64]) {
+    let pitch = input[0];
+    let gate = input[1] >= 0.5;
+    if state[0] == 0.0 {
+        state[1] = midi_number(params[0]) / 128.0;
+        state[0] = 1.0;
+    }
+    if input[2] >= 0.5 && gate && (state[2] == 0.0 || state[3] != pitch)
+        && pitch.is_finite() && pitch > 0.0
+    {
+        state[1] = midi_number(69.0 + 12.0 * (pitch / 440.0).log2()) / 128.0;
+    }
+    state[2] = if gate { 1.0 } else { 0.0 };
+    state[3] = pitch;
+    out[0] = state[1];
+}
+
+const fn named_input(name: &'static str, domain: Domain) -> InputPort {
+    InputPort { name, domain, fan_in: FanIn::One, unconnected: None }
+}
+
+pub const CAPTURE_ROOT: Contract = Contract {
+    name: "capture_root",
+    role: Role::Processor,
+    process: capture_root,
+    state_len: 4,
+    inputs: &[
+        named_input("pitch", Domain::FrequencyHz),
+        named_input("gate", Domain::MonoAudio),
+        named_input("arm", Domain::MonoAudio),
+    ],
+    outputs: NOTE128_OUTPUT,
+    params: &[Param { name: "initial_midi", default: 60.0, range: None }],
+};
+
+// Seven equal fader regions, followed by a diatonic degree offset.
+// This adapter preserves the selected key even when shifted to IV or V.
+fn scale_degree_to_note128(_: &mut [f64], input: &[f64], params: &[f64], _: f64, out: &mut [f64]) {
+    const MAJOR: [i32; 7] = [0, 2, 4, 5, 7, 9, 11];
+    const MINOR: [i32; 7] = [0, 2, 3, 5, 7, 8, 10];
+    let scale = if params[0] >= 0.5 { MINOR } else { MAJOR };
+    let value = if input[0].is_finite() { input[0].clamp(0.0, 1.0) } else { 0.0 };
+    let degree = ((value * 7.0).floor() as i32).min(6);
+    let shift = if input[2].is_finite() { input[2].round().clamp(-7.0, 7.0) as i32 } else { 0 };
+    let shifted = degree + shift;
+    let offset = shifted.div_euclid(7) * 12 + scale[shifted.rem_euclid(7) as usize];
+    out[0] = midi_number(note128_number(input[1]) + f64::from(offset)) / 128.0;
+}
+
+pub const SCALE_DEGREE_TO_NOTE128: Contract = Contract {
+    name: "scale_degree_to_note128",
+    role: Role::Processor,
+    process: scale_degree_to_note128,
+    state_len: 0,
+    inputs: &[
+        named_input("input", Domain::MonoAudio),
+        named_input("root", Domain::Note128),
+        named_input("transpose", Domain::MonoAudio),
+    ],
+    outputs: NOTE128_OUTPUT,
+    params: &[Param { name: "minor", default: 0.0, range: None }],
+};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seven_scale_regions_and_diatonic_transposition() {
+        let mut out = [0.0];
+        for (degree, offset) in [0, 2, 4, 5, 7, 9, 11].into_iter().enumerate() {
+            scale_degree_to_note128(&mut [], &[(degree as f64 + 0.5) / 7.0, 60.0 / 128.0, 0.0], &[0.0], 48000.0, &mut out);
+            assert_eq!(out[0], f64::from(60 + offset) / 128.0);
+        }
+        for (shift, expected) in [(0.0, 60.0), (3.0, 65.0), (4.0, 67.0)] {
+            scale_degree_to_note128(&mut [], &[0.0, 60.0 / 128.0, shift], &[0.0], 48000.0, &mut out);
+            assert_eq!(out[0], expected / 128.0);
+        }
+        scale_degree_to_note128(&mut [], &[1.0, 60.0 / 128.0, 4.0], &[0.0], 48000.0, &mut out);
+        assert_eq!(out[0], 77.0 / 128.0);
+    }
+
+    #[test]
+    fn root_capture_requires_armed_keyboard_edge() {
+        let mut state = [0.0; 4];
+        let mut out = [0.0];
+        for (input, expected) in [
+            ([440.0, 0.0, 0.0], 60.0),
+            ([440.0, 1.0, 0.0], 60.0),
+            ([440.0, 1.0, 1.0], 60.0),
+            ([440.0, 0.0, 1.0], 60.0),
+            ([440.0, 1.0, 1.0], 69.0),
+            ([440.0, 0.0, 0.0], 69.0),
+            ([261.625565, 1.0, 0.0], 69.0),
+        ] {
+            capture_root(&mut state, &input, &[60.0], 48000.0, &mut out);
+            assert_eq!(out[0], expected / 128.0);
+        }
+    }
+
+    fn run(process: crate::contract::ProcessFn, value: f64) -> f64 {
+        let mut output = [f64::NAN];
+        process(&mut [], &[value], &[], 48_000.0, &mut output);
+        output[0]
+    }
+
+    #[test]
+    fn every_midi_note_round_trips_exactly_via_note128() {
+        for note in 0..=127 {
+            let normalized = run(midi_to_note128, note as f64);
+            assert_eq!(normalized, note as f64 / 128.0);
+            assert_eq!(run(note128_to_midi, normalized), note as f64);
+            assert_eq!(
+                run(hz_to_note128, run(note128_to_hz, normalized)),
+                normalized
+            );
+        }
+    }
+
+    #[test]
+    fn concert_a_and_boundaries() {
+        assert_eq!(run(note128_to_hz, 69.0 / 128.0), 440.0);
+        assert_eq!(run(note128_to_midi, 127.0 / 128.0), 127.0);
+        assert_eq!(run(note128_to_midi, 1.0), 127.0);
+        assert_eq!(run(note128_to_midi, -0.2), 0.0);
+        assert_eq!(run(midi_to_note128, 200.0), 127.0 / 128.0);
+        assert_eq!(run(midi_to_note128, -5.0), 0.0);
+        assert_eq!(run(hz_to_note128, 440.0), 69.0 / 128.0);
+    }
+
+    #[test]
+    fn fractional_notes_quantize_to_nearest_integer() {
+        assert_eq!(run(note128_to_midi, 60.49 / 128.0), 60.0);
+        assert_eq!(run(note128_to_midi, 60.51 / 128.0), 61.0);
+        assert_eq!(run(midi_to_note128, 60.51), 61.0 / 128.0);
+    }
+
+    #[test]
+    fn bad_inputs_never_poison_the_output() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for process in [
+                note128_to_midi as crate::contract::ProcessFn,
+                midi_to_note128,
+                note128_to_hz,
+                hz_to_note128,
+            ] {
+                assert!(run(process, value).is_finite());
+            }
+        }
+    }
+}

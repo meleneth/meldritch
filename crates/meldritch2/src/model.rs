@@ -177,6 +177,17 @@ pub enum PolyOverflow {
     StealOldest,
 }
 
+/// Device routing for one eight-step value board; prepared as control IDs.
+#[derive(Clone, Debug)]
+pub struct ApcValueBoard {
+    pub values: [String; 8],
+    pub enabled: [String; 8],
+    pub alternate: Option<([String; 8], [String; 8])>,
+    pub bank: Option<String>,
+    pub master: Option<String>,
+    pub grid: Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 pub enum Widget {
     Label(String),
@@ -192,6 +203,12 @@ pub enum Widget {
         label: String,
         control_id: String,
         value: f64,
+    },
+    ValueSequencer {
+        values: [String; 8],
+        enabled: [String; 8],
+        length: String,
+        looped: String,
     },
     PerformanceControls,
     ControlFocus,
@@ -259,6 +276,8 @@ pub struct Graph {
     pub subpatches: BTreeMap<String, Subpatch>,
     pub connections: Vec<Connection>,
     pub normalizations: Vec<Connection>,
+    /// Compile-time aliases for exported subpatch outputs. Never traversed at runtime.
+    pub output_aliases: BTreeMap<Endpoint, Endpoint>,
     pub controls: Vec<Control>,
     pub midi_ccs: Vec<MidiCc>,
     pub midi_notes: Vec<MidiNotes>,
@@ -274,6 +293,7 @@ pub struct Graph {
     pub performance: Option<Performance>,
     pub actions: Vec<Action>,
     pub control_surfaces: Vec<ControlSurface>,
+    pub apc_value_board: Option<ApcValueBoard>,
     pub automations: Vec<Automation>,
 }
 

@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use crate::contract::{self, FanIn, Role};
 use crate::midi::NoteState;
 use crate::model::{
-    Action, AutomationInterpolation, Connection, ControlScale, Graph, LiveMidiConnection,
+    Action, AutomationInterpolation, Connection, ControlScale, Endpoint, Graph, LiveMidiConnection,
     LiveMidiInput, LiveMidiModule, LiveMidiModuleKind, LiveMidiNoteSource, MidiButton, MidiCc,
     MidiNotes, MidiPacket, ModuleRuntime, Navigation, ParameterId, Screen, Widget,
 };
@@ -546,12 +546,19 @@ impl ControlHandle {
     }
 }
 
+/// A direct output slot in one prepared Machine revision. Resolve it once, then
+/// read without names, graph traversal, or dynamic dispatch. Handles are NOT
+/// portable between graph revisions; re-resolve after publishing a new machine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OutputSlot(usize);
+
 /// An accepted, executable graph. Its processing buffers are allocated at compile time.
 #[derive(Debug)]
 pub struct Machine {
     revision: Arc<()>,
     ops: Vec<Op>,
     slots: Vec<f64>,
+    output_lookup: BTreeMap<Endpoint, OutputSlot>,
     input_scratch: Vec<f64>,
     param_scratch: Vec<f64>,
     params: Vec<f64>,
@@ -911,6 +918,21 @@ fn validate_screens(
                             "screen '{}' button value must be in {}..{} for control '{control_id}'",
                             screen.id, control.min, control.max
                         ));
+                    }
+                }
+                Widget::ValueSequencer {
+                    values,
+                    enabled,
+                    length,
+                    looped,
+                } => {
+                    for id in values.iter().chain(enabled.iter()).chain([length, looped]) {
+                        if !controls.contains_key(id) {
+                            return Err(format!(
+                                "screen '{}' ValueSequencer references unknown control '{id}'",
+                                screen.id
+                            ));
+                        }
                     }
                 }
                 Widget::PerformanceControls | Widget::ControlFocus => {}
@@ -1380,6 +1402,24 @@ impl Machine {
         diagnostics.frames += 1;
     }
 
+    /// Resolve a primitive or exported Board output once, outside the audio
+    /// callback. All nested exports resolve to the same physical source slot.
+    pub fn output_slot(&self, module: &str, port: &str) -> Option<OutputSlot> {
+        self.output_lookup
+            .get(&Endpoint {
+                module: module.to_owned(),
+                port: port.to_owned(),
+            })
+            .copied()
+    }
+
+    /// Single indexed read of prepared storage. The caller must use a slot
+    /// resolved against THIS Machine revision, not a replaced one.
+    #[inline]
+    pub fn read_output(&self, slot: OutputSlot) -> f64 {
+        self.slots[slot.0]
+    }
+
     pub fn order(&self) -> &[String] {
         &self.order
     }
@@ -1760,6 +1800,13 @@ fn process_machine_block(machine: &mut Machine, scratch: &mut BlockScratch, fram
             }
         }
     }
+    // Keep direct output handles meaningful after block processing too.
+    // One bounded copy per prepared slot per block, never per output read.
+    if frames != 0 {
+        for (slot, buffer) in machine.slots.iter_mut().zip(&scratch.slot_buffers) {
+            *slot = buffer[frames - 1];
+        }
+    }
 }
 
 /// Block-oriented executor for file rendering. The live callback continues to
@@ -1983,6 +2030,13 @@ impl OfflineRenderer {
                         self.slot_buffers[slot][frame] = outputs[frame * output_count + output];
                     }
                 }
+            }
+        }
+        if frames != 0 {
+            // Preserve the same revision-local direct-read contract as the live
+            // executor without adding any per-read lookup or alias traversal.
+            for (slot, buffer) in self.machine.slots.iter_mut().zip(&self.slot_buffers) {
+                *slot = buffer[frames - 1];
             }
         }
         left.copy_from_slice(&self.slot_buffers[self.machine.output_slots[0]][..frames]);
@@ -2324,6 +2378,36 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         };
     }
 
+    // Resolve exposed ports to the SAME primitive storage slots as their
+    // internal sources. Aliases are metadata only: no extra execution ops.
+    let mut output_lookup = BTreeMap::<Endpoint, OutputSlot>::new();
+    for (index, module) in graph.modules.iter().enumerate() {
+        let contract = contract::find(&module.kind).expect("module checked");
+        for (port, _) in contract.outputs.iter().enumerate() {
+            output_lookup.insert(
+                Endpoint {
+                    module: module.id.clone(),
+                    port: contract.outputs[port].name.into(),
+                },
+                OutputSlot(slot_bases[index] + port),
+            );
+        }
+    }
+    for (alias, target) in &graph.output_aliases {
+        let slot = *output_lookup.get(target).ok_or_else(|| {
+            format!(
+                "unresolved exported output '{}.{}'",
+                alias.module, alias.port
+            )
+        })?;
+        if output_lookup.insert(alias.clone(), slot).is_some() {
+            return Err(format!(
+                "duplicate exported output '{}.{}'",
+                alias.module, alias.port
+            ));
+        }
+    }
+
     // Validate both authored edge sets before selecting effective edges. An
     // overridden normalization is still an authored connection and must be valid.
     let resolve = |edge: &Connection| -> Result<(usize, usize, usize, FanIn), String> {
@@ -2351,10 +2435,15 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             .iter()
             .find(|p| p.name == edge.to.port)
             .ok_or_else(|| format!("invalid input port '{}.{}'", edge.to.module, edge.to.port))?;
-        if sp.1.domain != dp.domain {
+        if !dp.domain.accepts(sp.1.domain) {
             return Err(format!(
-                "incompatible ports '{}.{}' and '{}.{}'",
-                edge.from.module, edge.from.port, edge.to.module, edge.to.port
+                "incompatible ports '{}.{}' ({:?}) and '{}.{}' ({:?}); insert an explicit adapter",
+                edge.from.module,
+                edge.from.port,
+                sp.1.domain,
+                edge.to.module,
+                edge.to.port,
+                dp.domain
             ));
         }
         Ok((src, dst, slot_bases[src] + sp.0, dp.fan_in))
@@ -2551,6 +2640,26 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
             .is_some()
         {
             return Err(format!("duplicate control ID '{}'", control.id));
+        }
+    }
+    if let Some(board) = &graph.apc_value_board {
+        if graph.devices.apc_mini.is_none() {
+            return Err("APC ValueSequencer requires an apc_mini device".into());
+        }
+        if board.grid.len() > 64 || board.alternate.is_some() != board.bank.is_some() {
+            return Err("invalid APC grid or alternate bank binding".into());
+        }
+        for id in board.values.iter().chain(board.enabled.iter())
+            .chain(board.alternate.iter().flat_map(|(values, enabled)| values.iter().chain(enabled.iter())))
+            .chain(board.bank.iter()).chain(board.master.iter()).chain(board.grid.iter()) {
+            let control = controls
+                .get(id)
+                .ok_or_else(|| format!("APC ValueSequencer references unknown control '{id}'"))?;
+            if control.min != 0.0 || control.max != 1.0 {
+                return Err(format!(
+                    "APC ValueSequencer control '{id}' must have range 0..1"
+                ));
+            }
         }
     }
     let mut mapped_ccs = BTreeSet::new();
@@ -2929,7 +3038,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
                 if button
                     .icon
                     .as_deref()
-                    .is_some_and(|icon| !matches!(icon, "circle" | "square" | "triangle" | "bars"))
+                    .is_some_and(|icon| !matches!(icon, "circle" | "square" | "triangle" | "bars" | "note" | "clock" | "wave" | "drum" | "back"))
                 {
                     return Err(format!(
                         "surface button '{}' has an unknown generated icon",
@@ -3140,6 +3249,7 @@ pub fn compile_at_rate(graph: &Graph, sample_rate: f64) -> Result<Machine, Strin
         revision: Arc::new(()),
         ops,
         slots: vec![0.0; slot_count],
+        output_lookup,
         input_scratch: vec![
             0.0;
             graph

@@ -949,6 +949,57 @@ fn draw(
                     print_palette(&mut out, mode, 28, true, format!("{marker} [{label}]"))?;
                     queue!(out, Print("\r\n")).map_err(|error| error.to_string())
                 }
+                WidgetView::ValueSequencer {
+                    values,
+                    enabled,
+                    length,
+                    looped,
+                } => {
+                    print_palette(&mut out, mode, 36, true, "  VALUE SEQUENCER / 8 STEPS")?;
+                    queue!(out, Print("\r\n  Step:   ")).map_err(|error| error.to_string())?;
+                    for step in 0..8 {
+                        print_palette(
+                            &mut out,
+                            mode,
+                            if step == screen.value_step { 8 } else { 33 },
+                            step == screen.value_step,
+                            format!(" {:2}   ", step + 1),
+                        )?;
+                    }
+                    queue!(out, Print("\r\n  Value:  ")).map_err(|error| error.to_string())?;
+                    for value in values {
+                        print_palette(
+                            &mut out,
+                            mode,
+                            32,
+                            false,
+                            format!("{:5.3} ", value.value()),
+                        )?;
+                    }
+                    queue!(out, Print("\r\n  Enable: ")).map_err(|error| error.to_string())?;
+                    for (step, enabled) in enabled.iter().enumerate() {
+                        print_palette(
+                            &mut out,
+                            mode,
+                            if enabled.value() >= 0.5 { 20 } else { 4 },
+                            step == screen.value_step,
+                            if enabled.value() >= 0.5 {
+                                "  ON  "
+                            } else {
+                                "  --  "
+                            },
+                        )?;
+                    }
+                    queue!(
+                        out,
+                        Print(format!(
+                            "\r\n  Length: {:.0}    Loop: {}\r\n  1-8 toggle  ←/→ select  ↑/↓ value  Home/End bounds\r\n  [ / ] length  l toggle loop\r\n",
+                            length.value(),
+                            if looped.value() >= 0.5 { "ON" } else { "OFF" }
+                        ))
+                    )
+                    .map_err(|error| error.to_string())
+                }
                 WidgetView::PerformanceControls => {
                     print_palette(&mut out, mode, 36, true, "  LIVE CONTROLS")?;
                     queue!(out, Print("\r\n")).map_err(|error| error.to_string())?;
@@ -1257,8 +1308,17 @@ pub fn perform(
             eprintln!("Meldritch performance server listening on http://{address}");
         }
     }
-    let mut apc = match (output.apc_mini(), output.performance()) {
-        (Some(name), Some(performance)) => Some(crate::apc::ApcSession::start(
+    let mut apc = match (
+        output.apc_mini(),
+        output.performance(),
+        output.apc_value_board(),
+    ) {
+        (Some(name), _, Some(board)) => Some(crate::apc::ApcSession::start_value_board(
+            name.to_owned(),
+            board.clone(),
+            output.controls(),
+        )),
+        (Some(name), Some(performance), None) => Some(crate::apc::ApcSession::start(
             name.to_owned(),
             performance.clone(),
             output.controls(),
@@ -1382,6 +1442,19 @@ pub fn perform(
                 midi_session,
                 keyboard.as_ref(),
                 output.performance().map(|_| (grid_page, grid_track)),
+            )?;
+            continue;
+        }
+        if let Some(screens) = &mut screens
+            && screens.value_sequence_key(key.code)?
+        {
+            draw(
+                &panel,
+                Some(screens),
+                output,
+                midi_session,
+                keyboard.as_ref(),
+                None,
             )?;
             continue;
         }
