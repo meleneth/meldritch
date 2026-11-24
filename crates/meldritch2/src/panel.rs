@@ -55,6 +55,18 @@ impl ControlRow {
     pub fn value(&self) -> f64 {
         self.handle.effective_value()
     }
+    /// Normalized presentation coordinate, including logarithmic controls.
+    pub fn normalized(&self) -> f64 {
+        let (min, max) = self.range();
+        if max <= min { return 0.0; }
+        let value = self.value().clamp(min, max);
+        if self.handle.scale() == ControlScale::Logarithmic {
+            (value / min).ln() / (max / min).ln()
+        } else {
+            (value - min) / (max - min)
+        }
+    }
+
     pub fn hardware_pickup(&self) -> i8 {
         self.handle.hardware_pickup()
     }
