@@ -64,13 +64,30 @@ and PULSE_STATE to restore an optional trusted PULSE kit state. Without
 PULSE_STATE the installed plugin's default kit is used.
 
 The lead and bass share root capture and diatonic transposition but use
-independent Boards. Bass is two octaves below its resolved melody.
+independent eight-slot Boards. Bass is two octaves below its resolved melody.
 Four 16-step velocity Boards drive PULSE's GM notes 36, 38, 42, 46 on
 channel 10. A common 8 Hz clock supplies sixteenth notes at 120 BPM.
 
+Stream Deck row 1 keys 5–6 select the lead or bass fader bank.
+Changing banks resets fader soft pickup. Track buttons enable steps in
+the selected bank. APC grid rows 1–2 edit kick, 3–4 snare, 5–6 hat,
+7–8 percussion, with each pair spanning steps 1–16. Pads toggle the
+ordinary velocity control between zero and 0.85, with LED state derived
+from the same control. Existing nonzero authored velocities are preserved
+until the corresponding pad is edited.
+
 Stream Deck rows 2 and 3 provide instrument and individual drum lane mutes.
-Stereo levels and master headroom are exposed in the TUI. The APC faders
-and track buttons still edit the lead, and its RGB grid is unassigned.
-Drum patterns are authored in Lua for now; live pad editing and preset
-browsing are not implemented in this example. Real-plugin startup, sound
-quality and realtime throughput require local validation.
+Stereo levels and master headroom are exposed in the TUI. Serum selectors
+request indices from the existing asynchronous preset catalog, not a new
+processor per preset. The initial patch names are shown; active patch
+names and pending state are not yet projected into this TUI.
+
+Independent clock_divider contracts feed the lead and bass advance and
+gate paths. Default divisors are 1 and 2. The TUI controls expose 1–16;
+the processor supports rounded divisors 1–256. A rising reset clears
+phase and suppresses the coincident pulse. Divide-by-one passes all
+pulses. Passed pulses retain their input high duration.
+
+Real-plugin startup, sound quality and realtime throughput require local
+validation. Live root, resolved note names and automatic topology
+inspection remain outstanding.
