@@ -4,7 +4,7 @@
 -- Every APC pad column toggles the corresponding enable component.
 -- TUI: 1-8 toggle, left/right select, up/down adjust, Home/End min/max.
 local graph = meldritch.graph()
-graph:devices { apc_mini = "APC mini" }
+graph:devices { apc_mini = "APC mini mk2 Control" }
 
 local notes = graph:value_sequencer {
   id = "notes",
