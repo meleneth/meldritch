@@ -184,6 +184,7 @@ pub struct ApcValueBoard {
     pub enabled: [String; 8],
     pub alternate: Option<([String; 8], [String; 8])>,
     pub bank: Option<String>,
+    pub master: Option<String>,
     pub grid: Vec<String>,
 }
 
