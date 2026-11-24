@@ -28,6 +28,8 @@ pub(crate) enum WidgetView {
         length: ControlRow,
         looped: ControlRow,
     },
+    DrumGrid { lanes: Vec<(String, Vec<ControlRow>)> },
+    Choice { label: String, row: ControlRow, choices: Vec<(String, f64)> },
     PerformanceControls,
     ControlFocus,
     PerformanceStatus,
@@ -49,6 +51,8 @@ impl WidgetView {
                 | Self::Link { .. }
                 | Self::Button { .. }
                 | Self::ValueSequencer { .. }
+                | Self::DrumGrid { .. }
+                | Self::Choice { .. }
         )
     }
 }
@@ -59,6 +63,8 @@ pub(crate) struct ScreenView {
     pub widgets: Vec<WidgetView>,
     pub selected: Option<usize>,
     pub value_step: usize,
+    pub drum_lane: usize,
+    pub drum_step: usize,
 }
 
 pub(crate) struct ScreenPanel {
@@ -144,6 +150,20 @@ impl ScreenPanel {
                             looped: row_for(looped)?,
                         }
                     }
+                    Widget::DrumGrid { lanes } => {
+                        let lanes = lanes.iter().map(|(label, ids)| {
+                            let rows = ids.iter().map(|id| {
+                                let (handle, authored) = controls.get(id).ok_or_else(|| format!("unknown drum control '{id}'"))?;
+                                Ok(ControlRow::new(handle.clone(), *authored))
+                            }).collect::<Result<Vec<_>, String>>()?;
+                            Ok((label.clone(), rows))
+                        }).collect::<Result<Vec<_>, String>>()?;
+                        WidgetView::DrumGrid { lanes }
+                    }
+                    Widget::Choice { label, control_id, choices } => {
+                        let (handle, authored) = controls.get(control_id).ok_or_else(|| format!("unknown choice control '{control_id}'"))?;
+                        WidgetView::Choice { label: label.clone(), row: ControlRow::new(handle.clone(), *authored), choices: choices.clone() }
+                    }
                     Widget::PerformanceControls => WidgetView::PerformanceControls,
                     Widget::ControlFocus => WidgetView::ControlFocus,
                     Widget::PerformanceStatus => WidgetView::PerformanceStatus,
@@ -196,6 +216,8 @@ impl ScreenPanel {
                 widgets,
                 selected,
                 value_step: 0,
+                drum_lane: 0,
+                drum_step: 0,
             });
         }
         if views.is_empty() {
@@ -318,6 +340,35 @@ impl ScreenPanel {
         Ok(false)
     }
 
+    pub fn drum_grid_key(&mut self, key: crossterm::event::KeyCode) -> Result<bool, String> {
+        use crossterm::event::KeyCode;
+        let screen = &mut self.screens[self.active];
+        let Some(WidgetView::DrumGrid { lanes }) = screen.widgets.iter_mut().find(|widget| matches!(widget, WidgetView::DrumGrid { .. })) else {
+            return Ok(false);
+        };
+        let steps = lanes[0].1.len();
+        match key {
+            KeyCode::Left => screen.drum_step = (screen.drum_step + steps - 1) % steps,
+            KeyCode::Right => screen.drum_step = (screen.drum_step + 1) % steps,
+            KeyCode::Up => screen.drum_lane = (screen.drum_lane + lanes.len() - 1) % lanes.len(),
+            KeyCode::Down => screen.drum_lane = (screen.drum_lane + 1) % lanes.len(),
+            KeyCode::Char(' ') | KeyCode::Enter => {
+                let row = &lanes[screen.drum_lane].1[screen.drum_step];
+                row.publish(if row.value() > 0.0 { 0.0 } else { 0.85 })?;
+            }
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                let row = &lanes[screen.drum_lane].1[screen.drum_step];
+                row.publish((row.value() + 0.1).min(1.0))?;
+            }
+            KeyCode::Char('-') => {
+                let row = &lanes[screen.drum_lane].1[screen.drum_step];
+                row.publish((row.value() - 0.1).max(0.0))?;
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
     pub fn activate(&mut self) -> Result<(), String> {
         let Some(selected) = self.current().selected else {
             return Ok(());
@@ -352,6 +403,16 @@ impl ScreenPanel {
             _ => {
                 if let WidgetView::Control { row, .. } = &mut screen.widgets[selected] {
                     row.adjust(gesture)?;
+                } else if let WidgetView::Choice { row, choices, .. } = &screen.widgets[selected] {
+                    let current = choices.iter().enumerate().min_by(|(_, a), (_, b)| (a.1 - row.value()).abs().total_cmp(&(b.1 - row.value()).abs())).map_or(0, |(i, _)| i);
+                    let next = match gesture {
+                        Gesture::Decrease => current.saturating_sub(1),
+                        Gesture::Increase => (current + 1).min(choices.len() - 1),
+                        Gesture::Minimum => 0,
+                        Gesture::Maximum => choices.len() - 1,
+                        _ => current,
+                    };
+                    row.publish(choices[next].1)?;
                 }
             }
         }
